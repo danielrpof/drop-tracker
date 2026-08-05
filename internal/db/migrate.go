@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -19,30 +22,52 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-const (
-	defaultMaxAttempts = 6
-	defaultBaseDelay   = 500 * time.Millisecond
-	defaultMaxDelay    = 8 * time.Second
-)
+// Default retry/backoff parameters for RunMigrations (D-10). Exported so the
+// numbers are discoverable and adjustable rather than buried in the retry
+// loop. RESEARCH.md assumption A1 records these as engineering judgement: a
+// worst case near 20 seconds, comfortably covering a typical 2-to-10-second
+// Postgres container cold start without hanging on a genuinely dead
+// database.
+const DefaultMaxAttempts = 6
+const DefaultBaseDelay = 500 * time.Millisecond
+const DefaultMaxDelay = 8 * time.Second
 
 // retryConfig holds the bounded retry/backoff parameters for RunMigrations.
-// Plan 05 makes these injectable through RetryOption and adds the
-// behavioural tests; the variadic signature exists from this task so that
-// refactor does not touch RunMigrations' call site.
 type retryConfig struct {
 	maxAttempts int
 	baseDelay   time.Duration
 	maxDelay    time.Duration
 }
 
-// RetryOption customizes RunMigrations' retry/backoff behavior.
+// RetryOption customizes RunMigrations' retry/backoff behavior. RunMigrations
+// builds its policy from the Default* constants and then applies each
+// supplied option in order, so the production call site in cmd/server/main.go
+// (which passes no options) is unaffected by this type existing.
 type RetryOption func(*retryConfig)
+
+// WithMaxAttempts overrides the default number of attempts RunMigrations
+// makes before giving up.
+func WithMaxAttempts(n int) RetryOption {
+	return func(cfg *retryConfig) { cfg.maxAttempts = n }
+}
+
+// WithBaseDelay overrides the default initial backoff delay between failed
+// attempts.
+func WithBaseDelay(d time.Duration) RetryOption {
+	return func(cfg *retryConfig) { cfg.baseDelay = d }
+}
+
+// WithMaxDelay overrides the default cap on the exponentially growing
+// backoff delay.
+func WithMaxDelay(d time.Duration) RetryOption {
+	return func(cfg *retryConfig) { cfg.maxDelay = d }
+}
 
 func newRetryConfig(opts ...RetryOption) retryConfig {
 	cfg := retryConfig{
-		maxAttempts: defaultMaxAttempts,
-		baseDelay:   defaultBaseDelay,
-		maxDelay:    defaultMaxDelay,
+		maxAttempts: DefaultMaxAttempts,
+		baseDelay:   DefaultBaseDelay,
+		maxDelay:    DefaultMaxDelay,
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -50,16 +75,47 @@ func newRetryConfig(opts ...RetryOption) retryConfig {
 	return cfg
 }
 
+// userInfoPattern matches a DSN's "scheme://user:password@" (or
+// "scheme://user@") prefix. It exists so any error text that happens to
+// embed a raw DSN verbatim can still be scrubbed before it reaches a log
+// line or a returned error (RESEARCH.md Pitfall 3: pgx/driver connection
+// errors can embed the DSN, and the DSN carries the Postgres password).
+var userInfoPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^/@\s]*@`)
+
+// redactDSN reduces dsn to a credential-free "host=... database=..."
+// description, computed once at RunMigrations' entry so nothing downstream
+// ever needs the raw DSN again for logging or error messages.
+func redactDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "database=<unparseable>"
+	}
+	dbName := strings.TrimPrefix(u.Path, "/")
+	if dbName == "" {
+		return fmt.Sprintf("host=%s", u.Host)
+	}
+	return fmt.Sprintf("host=%s database=%s", u.Host, dbName)
+}
+
+// redactError reduces err's message to a form that cannot carry
+// credentials: any DSN-shaped user-info segment is stripped before the
+// message is logged or wrapped into a returned error.
+func redactError(err error) string {
+	return userInfoPattern.ReplaceAllString(err.Error(), "")
+}
+
 // RunMigrations applies every embedded migration to the database at dsn,
-// retrying with exponential backoff to tolerate a Postgres container that is
-// still starting under docker-compose. It returns nil both when migrations
-// were applied and when there was nothing new to apply
-// (migrate.ErrNoChange) — treating ErrNoChange as anything other than
-// success would fail every restart after the first successful migration.
+// retrying with exponential backoff (policy from cfg/opts, defaulting to the
+// D-10 values) to tolerate a Postgres container that is still starting under
+// docker-compose. It returns nil both when migrations were applied and when
+// there was nothing new to apply (migrate.ErrNoChange) — treating
+// ErrNoChange as anything other than success would fail every restart after
+// the first successful migration.
 //
-// dsn is never logged: only the attempt number and delay are logged on
-// retry, never the error's string form, since pgx/driver errors can embed
-// the DSN's credentials.
+// dsn itself is never logged or returned: RunMigrations reduces it to a
+// credential-free host/database description at entry, and scrubs any
+// DSN-shaped user-info segment out of underlying error text before it is
+// logged or wrapped, since pgx/driver errors can embed DSN credentials.
 func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger, opts ...RetryOption) error {
 	src, err := iofs.New(migrationsFS, "migrations")
 	if err != nil {
@@ -67,11 +123,12 @@ func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger, opts ..
 	}
 
 	cfg := newRetryConfig(opts...)
+	target := redactDSN(dsn)
 
-	var lastErr error
+	var lastErrMsg string
 	for attempt := 1; attempt <= cfg.maxAttempts; attempt++ {
 		if err := runMigrationsOnce(dsn, src); err != nil {
-			lastErr = err
+			lastErrMsg = redactError(err)
 		} else {
 			return nil
 		}
@@ -85,7 +142,10 @@ func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger, opts ..
 			delay = cfg.maxDelay
 		}
 		logger.Warn("migration attempt failed, retrying",
-			slog.Int("attempt", attempt), slog.Duration("delay", delay))
+			slog.Int("attempt", attempt),
+			slog.Duration("delay", delay),
+			slog.String("target", target),
+			slog.String("error", lastErrMsg))
 
 		select {
 		case <-time.After(delay):
@@ -94,7 +154,7 @@ func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger, opts ..
 		}
 	}
 
-	return fmt.Errorf("migrations failed after %d attempts: %w", cfg.maxAttempts, lastErr)
+	return fmt.Errorf("migrations failed after %d attempts against %s: %s", cfg.maxAttempts, target, lastErrMsg)
 }
 
 // runMigrationsOnce opens a fresh database/sql connection via the pgx
