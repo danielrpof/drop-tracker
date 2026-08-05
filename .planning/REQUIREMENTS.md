@@ -43,9 +43,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Operations
 
-- [ ] **OPS-01**: System exposes a `/health` endpoint that reports service and database connectivity status
-- [ ] **OPS-02**: System emits structured (JSON) logs with request-ID correlation for HTTP requests and poll cycles
-- [ ] **OPS-03**: All secrets and configuration are supplied via environment variables only; none are committed to the repository
+- [x] **OPS-01**: System exposes a `/health` endpoint that reports service and database connectivity status
+- [x] **OPS-02**: System emits structured (JSON) logs with request-ID correlation for HTTP requests and poll cycles
+- [x] **OPS-03**: All secrets and configuration are supplied via environment variables only; none are committed to the repository
 
 ### Frontend
 
@@ -103,9 +103,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| OPS-01 | Phase 1 | Pending |
-| OPS-02 | Phase 1 | Pending |
-| OPS-03 | Phase 1 | Pending |
+| OPS-01 | Phase 1 | Complete |
+| OPS-02 | Phase 1 | Complete |
+| OPS-03 | Phase 1 | Complete |
 | WLST-02 | Phase 2 | Pending |
 | WLST-03 | Phase 2 | Pending |
 | WLST-04 | Phase 2 | Pending |
@@ -140,6 +140,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CICD-10 | Phase 7 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 35 total
 - Mapped to phases: 35
 - Unmapped: 0 ✓
