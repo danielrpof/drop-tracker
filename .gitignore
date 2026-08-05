@@ -25,3 +25,6 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# GSD planning tool cache (local research API-response cache, not source)
+.planning/research/.cache/
