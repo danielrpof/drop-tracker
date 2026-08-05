@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/config"
@@ -16,6 +18,12 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
 )
+
+// shutdownTimeout bounds how long graceful shutdown waits for in-flight
+// requests to finish after a SIGTERM/SIGINT before giving up and returning
+// (WR-03), so an operator-issued stop cannot hang the process indefinitely
+// if a handler never completes.
+const shutdownTimeout = 10 * time.Second
 
 // HTTP server timeouts (WR-02): an http.Server with all zero-value timeouts
 // lets a client that opens a connection and sends headers/body slowly (or
@@ -50,7 +58,14 @@ func run() error {
 
 	logger := logging.New(cfg)
 
-	ctx := context.Background()
+	// WR-03: derive ctx from signal.NotifyContext so a SIGTERM/SIGINT (the
+	// normal way a container orchestrator stops this process) is observable
+	// throughout run() -- by the migration retry loop (WR-01), and by the
+	// select below that triggers httpSrv.Shutdown -- rather than killing the
+	// process immediately and skipping the deferred pool.Close() and the
+	// in-flight-request drain entirely.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	if err := db.RunMigrations(ctx, cfg.DatabaseURL, logger); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
@@ -74,10 +89,25 @@ func run() error {
 		IdleTimeout:       idleTimeout,
 	}
 
-	logger.Info("starting server", "addr", addr)
-	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("serve http: %w", err)
-	}
+	serveErr := make(chan error, 1)
+	go func() {
+		logger.Info("starting server", "addr", addr)
+		serveErr <- httpSrv.ListenAndServe()
+	}()
 
-	return nil
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve http: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		logger.Info("shutdown signal received, shutting down gracefully")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("graceful shutdown: %w", err)
+		}
+		return nil
+	}
 }
