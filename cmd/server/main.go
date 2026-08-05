@@ -5,14 +5,29 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/config"
 	"github.com/danielrpof/drop-tracker/internal/db"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
+)
+
+// HTTP server timeouts (WR-02): an http.Server with all zero-value timeouts
+// lets a client that opens a connection and sends headers/body slowly (or
+// never) hold a goroutine and connection open indefinitely -- the classic
+// Slowloris-style resource-exhaustion pattern. These are conservative
+// defaults appropriate for a JSON API with no large uploads/downloads or
+// long-lived streaming responses.
+const (
+	readHeaderTimeout = 5 * time.Second
+	readTimeout       = 15 * time.Second
+	writeTimeout      = 15 * time.Second
+	idleTimeout       = 60 * time.Second
 )
 
 func main() {
@@ -50,8 +65,17 @@ func run() error {
 	srv := httpserver.New(pool, logger)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
+	httpSrv := &http.Server{
+		Addr:              addr,
+		Handler:           srv.Router(),
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
+
 	logger.Info("starting server", "addr", addr)
-	if err := http.ListenAndServe(addr, srv.Router()); err != nil {
+	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve http: %w", err)
 	}
 
