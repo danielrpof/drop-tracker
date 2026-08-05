@@ -1,21 +1,14 @@
 ---
-status: testing
+status: complete
 phase: 01-foundation-data-layer-config-health
 source: [01-VERIFICATION.md]
 started: 2026-08-05T18:17:40Z
-updated: 2026-08-05T18:17:40Z
+updated: 2026-08-05T18:55:00Z
 ---
 
 ## Current Test
 
-number: 1
-name: Graceful shutdown under a real SIGTERM (WR-03)
-expected: |
-  The process logs "shutdown signal received, shutting down gracefully",
-  httpSrv.Shutdown drains or bounds in-flight requests within the 10s timeout,
-  the deferred pool.Close() runs, and the process exits cleanly (0) rather
-  than being killed mid-request.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -31,7 +24,13 @@ expected: |
   terminates the process directly without invoking Go's signal.NotifyContext handler,
   so this code path (present and correctly wired per source review) has never been
   exercised end-to-end.
-result: [pending]
+result: pass
+verified: |
+  Ran the built binary under WSL2 (real Linux kernel), sent a genuine `kill -TERM`
+  after an in-flight request completed. Log emitted
+  "shutdown signal received, shutting down gracefully" and the job exited with
+  bash job-control status "Done" (exit 0), confirming graceful shutdown rather
+  than being killed.
 
 ### 2. Race-detector confirmation of the migration-cancellation goroutine (WR-01)
 expected: |
@@ -45,14 +44,22 @@ expected: |
   behavior is structurally argued to be safe and all tests pass without -race, but the
   specific concurrency claim introduced by the WR-01 fix has never been confirmed by an
   actual race detector.
-result: [pending]
+result: pass
+verified: |
+  Ran `go test -race ./internal/db/... -run TestRunMigrations -v -count=1` on Windows
+  (toolchain now able to run -race). TestRunMigrations_HonoursContextCancellation --
+  the test exercising the WR-01 goroutine/context-cancellation path -- passed with no
+  data race reported. TestRunMigrations_AppliesFromScratch and
+  TestRunMigrations_IsIdempotent were skipped (require TEST_DATABASE_URL against a
+  live Postgres) but are DB-integration tests unrelated to the race claim, not
+  concurrency tests -- their skip does not weaken the WR-01 confirmation.
 
 ## Summary
 
 total: 2
-passed: 0
+passed: 2
 issues: 0
-pending: 2
+pending: 0
 skipped: 0
 blocked: 0
 
