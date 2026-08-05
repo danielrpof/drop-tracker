@@ -103,13 +103,47 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmap creation) | | Pending |
+| OPS-01 | Phase 1 | Pending |
+| OPS-02 | Phase 1 | Pending |
+| OPS-03 | Phase 1 | Pending |
+| WLST-02 | Phase 2 | Pending |
+| WLST-03 | Phase 2 | Pending |
+| WLST-04 | Phase 2 | Pending |
+| WLST-05 | Phase 2 | Pending |
+| WLST-06 | Phase 2 | Pending |
+| WLST-01 | Phase 3 | Pending |
+| CLNT-01 | Phase 3 | Pending |
+| CLNT-02 | Phase 3 | Pending |
+| CLNT-03 | Phase 3 | Pending |
+| DTCT-01 | Phase 4 | Pending |
+| DTCT-02 | Phase 4 | Pending |
+| DTCT-03 | Phase 4 | Pending |
+| DTCT-04 | Phase 4 | Pending |
+| DTCT-05 | Phase 4 | Pending |
+| NTFY-01 | Phase 5 | Pending |
+| NTFY-02 | Phase 5 | Pending |
+| NTFY-03 | Phase 5 | Pending |
+| NTFY-04 | Phase 5 | Pending |
+| UI-01 | Phase 6 | Pending |
+| UI-02 | Phase 6 | Pending |
+| UI-03 | Phase 6 | Pending |
+| HIST-01 | Phase 6 | Pending |
+| CICD-01 | Phase 7 | Pending |
+| CICD-02 | Phase 7 | Pending |
+| CICD-03 | Phase 7 | Pending |
+| CICD-04 | Phase 7 | Pending |
+| CICD-05 | Phase 7 | Pending |
+| CICD-06 | Phase 7 | Pending |
+| CICD-07 | Phase 7 | Pending |
+| CICD-08 | Phase 7 | Pending |
+| CICD-09 | Phase 7 | Pending |
+| CICD-10 | Phase 7 | Pending |
 
 **Coverage:**
 - v1 requirements: 35 total
-- Mapped to phases: 0
-- Unmapped: 35 ⚠️ (pending roadmap creation)
+- Mapped to phases: 35
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-08-04*
-*Last updated: 2026-08-04 after initial definition*
+*Last updated: 2026-08-04 after roadmap creation (7 phases, full coverage)*
