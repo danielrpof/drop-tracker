@@ -7,15 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	pgxmigrate "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver used below
 )
 
@@ -85,16 +84,21 @@ var userInfoPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^/@\s]*@`)
 // redactDSN reduces dsn to a credential-free "host=... database=..."
 // description, computed once at RunMigrations' entry so nothing downstream
 // ever needs the raw DSN again for logging or error messages.
+//
+// It delegates to pgconn.ParseConfig rather than hand-rolling a url.Parse
+// based parser, because dsn may be either the URL form
+// (postgres://user:pass@host/db) or libpq's keyword/value form
+// (host=... user=... password=... dbname=...) -- config.go places no format
+// constraint on DATABASE_URL, and pgx/golang-migrate accept both. pgconn
+// understands both forms; a hand-rolled url.Parse-based parser does not (it
+// silently treats an entire keyword/value DSN as an opaque path and echoes
+// it back verbatim, password included -- see CR-01).
 func redactDSN(dsn string) string {
-	u, err := url.Parse(dsn)
+	cfg, err := pgconn.ParseConfig(dsn)
 	if err != nil {
 		return "database=<unparseable>"
 	}
-	dbName := strings.TrimPrefix(u.Path, "/")
-	if dbName == "" {
-		return fmt.Sprintf("host=%s", u.Host)
-	}
-	return fmt.Sprintf("host=%s database=%s", u.Host, dbName)
+	return fmt.Sprintf("host=%s database=%s", cfg.Host, cfg.Database)
 }
 
 // redactError reduces err's message to a form that cannot carry

@@ -42,6 +42,27 @@ func closedPortDSN(t *testing.T) string {
 	return fmt.Sprintf("postgres://drop_tracker:VerySecretPassw0rd@127.0.0.1:%d/drop_tracker?sslmode=disable", port)
 }
 
+// closedPortKeywordValueDSN is closedPortDSN's libpq keyword/value-form
+// equivalent (host=... user=... password=... dbname=...) -- a form pgx and
+// golang-migrate both accept, and config.go places no format constraint on
+// DATABASE_URL that would rule it out. This exists to catch the CR-01
+// regression class: redactDSN previously only handled the URL form and
+// silently echoed a keyword/value DSN back verbatim, password included.
+func closedPortKeywordValueDSN(t *testing.T) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("closedPortKeywordValueDSN: find free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("closedPortKeywordValueDSN: close listener: %v", err)
+	}
+
+	return fmt.Sprintf("host=127.0.0.1 port=%d user=drop_tracker password=VerySecretPassw0rd dbname=drop_tracker sslmode=disable", port)
+}
+
 // syncBuffer is a mutex-guarded bytes.Buffer used as a log sink, so the
 // captured log output can be inspected safely regardless of what goroutine
 // produced it.
@@ -230,5 +251,36 @@ func TestRunMigrations_NeverLogsDSN(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "postgres://") {
 		t.Fatalf("returned error contains the postgres:// scheme prefix: %v", err)
+	}
+}
+
+// TestRunMigrations_NeverLogsDSN_KeywordValueForm mirrors
+// TestRunMigrations_NeverLogsDSN but exercises a libpq keyword/value-form
+// DSN instead of the URL form, guarding against the CR-01 regression: a
+// hand-rolled url.Parse-based redactDSN silently echoed this DSN form back
+// verbatim (password included) because url.Parse treats a scheme-less
+// string as an opaque path.
+func TestRunMigrations_NeverLogsDSN_KeywordValueForm(t *testing.T) {
+	dsn := closedPortKeywordValueDSN(t)
+	buf := &syncBuffer{}
+	logger := newCapturingLogger(buf)
+
+	err := db.RunMigrations(context.Background(), dsn, logger,
+		db.WithMaxAttempts(2),
+		db.WithBaseDelay(5*time.Millisecond),
+		db.WithMaxDelay(10*time.Millisecond),
+	)
+	if err == nil {
+		t.Fatal("RunMigrations: want non-nil error, got nil")
+	}
+
+	const password = "VerySecretPassw0rd"
+	logOutput := buf.String()
+
+	if strings.Contains(logOutput, password) {
+		t.Fatalf("captured log contains the DSN password:\n%s", logOutput)
+	}
+	if strings.Contains(err.Error(), password) {
+		t.Fatalf("returned error contains the DSN password: %v", err)
 	}
 }
