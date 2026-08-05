@@ -21,12 +21,17 @@ type Config struct {
 	LogLevel    string `env:"LOG_LEVEL" envDefault:"info"`
 	LogFormat   string `env:"LOG_FORMAT" envDefault:"json"`
 
-	// Stubbed for future phases (D-06/D-07) — optional, sane defaults, never
-	// `notEmpty`/`required`. Plan 03 owns the full surface; these exist so the
-	// struct is authoritative for later phases from day one.
+	// Phase 3-5 — optional, sane defaults, never `notEmpty`/`required`. Real
+	// fields per D-06/D-07: the struct is authoritative for later phases from
+	// day one, so Phase 3 starts by reading these rather than introducing them.
 	DiscordWebhookURL string        `env:"DISCORD_WEBHOOK_URL"`
 	PollInterval      time.Duration `env:"POLL_INTERVAL" envDefault:"15m"`
-	MusicBrainzUA     string        `env:"MUSICBRAINZ_USER_AGENT" envDefault:"drop-tracker/0.1.0"`
+	// MusicBrainzUserAgent must never default to empty: MusicBrainz throttles
+	// requests carrying a missing/default User-Agent, and the failure surfaces
+	// as intermittent 503s rather than an auth error (CLAUDE.md).
+	MusicBrainzUserAgent       string  `env:"MUSICBRAINZ_USER_AGENT" envDefault:"drop-tracker/0.1.0 (+https://github.com/danielrpof/drop-tracker)"`
+	MusicBrainzRateLimitPerSec float64 `env:"MUSICBRAINZ_RATE_LIMIT_PER_SEC" envDefault:"1"`
+	DeezerRateLimitPer5s       int     `env:"DEEZER_RATE_LIMIT_PER_5S" envDefault:"50"`
 }
 
 // Load parses Config from the process environment. On failure it returns
