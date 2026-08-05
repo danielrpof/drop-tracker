@@ -12,7 +12,10 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 ### Validated
 
-(None yet — ship to validate)
+- ✓ `/health` endpoint for liveness/readiness — Phase 01
+- ✓ sqlc-generated type-safe DB queries + golang-migrate schema migrations — Phase 01
+- ✓ Structured (slog-based) JSON logging — Phase 01
+- ✓ `.env.example` documenting all config, secrets via env vars only — nothing real committed — Phase 01
 
 ### Active
 
@@ -21,13 +24,9 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - [ ] Scheduler (robfig/cron) polls MusicBrainz + Deezer per watchlist entry on a configurable interval
 - [ ] Diff engine compares poll results against the Postgres "seen" store to detect: new releases, new guest features, deluxe/tracklist changes
 - [ ] Notifier posts detected changes to a Discord webhook
-- [ ] `/health` endpoint for liveness/readiness
 - [ ] React (Vite) SPA UI for browsing/managing the watchlist, built and embedded into the Go binary via `go:embed` — single deployable image
-- [ ] sqlc-generated type-safe DB queries + golang-migrate schema migrations
-- [ ] Structured (slog-based) JSON logging
 - [ ] Multi-stage Dockerfile: slim base image, non-root user, single final image containing API+UI
-- [ ] docker-compose for local dev (app + Postgres)
-- [ ] `.env.example` documenting all config, secrets via env vars only — nothing real committed
+- [ ] docker-compose for local dev (app + Postgres) — partial: Postgres service exists (Phase 01), app service not yet added
 - [ ] pre-commit hooks: golangci-lint, gitleaks
 - [ ] GitHub Actions "Full Pipeline": golangci-lint + go vet + unit tests (httptest.Server-mocked MusicBrainz/Deezer) → Trivy image/dependency scan → gitleaks secret scan → SBOM generation → semantic-release versioning/tagging → push image to GitHub Container Registry (ghcr.io)
 - [ ] VPS SSH-based deploy step (added once the app is feature-stable — not part of initial phases)
@@ -66,9 +65,9 @@ A single Go binary that reliably detects and notifies on new releases for watche
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | Go over Python | Better portfolio differentiation; closer fit to systems/DevOps skills being practiced | — Pending |
-| chi router | stdlib-idiomatic, minimal footprint for a small API surface | — Pending |
-| sqlc for DB access | Type-safe generated queries; codegen step is itself a nice CI showcase | — Pending |
-| golang-migrate for migrations | Widely used, plain SQL up/down files, simple CI integration | — Pending |
+| chi router | stdlib-idiomatic, minimal footprint for a small API surface | Validated Phase 01 — `/health` route + `go-chi/httplog` request logging wired |
+| sqlc for DB access | Type-safe generated queries; codegen step is itself a nice CI showcase | Validated Phase 01 — `make sqlc-check` regenerates and diffs committed output; version-pinned via `sqlc-version-check` |
+| golang-migrate for migrations | Widely used, plain SQL up/down files, simple CI integration | Validated Phase 01 — embedded (`go:embed`) migrations run at boot with a bounded retry loop and context-cancellation support |
 | robfig/cron for scheduling | Closest equivalent to APScheduler; configurable per-source poll intervals | — Pending |
 | React (Vite) SPA embedded via go:embed | Keeps deployable to a single Go binary/image while still using a real frontend stack | — Pending |
 | Single Go binary/service architecture | Simpler CI/CD to start; still exercises full pipeline without microservice complexity | — Pending |
@@ -77,8 +76,10 @@ A single Go binary that reliably detects and notifies on new releases for watche
 | httptest.Server for HTTP mocking in tests | Stdlib-only, no extra test dependency | — Pending |
 | "Full Pipeline" CI/CD depth (lint+test+scan+SBOM+semantic-release+push) | Matches the project's primary goal of practicing real DevOps pipelines | — Pending |
 | ghcr.io as image registry | Free, zero extra secrets, tightly integrated with GitHub Actions | — Pending |
-| Structured logging only for v1 (no Prometheus/Grafana yet) | Keeps initial scope tight; metrics can be layered on later | — Pending |
+| Structured logging only for v1 (no Prometheus/Grafana yet) | Keeps initial scope tight; metrics can be layered on later | Validated Phase 01 — `log/slog` JSON logging via `go-chi/httplog`, wired with a secret-redaction pattern for the DB DSN |
 | Phased deploy: local-only now, VPS SSH deploy later | Avoids committing to live infra before the app is feature-stable | — Pending |
+| DSN/secret redaction on every error path that could reach logs or stderr | Connection-failure errors routinely embed the raw DSN with its password; Phase 01's security review (T-01-01) required scrubbing it before it reaches `slog` or a returned error | Validated Phase 01 — `redactDSN`/`redactError` helpers in `internal/db/migrate.go`, asserted by `TestRunMigrations_NeverLogsDSN` |
+| Graceful shutdown via `signal.NotifyContext` + bounded `httpSrv.Shutdown` timeout | A container orchestrator stops the process with SIGTERM; without this, in-flight requests and the deferred `pool.Close()` are skipped | Validated Phase 01 — confirmed end-to-end under a real SIGTERM in WSL2 (UAT test 1) |
 
 ## Evolution
 
@@ -98,4 +99,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-04 after initialization*
+*Last updated: 2026-08-05 after Phase 01 (foundation-data-layer-config-health)*

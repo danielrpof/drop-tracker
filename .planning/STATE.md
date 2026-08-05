@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 01
-current_phase_name: foundation-data-layer-config-health
-status: verifying
+current_phase: 2
+current_phase_name: Watchlist Core
+status: planning
 stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-08-05T17:46:47.462Z"
+last_updated: "2026-08-05T19:07:54.939Z"
 last_activity: 2026-08-05
-last_activity_desc: Phase 01 execution resumed (wave continue)
+last_activity_desc: Phase 01 complete, transitioned to Phase 2
 progress:
   total_phases: 1
   completed_phases: 1
@@ -20,17 +20,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-04)
+See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 01 — foundation-data-layer-config-health
+**Current focus:** Phase 2 — Watchlist Core
 
 ## Current Position
 
-Phase: 01 (foundation-data-layer-config-health) — EXECUTING
-Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-08-05 — Phase 01 execution resumed (wave continue)
+Phase: 2 — Watchlist Core
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-05 — Phase 01 complete, transitioned to Phase 2
 
 Progress: [██████████] 100%
 
@@ -38,7 +38,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 5
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -46,7 +46,7 @@ Progress: [██████████] 100%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -81,6 +81,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 01-04]: Installed sqlc v1.31.1 with CGO_ENABLED=0 (pure-Go/WASM parser backend) since this dev machine's mingw64 gcc cc1.exe cannot execute — same pre-existing cgo toolchain break already documented for -race in 01-02/01-03
 - [Phase ?]: [Phase 01-04]: Installed GNU Make 4.4.1 via winget (ezwinports.make, per-user, user-approved) after choco install failed on a non-admin permissions error; make targets (build/run/test/test-short/test-integration/sqlc/sqlc-check/db-up/db-down) verified against all acceptance criteria
 - [Phase ?]: [Phase 01-05]: Made db.RunMigrations retry policy injectable (WithMaxAttempts/WithBaseDelay/WithMaxDelay) with DSN-to-safe-description redaction on every retry log line and the final error, without touching cmd/server/main.go's call site
+- [Phase 01 UAT/Security]: Graceful shutdown (WR-03) and the WR-01 migration-cancellation goroutine were confirmed by hand on this Windows dev box's WSL2 (real SIGTERM + `go test -race`), closing the two human-verification gaps this Windows sandbox couldn't exercise natively.
+- [Phase 01 Security]: `/gsd-secure-phase 01` closed all 18 registered threats (`threats_open: 0`). Two mitigation claims were corrected in the process: added `sqlc-version-check` (T-01-13, Makefile had no version guard) and a test proving secret-bearing config fields can never have their value echoed by a type-conversion error (T-01-09, the original "never echoes values" claim was inaccurate for non-secret typed fields). See 01-SECURITY.md.
 
 ### Pending Todos
 
@@ -88,7 +90,7 @@ None yet.
 
 ### Blockers/Concerns
 
-None yet.
+None yet — Phase 01 fully closed (UAT 2/2, security 18/18).
 
 ## Deferred Items
 
@@ -100,6 +102,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-05T17:46:47.435Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-08-05
+Stopped at: Phase 01 complete (UAT passed, security verified), ready to plan Phase 2
 Resume file: None
