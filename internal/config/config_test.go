@@ -222,6 +222,36 @@ func setDiff(a, b map[string]bool) []string {
 	return out
 }
 
+// TestLoad_TypeErrorNeverEchoesSecretFields guards T-01-09: caarlos0/env's
+// aggregate error format (`parse error on field %q of type %q: %v`) embeds
+// the underlying strconv error, which quotes the raw invalid input verbatim
+// for a field that failed *type conversion* -- so a malformed HTTP_PORT is
+// expected to appear in the error text (that's not a secret, just an
+// operator typo). The only fields that hold secret material (DatabaseURL,
+// DiscordWebhookURL) are plain, unvalidated strings with no custom parser,
+// so they can never fail type conversion and can never have a value echoed
+// this way. This test cements that structural invariant rather than
+// asserting a blanket "no value is ever echoed" claim, which is false.
+func TestLoad_TypeErrorNeverEchoesSecretFields(t *testing.T) {
+	const secret = "postgres://user:s3cr3t-p4ssw0rd@localhost:5432/db?sslmode=disable"
+	t.Setenv("DATABASE_URL", secret)
+	t.Setenv("HTTP_PORT", "not-a-number")
+
+	_, err := config.Load()
+	if err == nil {
+		t.Fatal("Load() with HTTP_PORT=not-a-number returned nil error")
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "not-a-number") {
+		t.Errorf("aggregate error %q does not mention the invalid HTTP_PORT value; "+
+			"expected library behavior for a non-secret typed field changed", msg)
+	}
+	if strings.Contains(msg, secret) || strings.Contains(msg, "s3cr3t-p4ssw0rd") {
+		t.Errorf("aggregate error %q leaked the DATABASE_URL secret value", msg)
+	}
+}
+
 func TestEnvExampleCompleteness(t *testing.T) {
 	structKeys := configEnvKeys(t)
 	fileKeys := envExampleKeys(t)
