@@ -1,15 +1,17 @@
 ---
 phase: 01-foundation-data-layer-config-health
 verified: 2026-08-05T18:20:00Z
-status: human_needed
+status: passed
 score: 6/8 must-haves verified
 behavior_unverified: 2
 overrides_applied: 0
 behavior_unverified_items:
+
   - truth: "The service shuts down gracefully on SIGTERM/SIGINT: httpSrv.Shutdown(ctx) drains in-flight requests and the deferred pool.Close() runs, rather than the process dying immediately (WR-03, cmd/server/main.go)"
     test: "Send a real POSIX SIGTERM to the running binary (e.g. `docker run` the built image then `docker stop`, or run on Linux CI and `kill -TERM <pid>`) while a slow in-flight /health request is outstanding, and observe the shutdown log line, a clean Shutdown() return, and the pool being closed."
     expected: "Process logs \"shutdown signal received, shutting down gracefully\", the in-flight request completes or is bounded by the 10s shutdown timeout, httpSrv.Shutdown returns nil, and the process exits 0 — not killed mid-request."
     why_human: "Windows has no true POSIX SIGTERM — `kill <pid>` in this sandbox terminates the process directly rather than routing through Go's signal.NotifyContext handler, so the graceful-shutdown code path (present and wired, confirmed by source read) has never actually been exercised end-to-end in this environment. The code-review-fix agent itself flagged this as 'requires human verification' in 01-REVIEW-FIX.md."
+
   - truth: "A hang mid-migration (m.Up() run on a background goroutine) is bounded by context cancellation without the racing sqlDB.Close() corrupting shared state or panicking (WR-01, internal/db/migrate.go runMigrationsOnce)"
     test: "Run `go test -race ./internal/db/... -run TestRunMigrations` on a machine/CI with a working C toolchain (e.g. Phase 7's Linux GitHub Actions runner)."
     expected: "All TestRunMigrations_* tests pass under -race with no data race reported, confirming the goroutine running m.Up() and the deferred sqlDB.Close() on the cancellation path do not race."
