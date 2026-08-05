@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Every HTTP request and poll cycle emits a structured JSON log line with a correlating request ID
   3. The service starts entirely from environment variables (via `.env.example` documenting every setting), with no real secret ever committed to the repo
 
-**Plans**: 3/5 plans executed
+**Plans**: 4/5 plans executed
 
 Plans:
 **Wave 1**
@@ -46,7 +46,7 @@ Plans:
 
 - [x] 01-02-PLAN.md — Health degraded/timeout branches, concurrent polling, and `X-Request-Id` correlation proven against the log line
 - [x] 01-03-PLAN.md — Complete the `Config` surface through Phase 5, `.env.example` parity, and fail-fast rejection coverage
-- [ ] 01-04-PLAN.md — Wire sqlc end-to-end (config, query, committed codegen, execution test) plus the `make sqlc-check` drift gate
+- [x] 01-04-PLAN.md — Wire sqlc end-to-end (config, query, committed codegen, execution test) plus the `make sqlc-check` drift gate
 - [ ] 01-05-PLAN.md — Injectable migrate-on-boot retry policy with apply/idempotency/exhaustion/cancellation/redaction coverage
 
 ### Phase 2: Watchlist Core
@@ -148,7 +148,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation — Data Layer, Config & Health | 3/5 | In Progress|  |
+| 1. Foundation — Data Layer, Config & Health | 4/5 | In Progress|  |
 | 2. Watchlist Core | 0/TBD | Not started | - |
 | 3. External Clients & Search | 0/TBD | Not started | - |
 | 4. Detection Engine | 0/TBD | Not started | - |
