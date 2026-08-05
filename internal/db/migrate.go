@@ -131,7 +131,10 @@ func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger, opts ..
 
 	var lastErrMsg string
 	for attempt := 1; attempt <= cfg.maxAttempts; attempt++ {
-		if err := runMigrationsOnce(dsn, src); err != nil {
+		if err := runMigrationsOnce(ctx, dsn, src); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
 			lastErrMsg = redactError(err)
 		} else {
 			return nil
@@ -165,12 +168,27 @@ func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger, opts ..
 // stdlib driver (never lib/pq — CLAUDE.md forbids it, and golang-migrate's
 // generic "postgres" database driver depends on lib/pq internally) and runs
 // migrate.Up against it.
-func runMigrationsOnce(dsn string, src source.Driver) error {
+//
+// ctx bounds the whole attempt, not just the connectivity check: the initial
+// PingContext(ctx) catches an unreachable/slow-to-accept database before any
+// migration work starts, and m.Up() itself (which has no context-aware API)
+// is run on a background goroutine so a hang mid-migration (e.g. a stuck
+// advisory lock) cannot block RunMigrations past ctx's cancellation (WR-01).
+// If ctx is done first, runMigrationsOnce returns ctx.Err() and abandons the
+// in-flight m.Up() goroutine; sqlDB.Close() (deferred) may then run
+// concurrently with that goroutine's use of sqlDB, which database/sql
+// supports safely -- Close causes the in-flight operation to fail rather
+// than corrupt state or panic.
+func runMigrationsOnce(ctx context.Context, dsn string, src source.Driver) error {
 	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return fmt.Errorf("open database/sql handle: %w", err)
 	}
 	defer sqlDB.Close()
+
+	if err := sqlDB.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping database: %w", err)
+	}
 
 	dbDriver, err := pgxmigrate.WithInstance(sqlDB, &pgxmigrate.Config{})
 	if err != nil {
@@ -182,9 +200,18 @@ func runMigrationsOnce(dsn string, src source.Driver) error {
 		return fmt.Errorf("create migrate instance: %w", err)
 	}
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return fmt.Errorf("apply migrations: %w", err)
-	}
+	done := make(chan error, 1)
+	go func() {
+		done <- m.Up()
+	}()
 
-	return nil
+	select {
+	case err := <-done:
+		if err != nil && !errors.Is(err, migrate.ErrNoChange) {
+			return fmt.Errorf("apply migrations: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
