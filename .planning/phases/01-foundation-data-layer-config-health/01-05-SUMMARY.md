@@ -191,3 +191,11 @@ Phase 2 (watchlist schema/CRUD).
 ---
 *Phase: 01-foundation-data-layer-config-health*
 *Completed: 2026-08-05*
+
+## Self-Check: PASSED
+
+- FOUND: internal/db/migrate.go
+- FOUND: internal/db/migrate_test.go
+- FOUND: commit 1663a6d
+- FOUND: commit 1dc505a
+- FOUND: commit 83ca8c0
