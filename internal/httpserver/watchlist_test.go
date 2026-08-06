@@ -228,6 +228,46 @@ func TestWatchlist_Add_RejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestWatchlist_Add_DuplicateReturns409(t *testing.T) {
+	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
+		return watchlist.Entry{}, watchlist.ErrDuplicate
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const body = `{"mbid":"x","name":"y"}`
+	resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /watchlist: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusConflict)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+
+	var eb errorBody
+	if err := json.Unmarshal(data, &eb); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if eb.Error == "" {
+		t.Fatal("error message is empty, want a non-empty message")
+	}
+
+	raw := string(data)
+	for _, leak := range []string{"23505", "pgconn", "watchlist_artist_id_key"} {
+		if strings.Contains(raw, leak) {
+			t.Fatalf("response body leaked %q: %s", leak, raw)
+		}
+	}
+}
+
 func TestWatchlist_Add_DoesNotLeakInternals(t *testing.T) {
 	addErr := errors.New("pq: connection to postgres://user:hunter2@db:5432 failed")
 	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
