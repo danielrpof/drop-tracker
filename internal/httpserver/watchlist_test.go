@@ -506,6 +506,225 @@ func TestWatchlist_Delete_ConcurrentSameIDYieldsOne204AndOne404(t *testing.T) {
 	}
 }
 
+// TestWatchlist_Patch_ConcurrentDifferentAxesBothSurvive is the end-to-end
+// analogue of internal/watchlist/service_test.go's
+// TestService_UpdatePreferences_ConcurrentAxisWriteIsNotLost (G-02-2b,
+// WR-02): the pre-fix behaviour was that a PATCH to one axis could silently
+// revert a concurrently-applied PATCH to the other. Unlike the service-layer
+// test, these two real HTTP requests race with no forced interleaving, so a
+// single run cannot be guaranteed to catch a regression -- this loops 25
+// times so an unlucky scheduling on any one iteration does not make a green
+// run meaningless. The deterministic proof lives in the service-layer test
+// above; this proves the same property survives the handler and the real
+// network round trip.
+func TestWatchlist_Patch_ConcurrentDifferentAxesBothSurvive(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	store := watchlist.NewService(sqlc.New(pool))
+	entry, err := store.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Concurrent Patch Axes Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	srv := httpserver.New(pool, store, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const iterations = 25
+	for i := 0; i < iterations; i++ {
+		if _, err := pool.Exec(ctx,
+			"UPDATE watchlist SET release_types = ARRAY['album','single','ep','deluxe']::text[], muted_event_types = '{}'::text[] WHERE id = $1",
+			entry.ID,
+		); err != nil {
+			t.Fatalf("iteration %d: reset row: %v", i, err)
+		}
+
+		var wg sync.WaitGroup
+		var barrier sync.WaitGroup
+		barrier.Add(1)
+		statuses := make([]int, 2)
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodPatch, fmt.Sprintf("%s/watchlist/%d", ts.URL, entry.ID), strings.NewReader(`{"release_types":["single"]}`))
+			if err != nil {
+				t.Errorf("iteration %d: build release_types request: %v", i, err)
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			barrier.Wait()
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Errorf("iteration %d: release_types PATCH: %v", i, err)
+				return
+			}
+			defer resp.Body.Close()
+			statuses[0] = resp.StatusCode
+		}()
+		go func() {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodPatch, fmt.Sprintf("%s/watchlist/%d", ts.URL, entry.ID), strings.NewReader(`{"muted_event_types":["deluxe_change"]}`))
+			if err != nil {
+				t.Errorf("iteration %d: build muted_event_types request: %v", i, err)
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			barrier.Wait()
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Errorf("iteration %d: muted_event_types PATCH: %v", i, err)
+				return
+			}
+			defer resp.Body.Close()
+			statuses[1] = resp.StatusCode
+		}()
+
+		barrier.Done()
+		wg.Wait()
+
+		if statuses[0] != http.StatusOK {
+			t.Errorf("iteration %d: release_types PATCH status = %d, want %d", i, statuses[0], http.StatusOK)
+		}
+		if statuses[1] != http.StatusOK {
+			t.Errorf("iteration %d: muted_event_types PATCH status = %d, want %d", i, statuses[1], http.StatusOK)
+		}
+
+		var releaseTypes, mutedEventTypes []string
+		row := pool.QueryRow(ctx, "SELECT release_types, muted_event_types FROM watchlist WHERE id = $1", entry.ID)
+		if err := row.Scan(&releaseTypes, &mutedEventTypes); err != nil {
+			t.Fatalf("iteration %d: query stored preferences: %v", i, err)
+		}
+		if len(releaseTypes) != 1 || releaseTypes[0] != "single" {
+			t.Errorf("iteration %d: release_types = %v, want [single] (the muted_event_types PATCH must not have reverted it)", i, releaseTypes)
+		}
+		if len(mutedEventTypes) != 1 || mutedEventTypes[0] != "deluxe_change" {
+			t.Errorf("iteration %d: muted_event_types = %v, want [deluxe_change] (the release_types PATCH must not have reverted it)", i, mutedEventTypes)
+		}
+	}
+}
+
+// TestWatchlist_Patch_ConcurrentWithDeleteNeverReturns500 is the end-to-end
+// analogue of internal/watchlist/service_test.go's
+// TestService_UpdatePreferences_RowDeletedMidWriteReturnsErrNotFound
+// (G-02-2b, WR-02): the pre-fix behaviour was a 500 when a PATCH raced a
+// DELETE for the same row. Like its sibling above, this cannot force the
+// interleaving -- it races 25 real request pairs and asserts the invariant
+// holds on every one; the deterministic proof lives in the service-layer
+// test.
+func TestWatchlist_Patch_ConcurrentWithDeleteNeverReturns500(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	store := watchlist.NewService(sqlc.New(pool))
+	srv := httpserver.New(pool, store, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const iterations = 25
+	for i := 0; i < iterations; i++ {
+		entry, err := store.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Concurrent Patch Delete Test"})
+		if err != nil {
+			t.Fatalf("iteration %d: Add: %v", i, err)
+		}
+
+		var wg sync.WaitGroup
+		var barrier sync.WaitGroup
+		barrier.Add(1)
+		var patchStatus, deleteStatus int
+		var patchBody []byte
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodPatch, fmt.Sprintf("%s/watchlist/%d", ts.URL, entry.ID), strings.NewReader(`{"release_types":["album"]}`))
+			if err != nil {
+				t.Errorf("iteration %d: build PATCH request: %v", i, err)
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			barrier.Wait()
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Errorf("iteration %d: PATCH: %v", i, err)
+				return
+			}
+			defer resp.Body.Close()
+			patchStatus = resp.StatusCode
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Errorf("iteration %d: read PATCH response body: %v", i, err)
+				return
+			}
+			patchBody = body
+		}()
+		go func() {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/watchlist/%d", ts.URL, entry.ID), nil)
+			if err != nil {
+				t.Errorf("iteration %d: build DELETE request: %v", i, err)
+				return
+			}
+			barrier.Wait()
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Errorf("iteration %d: DELETE: %v", i, err)
+				return
+			}
+			defer resp.Body.Close()
+			deleteStatus = resp.StatusCode
+		}()
+
+		barrier.Done()
+		wg.Wait()
+
+		if deleteStatus != http.StatusNoContent {
+			t.Errorf("iteration %d: DELETE status = %d, want %d", i, deleteStatus, http.StatusNoContent)
+		}
+
+		if patchStatus != http.StatusOK && patchStatus != http.StatusNotFound {
+			t.Errorf("iteration %d: PATCH status = %d, want %d or %d (never 500)", i, patchStatus, http.StatusOK, http.StatusNotFound)
+		}
+
+		if patchStatus == http.StatusNotFound {
+			var eb errorBody
+			if err := json.Unmarshal(patchBody, &eb); err != nil {
+				t.Errorf("iteration %d: decode 404 body: %v (body: %s)", i, err, patchBody)
+			} else {
+				if eb.Error == "" {
+					t.Errorf("iteration %d: 404 error message is empty, want a non-empty message", i)
+				}
+				lower := strings.ToLower(eb.Error)
+				if strings.Contains(lower, "sqlstate") || strings.Contains(lower, "pgconn") || strings.Contains(lower, "pgx") || strings.Contains(eb.Error, "@") {
+					t.Errorf("iteration %d: 404 error message %q looks like it leaks driver/DSN internals", i, eb.Error)
+				}
+			}
+		}
+
+		// Self-consistency: if the DELETE somehow did not land (e.g. it lost
+		// the race to a PATCH that also failed), remove the row so the next
+		// iteration's Add starts clean.
+		if deleteStatus != http.StatusNoContent {
+			if _, err := pool.Exec(ctx, "DELETE FROM watchlist WHERE id = $1", entry.ID); err != nil {
+				t.Fatalf("iteration %d: self-consistency cleanup delete: %v", i, err)
+			}
+		}
+	}
+}
+
 func TestWatchlist_Delete_MissingReturns404(t *testing.T) {
 	stub := stubStore{removeFunc: func(context.Context, int64) error {
 		return watchlist.ErrNotFound
