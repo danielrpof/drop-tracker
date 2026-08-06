@@ -27,13 +27,23 @@ type Querier interface {
 	// planner happens to choose, which is non-deterministic across runs.
 	ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 	Ping(ctx context.Context) (int32, error)
-	// Both arrays are always written; the partial-update semantics (leave one
-	// axis untouched) live in Go, which reads the current row first and
-	// substitutes the untouched axis before calling this query. Keeping the SQL
-	// total rather than conditional avoids a COALESCE-per-column expression
-	// whose NULL-versus-empty-array behaviour is exactly the distinction this
-	// plan has to keep sharp.
-	UpdateWatchlistPreferences(ctx context.Context, arg UpdateWatchlistPreferencesParams) (Watchlist, error)
+	// The partial-update merge happens inside this statement, not in Go: each
+	// axis is resolved by a CASE whose ELSE names the column itself, so the
+	// value carried forward for an untouched axis is read from the row version
+	// this UPDATE itself locked. Under READ COMMITTED a writer blocked behind
+	// another writer's uncommitted change re-evaluates its WHERE clause and SET
+	// expressions against the newly committed row once it unblocks -- so the
+	// second writer physically cannot persist a value it observed before the
+	// first writer committed (G-02-2b, T-02-19). The zero-row case (no matching
+	// id, including one deleted concurrently) surfaces as pgx.ErrNoRows, which
+	// Service.UpdatePreferences translates to ErrNotFound in one round trip
+	// (T-02-20) -- there is no separate unlocked read whose result can go stale.
+	//
+	// Each axis's "am I being set" signal is carried by its own explicit boolean
+	// parameter rather than multiplexed onto the array parameter's nullability:
+	// an empty array and an absent key are two different client intents (D-11),
+	// and a NULL-means-untouched COALESCE would collapse that distinction.
+	UpdateWatchlistPreferences(ctx context.Context, arg UpdateWatchlistPreferencesParams) (UpdateWatchlistPreferencesRow, error)
 	// The SET list below is deliberately exhaustive over every mutable metadata
 	// column on artists (WR-01, G-02-2a): a column left out of it is a column
 	// this table silently refuses to ever update again on a re-add, and because

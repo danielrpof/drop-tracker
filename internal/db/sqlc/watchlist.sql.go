@@ -119,30 +119,82 @@ func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 }
 
 const updateWatchlistPreferences = `-- name: UpdateWatchlistPreferences :one
-UPDATE watchlist
-SET release_types = $2, muted_event_types = $3, updated_at = now()
-WHERE id = $1
-RETURNING id, artist_id, release_types, muted_event_types, created_at, updated_at
+WITH updated AS (
+    UPDATE watchlist
+    SET release_types = CASE
+            WHEN $1::boolean THEN $2::text[]
+            ELSE watchlist.release_types
+        END,
+        muted_event_types = CASE
+            WHEN $3::boolean THEN $4::text[]
+            ELSE watchlist.muted_event_types
+        END,
+        updated_at = now()
+    WHERE watchlist.id = $5
+    RETURNING watchlist.id, watchlist.artist_id, watchlist.release_types, watchlist.muted_event_types, watchlist.created_at, watchlist.updated_at
+)
+SELECT u.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
+       a.disambiguation, a.image_url,
+       u.release_types, u.muted_event_types, u.created_at, u.updated_at
+FROM updated u
+JOIN artists a ON a.id = u.artist_id
 `
 
 type UpdateWatchlistPreferencesParams struct {
-	ID              int64    `json:"id"`
-	ReleaseTypes    []string `json:"release_types"`
-	MutedEventTypes []string `json:"muted_event_types"`
+	SetReleaseTypes    bool     `json:"set_release_types"`
+	ReleaseTypes       []string `json:"release_types"`
+	SetMutedEventTypes bool     `json:"set_muted_event_types"`
+	MutedEventTypes    []string `json:"muted_event_types"`
+	ID                 int64    `json:"id"`
 }
 
-// Both arrays are always written; the partial-update semantics (leave one
-// axis untouched) live in Go, which reads the current row first and
-// substitutes the untouched axis before calling this query. Keeping the SQL
-// total rather than conditional avoids a COALESCE-per-column expression
-// whose NULL-versus-empty-array behaviour is exactly the distinction this
-// plan has to keep sharp.
-func (q *Queries) UpdateWatchlistPreferences(ctx context.Context, arg UpdateWatchlistPreferencesParams) (Watchlist, error) {
-	row := q.db.QueryRow(ctx, updateWatchlistPreferences, arg.ID, arg.ReleaseTypes, arg.MutedEventTypes)
-	var i Watchlist
+type UpdateWatchlistPreferencesRow struct {
+	ID              int64              `json:"id"`
+	ArtistID        int64              `json:"artist_id"`
+	Mbid            string             `json:"mbid"`
+	Name            string             `json:"name"`
+	DeezerID        *string            `json:"deezer_id"`
+	Disambiguation  *string            `json:"disambiguation"`
+	ImageUrl        *string            `json:"image_url"`
+	ReleaseTypes    []string           `json:"release_types"`
+	MutedEventTypes []string           `json:"muted_event_types"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+// The partial-update merge happens inside this statement, not in Go: each
+// axis is resolved by a CASE whose ELSE names the column itself, so the
+// value carried forward for an untouched axis is read from the row version
+// this UPDATE itself locked. Under READ COMMITTED a writer blocked behind
+// another writer's uncommitted change re-evaluates its WHERE clause and SET
+// expressions against the newly committed row once it unblocks -- so the
+// second writer physically cannot persist a value it observed before the
+// first writer committed (G-02-2b, T-02-19). The zero-row case (no matching
+// id, including one deleted concurrently) surfaces as pgx.ErrNoRows, which
+// Service.UpdatePreferences translates to ErrNotFound in one round trip
+// (T-02-20) -- there is no separate unlocked read whose result can go stale.
+//
+// Each axis's "am I being set" signal is carried by its own explicit boolean
+// parameter rather than multiplexed onto the array parameter's nullability:
+// an empty array and an absent key are two different client intents (D-11),
+// and a NULL-means-untouched COALESCE would collapse that distinction.
+func (q *Queries) UpdateWatchlistPreferences(ctx context.Context, arg UpdateWatchlistPreferencesParams) (UpdateWatchlistPreferencesRow, error) {
+	row := q.db.QueryRow(ctx, updateWatchlistPreferences,
+		arg.SetReleaseTypes,
+		arg.ReleaseTypes,
+		arg.SetMutedEventTypes,
+		arg.MutedEventTypes,
+		arg.ID,
+	)
+	var i UpdateWatchlistPreferencesRow
 	err := row.Scan(
 		&i.ID,
 		&i.ArtistID,
+		&i.Mbid,
+		&i.Name,
+		&i.DeezerID,
+		&i.Disambiguation,
+		&i.ImageUrl,
 		&i.ReleaseTypes,
 		&i.MutedEventTypes,
 		&i.CreatedAt,

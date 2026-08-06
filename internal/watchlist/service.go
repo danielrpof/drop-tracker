@@ -13,6 +13,7 @@ import (
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -201,75 +202,62 @@ func (s *Service) List(ctx context.Context) ([]Entry, error) {
 // (WLST-05, WLST-06, D-11). A nil PreferencesParams field means "leave this
 // axis untouched"; a non-nil pointer -- including one pointing at an empty
 // slice -- means "use exactly this normalised set." The two axes are always
-// validated, read and written independently: nothing in this method may make
-// one axis's resolved value depend on the other's (D-05).
+// validated and written independently: nothing in this method may make one
+// axis's resolved value depend on the other's (D-05).
+//
+// The merge itself happens in a single round trip: UpdateWatchlistPreferences
+// resolves each untouched axis's carried-forward value from the row version
+// its own UPDATE locked, so there is no window between reading an axis and
+// writing it for a concurrent writer to land in (G-02-2b, T-02-19). A
+// zero-row result -- the id does not exist, whether it never did or was
+// deleted a moment before this write landed -- surfaces as pgx.ErrNoRows,
+// which is translated to ErrNotFound below, the same honest 404 Remove
+// already produces from its :execrows count.
 func (s *Service) UpdatePreferences(ctx context.Context, id int64, p PreferencesParams) (Entry, error) {
 	// Validate first, before any database call, so a rejected request never
 	// leaves a partially-applied row behind.
-	var newReleaseTypes, newMutedEventTypes *[]string
+	params := sqlc.UpdateWatchlistPreferencesParams{
+		ID:              id,
+		ReleaseTypes:    []string{},
+		MutedEventTypes: []string{},
+	}
+
 	if p.ReleaseTypes != nil {
 		normalized, err := normalizeSet(*p.ReleaseTypes, ReleaseTypes, ErrInvalidReleaseType)
 		if err != nil {
 			return Entry{}, err
 		}
-		newReleaseTypes = &normalized
+		params.SetReleaseTypes = true
+		params.ReleaseTypes = normalized
 	}
 	if p.MutedEventTypes != nil {
 		normalized, err := normalizeSet(*p.MutedEventTypes, EventTypes, ErrInvalidEventType)
 		if err != nil {
 			return Entry{}, err
 		}
-		newMutedEventTypes = &normalized
+		params.SetMutedEventTypes = true
+		params.MutedEventTypes = normalized
 	}
 
-	// Read the current row via the existing ListWatchlist query rather than
-	// adding a sixth query -- the phase's query surface stays at five, and
-	// this read is already proven by plan 02-03's tests. A nil pointer means
-	// "carry the value just read forward" for that axis.
-	rows, err := s.q.ListWatchlist(ctx)
+	updated, err := s.q.UpdateWatchlistPreferences(ctx, params)
 	if err != nil {
-		return Entry{}, fmt.Errorf("list watchlist: %w", err)
-	}
-	var current *sqlc.ListWatchlistRow
-	for i := range rows {
-		if rows[i].ID == id {
-			current = &rows[i]
-			break
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Entry{}, ErrNotFound
 		}
-	}
-	if current == nil {
-		return Entry{}, ErrNotFound
-	}
-
-	releaseTypes := current.ReleaseTypes
-	if newReleaseTypes != nil {
-		releaseTypes = *newReleaseTypes
-	}
-	mutedEventTypes := current.MutedEventTypes
-	if newMutedEventTypes != nil {
-		mutedEventTypes = *newMutedEventTypes
-	}
-
-	updated, err := s.q.UpdateWatchlistPreferences(ctx, sqlc.UpdateWatchlistPreferencesParams{
-		ID:              id,
-		ReleaseTypes:    releaseTypes,
-		MutedEventTypes: mutedEventTypes,
-	})
-	if err != nil {
 		return Entry{}, fmt.Errorf("update watchlist preferences: %w", err)
 	}
 
 	return Entry{
 		ID:              updated.ID,
-		ArtistID:        current.ArtistID,
-		MBID:            current.Mbid,
-		Name:            current.Name,
-		DeezerID:        current.DeezerID,
-		Disambiguation:  current.Disambiguation,
-		ImageURL:        current.ImageUrl,
+		ArtistID:        updated.ArtistID,
+		MBID:            updated.Mbid,
+		Name:            updated.Name,
+		DeezerID:        updated.DeezerID,
+		Disambiguation:  updated.Disambiguation,
+		ImageURL:        updated.ImageUrl,
 		ReleaseTypes:    updated.ReleaseTypes,
 		MutedEventTypes: updated.MutedEventTypes,
-		CreatedAt:       current.CreatedAt.Time,
+		CreatedAt:       updated.CreatedAt.Time,
 		UpdatedAt:       updated.UpdatedAt.Time,
 	}, nil
 }
