@@ -34,6 +34,16 @@ type Querier interface {
 	// whose NULL-versus-empty-array behaviour is exactly the distinction this
 	// plan has to keep sharp.
 	UpdateWatchlistPreferences(ctx context.Context, arg UpdateWatchlistPreferencesParams) (Watchlist, error)
+	// The SET list below is deliberately exhaustive over every mutable metadata
+	// column on artists (WR-01, G-02-2a): a column left out of it is a column
+	// this table silently refuses to ever update again on a re-add, and because
+	// Service.Add builds the response Entry from this query's returned row, the
+	// caller is handed back the stale value with a 201 as though the write
+	// succeeded. name is NOT NULL and required on every add (D-04), so it is
+	// always refreshed unconditionally. deezer_id, disambiguation and image_url
+	// are all nullable, caller-optional metadata, so each uses
+	// COALESCE(EXCLUDED.<col>, artists.<col>): a nil/omitted field means "the
+	// caller said nothing about this field", never "blank it".
 	UpsertArtist(ctx context.Context, arg UpsertArtistParams) (Artist, error)
 }
 
