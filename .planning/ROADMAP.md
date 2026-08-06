@@ -63,7 +63,7 @@ Plans:
   4. User can set per-artist release-type filters (album/single/EP/deluxe) that control which release types trigger alerts
   5. User can mute specific notification types per artist (e.g., deluxe/reissue alerts)
 
-**Plans**: 6/8 plans executed (2 gap-closure plans pending)
+**Plans**: 7/8 plans executed
 
 Plans:
 **Wave 1**
@@ -92,7 +92,7 @@ Plans:
 
 **Gap closure — Wave 1** *(from 02-UAT.md tests 1 and 2: "fix"; independent, no shared files)*
 
-- [ ] 02-07-PLAN.md — G-02-1: move the neither-axis rule into `watchlist.Service` behind an `ErrNoPreferencesSupplied` sentinel (WR-01), and reject a second concatenated JSON value on both body-taking routes through one shared decode path (WR-02)
+- [x] 02-07-PLAN.md — G-02-1: move the neither-axis rule into `watchlist.Service` behind an `ErrNoPreferencesSupplied` sentinel (WR-01), and reject a second concatenated JSON value on both body-taking routes through one shared decode path (WR-02)
 - [ ] 02-08-PLAN.md — G-02-2: give `redactError` keyword/value-form DSN password coverage (CR-01), proven by unit tests against both redaction helpers, and correct the migration test that never exercised the gap
 
 ### Phase 3: External Clients & Search
@@ -179,7 +179,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation — Data Layer, Config & Health | 5/5 | Complete    | 2026-08-05 |
-| 2. Watchlist Core | 6/6 | In Progress|  |
+| 2. Watchlist Core | 7/8 | In Progress|  |
 | 3. External Clients & Search | 0/TBD | Not started | - |
 | 4. Detection Engine | 0/TBD | Not started | - |
 | 5. Discord Notifications | 0/TBD | Not started | - |

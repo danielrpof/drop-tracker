@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: watchlist-core
 status: executing
-stopped_at: Completed quick task 260806-hfn (gitleaks pre-commit hook)
-last_updated: "2026-08-06T18:06:06.739Z"
+stopped_at: Completed 02-07-PLAN.md (gap closure G-02-1)
+last_updated: "2026-08-06T19:18:53.016Z"
 last_activity: 2026-08-06
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
-  completed_phases: 2
-  total_plans: 11
-  completed_plans: 11
+  completed_phases: 1
+  total_plans: 13
+  completed_plans: 12
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 02 (watchlist-core) — EXECUTING
-Plan: 3 of 6
+Plan: 2 of 8
 Status: Ready to execute
 Last activity: 2026-08-06 — Phase 02 execution started
 
-Progress: [██████████] 100%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Progress: [██████████] 100%
 | Phase 02 P04 | 40m | 2 tasks | 9 files |
 | Phase 02 P05 | 15min | 2 tasks | 4 files |
 | Phase 02 P06 | 25min | 2 tasks | 6 files |
+| Phase 02 P07 | 40min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 02-05]: Widened UpsertArtist's ON CONFLICT SET list to COALESCE disambiguation and image_url the same way deezer_id already was, closing gap G-02-2a (WR-01) -- regenerated sqlc output (artists.sql.go, querier.go) and two real-Postgres tests pin both the refresh-on-supplied and preserve-on-omitted halves of the contract
 - [Phase ?]: [Phase 02-06]: Rewrote UpdateWatchlistPreferences as a single data-modifying CTE (per-axis CASE/ELSE reading the row version the UPDATE itself locked) instead of a two-statement read-then-write, closing gap G-02-2b's lost-update and not-found-on-delete races; qualified every column reference inside the CTE's UPDATE to satisfy sqlc's ambiguity check
 - [Phase ?]: quick/260806-hfn: gitleaks pre-commit hook added and proven end-to-end; full-history scan found 4 pre-existing findings (fake test-fixture password), resolved via documented acceptance (not suppression) after 4 human checkpoints -- no history rewrite, no force-push
+- [Phase ?]: [Phase 02-07]: Closed gap G-02-1 (WR-01, WR-02) -- moved the neither-axis PATCH guard into Service.UpdatePreferences as ErrNoPreferencesSupplied (first statement, ahead of validation and the id lookup) and replaced both hand-copied JSON decode blocks in internal/httpserver/watchlist.go with a shared decodeJSONBody helper that rejects a body carrying a second JSON value
 
 ### Pending Todos
 
@@ -126,6 +128,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-06T18:06:06.706Z
-Stopped at: Completed quick task 260806-hfn (gitleaks pre-commit hook)
+Last session: 2026-08-06T19:18:52.989Z
+Stopped at: Completed 02-07-PLAN.md (gap closure G-02-1)
 Resume file: None
