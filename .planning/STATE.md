@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 current_phase_name: watchlist-core
-status: verifying
-stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-08-06T01:36:17.560Z"
-last_activity: 2026-08-05
+status: executing
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-08-06T16:28:15.246Z"
+last_activity: 2026-08-06
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
-  completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
+  completed_phases: 1
+  total_plans: 11
+  completed_plans: 10
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 02 (watchlist-core) — EXECUTING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
-Last activity: 2026-08-05 — Phase 02 execution started
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-08-06 — Phase 02 execution started
 
-Progress: [██████████] 100%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [██████████] 100%
 | Phase 02 P02 | 20m | 2 tasks | 6 files |
 | Phase 02 P03 | 55m | 2 tasks | 8 files |
 | Phase 02 P04 | 40m | 2 tasks | 9 files |
+| Phase 02 P05 | 15min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 02-03]: TestService_List_EmptyReturnsNonNilSlice queries actual watchlist row count rather than assuming a truly empty table (testutil.NewTestPool resets schema, not table contents), asserting non-nil always and length-zero only when the count is genuinely zero
 - [Phase ?]: [Phase 02-04]: UpdatePreferences reads the current row via the existing ListWatchlist query filtered by id in Go rather than adding a dedicated single-row query, keeping the phase's sqlc query surface at exactly five
 - [Phase ?]: [Phase 02-04]: errNotImplemented sentinel removal folded into task 1's GREEN commit (replacing UpdatePreferences's body removed the last reference); task 2's placeholder gate was a grep-based verification, not a second removal step
+- [Phase ?]: [Phase 02-05]: Widened UpsertArtist's ON CONFLICT SET list to COALESCE disambiguation and image_url the same way deezer_id already was, closing gap G-02-2a (WR-01) -- regenerated sqlc output (artists.sql.go, querier.go) and two real-Postgres tests pin both the refresh-on-supplied and preserve-on-omitted halves of the contract
 
 ### Pending Todos
 
@@ -115,6 +117,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-06T01:36:17.527Z
-Stopped at: Completed 02-04-PLAN.md
+Last session: 2026-08-06T16:28:15.212Z
+Stopped at: Completed 02-05-PLAN.md
 Resume file: None
