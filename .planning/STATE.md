@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: watchlist-core
 status: executing
-stopped_at: Completed 02-05-PLAN.md
-last_updated: "2026-08-06T16:28:15.246Z"
+stopped_at: Completed 02-06-PLAN.md
+last_updated: "2026-08-06T16:37:03.324Z"
 last_activity: 2026-08-06
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 02 (watchlist-core) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-08-06 — Phase 02 execution started
 
-Progress: [█████████░] 91%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -68,6 +68,7 @@ Progress: [█████████░] 91%
 | Phase 02 P03 | 55m | 2 tasks | 8 files |
 | Phase 02 P04 | 40m | 2 tasks | 9 files |
 | Phase 02 P05 | 15min | 2 tasks | 4 files |
+| Phase 02 P06 | 25min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 02-04]: UpdatePreferences reads the current row via the existing ListWatchlist query filtered by id in Go rather than adding a dedicated single-row query, keeping the phase's sqlc query surface at exactly five
 - [Phase ?]: [Phase 02-04]: errNotImplemented sentinel removal folded into task 1's GREEN commit (replacing UpdatePreferences's body removed the last reference); task 2's placeholder gate was a grep-based verification, not a second removal step
 - [Phase ?]: [Phase 02-05]: Widened UpsertArtist's ON CONFLICT SET list to COALESCE disambiguation and image_url the same way deezer_id already was, closing gap G-02-2a (WR-01) -- regenerated sqlc output (artists.sql.go, querier.go) and two real-Postgres tests pin both the refresh-on-supplied and preserve-on-omitted halves of the contract
+- [Phase ?]: [Phase 02-06]: Rewrote UpdateWatchlistPreferences as a single data-modifying CTE (per-axis CASE/ELSE reading the row version the UPDATE itself locked) instead of a two-statement read-then-write, closing gap G-02-2b's lost-update and not-found-on-delete races; qualified every column reference inside the CTE's UPDATE to satisfy sqlc's ambiguity check
 
 ### Pending Todos
 
@@ -117,6 +119,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-06T16:28:15.212Z
-Stopped at: Completed 02-05-PLAN.md
+Last session: 2026-08-06T16:37:03.291Z
+Stopped at: Completed 02-06-PLAN.md
 Resume file: None
