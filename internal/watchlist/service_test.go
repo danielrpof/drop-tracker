@@ -136,6 +136,80 @@ func TestService_Add_ReusesExistingArtistRow(t *testing.T) {
 	}
 }
 
+// strptr returns a pointer to a freshly allocated copy of s, so callers never
+// take the address of a loop variable or a shared literal by accident.
+func strptr(s string) *string { return &s }
+
+// TestService_Add_RefreshesArtistMetadataOnReAdd pins WR-01/G-02-2a: a re-add
+// carrying a changed disambiguation or image_url must update the stored
+// artists row, and the Entry Service.Add returns must reflect the new
+// values -- not the stale ones UpsertArtist's ON CONFLICT clause used to
+// silently keep. This is the "a supplied value refreshes" half of the
+// COALESCE contract task 2 completes with the "an omitted value preserves"
+// half.
+func TestService_Add_RefreshesArtistMetadataOnReAdd(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	if _, err := svc.Add(ctx, watchlist.AddParams{
+		MBID:           mbid,
+		Name:           "First Add",
+		Disambiguation: strptr("US rapper"),
+		ImageURL:       strptr("https://example.test/old.jpg"),
+	}); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, "DELETE FROM watchlist WHERE artist_id = (SELECT id FROM artists WHERE mbid = $1)", mbid); err != nil {
+		t.Fatalf("delete watchlist row: %v", err)
+	}
+
+	entry, err := svc.Add(ctx, watchlist.AddParams{
+		MBID:           mbid,
+		Name:           "Second Add",
+		Disambiguation: strptr("Chicago rapper"),
+		ImageURL:       strptr("https://example.test/new.jpg"),
+	})
+	if err != nil {
+		t.Fatalf("second Add (re-adding after watchlist row removed): %v", err)
+	}
+
+	if entry.Disambiguation == nil || *entry.Disambiguation != "Chicago rapper" {
+		t.Fatalf("returned Entry.Disambiguation = %v, want %q", entry.Disambiguation, "Chicago rapper")
+	}
+	if entry.ImageURL == nil || *entry.ImageURL != "https://example.test/new.jpg" {
+		t.Fatalf("returned Entry.ImageURL = %v, want %q", entry.ImageURL, "https://example.test/new.jpg")
+	}
+
+	var disambiguation, imageURL *string
+	row := pool.QueryRow(ctx, "SELECT disambiguation, image_url FROM artists WHERE mbid = $1", mbid)
+	if err := row.Scan(&disambiguation, &imageURL); err != nil {
+		t.Fatalf("query stored artist metadata: %v", err)
+	}
+	if disambiguation == nil || *disambiguation != "Chicago rapper" {
+		t.Fatalf("stored disambiguation = %v, want %q", disambiguation, "Chicago rapper")
+	}
+	if imageURL == nil || *imageURL != "https://example.test/new.jpg" {
+		t.Fatalf("stored image_url = %v, want %q", imageURL, "https://example.test/new.jpg")
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artists WHERE mbid = $1", mbid).Scan(&count); err != nil {
+		t.Fatalf("query artists count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("artists row count = %d, want 1 (refreshing metadata must not fork the master row, D-03)", count)
+	}
+}
+
 func TestService_Add_DefaultsWhenPreferencesOmitted(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	mbid := testMBID(t)
