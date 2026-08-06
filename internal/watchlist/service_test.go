@@ -210,6 +210,72 @@ func TestService_Add_RefreshesArtistMetadataOnReAdd(t *testing.T) {
 	}
 }
 
+// TestService_Add_OmittedMetadataSurvivesReAdd guards the other half of the
+// COALESCE contract task 1 established: nil on an optional pointer field
+// means "I am not saying anything about this field", not "clear it". This
+// test is expected to pass on first run -- it drives no new production code
+// -- its value is directional, failing the moment someone "simplifies" the
+// three COALESCE wrappers in queries/artists.sql into bare EXCLUDED
+// assignments, which would turn every metadata-omitting re-add into a
+// silent blanking of stored data. Add accepts partial metadata by design, so
+// that regression would fire on ordinary traffic, not as an edge case.
+func TestService_Add_OmittedMetadataSurvivesReAdd(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	if _, err := svc.Add(ctx, watchlist.AddParams{
+		MBID:           mbid,
+		Name:           "First Add",
+		DeezerID:       strptr("12345"),
+		Disambiguation: strptr("Atlanta trio"),
+		ImageURL:       strptr("https://example.test/keep.jpg"),
+	}); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, "DELETE FROM watchlist WHERE artist_id = (SELECT id FROM artists WHERE mbid = $1)", mbid); err != nil {
+		t.Fatalf("delete watchlist row: %v", err)
+	}
+
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Second Add"})
+	if err != nil {
+		t.Fatalf("second Add (re-adding with all optional metadata omitted): %v", err)
+	}
+
+	var deezerID, disambiguation, imageURL *string
+	row := pool.QueryRow(ctx, "SELECT deezer_id, disambiguation, image_url FROM artists WHERE mbid = $1", mbid)
+	if err := row.Scan(&deezerID, &disambiguation, &imageURL); err != nil {
+		t.Fatalf("query stored artist metadata: %v", err)
+	}
+	if deezerID == nil || *deezerID != "12345" {
+		t.Fatalf("stored deezer_id = %v, want %q (omitted field must not blank it)", deezerID, "12345")
+	}
+	if disambiguation == nil || *disambiguation != "Atlanta trio" {
+		t.Fatalf("stored disambiguation = %v, want %q (omitted field must not blank it)", disambiguation, "Atlanta trio")
+	}
+	if imageURL == nil || *imageURL != "https://example.test/keep.jpg" {
+		t.Fatalf("stored image_url = %v, want %q (omitted field must not blank it)", imageURL, "https://example.test/keep.jpg")
+	}
+
+	if entry.DeezerID == nil || *entry.DeezerID != "12345" {
+		t.Fatalf("returned Entry.DeezerID = %v, want %q", entry.DeezerID, "12345")
+	}
+	if entry.Disambiguation == nil || *entry.Disambiguation != "Atlanta trio" {
+		t.Fatalf("returned Entry.Disambiguation = %v, want %q", entry.Disambiguation, "Atlanta trio")
+	}
+	if entry.ImageURL == nil || *entry.ImageURL != "https://example.test/keep.jpg" {
+		t.Fatalf("returned Entry.ImageURL = %v, want %q", entry.ImageURL, "https://example.test/keep.jpg")
+	}
+}
+
 func TestService_Add_DefaultsWhenPreferencesOmitted(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	mbid := testMBID(t)
