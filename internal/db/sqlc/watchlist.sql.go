@@ -37,6 +37,25 @@ func (q *Queries) CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistE
 	return i, err
 }
 
+const deleteWatchlistEntry = `-- name: DeleteWatchlistEntry :execrows
+DELETE FROM watchlist WHERE id = $1
+`
+
+// :execrows returns the affected row count in one round trip, which is what
+// lets the service distinguish "deleted" from "there was nothing to delete"
+// without a preceding existence SELECT. A check-then-delete pair would open
+// a window where a concurrent delete lands between the two statements,
+// turning what should be one 204 and one 404 into two 204s; Postgres's
+// row-level lock on this single statement is what makes the split
+// deterministic under concurrency (T-02-15).
+func (q *Queries) DeleteWatchlistEntry(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWatchlistEntry, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listWatchlist = `-- name: ListWatchlist :many
 SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
        a.disambiguation, a.image_url,

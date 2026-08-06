@@ -10,6 +10,14 @@ import (
 
 type Querier interface {
 	CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error)
+	// :execrows returns the affected row count in one round trip, which is what
+	// lets the service distinguish "deleted" from "there was nothing to delete"
+	// without a preceding existence SELECT. A check-then-delete pair would open
+	// a window where a concurrent delete lands between the two statements,
+	// turning what should be one 204 and one 404 into two 204s; Postgres's
+	// row-level lock on this single statement is what makes the split
+	// deterministic under concurrency (T-02-15).
+	DeleteWatchlistEntry(ctx context.Context, id int64) (int64, error)
 	// Both watchlist and artists have a column named id -- every selected
 	// column is explicitly aliased so sqlc emits a struct carrying both ID
 	// (the watchlist entry) and ArtistID (the master artist) rather than

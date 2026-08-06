@@ -38,12 +38,13 @@ var (
 	// EventTypes is supplied.
 	ErrInvalidEventType = errors.New("invalid event type")
 
-	// errNotImplemented backs the three Store methods this plan declares
-	// but does not yet implement. Plan 02-03 fills List and Remove; plan
-	// 02-04 fills UpdatePreferences and carries the gate proving none of
-	// these bodies survive to the end of the phase. None of the three has
-	// a route registered against it until its own plan, so no half-built
-	// behaviour is reachable over HTTP at any point.
+	// errNotImplemented backs UpdatePreferences, the one Store method this
+	// plan does not implement. Plan 02-01 declared all three placeholders;
+	// this plan (02-03) fills List and Remove; plan 02-04 fills
+	// UpdatePreferences and carries the gate proving this sentinel is gone
+	// by the end of the phase. No route is registered against
+	// UpdatePreferences until its own plan, so no half-built behaviour is
+	// reachable over HTTP.
 	errNotImplemented = errors.New("watchlist: not implemented")
 )
 
@@ -211,10 +212,24 @@ func (s *Service) UpdatePreferences(_ context.Context, _ int64, _ PreferencesPar
 	return Entry{}, errNotImplemented
 }
 
-// Remove is declared now so the Store contract never reshapes mid-phase.
-// Plan 02-03 fills this body; no route is registered against it until then.
-func (s *Service) Remove(_ context.Context, _ int64) error {
-	return errNotImplemented
+// Remove hard-deletes a watchlist entry by id (WLST-03, D-10): no status
+// column, no soft-delete timestamp, no filtering predicate anywhere else in
+// the schema or queries -- the row is gone, and nothing downstream can keep
+// reading it. The artists master row is never touched: the FK cascade runs
+// from artists to watchlist, not the other way (D-03), so removing a
+// watchlist entry cannot take the artist with it. DeleteWatchlistEntry's
+// :execrows affected-row count is what distinguishes "deleted" from "there
+// was nothing to delete" -- 0 rows affected (including on a repeat delete of
+// the same id) is ErrNotFound, never a silently-reported success.
+func (s *Service) Remove(ctx context.Context, id int64) error {
+	affected, err := s.q.DeleteWatchlistEntry(ctx, id)
+	if err != nil {
+		return fmt.Errorf("delete watchlist entry: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // normalizeSet validates values against allowed and returns a new slice

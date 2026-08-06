@@ -17,3 +17,13 @@ SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
 FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
 ORDER BY a.name ASC, a.id ASC;
+
+-- name: DeleteWatchlistEntry :execrows
+-- :execrows returns the affected row count in one round trip, which is what
+-- lets the service distinguish "deleted" from "there was nothing to delete"
+-- without a preceding existence SELECT. A check-then-delete pair would open
+-- a window where a concurrent delete lands between the two statements,
+-- turning what should be one 204 and one 404 into two 204s; Postgres's
+-- row-level lock on this single statement is what makes the split
+-- deterministic under concurrency (T-02-15).
+DELETE FROM watchlist WHERE id = $1;

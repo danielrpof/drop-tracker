@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/httplog/v3"
 
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
@@ -43,6 +45,20 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorResponse{Error: msg})
+}
+
+// parseWatchlistID reads and validates the {id} path segment shared by
+// DELETE /watchlist/{id} (this plan) and plan 02-04's PATCH
+// /watchlist/{id}. Ids are BIGSERIAL, so 0 and negatives are never valid --
+// rejecting them here, before any service call, keeps nonsense out of the
+// query (T-02-07).
+func parseWatchlistID(r *http.Request) (int64, error) {
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id < 1 {
+		return 0, fmt.Errorf("invalid watchlist id: %q", raw)
+	}
+	return id, nil
 }
 
 // addWatchlistRequest is the request DTO for POST /watchlist. It carries
@@ -174,4 +190,30 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(entries)
+}
+
+// handleRemoveWatchlist implements DELETE /watchlist/{id} (WLST-03): a hard
+// delete (D-10) that responds 204 with no body on success, 404 when the id
+// does not exist (including a repeat delete of an id already removed), and
+// 400 -- before any service call -- for a malformed id.
+func (s *Server) handleRemoveWatchlist(w http.ResponseWriter, r *http.Request) {
+	id, err := parseWatchlistID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid watchlist id")
+		return
+	}
+
+	err = s.watchlist.Remove(r.Context(), id)
+	switch {
+	case errors.Is(err, watchlist.ErrNotFound):
+		writeError(w, http.StatusNotFound, "watchlist entry not found")
+		return
+	case err != nil:
+		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// 204 carries no payload -- no Content-Type, no encoder call.
+	w.WriteHeader(http.StatusNoContent)
 }
