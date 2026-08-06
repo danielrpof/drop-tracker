@@ -1226,6 +1226,94 @@ func TestService_UpdatePreferences_RowDeletedMidWriteReturnsErrNotFound(t *testi
 	}
 }
 
+// TestService_UpdatePreferences_NeitherAxisReturnsErrNoPreferencesSupplied
+// pins WR-01 (G-02-1): a call to UpdatePreferences supplying neither axis
+// must be rejected by the domain itself, before any database write, not
+// merely by the HTTP handler one layer above it. The updated_at assertion
+// below is what carries the finding -- it is the observable proof that no
+// write reached the database at all, not merely that the response looked
+// like a rejection.
+//
+// Why this is red today: the call returns (Entry, nil) and the statement's
+// updated_at = now() fires with both CASE branches resolving to the
+// column's own value.
+func TestService_UpdatePreferences_NeitherAxisReturnsErrNoPreferencesSupplied(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Neither Axis Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	var beforeReleaseTypes, beforeMutedEventTypes []string
+	var beforeUpdatedAt time.Time
+	row := pool.QueryRow(ctx, "SELECT release_types, muted_event_types, updated_at FROM watchlist WHERE id = $1", entry.ID)
+	if err := row.Scan(&beforeReleaseTypes, &beforeMutedEventTypes, &beforeUpdatedAt); err != nil {
+		t.Fatalf("query preferences before update: %v", err)
+	}
+
+	got, err := svc.UpdatePreferences(ctx, entry.ID, watchlist.PreferencesParams{})
+	if !errors.Is(err, watchlist.ErrNoPreferencesSupplied) {
+		t.Fatalf("err = %v, want errors.Is(err, watchlist.ErrNoPreferencesSupplied)", err)
+	}
+	if !reflect.DeepEqual(got, watchlist.Entry{}) {
+		t.Fatalf("returned Entry = %+v, want the zero value", got)
+	}
+
+	var afterReleaseTypes, afterMutedEventTypes []string
+	var afterUpdatedAt time.Time
+	row = pool.QueryRow(ctx, "SELECT release_types, muted_event_types, updated_at FROM watchlist WHERE id = $1", entry.ID)
+	if err := row.Scan(&afterReleaseTypes, &afterMutedEventTypes, &afterUpdatedAt); err != nil {
+		t.Fatalf("query preferences after update: %v", err)
+	}
+	if !reflect.DeepEqual(afterReleaseTypes, beforeReleaseTypes) {
+		t.Fatalf("release_types = %v, want unchanged %v (a rejected empty update must issue no write)", afterReleaseTypes, beforeReleaseTypes)
+	}
+	if !reflect.DeepEqual(afterMutedEventTypes, beforeMutedEventTypes) {
+		t.Fatalf("muted_event_types = %v, want unchanged %v (a rejected empty update must issue no write)", afterMutedEventTypes, beforeMutedEventTypes)
+	}
+	if !afterUpdatedAt.Equal(beforeUpdatedAt) {
+		t.Fatalf("updated_at = %v, want unchanged %v -- a rejected empty update must leave no write behind at all, not merely fail to change the returned entry", afterUpdatedAt, beforeUpdatedAt)
+	}
+}
+
+// TestService_UpdatePreferences_NeitherAxisOutranksUnknownID pins the
+// guard's position as UpdatePreferences' first statement, ahead of the id
+// lookup: an empty update against an id no row holds must report
+// ErrNoPreferencesSupplied, not ErrNotFound. Without this, a later refactor
+// could satisfy the sibling test above while quietly making the rejection
+// depend on the row existing.
+//
+// Why this is red today: the statement runs, matches zero rows, and the
+// method translates pgx.ErrNoRows to ErrNotFound.
+func TestService_UpdatePreferences_NeitherAxisOutranksUnknownID(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	var unknownID int64
+	row := pool.QueryRow(ctx, "SELECT COALESCE(MAX(id), 0) + 1 FROM watchlist")
+	if err := row.Scan(&unknownID); err != nil {
+		t.Fatalf("query an id no row holds: %v", err)
+	}
+
+	_, err := svc.UpdatePreferences(ctx, unknownID, watchlist.PreferencesParams{})
+	if !errors.Is(err, watchlist.ErrNoPreferencesSupplied) {
+		t.Fatalf("err = %v, want errors.Is(err, watchlist.ErrNoPreferencesSupplied)", err)
+	}
+	if errors.Is(err, watchlist.ErrNotFound) {
+		t.Fatalf("err = %v also matches watchlist.ErrNotFound -- the neither-axis guard must outrank the id lookup, not merely coincide with it", err)
+	}
+}
+
 // The four tests below prove the watchlist_release_types_valid and
 // watchlist_muted_event_types_valid CHECK constraints reject an
 // out-of-allow-list value written by raw SQL that bypasses Service entirely

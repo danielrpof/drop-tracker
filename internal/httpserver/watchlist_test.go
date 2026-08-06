@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
@@ -1003,6 +1004,125 @@ func TestWatchlist_Patch_RejectsUnknownFields(t *testing.T) {
 	}
 	if called {
 		t.Fatal("updateFunc was called for an over-posted body")
+	}
+}
+
+// TestWatchlist_Patch_NoPreferencesSuppliedReturns400 pins WR-01's handler
+// side (G-02-1): once the neither-axis guard moves into the domain, the
+// handler must forward an empty request to it rather than short-circuiting
+// the request itself, and translate the domain's rejection to the same 400
+// it produced before. The store *was* called, with both pointer fields nil,
+// is the finding here -- it is the only assertion in this test that is red
+// today.
+func TestWatchlist_Patch_NoPreferencesSuppliedReturns400(t *testing.T) {
+	called := false
+	var gotParams watchlist.PreferencesParams
+	stub := stubStore{updateFunc: func(_ context.Context, _ int64, p watchlist.PreferencesParams) (watchlist.Entry, error) {
+		called = true
+		gotParams = p
+		return watchlist.Entry{}, watchlist.ErrNoPreferencesSupplied
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const body = `{}`
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/watchlist/1", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /watchlist/1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+
+	var eb errorBody
+	if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if eb.Error != "no preferences supplied" {
+		t.Fatalf("error message = %q, want %q", eb.Error, "no preferences supplied")
+	}
+
+	if !called {
+		t.Fatal("updateFunc was not called -- the handler must forward an empty request to the domain instead of short-circuiting it")
+	}
+	if gotParams.ReleaseTypes != nil || gotParams.MutedEventTypes != nil {
+		t.Fatalf("PreferencesParams forwarded to the store = %+v, want both pointer fields nil", gotParams)
+	}
+}
+
+// TestWatchlist_Patch_EmptyBodyStillRejectedEndToEnd is the regression net
+// under deleting handleUpdateWatchlist's own neither-axis check: it is green
+// before this plan (the handler's own guard) and green after (the domain's
+// guard translated through the handler's error switch) by design -- it is
+// the one test that fails if the guard is removed from the handler and the
+// sentinel branch is forgotten.
+func TestWatchlist_Patch_EmptyBodyStillRejectedEndToEnd(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	store := watchlist.NewService(sqlc.New(pool))
+	entry, err := store.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Empty Body End To End Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	var beforeUpdatedAt time.Time
+	row := pool.QueryRow(ctx, "SELECT updated_at FROM watchlist WHERE id = $1", entry.ID)
+	if err := row.Scan(&beforeUpdatedAt); err != nil {
+		t.Fatalf("query updated_at before PATCH: %v", err)
+	}
+
+	srv := httpserver.New(pool, store, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodPatch, fmt.Sprintf("%s/watchlist/%d", ts.URL, entry.ID), strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	var eb errorBody
+	if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if eb.Error != "no preferences supplied" {
+		t.Fatalf("error message = %q, want %q", eb.Error, "no preferences supplied")
+	}
+
+	var afterUpdatedAt time.Time
+	row = pool.QueryRow(ctx, "SELECT updated_at FROM watchlist WHERE id = $1", entry.ID)
+	if err := row.Scan(&afterUpdatedAt); err != nil {
+		t.Fatalf("query updated_at after PATCH: %v", err)
+	}
+	if !afterUpdatedAt.Equal(beforeUpdatedAt) {
+		t.Fatalf("updated_at = %v, want unchanged %v", afterUpdatedAt, beforeUpdatedAt)
 	}
 }
 
