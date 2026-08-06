@@ -268,6 +268,106 @@ func TestWatchlist_Add_DuplicateReturns409(t *testing.T) {
 	}
 }
 
+func TestWatchlist_Add_InvalidPreferenceValueReturns400(t *testing.T) {
+	called := false
+	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
+		called = true
+		return watchlist.Entry{}, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const body = `{"mbid":"x","name":"y","release_types":["mixtape"]}`
+	resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /watchlist: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	var eb errorBody
+	if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if !strings.Contains(eb.Error, "mixtape") {
+		t.Fatalf("error message = %q, want it to contain %q", eb.Error, "mixtape")
+	}
+	if called {
+		t.Fatal("addFunc was called for a body with an out-of-allow-list release type")
+	}
+}
+
+func TestWatchlist_Add_RejectsOversizeBody(t *testing.T) {
+	called := false
+	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
+		called = true
+		return watchlist.Entry{}, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	body := `{"mbid":"x","name":"` + strings.Repeat("a", 70000) + `"}`
+	resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /watchlist: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	if called {
+		t.Fatal("addFunc was called for an oversize body")
+	}
+}
+
+func TestWatchlist_Add_RejectsOverlongFields(t *testing.T) {
+	tests := []struct {
+		name string
+		mbid string
+		aid  string
+	}{
+		{name: "overlong mbid", mbid: strings.Repeat("a", 37), aid: "y"},
+		{name: "overlong name", mbid: "x", aid: strings.Repeat("a", 513)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
+				called = true
+				return watchlist.Entry{}, nil
+			}}
+			srv := httpserver.New(noopPinger{}, stub, discardLogger())
+			ts := httptest.NewServer(srv.Router())
+			defer ts.Close()
+
+			reqBody, err := json.Marshal(map[string]string{"mbid": tt.mbid, "name": tt.aid})
+			if err != nil {
+				t.Fatalf("marshal request body: %v", err)
+			}
+
+			resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(string(reqBody)))
+			if err != nil {
+				t.Fatalf("POST /watchlist: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+			if called {
+				t.Fatal("addFunc was called for an overlong field")
+			}
+		})
+	}
+}
+
 func TestWatchlist_Add_DoesNotLeakInternals(t *testing.T) {
 	addErr := errors.New("pq: connection to postgres://user:hunter2@db:5432 failed")
 	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
