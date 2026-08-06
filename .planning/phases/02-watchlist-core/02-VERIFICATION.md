@@ -1,80 +1,82 @@
 ---
 phase: 02-watchlist-core
-verified: 2026-08-06T19:30:00Z
-status: human_needed
-score: 43/43 must-haves verified
+verified: 2026-08-06T21:00:00Z
+status: passed
+score: 61/61 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
   previous_status: human_needed
-  previous_score: 32/32
+  previous_score: 43/43
   gaps_closed:
-    - "G-02-2a (WR-01): UpsertArtist silently dropped disambiguation/image_url on re-add — closed by 02-05 (widened ON CONFLICT SET list, COALESCE on all three nullable metadata columns)"
-    - "G-02-2b (WR-02): UpdatePreferences had an unhandled not-found race and a lost-update race under concurrent PATCH — closed by 02-06 (single data-modifying CTE, one round trip, pgx.ErrNoRows translated to ErrNotFound)"
+    - "G-02-1 (WR-01): Service.UpdatePreferences had no independent domain-boundary no-op guard -- closed by 02-07 (ErrNoPreferencesSupplied sentinel returned as the method's first statement, ahead of validation and the database call)"
+    - "G-02-1 (WR-02): handleAddWatchlist/handleUpdateWatchlist's json.Decoder.Decode never checked the stream was exhausted, silently accepting a body with a second concatenated JSON value -- closed by 02-07 (shared decodeJSONBody helper asserting errors.Is(err, io.EOF) on a second decode)"
+    - "G-02-2 (CR-01): internal/db/migrate.go's redactError only stripped URL-form DSN userinfo, not libpq keyword/value-form password=... -- closed by 02-08 (kvPasswordPattern applied after the existing userinfo strip, covering canonical/whitespace-padded/quoted/differently-cased spellings and query-parameter passwords)"
   gaps_remaining: []
   regressions: []
-human_verification:
-  - test: "Decide the disposition of the two NEW Warning-level findings in the current 02-REVIEW.md (dated after 02-05/02-06 landed, commit 25c285c): new-WR-01 (Service.UpdatePreferences has no independent no-op guard — a direct, non-HTTP caller can send PreferencesParams{} and get a silent no-op 200 that only bumps updated_at) and new-WR-02 (handleAddWatchlist/handleUpdateWatchlist's json.Decoder.Decode never checks the stream is exhausted, so trailing garbage after a valid JSON body is silently ignored rather than rejected)."
-    expected: "A recorded decision (accept as documented risk for v1, or open a follow-up plan) for each finding, the same pattern already used for the prior WR-01/WR-02 pair."
-    why_human: "Both re-confirmed present by direct source inspection during this verification (internal/watchlist/service.go:216-263 has no equivalent of the handler's `if req.ReleaseTypes == nil && req.MutedEventTypes == nil` guard; internal/httpserver/watchlist.go:90-96 and :223-229 both `dec.Decode(&req)` once with no follow-up `dec.Decode(&struct{}{})` != io.EOF check). Neither breaks a declared must-have truth for this phase (no truth asserts domain-layer-only no-op rejection or trailing-data rejection), so this is not a phase must-have gap under the plan's own contract — but both are real, reproducible robustness gaps in Phase 2's own files that a human should knowingly accept or schedule, exactly as WR-01/WR-02 were before this cycle."
-  - test: "Out-of-scope but noteworthy: decide whether to fast-follow CR-01 (Critical) from the same current 02-REVIEW.md — internal/db/migrate.go's redactError only strips the URL-form DSN pattern (scheme://user:pass@host), not a libpq keyword/value-form password=... fragment, so a raw Postgres password could still reach a log line or a returned error if a DSN-parse failure (not just a dial-refused failure) ever embeds the connection string verbatim."
-    expected: "A recorded accept-or-fix decision, tracked separately from Phase 2 (this file was never touched by any 02-01..02-06 plan — `git log -- internal/db/migrate.go` shows only Phase 1 commits) since it does not affect Phase 2's watchlist goal, but flagged because it is Critical severity and directly implicates CLAUDE.md's 'all secrets via environment variables only... nothing real ever committed' constraint."
-    why_human: "Confirmed present by direct source read of internal/db/migrate.go:107-109 (`redactError` still only applies `userInfoPattern`, no keyword/value password pattern). This is a Phase 1 file with zero Phase 2 commits against it and no Phase 2 must-have references it, so it does not block this phase's status determination — but an adversarial verification pass should not silently drop a Critical, unresolved, security-relevant finding just because it sits one file outside the phase boundary."
 ---
 
 # Phase 2: Watchlist Core Verification Report
 
 **Phase Goal:** "Users can fully manage their watchlist — add, remove, list, and configure per-artist alert preferences — through a tested API service layer."
-**Verified:** 2026-08-06T19:30:00Z
-**Status:** human_needed
-**Re-verification:** Yes — after gap closure (plans 02-05, 02-06 landed since the prior VERIFICATION.md)
+**Verified:** 2026-08-06T21:00:00Z
+**Status:** passed
+**Re-verification:** Yes — after gap closure (plans 02-07, 02-08 landed since the prior VERIFICATION.md, closing gaps G-02-1 and G-02-2 recorded in 02-UAT.md)
 
-**Note on ROADMAP `Mode: mvp`:** This phase (and all seven phases in ROADMAP.md) is labeled `Mode: mvp`, but the goal is not in strict user-story form (`As a ..., I want to ..., so that ...`) — confirmed via `user-story.validate`, which returns `valid: false`. Phase 1's own VERIFICATION.md was previously produced in standard (non-MVP-flow) form under the same condition, so this re-verification follows that established precedent rather than the MVP-mode "User Flow Coverage" framing, which would otherwise require refusing to verify. Flagging this for awareness; it is a project-wide metadata/process discrepancy, not a Phase 2 code defect.
+**Note on ROADMAP `Mode: mvp`:** As in the prior verification cycle, this phase's ROADMAP goal is not in strict user-story form (confirmed previously via `user-story.validate` returning `valid: false`). This re-verification follows the same established non-MVP-flow precedent rather than requiring a refusal to verify.
+
+**Scope of this pass:** This is a `--gaps-only` re-verification per the task instructions. Plans 02-01 through 02-06's 43 previously-verified truths were re-confirmed (full suite still green, no regression). The two new plans, 02-07 (G-02-1) and 02-08 (G-02-2), were verified in full against their own declared must-haves, independently of their own SUMMARY.md claims. A full code-review pass (`02-REVIEW.md`, commit `6687486`) ran against all 23 phase-02 source files after 02-07/02-08 landed and reports 0 Critical, 5 Warning, 2 Info. Per the task's explicit scoping instruction, none of the 5 Warning/2 Info findings were claimed as fixed by any plan in this phase — they are recorded below as known, out-of-scope issues, not as unverified claims requiring human disposition in this pass.
 
 ## Goal Achievement
 
 ### Observable Truths
 
-All 32 must-have truths from plans 02-01 through 02-04 were re-verified against the current codebase (full build, `go vet`, a full `go test ./... -count=1` run against real Postgres — 81/81 tests pass, 0 fail), plus 11 new must-have truths from the two gap-closure plans (02-05, 02-06) that landed since the prior VERIFICATION.md.
+All 43 must-have truths from plans 02-01 through 02-06 were re-confirmed (full suite re-run green, `go build`/`go vet` clean, no regression). The 18 new must-have truths from plans 02-07 and 02-08 were independently verified against the current codebase — source read, targeted named-test execution, and grep-based structural gates re-run directly rather than trusted from either SUMMARY.md.
 
 | # | Plan | Truth | Status | Evidence |
 |---|------|-------|--------|----------|
-| 1-32 | 02-01..04 | All 32 previously-verified truths (add/duplicate/validation/list/ordering/delete/concurrency/patch/CHECK-backstop) | ✓ VERIFIED | Full suite re-run green (81/81 tests pass); no regression in any pre-existing `TestService_*`/`TestWatchlist_*` test — see full list in this phase's prior VERIFICATION.md, whose evidence lines were independently re-confirmed against current source rather than merely copied forward |
-| 33 | 02-05 | Re-add with changed disambiguation/image_url updates the stored row; API response reflects it (G-02-2a) | ✓ VERIFIED | `TestService_Add_RefreshesArtistMetadataOnReAdd` PASS; `queries/artists.sql:14-19` widens the `ON CONFLICT` SET list |
-| 34 | 02-05 | Re-add omitting disambiguation/image_url/deezer_id leaves stored value intact | ✓ VERIFIED | `TestService_Add_OmittedMetadataSurvivesReAdd` PASS |
-| 35 | 02-05 | Artists master row reused, not duplicated, on re-add (D-03) | ✓ VERIFIED | Same test's `SELECT count(*) FROM artists WHERE mbid = $1` == 1 assertion |
-| 36 | 02-05 | Committed sqlc output regenerated from edited source, no drift | ✓ VERIFIED | `sqlc generate` + `git diff --exit-code -- internal/db/sqlc/` clean (re-run directly in this verification) |
-| 37 | 02-05 | No Go module added/removed/upgraded | ✓ VERIFIED | `git diff --exit-code -- go.mod go.sum` clean |
-| 38 | 02-06 | PATCH for a row deleted mid-write returns 404, never 500 (G-02-2b) | ✓ VERIFIED | `TestService_UpdatePreferences_RowDeletedMidWriteReturnsErrNotFound` PASS (deterministic held-lock); `TestWatchlist_Patch_ConcurrentWithDeleteNeverReturns500` PASS (25-iteration end-to-end) |
-| 39 | 02-06 | Two concurrent PATCH calls on different axes both take effect, neither reverts the other | ✓ VERIFIED | `TestService_UpdatePreferences_ConcurrentAxisWriteIsNotLost` PASS (deterministic held-lock); `TestWatchlist_Patch_ConcurrentDifferentAxesBothSurvive` PASS (25-iteration end-to-end) |
-| 40 | 02-06 | Untouched axis resolved inside the same statement, one round trip, no separate unlocked read | ✓ VERIFIED | `grep -v '^\s*//' service.go \| grep -c 's.q.ListWatchlist(ctx)'` == 1 (only in `List`, not `UpdatePreferences`); `queries/watchlist.sql:38-56`'s single `WITH updated AS (UPDATE ...) SELECT ...` CTE |
-| 41 | 02-06 | Every pre-existing preference behavior unchanged (partial update, empty-vs-omitted, dedup/canonical order, 400 on invalid value, 404 on unknown id) | ✓ VERIFIED | All pre-existing `TestService_UpdatePreferences_*` and `TestWatchlist_Patch_*` tests pass unedited in the full suite run |
-| 42 | 02-06 | Committed sqlc output regenerated, no drift | ✓ VERIFIED | `sqlc generate` + `git diff --exit-code -- internal/db/sqlc/` clean |
-| 43 | 02-06 | No Go module added/removed/upgraded | ✓ VERIFIED | `git diff --exit-code -- go.mod go.sum` clean |
+| 1-43 | 02-01..06 | All 43 previously-verified truths (add/duplicate/validation/list/ordering/delete/concurrency/patch/CHECK-backstop/re-add metadata refresh/single-CTE concurrency fix) | ✓ VERIFIED | Full suite re-run green (`go test ./... -count=1` against real Postgres: `internal/config`, `internal/db`, `internal/httpserver`, `internal/watchlist` all `ok`, 0 fail); `go build ./...` and `go vet ./...` both exit 0 |
+| 44 | 02-07 | `Service.UpdatePreferences` with neither axis supplied returns `ErrNoPreferencesSupplied` before any database call (G-02-1, WR-01) | ✓ VERIFIED | `internal/watchlist/service.go:231-233` — guard is the method's first statement, ahead of `params` construction; `TestService_UpdatePreferences_NeitherAxisReturnsErrNoPreferencesSupplied` PASS (run by name) |
+| 45 | 02-07 | A rejected empty preferences update leaves `updated_at` exactly as it was — no write reaches the database | ✓ VERIFIED | Same test's before/after `SELECT release_types, muted_event_types, updated_at` + `.Equal()` assertion on the real row, PASS |
+| 46 | 02-07 | The neither-axis rule rejects before the id is looked up (outranks `ErrNotFound`) | ✓ VERIFIED | `TestService_UpdatePreferences_NeitherAxisOutranksUnknownID` PASS — an id no row holds still reports the sentinel |
+| 47 | 02-07 | `PATCH /watchlist/{id}` with a body supplying neither key still answers 400 with byte-identical `{"error":"no preferences supplied"}` | ✓ VERIFIED | `TestWatchlist_Patch_NoPreferencesSuppliedReturns400` and `TestWatchlist_Patch_EmptyBodyStillRejectedEndToEnd` PASS; sentinel message text in `service.go:45` is `"no preferences supplied"`, matches handler's prior wire contract |
+| 48 | 02-07 | The neither-axis rule is implemented exactly once, in `internal/watchlist`; the handler owns no second copy | ✓ VERIFIED | `grep -v '^\s*//' watchlist.go \| grep -c 'ErrNoPreferencesSupplied'` == 1 (re-run directly) |
+| 49 | 02-07 | `POST /watchlist` and `PATCH /watchlist/{id}` answer 400 for a body carrying a second JSON value after the first; store never called (G-02-1, WR-02) | ✓ VERIFIED | `TestWatchlist_Add_BodyMustContainExactlyOneJSONValue` and `TestWatchlist_Patch_BodyMustContainExactlyOneJSONValue` PASS, all 4 trailing-shape subtests (object/array/scalar/non-JSON) 400 with `called=false` asserted directly against the stub's invocation flag, not just status code |
+| 50 | 02-07 | A body followed only by whitespace/trailing newline is still accepted | ✓ VERIFIED | `trailing_whitespace_only` subtest in both tables PASS — 201/200 with `called=true` |
+| 51 | 02-07 | Every request-body decode in `internal/httpserver/watchlist.go` runs through one shared path | ✓ VERIFIED | `grep -c 'json.NewDecoder('` == 1 (only inside `decodeJSONBody`); `grep -c 'decodeJSONBody('` == 3 (declaration + 2 call sites) |
+| 52 | 02-07 | No Go module added/removed/upgraded | ✓ VERIFIED | `git diff --exit-code -- go.mod go.sum` clean |
+| 53 | 02-08 | `redactError` strips a libpq keyword/value-form password from error text, not only URL-form userinfo (G-02-2, CR-01) | ✓ VERIFIED | `internal/db/migrate.go:110,148-149` — `kvPasswordPattern` applied after the userinfo strip; `TestRedactError_NeverEchoesPassword` PASS across all `dsnFixtures` entries (run by name) |
+| 54 | 02-08 | Redaction covers whitespace-padded, single-quoted, and differently-cased keyword/value spellings | ✓ VERIFIED | `TestRedactError_NeverEchoesPassword` subtests for all three spellings PASS |
+| 55 | 02-08 | A password supplied as a URL query parameter is redacted too | ✓ VERIFIED | `TestRedactError_NeverEchoesPassword/URL_form,_password_as_a_query_parameter,_no_userinfo` PASS |
+| 56 | 02-08 | Redaction is surgical: host, database name, and surrounding failure text survive | ✓ VERIFIED | `TestRedactError_KeepsDiagnosticContext` PASS — asserts `host=...`, `dbname=...`, wrapping text, and a visible `password=<redacted>` placeholder all present |
+| 57 | 02-08 | Text merely mentioning "password" without assigning one passes through byte-identical | ✓ VERIFIED | `TestRedactError_LeavesNonDSNTextAlone` PASS for both a Postgres auth-failure message and a mid-sentence mention |
+| 58 | 02-08 | Both redaction helpers are pinned against one shared list of DSN forms | ✓ VERIFIED | `TestRedactDSN_NeverEchoesPassword` iterates the same `dsnFixtures` table as `TestRedactError_NeverEchoesPassword`, PASS |
+| 59 | 02-08 | The dial-failure-only migration test says so in its name/comment | ✓ VERIFIED | `TestRunMigrations_NeverLogsDSN_KeywordValueForm_DialFailurePath` present in `migrate_test.go:278`; old unrenamed name absent (`grep -c '_KeywordValueForm('` == 0 in non-comment lines) |
+| 60 | 02-08 | Every fixture password is the project's existing non-entropic marker, so `gitleaks` reports no new finding | ✓ VERIFIED | `python -m pre_commit run gitleaks --all-files` → "Passed" (re-run directly against current HEAD) |
+| 61 | 02-08 | No Go module added/removed/upgraded | ✓ VERIFIED | `git diff --exit-code -- go.mod go.sum` clean |
 
-**Score:** 43/43 declared must-have truths verified. 0 truths left behaviorally unverified.
+**Score:** 61/61 declared must-have truths verified (43 carried forward + 18 from 02-07/02-08). 0 truths left behaviorally unverified.
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `queries/artists.sql` | `UpsertArtist` with exhaustive `ON CONFLICT` SET list | ✓ VERIFIED | 3 real `COALESCE(EXCLUDED.<col>, artists.<col>)` clauses (deezer_id, disambiguation, image_url) + 1 in leading comment; `name` bare-assigned (NOT NULL) |
-| `internal/db/sqlc/artists.sql.go`, `querier.go` | Regenerated codegen matching the widened query | ✓ VERIFIED | `sqlc generate` produces zero working-tree diff |
-| `internal/watchlist/service_test.go` | Both halves of the COALESCE contract covered | ✓ VERIFIED | `TestService_Add_RefreshesArtistMetadataOnReAdd`, `TestService_Add_OmittedMetadataSurvivesReAdd` both present and passing |
-| `queries/watchlist.sql` | `UpdateWatchlistPreferences` as a single data-modifying CTE | ✓ VERIFIED | Lines 38-56: `WITH updated AS (UPDATE ... CASE/ELSE ... RETURNING ...) SELECT ... JOIN artists` |
-| `internal/db/sqlc/watchlist.sql.go`, `querier.go` | Regenerated with `SetReleaseTypes`/`SetMutedEventTypes bool` params, artist-joined row | ✓ VERIFIED | `sqlc generate` produces zero working-tree diff; `UpdateWatchlistPreferencesParams`/`Row` exports confirmed via passing tests that construct/consume them |
-| `internal/watchlist/service.go` | One-round-trip `UpdatePreferences`, `pgx.ErrNoRows` → `ErrNotFound` | ✓ VERIFIED | Lines 216-263: single `s.q.UpdateWatchlistPreferences` call, `errors.Is(err, pgx.ErrNoRows)` branch present |
-| `internal/httpserver/watchlist_test.go` | End-to-end concurrent-PATCH coverage | ✓ VERIFIED | `TestWatchlist_Patch_ConcurrentDifferentAxesBothSurvive`, `TestWatchlist_Patch_ConcurrentWithDeleteNeverReturns500` present, both passing |
-| `internal/httpserver/watchlist.go` | Unchanged (404 comes from the service handing over the right sentinel) | ✓ VERIFIED | `git diff --exit-code -- internal/httpserver/watchlist.go` against pre-02-06 state was gated by the plan's own verify step and re-confirmed unmodified by 02-06 per its SUMMARY's key-files list |
+| `internal/watchlist/service.go` | `ErrNoPreferencesSupplied` sentinel + domain-boundary guard | ✓ VERIFIED | Sentinel at line 45, guard at lines 231-233, first statement of `UpdatePreferences` |
+| `internal/watchlist/service_test.go` | Real-Postgres proof of no-op guard and its precedence over `ErrNotFound` | ✓ VERIFIED | `TestService_UpdatePreferences_NeitherAxisReturnsErrNoPreferencesSupplied`, `TestService_UpdatePreferences_NeitherAxisOutranksUnknownID` present and passing |
+| `internal/httpserver/watchlist.go` | One shared `decodeJSONBody` path, sentinel translated to 400 | ✓ VERIFIED | Helper at lines 67-77; used by both `handleAddWatchlist` (line 120) and `handleUpdateWatchlist` (line 253); error switch case at line 263 |
+| `internal/httpserver/watchlist_test.go` | Handler-level 400 translation + table-driven trailing-value rejection | ✓ VERIFIED | `TestWatchlist_Patch_NoPreferencesSuppliedReturns400`, `TestWatchlist_Patch_EmptyBodyStillRejectedEndToEnd`, `TestWatchlist_Add_BodyMustContainExactlyOneJSONValue`, `TestWatchlist_Patch_BodyMustContainExactlyOneJSONValue` all present and passing |
+| `internal/db/migrate.go` | `kvPasswordPattern` applied in `redactError` alongside the existing userinfo strip | ✓ VERIFIED | Pattern at line 110, applied at line 149; doc comments record coverage and the non-reliance on pgx's incidental self-redaction |
+| `internal/db/redact_test.go` | In-package unit coverage of `redactError`/`redactDSN` against a shared `dsnFixtures` table | ✓ VERIFIED | File exists, `package db`, 7-entry `dsnFixtures` table, 4 test functions all present and passing |
+| `internal/db/migrate_test.go` | Honestly named/documented dial-failure test | ✓ VERIFIED | `TestRunMigrations_NeverLogsDSN_KeywordValueForm_DialFailurePath` present; old name absent |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|----|--------|---------|
-| `queries/artists.sql` | `internal/db/sqlc/artists.sql.go` | `sqlc generate`, gated by clean diff | ✓ WIRED | Regenerated, zero drift |
-| `internal/db/sqlc/artists.sql.go` | `internal/watchlist/service.go` | `Service.Add` calls `UpsertArtist`, builds `Entry` from its returned row | ✓ WIRED | `service.go:134-140`, `toEntry` |
-| `queries/watchlist.sql` | `internal/watchlist/service.go` | `UpdatePreferences` calls `s.q.UpdateWatchlistPreferences` once | ✓ WIRED | `service.go:242` |
-| `internal/watchlist/service.go` | `internal/httpserver/watchlist.go` | `pgx.ErrNoRows` → `ErrNotFound` → handler's existing `errors.Is` branch → 404 | ✓ WIRED | No handler edit needed or made; confirmed by `TestWatchlist_Patch_ConcurrentWithDeleteNeverReturns500`'s 404-body assertion passing |
+| `internal/watchlist/service.go` | `internal/httpserver/watchlist.go` | `errors.Is` against `ErrNoPreferencesSupplied` is the handler's only remaining route to 400 | ✓ WIRED | Handler's error switch at line 263; handler's own duplicate two-condition check confirmed deleted (grep count == 1, the switch case) |
+| `internal/httpserver/watchlist.go decodeJSONBody` | `handleAddWatchlist` and `handleUpdateWatchlist` | Both decode sites call the one helper | ✓ WIRED | 3 non-comment occurrences (1 declaration, 2 call sites) confirmed by grep |
+| `internal/db/redact_test.go dsnFixtures` | `redactError` and `redactDSN` | One shared table drives both helpers' tests | ✓ WIRED | `TestRedactError_NeverEchoesPassword` and `TestRedactDSN_NeverEchoesPassword` both range over `dsnFixtures`, confirmed by direct source read |
+| `internal/db/migrate.go redactError` | `RunMigrations`' retry `Warn` line and returned error | `redactError` is the only scrubbing applied to underlying error text on both paths | ✓ WIRED | `RunMigrations` (lines 179, 196, 205) calls `redactError` once per failed attempt and reuses `lastErrMsg` for both the retry log line and the final wrapped error |
 
 ### Behavioral Spot-Checks / Direct Execution
 
@@ -82,73 +84,60 @@ All 32 must-have truths from plans 02-01 through 02-04 were re-verified against 
 |----------|---------|--------|--------|
 | Full build | `go build ./...` | exit 0 | ✓ PASS |
 | Static analysis | `go vet ./...` | exit 0, no output | ✓ PASS |
-| Full test suite (real Postgres) | `TEST_DATABASE_URL=... go test ./... -count=1` | all packages `ok`, 81/81 tests pass, 0 fail | ✓ PASS |
-| New gap-closure tests, named | `go test ./internal/watchlist/... -run 'TestService_Add_RefreshesArtistMetadataOnReAdd\|TestService_Add_OmittedMetadataSurvivesReAdd\|TestService_UpdatePreferences_ConcurrentAxisWriteIsNotLost\|TestService_UpdatePreferences_RowDeletedMidWriteReturnsErrNotFound' -v` | 4/4 PASS | ✓ PASS |
-| New end-to-end concurrency tests, named | `go test ./internal/httpserver/... -run 'TestWatchlist_Patch_ConcurrentDifferentAxesBothSurvive\|TestWatchlist_Patch_ConcurrentWithDeleteNeverReturns500' -v` | 2/2 PASS | ✓ PASS |
-| sqlc drift check | `sqlc generate && git diff --exit-code -- internal/db/sqlc/` | exit 0, no diff (only CRLF line-ending warnings) | ✓ PASS |
-| `go mod verify` | `go mod verify` | "all modules verified" | ✓ PASS |
+| Full test suite (real Postgres) | `TEST_DATABASE_URL=... go test ./... -count=1` | `internal/config`, `internal/db`, `internal/httpserver`, `internal/watchlist` all `ok`, 0 fail | ✓ PASS |
+| 02-07 named tests | `go test ./internal/watchlist/... -run 'TestService_UpdatePreferences_NeitherAxis...'` and `./internal/httpserver/... -run 'TestWatchlist_Add_BodyMustContainExactlyOneJSONValue\|TestWatchlist_Patch_BodyMustContainExactlyOneJSONValue\|TestWatchlist_Patch_NoPreferencesSuppliedReturns400'` | all subtests PASS | ✓ PASS |
+| 02-08 named tests | `go test ./internal/db/... -run 'TestRedactError_NeverEchoesPassword\|TestRedactError_KeepsDiagnosticContext\|TestRedactError_LeavesNonDSNTextAlone\|TestRedactDSN_NeverEchoesPassword'` | all subtests PASS | ✓ PASS |
+| Structural gates re-run | `grep -c 'ErrNoPreferencesSupplied'`==1, `grep -c 'decodeJSONBody('`==3, `grep -c 'json.NewDecoder('`==1, `grep -c 'kvPasswordPattern'`==2 | all match plan's own acceptance criteria | ✓ PASS |
+| gitleaks pre-commit | `python -m pre_commit run gitleaks --all-files` | "Detect hardcoded secrets.....Passed" | ✓ PASS |
 | No dependency drift | `git diff --exit-code -- go.mod go.sum` | exit 0, clean | ✓ PASS |
-| No debt markers in phase files | `grep -nE 'TBD\|FIXME\|XXX\|TODO\|HACK\|PLACEHOLDER'` across `internal/watchlist/`, `internal/httpserver/` | no matches | ✓ PASS |
-| Untouched-axis single-round-trip invariant | `grep -v '^\s*//' service.go \| grep -c 's.q.ListWatchlist(ctx)'` | 1 (in `List` only) | ✓ PASS |
+| No debt markers in phase files | `grep -nE 'TBD\|FIXME\|XXX\|TODO\|HACK\|PLACEHOLDER'` across `internal/watchlist/`, `internal/httpserver/`, `internal/db/migrate.go`, `internal/db/migrate_test.go`, `internal/db/redact_test.go` | no matches | ✓ PASS |
+| Plan-scope independence | `git diff --stat <02-08 range> -- internal/watchlist/ internal/httpserver/ queries/ internal/db/sqlc/` | empty diff | ✓ PASS — confirms 02-08 touched only `internal/db/` |
 | Working tree clean at HEAD | `git status --porcelain` | empty | ✓ PASS |
 
 ### Requirements Coverage
 
 | Requirement | Source Plan | Description | Status | Evidence |
 |-------------|-------------|-------------|--------|----------|
-| WLST-02 | 02-01, 02-02, 02-05 | User can add an artist to the watchlist from search results | ✓ SATISFIED | `POST /watchlist` implemented, tested, D-08/D-09 both proven, re-add metadata refresh now correct |
+| WLST-02 | 02-01, 02-02, 02-05, 02-07 | User can add an artist to the watchlist from search results | ✓ SATISFIED | `POST /watchlist` implemented, tested; re-add metadata refresh correct; trailing-JSON smuggling now rejected |
 | WLST-03 | 02-03 | User can remove an artist from the watchlist | ✓ SATISFIED | `DELETE /watchlist/{id}` hard delete, 404/400 branches, concurrency-safe |
 | WLST-04 | 02-03 | User can list all artists currently on the watchlist | ✓ SATISFIED | `GET /watchlist` joined, ordered, `[]`-safe |
-| WLST-05 | 02-02, 02-04, 02-06 | User can set per-artist release-type filters | ✓ SATISFIED | Set on add and via `PATCH`; PATCH now concurrency-safe and 404-honest |
-| WLST-06 | 02-02, 02-04, 02-06 | User can set per-artist notification/mute preferences | ✓ SATISFIED | Same as WLST-05, mute axis |
+| WLST-05 | 02-02, 02-04, 02-06, 02-07 | User can set per-artist release-type filters | ✓ SATISFIED | Set on add and via `PATCH`; PATCH concurrency-safe, 404-honest, and now rejects a neither-axis call at the domain boundary |
+| WLST-06 | 02-02, 02-04, 02-06, 02-07 | User can set per-artist notification/mute preferences | ✓ SATISFIED | Same as WLST-05, mute axis |
+| OPS-02 | 02-08 | Structured (JSON) logs with request-ID correlation | ✓ SATISFIED (phase-scoped) | 02-08 hardens the one credential-scrubbing guarantee those logs rely on (`redactError`) — no regression to the underlying `httplog`/`slog` wiring from Phase 1 |
+| OPS-03 | 02-08 | All secrets/configuration supplied via environment variables only; none committed | ✓ SATISFIED (phase-scoped) | `redactError` now meets its own stated contract for every DSN form `config.Config.DatabaseURL` accepts, proven at the unit level; `gitleaks` clean |
 
-`.planning/REQUIREMENTS.md` traceability table maps WLST-02 through WLST-06 to Phase 2, all `[x]`/Complete (lines 13-17, 109-113). No orphaned requirements — all five appear in at least one plan's `requirements:` frontmatter, including the two gap-closure plans (02-05: WLST-02; 02-06: WLST-05, WLST-06).
+`.planning/REQUIREMENTS.md` traceability table maps WLST-02 through WLST-06 to Phase 2, all `[x]`/Complete (lines 13-17, 109-113). OPS-02/OPS-03 are mapped to Phase 1 as their primary phase but are legitimately re-touched here since 02-08 hardens a Phase-1-owned guarantee those requirements state; this does not change their traceability-table phase assignment, which is correct as-is. No orphaned requirements — every ID declared across all 8 plans (`WLST-02` through `WLST-06`, `OPS-02`, `OPS-03`) appears in at least one plan's `requirements:` frontmatter.
 
 ### Anti-Patterns Found
 
-None in phase-modified files. Scanned `internal/watchlist/`, `internal/httpserver/`, `queries/artists.sql`, `queries/watchlist.sql` for `TBD`/`FIXME`/`XXX`/`TODO`/`HACK`/`PLACEHOLDER` and common stub phrases — zero matches.
+None in phase-modified files. Re-scanned `internal/watchlist/`, `internal/httpserver/`, `internal/db/migrate.go`, `internal/db/migrate_test.go`, `internal/db/redact_test.go` for `TBD`/`FIXME`/`XXX`/`TODO`/`HACK`/`PLACEHOLDER` and common stub phrases — zero matches.
 
-### Code Review Findings Carried Forward (current 02-REVIEW.md, commit `25c285c`, post-gap-closure)
+### Code Review Findings — Out of Scope for This Pass
 
-The code review artifact was regenerated after 02-05/02-06 landed (this is a *different, later* review than the one the prior VERIFICATION.md referenced — confirmed via `git log -- 02-REVIEW.md`, which shows two commits: `3516368` pre-gap-closure and `25c285c` post-gap-closure, currently at HEAD).
+The current `02-REVIEW.md` (commit `6687486`, generated after 02-07/02-08 landed) reports **0 Critical, 5 Warning, 2 Info**. Both previously-open findings are confirmed resolved by this verification's own direct re-inspection (old WR-01/WR-02 from the pre-gap-closure review, and CR-01) — see the Observable Truths table above.
 
-**Previously-open findings, now confirmed resolved by direct re-inspection:**
-- **Old WR-01 (UpsertArtist drops disambiguation/image_url on re-add):** RESOLVED — `queries/artists.sql`'s SET list now covers all three nullable metadata columns.
-- **Old WR-02 (UpdatePreferences not-found race + lost-update race):** RESOLVED — single-CTE rewrite, deterministic held-lock tests passing.
+Per this verification's task instructions, the 5 new Warning and 2 new Info findings in the current review were **not claimed as fixed by any plan in this phase** and are recorded here as known, out-of-scope issues rather than routed to human verification in this pass:
 
-**New findings from the post-gap-closure review pass, not yet addressed:**
+1. **WR-01 (backoff shift-to-zero for `maxAttempts >= 65`)** — unreachable at the current production call site (`DefaultMaxAttempts = 6`); exported `WithMaxAttempts` is unvalidated. Not tied to any Phase 2 must-have.
+2. **WR-02 (`RetryOption`s unvalidated, malformed error message for `maxAttempts <= 0`)** — same unreachability caveat. Not tied to any Phase 2 must-have.
+3. **WR-03 (`kvPasswordPattern`'s unquoted branch over-consumes trailing query-string parameters)** — confirmed real by inspection: for `?password=x&sslmode=disable`, the redacted output would also swallow `&sslmode=disable`. This is the safe direction for the "never leak a secret" guarantee (no fixture in `dsnFixtures` currently pins trailing-parameter survival for this specific form), but is a residual robustness gap in code 02-08 introduced. Not tied to any declared must-have truth as literally written — none of 02-08's must-haves specify that *subsequent* query parameters after the password must survive, only that the password itself is redacted and that "the underlying failure text" broadly survives — but it is real and worth a human accept-or-fix call.
+4. **WR-04 (`AddParams` vs `PreferencesParams` nil-semantics inconsistency)** — pre-existing design note, not touched by 02-07/02-08.
+5. **WR-05 (no auth on watchlist-mutating routes)** — pre-existing scope note, not touched by 02-07/02-08.
+6. **IN-01, IN-02** — naming/consistency notes, pre-existing.
 
-1. **CR-01 (Critical) — `internal/db/migrate.go`'s `redactError` only strips URL-form DSN userinfo, not libpq keyword/value-form `password=...`.** Confirmed by direct read of `migrate.go:107-109`: `redactError` applies only `userInfoPattern` (`scheme://user:pass@`), with no pattern for `password=\S+`. **This file was never touched by any Phase 2 plan** (`git log -- internal/db/migrate.go` shows only Phase 1 commits) and no Phase 2 must-have references it, so it is out of this phase's scope and does not affect the status determination below — but it is Critical severity, security-relevant (CLAUDE.md's "all secrets via environment variables only... nothing real ever committed"), and currently unresolved at HEAD. Recorded as a human-decision item for visibility, not as a Phase 2 gap.
+These are carried forward as known issues for a future review/plan cycle, consistent with the task's explicit scoping instruction for this verification pass.
 
-2. **New WR-01 (Warning) — `Service.UpdatePreferences` has no independent no-op guard.** Confirmed at `service.go:216-263`: the "at least one axis supplied" check exists only in `handleUpdateWatchlist`, not in the domain-layer `Service.UpdatePreferences` itself. A non-HTTP caller (a future admin tool, Phase 3+ scheduler, or test) invoking `UpdatePreferences(ctx, id, PreferencesParams{})` directly gets a silent success that only bumps `updated_at`. Not tied to any declared must-have truth for this phase.
+### Human Verification Required
 
-3. **New WR-02 (Warning) — decoders accept trailing data after a valid JSON body.** Confirmed at `watchlist.go:90-96` (`handleAddWatchlist`) and `:223-229` (`handleUpdateWatchlist`): `dec.Decode(&req)` is never followed by a stream-exhaustion check, so `{"mbid":"x","name":"y"}{"garbage":true}` decodes and processes as a normal valid request. Not tied to any declared must-have truth for this phase.
-
-4. **IN-01/IN-02 (Info):** redundant double panic recovery in the middleware stack; `handleUpdateWatchlist` lacks the same fail-fast allow-list pre-check `handleAddWatchlist` has (functionally harmless — `Service.UpdatePreferences`'s `normalizeSet` still validates before any DB call). Neither is a defect; both are consistency notes.
-
-## Human Verification Required
-
-### 1. Decide disposition of new-WR-01 and new-WR-02 (in-scope, Warning-severity, code review findings)
-
-**Test:** Review the current `02-REVIEW.md`'s WR-01 (no domain-layer no-op guard on `UpdatePreferences`) and WR-02 (JSON decoders accept trailing data) and decide whether either needs a fast-follow fix before Phase 3/4 build additional callers of `internal/watchlist`, or is an accepted risk for v1.
-**Expected:** A recorded decision, following the same pattern already used for the prior WR-01/WR-02 pair (which resulted in plans 02-05/02-06).
-**Why human:** Both are real, reproducible gaps confirmed by direct source inspection, but neither breaks a declared must-have truth or a WLST-* requirement as literally written, so it is a scoping/priority call, not something a verifier can resolve unilaterally.
-
-### 2. Out-of-scope flag: CR-01 (Critical, Phase 1 file, currently unresolved)
-
-**Test:** Review CR-01 in the current `02-REVIEW.md` — `internal/db/migrate.go`'s `redactError` does not scrub libpq keyword/value-form passwords, only URL-form userinfo — and decide whether to open a fast-follow fix (likely scoped to Phase 1, or a small cross-cutting hardening plan) before it's forgotten.
-**Expected:** A recorded accept-or-fix decision; if fixed, it should land as its own plan since it touches no Phase 2 file.
-**Why human:** Confirmed present at HEAD by direct source read. Does not block Phase 2 (file untouched by any 02-01..02-06 plan, no Phase 2 must-have references it), but is Critical severity and directly implicates a hard project security constraint (CLAUDE.md), so it should not be silently dropped just because it falls one file outside this phase's boundary.
+None for this pass. The two items that were open after the prior verification cycle (disposition of old WR-01/WR-02, and CR-01) were resolved via `02-UAT.md`'s recorded "fix" decisions and closed by plans 02-07 and 02-08, both independently confirmed above. The 6 new Warning/Info findings from the post-02-07/02-08 review are, per this verification's task scope, recorded as known out-of-scope issues rather than new human-verification items.
 
 ### Gaps Summary
 
-No gaps against Phase 2's own declared must-haves. All 43 must-have truths (32 original + 5 from 02-05 + 6 from 02-06) are independently confirmed against the current codebase — a real, single full-suite test run against Postgres (81/81 tests pass), the four new gap-closure tests run by name, `go build`/`go vet`/`sqlc generate`-diff/`go mod verify`, and direct source inspection of every referenced code path. No stub, no orphaned requirement, no debt marker in phase-modified files, and no regression in any of the 32 previously-verified truths.
+No gaps. Both gaps carried into this pass — G-02-1 (WR-01: domain-boundary no-op guard; WR-02: trailing-JSON-value rejection) and G-02-2 (CR-01: keyword/value-form DSN password redaction) — are closed, each proven by tests that were red before the fix and green after (per both SUMMARY.md's TDD commit sequences, independently re-run by name in this verification rather than trusted from the summaries). All 61 must-have truths across all 8 plans are independently confirmed against the current codebase: a full suite run against real Postgres (0 fail), all newly-added named tests re-run individually, `go build`/`go vet` clean, every plan's own grep-based structural gate re-executed directly, `gitleaks` clean, and no dependency drift. No stub, no orphaned requirement, no debt marker, and no regression in any of the 43 previously-verified truths.
 
-The two gaps flagged in the prior verification cycle (G-02-2a / old WR-01, G-02-2b / old WR-02) are both closed, with deterministic tests proving the fixes rather than merely asserting they were made.
-
-The `human_needed` status reflects two fresh in-scope Warning-level findings from the post-gap-closure code review (not gaps against this phase's own contract, but real robustness gaps worth an explicit accept-or-fix call) plus one out-of-scope Critical finding surfaced for visibility rather than silently dropped.
+The phase goal — "Users can fully manage their watchlist — add, remove, list, and configure per-artist alert preferences — through a tested API service layer" — is achieved and now additionally hardened at the domain boundary and in its credential-redaction guarantee.
 
 ---
 
-_Verified: 2026-08-06T19:30:00Z_
+_Verified: 2026-08-06T21:00:00Z_
 _Verifier: Claude (gsd-verifier)_
