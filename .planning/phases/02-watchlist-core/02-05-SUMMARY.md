@@ -146,3 +146,15 @@ No other deviations — both tasks otherwise executed exactly as written, includ
 ---
 *Phase: 02-watchlist-core*
 *Completed: 2026-08-06*
+
+## Self-Check: PASSED
+
+- `queries/artists.sql` — FOUND
+- `internal/db/sqlc/artists.sql.go` — FOUND
+- `internal/db/sqlc/querier.go` — FOUND
+- `internal/watchlist/service_test.go` — FOUND
+- `.planning/phases/02-watchlist-core/02-05-SUMMARY.md` — FOUND
+- Commit `79fbe06` — FOUND in `git log --oneline --all`
+- Commit `a9924ae` — FOUND in `git log --oneline --all`
+- Commit `2f5fe49` — FOUND in `git log --oneline --all`
+- Commit `cd72b3d` — FOUND in `git log --oneline --all`
