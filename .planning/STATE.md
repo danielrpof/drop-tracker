@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: watchlist-core
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-08-06T01:08:44.775Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-08-06T01:22:16.633Z"
 last_activity: 2026-08-05
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 02 (watchlist-core) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-08-05 — Phase 02 execution started
 
-Progress: [████████░░] 78%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [████████░░] 78%
 | Phase 01 P05 | 35m | 2 tasks | 2 files |
 | Phase 02 P01 | 75m | 1 tasks | 18 files |
 | Phase 02 P02 | 20m | 2 tasks | 6 files |
+| Phase 02 P03 | 55m | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 02-01]: Fixed internal/db/migrate_test.go's from-scratch reset (drop whole public schema, not just schema_migrations) since 000002 now creates real domain tables a bare reset left behind
 - [Phase ?]: [Phase 02-02]: normalizeSet's unit test lives in a separate internal-package file (normalize_test.go, package watchlist) since it tests an unexported function; service_test.go stays package watchlist_test for the real-Postgres tests
 - [Phase ?]: [Phase 02-02]: Handler performs its own fail-fast membership check against watchlist.ReleaseTypes/EventTypes before calling Store.Add, so an invalid preference value never reaches the store -- Service.Add's normalizeSet remains the non-bypassable backstop
+- [Phase ?]: [Phase 02-03]: RED-phase tests for both List and Remove tasks were written and committed together (one test commit covering both tasks) since drafting happened in one pass; each task's GREEN implementation still landed in its own separate feat commit
+- [Phase ?]: [Phase 02-03]: TestService_List_EmptyReturnsNonNilSlice queries actual watchlist row count rather than assuming a truly empty table (testutil.NewTestPool resets schema, not table contents), asserting non-nil always and length-zero only when the count is genuinely zero
 
 ### Pending Todos
 
@@ -109,6 +112,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-06T01:08:44.744Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-08-06T01:22:16.598Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None

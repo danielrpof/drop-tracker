@@ -11,8 +11,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **WLST-01**: User can search MusicBrainz and Deezer catalogs to find an artist to add to the watchlist
 - [x] **WLST-02**: User can add an artist to the watchlist from search results
-- [ ] **WLST-03**: User can remove an artist from the watchlist
-- [ ] **WLST-04**: User can list all artists currently on the watchlist
+- [x] **WLST-03**: User can remove an artist from the watchlist
+- [x] **WLST-04**: User can list all artists currently on the watchlist
 - [x] **WLST-05**: User can set per-artist release-type filters (album/single/EP/deluxe) to control which release types trigger alerts
 - [x] **WLST-06**: User can set per-artist notification preferences (e.g. mute deluxe/reissue alerts)
 
@@ -107,8 +107,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OPS-02 | Phase 1 | Complete |
 | OPS-03 | Phase 1 | Complete |
 | WLST-02 | Phase 2 | Complete |
-| WLST-03 | Phase 2 | Pending |
-| WLST-04 | Phase 2 | Pending |
+| WLST-03 | Phase 2 | Complete |
+| WLST-04 | Phase 2 | Complete |
 | WLST-05 | Phase 2 | Complete |
 | WLST-06 | Phase 2 | Complete |
 | WLST-01 | Phase 3 | Pending |
