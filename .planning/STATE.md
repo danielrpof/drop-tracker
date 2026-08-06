@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: watchlist-core
 status: executing
-stopped_at: Completed 02-07-PLAN.md (gap closure G-02-1)
-last_updated: "2026-08-06T19:18:53.016Z"
+stopped_at: Completed 02-08-PLAN.md (gap closure G-02-2)
+last_updated: "2026-08-06T19:27:52.433Z"
 last_activity: 2026-08-06
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 13
-  completed_plans: 12
+  completed_plans: 13
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 02 (watchlist-core) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-08-06 — Phase 02 execution started
 
-Progress: [█████████░] 92%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Progress: [█████████░] 92%
 | Phase 02 P05 | 15min | 2 tasks | 4 files |
 | Phase 02 P06 | 25min | 2 tasks | 6 files |
 | Phase 02 P07 | 40min | 2 tasks | 4 files |
+| Phase 02 P08 | 15min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 02-06]: Rewrote UpdateWatchlistPreferences as a single data-modifying CTE (per-axis CASE/ELSE reading the row version the UPDATE itself locked) instead of a two-statement read-then-write, closing gap G-02-2b's lost-update and not-found-on-delete races; qualified every column reference inside the CTE's UPDATE to satisfy sqlc's ambiguity check
 - [Phase ?]: quick/260806-hfn: gitleaks pre-commit hook added and proven end-to-end; full-history scan found 4 pre-existing findings (fake test-fixture password), resolved via documented acceptance (not suppression) after 4 human checkpoints -- no history rewrite, no force-push
 - [Phase ?]: [Phase 02-07]: Closed gap G-02-1 (WR-01, WR-02) -- moved the neither-axis PATCH guard into Service.UpdatePreferences as ErrNoPreferencesSupplied (first statement, ahead of validation and the id lookup) and replaced both hand-copied JSON decode blocks in internal/httpserver/watchlist.go with a shared decodeJSONBody helper that rejects a body carrying a second JSON value
+- [Phase ?]: [Phase 02-08]: Closed gap G-02-2 (CR-01) -- added kvPasswordPattern to redactError for libpq keyword/value-form and query-parameter DSN passwords, gated by a unit-level dsnFixtures table shared with redactDSN since the reachable pgconn.ParseConfig failure path does not currently leak under pinned pgx v5.10.0's own self-redaction
 
 ### Pending Todos
 
@@ -128,6 +130,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-06T19:18:52.989Z
-Stopped at: Completed 02-07-PLAN.md (gap closure G-02-1)
+Last session: 2026-08-06T19:27:52.402Z
+Stopped at: Completed 02-08-PLAN.md (gap closure G-02-2)
 Resume file: None
