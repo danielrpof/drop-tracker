@@ -31,6 +31,13 @@ var dsnFixtures = []struct {
 	// mustNotContain lists the exact substrings that may never survive
 	// redaction.
 	mustNotContain []string
+	// mustContain lists exact substrings that must survive redaction
+	// byte-identical -- diagnostic context redaction must not destroy.
+	// Only checked against redactError's output: redactDSN's output format
+	// (a fixed "host=... database=..." description) is not the DSN text
+	// this field describes, so the field is meaningless there and is left
+	// empty for every fixture where redactDSN is the only helper exercised.
+	mustContain []string
 }{
 	{
 		name:           "URL form, userinfo",
@@ -41,6 +48,11 @@ var dsnFixtures = []struct {
 		name:           "URL form, password as a query parameter, no userinfo",
 		dsn:            "postgres://127.0.0.1:5432/drop_tracker?password=local-test-fixture-password&sslmode=disable",
 		mustNotContain: []string{"local-test-fixture-password"},
+		// The '&'-delimited sibling parameter must survive: an earlier
+		// version of kvPasswordPattern's unquoted branch (\S+) matched
+		// through the '&' and swallowed "sslmode=disable" along with the
+		// secret (T-02-29).
+		mustContain: []string{"sslmode=disable"},
 	},
 	{
 		name:           "keyword/value form, canonical spacing",
@@ -87,6 +99,11 @@ func TestRedactError_NeverEchoesPassword(t *testing.T) {
 			for _, secret := range f.mustNotContain {
 				if strings.Contains(got, secret) {
 					t.Fatalf("fixture %q: redactError(err) = %q, must not contain %q", f.name, got, secret)
+				}
+			}
+			for _, want := range f.mustContain {
+				if !strings.Contains(got, want) {
+					t.Fatalf("fixture %q: redactError(err) = %q, must still contain %q", f.name, got, want)
 				}
 			}
 		})

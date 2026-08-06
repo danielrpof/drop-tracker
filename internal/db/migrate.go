@@ -71,7 +71,43 @@ func newRetryConfig(opts ...RetryOption) retryConfig {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	// A caller-supplied WithMaxAttempts(n) with n < 1 would make the retry
+	// loop's condition (attempt <= cfg.maxAttempts, attempt starting at 1)
+	// false on the first check, skipping every attempt including the first.
+	// Clamp to 1 so RunMigrations always tries at least once.
+	if cfg.maxAttempts < 1 {
+		cfg.maxAttempts = 1
+	}
 	return cfg
+}
+
+// maxBackoffShift bounds the exponent in the backoff calculation below. The
+// delay is baseDelay * 2^(attempt-1); once attempt-1 reaches 64 the uint64
+// left shift overflows and wraps to 0, producing a zero delay that the
+// delay > cfg.maxDelay clamp never catches (0 is never greater than a
+// positive maxDelay) -- silently collapsing exponential backoff into a
+// zero-wait retry storm against the database. Capping the shift well below
+// 64 means the computed delay saturates at (and is then clamped to)
+// cfg.maxDelay long before the exponent could ever overflow.
+const maxBackoffShift = 32
+
+// backoffDelay computes the exponential backoff delay before the attempt-th
+// retry: cfg.baseDelay * 2^(attempt-1), clamped to cfg.maxDelay. The
+// exponent is capped at maxBackoffShift before the shift runs, so a large
+// attempt number (e.g. from a caller-supplied WithMaxAttempts) saturates at
+// cfg.maxDelay rather than overflowing uint64 and wrapping to a zero delay
+// (T-02-33). The delay <= 0 check is a second, independent backstop against
+// the same failure mode.
+func backoffDelay(cfg retryConfig, attempt int) time.Duration {
+	shift := attempt - 1
+	if shift > maxBackoffShift {
+		shift = maxBackoffShift
+	}
+	delay := cfg.baseDelay * time.Duration(uint64(1)<<uint(shift))
+	if delay <= 0 || delay > cfg.maxDelay {
+		delay = cfg.maxDelay
+	}
+	return delay
 }
 
 // userInfoPattern matches a DSN's "scheme://user:password@" (or
@@ -107,7 +143,14 @@ var userInfoPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^/@\s]*@`)
 // unquoted branch listed first would stop at the value's first space and
 // leave the remainder of a quoted value (which libpq permits containing
 // spaces) in the output.
-var kvPasswordPattern = regexp.MustCompile(`(?i)\bpassword\s*=\s*(?:'(?:[^'\\]|\\.)*'|\S+)`)
+//
+// The unquoted branch excludes '&' (and the quote characters) rather than
+// matching every non-whitespace run: a URL query-parameter password is
+// followed by '&'-delimited siblings on the same line with no whitespace
+// between them ("password=secret&sslmode=disable"), and a bare \S+ swallows
+// them along with the secret -- over-redacting and destroying diagnostic
+// context that protects nothing (T-02-29).
+var kvPasswordPattern = regexp.MustCompile(`(?i)\bpassword\s*=\s*(?:'(?:[^'\\]|\\.)*'|[^\s&'"]+)`)
 
 // redactDSN reduces dsn to a credential-free "host=... database=..."
 // description, computed once at RunMigrations' entry so nothing downstream
@@ -185,10 +228,7 @@ func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger, opts ..
 			break
 		}
 
-		delay := cfg.baseDelay * time.Duration(uint64(1)<<uint(attempt-1))
-		if delay > cfg.maxDelay {
-			delay = cfg.maxDelay
-		}
+		delay := backoffDelay(cfg, attempt)
 		logger.Warn("migration attempt failed, retrying",
 			slog.Int("attempt", attempt),
 			slog.Duration("delay", delay),

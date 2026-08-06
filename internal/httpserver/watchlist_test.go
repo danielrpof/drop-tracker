@@ -384,6 +384,97 @@ func TestWatchlist_Add_RejectsOverlongFields(t *testing.T) {
 	}
 }
 
+// TestWatchlist_Add_RejectsOverlongOptionalMetadata extends
+// TestWatchlist_Add_RejectsOverlongFields to the three optional metadata
+// fields, which T-02-05 originally left unbounded (a gap caught by the
+// phase 02 review, not part of the original plan's scope).
+func TestWatchlist_Add_RejectsOverlongOptionalMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]any
+	}{
+		{name: "overlong deezer_id", body: map[string]any{"mbid": "x", "name": "y", "deezer_id": strings.Repeat("1", 65)}},
+		{name: "overlong disambiguation", body: map[string]any{"mbid": "x", "name": "y", "disambiguation": strings.Repeat("a", 513)}},
+		{name: "overlong image_url", body: map[string]any{"mbid": "x", "name": "y", "image_url": "https://example.test/" + strings.Repeat("a", 2048)}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
+				called = true
+				return watchlist.Entry{}, nil
+			}}
+			srv := httpserver.New(noopPinger{}, stub, discardLogger())
+			ts := httptest.NewServer(srv.Router())
+			defer ts.Close()
+
+			reqBody, err := json.Marshal(tt.body)
+			if err != nil {
+				t.Fatalf("marshal request body: %v", err)
+			}
+
+			resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(string(reqBody)))
+			if err != nil {
+				t.Fatalf("POST /watchlist: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+			if called {
+				t.Fatal("addFunc was called for an overlong optional metadata field")
+			}
+		})
+	}
+}
+
+// TestWatchlist_Add_TrimsOptionalMetadataWhitespace proves the new bound is
+// paired with the same TrimSpace treatment mbid and name already receive,
+// not just a length check: a value padded with whitespace inside the
+// allowed length must reach the store trimmed.
+func TestWatchlist_Add_TrimsOptionalMetadataWhitespace(t *testing.T) {
+	var got watchlist.AddParams
+	stub := stubStore{addFunc: func(_ context.Context, p watchlist.AddParams) (watchlist.Entry, error) {
+		got = p
+		return watchlist.Entry{}, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	reqBody, err := json.Marshal(map[string]any{
+		"mbid":           "x",
+		"name":           "y",
+		"deezer_id":      "  12345  ",
+		"disambiguation": "  US rapper  ",
+		"image_url":      "  https://example.test/a.jpg  ",
+	})
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(string(reqBody)))
+	if err != nil {
+		t.Fatalf("POST /watchlist: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+	if got.DeezerID == nil || *got.DeezerID != "12345" {
+		t.Fatalf("DeezerID = %v, want trimmed \"12345\"", got.DeezerID)
+	}
+	if got.Disambiguation == nil || *got.Disambiguation != "US rapper" {
+		t.Fatalf("Disambiguation = %v, want trimmed \"US rapper\"", got.Disambiguation)
+	}
+	if got.ImageURL == nil || *got.ImageURL != "https://example.test/a.jpg" {
+		t.Fatalf("ImageURL = %v, want trimmed \"https://example.test/a.jpg\"", got.ImageURL)
+	}
+}
+
 // TestWatchlist_Add_BodyMustContainExactlyOneJSONValue pins WR-02 (G-02-1):
 // a body carrying a second JSON value concatenated after a well-formed
 // object must be rejected, with the store never reached -- json.Decoder

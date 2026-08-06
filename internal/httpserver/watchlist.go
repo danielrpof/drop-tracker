@@ -32,6 +32,23 @@ const (
 	maxNameRunes = 512
 )
 
+// maxDeezerIDRunes, maxDisambiguationRunes and maxImageURLRunes cap the
+// three optional metadata fields on the add path the same way maxMBIDRunes
+// and maxNameRunes cap the two required ones (T-02-34; T-02-05 covered only
+// mbid and name, and these three were left unbounded and untrimmed, an
+// oversight caught by the phase 02 review). deezer_id is a short numeric
+// identifier;
+// disambiguation mirrors name's cap since both are short free-text
+// descriptors; image_url uses the common practical URL-length ceiling.
+// Format (e.g. that image_url parses as a URL) is deliberately not
+// validated here -- rendering-surface validation for image_url is Phase 5
+// (Discord embeds) and Phase 6 (React UI)'s responsibility, per T-02-18.
+const (
+	maxDeezerIDRunes       = 64
+	maxDisambiguationRunes = 512
+	maxImageURLRunes       = 2048
+)
+
 // errorResponse is the single D-13 error-body shape for every watchlist
 // handler: {"error": "message"}.
 type errorResponse struct {
@@ -138,6 +155,36 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 	if utf8.RuneCountInString(name) > maxNameRunes {
 		writeError(w, http.StatusBadRequest, "name must be at most 512 characters")
 		return
+	}
+
+	// Trim and length-cap the three optional metadata fields the same way
+	// mbid and name are bounded above -- omitted entirely from T-02-05's
+	// original scope, which named only mbid and name. A nil pointer (the
+	// field was absent from the body) is left untouched; only a supplied
+	// value is trimmed and measured.
+	if req.DeezerID != nil {
+		v := strings.TrimSpace(*req.DeezerID)
+		if utf8.RuneCountInString(v) > maxDeezerIDRunes {
+			writeError(w, http.StatusBadRequest, "deezer_id must be at most 64 characters")
+			return
+		}
+		req.DeezerID = &v
+	}
+	if req.Disambiguation != nil {
+		v := strings.TrimSpace(*req.Disambiguation)
+		if utf8.RuneCountInString(v) > maxDisambiguationRunes {
+			writeError(w, http.StatusBadRequest, "disambiguation must be at most 512 characters")
+			return
+		}
+		req.Disambiguation = &v
+	}
+	if req.ImageURL != nil {
+		v := strings.TrimSpace(*req.ImageURL)
+		if utf8.RuneCountInString(v) > maxImageURLRunes {
+			writeError(w, http.StatusBadRequest, "image_url must be at most 2048 characters")
+			return
+		}
+		req.ImageURL = &v
 	}
 
 	// Reject an out-of-allow-list preference value before ever calling the
