@@ -38,14 +38,6 @@ var (
 	// EventTypes is supplied.
 	ErrInvalidEventType = errors.New("invalid event type")
 
-	// errNotImplemented backs UpdatePreferences, the one Store method this
-	// plan does not implement. Plan 02-01 declared all three placeholders;
-	// this plan (02-03) fills List and Remove; plan 02-04 fills
-	// UpdatePreferences and carries the gate proving this sentinel is gone
-	// by the end of the phase. No route is registered against
-	// UpdatePreferences until its own plan, so no half-built behaviour is
-	// reachable over HTTP.
-	errNotImplemented = errors.New("watchlist: not implemented")
 )
 
 // Entry is the API-facing joined artist + watchlist row.
@@ -205,11 +197,81 @@ func (s *Service) List(ctx context.Context) ([]Entry, error) {
 	return entries, nil
 }
 
-// UpdatePreferences is declared now so the Store contract never reshapes
-// mid-phase. Plan 02-04 fills this body; no route is registered against it
-// until then.
-func (s *Service) UpdatePreferences(_ context.Context, _ int64, _ PreferencesParams) (Entry, error) {
-	return Entry{}, errNotImplemented
+// UpdatePreferences applies a partial update to one or both preference axes
+// (WLST-05, WLST-06, D-11). A nil PreferencesParams field means "leave this
+// axis untouched"; a non-nil pointer -- including one pointing at an empty
+// slice -- means "use exactly this normalised set." The two axes are always
+// validated, read and written independently: nothing in this method may make
+// one axis's resolved value depend on the other's (D-05).
+func (s *Service) UpdatePreferences(ctx context.Context, id int64, p PreferencesParams) (Entry, error) {
+	// Validate first, before any database call, so a rejected request never
+	// leaves a partially-applied row behind.
+	var newReleaseTypes, newMutedEventTypes *[]string
+	if p.ReleaseTypes != nil {
+		normalized, err := normalizeSet(*p.ReleaseTypes, ReleaseTypes, ErrInvalidReleaseType)
+		if err != nil {
+			return Entry{}, err
+		}
+		newReleaseTypes = &normalized
+	}
+	if p.MutedEventTypes != nil {
+		normalized, err := normalizeSet(*p.MutedEventTypes, EventTypes, ErrInvalidEventType)
+		if err != nil {
+			return Entry{}, err
+		}
+		newMutedEventTypes = &normalized
+	}
+
+	// Read the current row via the existing ListWatchlist query rather than
+	// adding a sixth query -- the phase's query surface stays at five, and
+	// this read is already proven by plan 02-03's tests. A nil pointer means
+	// "carry the value just read forward" for that axis.
+	rows, err := s.q.ListWatchlist(ctx)
+	if err != nil {
+		return Entry{}, fmt.Errorf("list watchlist: %w", err)
+	}
+	var current *sqlc.ListWatchlistRow
+	for i := range rows {
+		if rows[i].ID == id {
+			current = &rows[i]
+			break
+		}
+	}
+	if current == nil {
+		return Entry{}, ErrNotFound
+	}
+
+	releaseTypes := current.ReleaseTypes
+	if newReleaseTypes != nil {
+		releaseTypes = *newReleaseTypes
+	}
+	mutedEventTypes := current.MutedEventTypes
+	if newMutedEventTypes != nil {
+		mutedEventTypes = *newMutedEventTypes
+	}
+
+	updated, err := s.q.UpdateWatchlistPreferences(ctx, sqlc.UpdateWatchlistPreferencesParams{
+		ID:              id,
+		ReleaseTypes:    releaseTypes,
+		MutedEventTypes: mutedEventTypes,
+	})
+	if err != nil {
+		return Entry{}, fmt.Errorf("update watchlist preferences: %w", err)
+	}
+
+	return Entry{
+		ID:              updated.ID,
+		ArtistID:        current.ArtistID,
+		MBID:            current.Mbid,
+		Name:            current.Name,
+		DeezerID:        current.DeezerID,
+		Disambiguation:  current.Disambiguation,
+		ImageURL:        current.ImageUrl,
+		ReleaseTypes:    updated.ReleaseTypes,
+		MutedEventTypes: updated.MutedEventTypes,
+		CreatedAt:       current.CreatedAt.Time,
+		UpdatedAt:       updated.UpdatedAt.Time,
+	}, nil
 }
 
 // Remove hard-deletes a watchlist entry by id (WLST-03, D-10): no status

@@ -192,6 +192,71 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(entries)
 }
 
+// updateWatchlistRequest is the request DTO for PATCH /watchlist/{id}. It
+// carries only the two preference axes -- id, artist_id, mbid, name and the
+// timestamps are not modifiable through this route and are deliberately
+// absent so an attempt to set them is rejected by DisallowUnknownFields
+// rather than silently discarded (T-02-11).
+type updateWatchlistRequest struct {
+	ReleaseTypes    *[]string `json:"release_types"`
+	MutedEventTypes *[]string `json:"muted_event_types"`
+}
+
+// handleUpdateWatchlist implements PATCH /watchlist/{id} (WLST-05, WLST-06,
+// D-11): partial-update semantics for two independent preference axes. A
+// nil field in the request means "leave this axis untouched"; an explicit
+// empty array means "watch/mute nothing on this axis" -- distinct states,
+// both representable via updateWatchlistRequest's *[]string fields. A body
+// that supplies neither key is rejected -- an empty PATCH is a caller
+// mistake, and a 200 to it would report a change that never happened.
+func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
+	id, err := parseWatchlistID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid watchlist id")
+		return
+	}
+
+	// Bound the body before decoding, matching the ceiling the add path
+	// applies (T-02-16).
+	r.Body = http.MaxBytesReader(w, r.Body, maxAddWatchlistBodyBytes)
+
+	var req updateWatchlistRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.ReleaseTypes == nil && req.MutedEventTypes == nil {
+		writeError(w, http.StatusBadRequest, "no preferences supplied")
+		return
+	}
+
+	entry, err := s.watchlist.UpdatePreferences(r.Context(), id, watchlist.PreferencesParams{
+		ReleaseTypes:    req.ReleaseTypes,
+		MutedEventTypes: req.MutedEventTypes,
+	})
+	switch {
+	case errors.Is(err, watchlist.ErrNotFound):
+		writeError(w, http.StatusNotFound, "watchlist entry not found")
+		return
+	case errors.Is(err, watchlist.ErrInvalidReleaseType), errors.Is(err, watchlist.ErrInvalidEventType):
+		// These sentinels wrap only the offending value, which came from the
+		// client, so echoing err.Error() leaks nothing.
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	case err != nil:
+		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(entry)
+}
+
 // handleRemoveWatchlist implements DELETE /watchlist/{id} (WLST-03): a hard
 // delete (D-10) that responds 204 with no body on success, 404 when the id
 // does not exist (including a repeat delete of an id already removed), and

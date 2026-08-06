@@ -18,6 +18,18 @@ FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
 ORDER BY a.name ASC, a.id ASC;
 
+-- name: UpdateWatchlistPreferences :one
+-- Both arrays are always written; the partial-update semantics (leave one
+-- axis untouched) live in Go, which reads the current row first and
+-- substitutes the untouched axis before calling this query. Keeping the SQL
+-- total rather than conditional avoids a COALESCE-per-column expression
+-- whose NULL-versus-empty-array behaviour is exactly the distinction this
+-- plan has to keep sharp.
+UPDATE watchlist
+SET release_types = $2, muted_event_types = $3, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteWatchlistEntry :execrows
 -- :execrows returns the affected row count in one round trip, which is what
 -- lets the service distinguish "deleted" from "there was nothing to delete"

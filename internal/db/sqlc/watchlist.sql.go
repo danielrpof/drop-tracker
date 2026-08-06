@@ -117,3 +117,36 @@ func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 	}
 	return items, nil
 }
+
+const updateWatchlistPreferences = `-- name: UpdateWatchlistPreferences :one
+UPDATE watchlist
+SET release_types = $2, muted_event_types = $3, updated_at = now()
+WHERE id = $1
+RETURNING id, artist_id, release_types, muted_event_types, created_at, updated_at
+`
+
+type UpdateWatchlistPreferencesParams struct {
+	ID              int64    `json:"id"`
+	ReleaseTypes    []string `json:"release_types"`
+	MutedEventTypes []string `json:"muted_event_types"`
+}
+
+// Both arrays are always written; the partial-update semantics (leave one
+// axis untouched) live in Go, which reads the current row first and
+// substitutes the untouched axis before calling this query. Keeping the SQL
+// total rather than conditional avoids a COALESCE-per-column expression
+// whose NULL-versus-empty-array behaviour is exactly the distinction this
+// plan has to keep sharp.
+func (q *Queries) UpdateWatchlistPreferences(ctx context.Context, arg UpdateWatchlistPreferencesParams) (Watchlist, error) {
+	row := q.db.QueryRow(ctx, updateWatchlistPreferences, arg.ID, arg.ReleaseTypes, arg.MutedEventTypes)
+	var i Watchlist
+	err := row.Scan(
+		&i.ID,
+		&i.ArtistID,
+		&i.ReleaseTypes,
+		&i.MutedEventTypes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

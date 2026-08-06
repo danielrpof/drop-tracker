@@ -27,6 +27,13 @@ type Querier interface {
 	// planner happens to choose, which is non-deterministic across runs.
 	ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 	Ping(ctx context.Context) (int32, error)
+	// Both arrays are always written; the partial-update semantics (leave one
+	// axis untouched) live in Go, which reads the current row first and
+	// substitutes the untouched axis before calling this query. Keeping the SQL
+	// total rather than conditional avoids a COALESCE-per-column expression
+	// whose NULL-versus-empty-array behaviour is exactly the distinction this
+	// plan has to keep sharp.
+	UpdateWatchlistPreferences(ctx context.Context, arg UpdateWatchlistPreferencesParams) (Watchlist, error)
 	UpsertArtist(ctx context.Context, arg UpsertArtistParams) (Artist, error)
 }
 
