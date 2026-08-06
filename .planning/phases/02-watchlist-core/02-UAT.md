@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: resolved
 phase: 02-watchlist-core
 source: [02-VERIFICATION.md]
 started: 2026-08-06T19:30:00Z
-updated: 2026-08-06T20:15:00Z
+updated: 2026-08-06T21:30:00Z
 ---
 
 ## Current Test
@@ -37,7 +37,7 @@ blocked: 0
 
 - gap_id: G-02-1
   truth: "A recorded decision (accept as documented risk for v1, or open a follow-up plan) for each finding, the same pattern already used for the prior WR-01/WR-02 pair."
-  status: failed
+  status: resolved
   reason: "User reported: fix"
   severity: major
   test: 1
@@ -58,7 +58,7 @@ blocked: 0
 
 - gap_id: G-02-2
   truth: "A recorded accept-or-fix decision for internal/db/migrate.go's redactError only stripping URL-form DSN userinfo, not libpq keyword/value-form password=... constraint."
-  status: failed
+  status: resolved
   reason: "User reported: fix"
   severity: major
   test: 2
