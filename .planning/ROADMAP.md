@@ -63,7 +63,7 @@ Plans:
   4. User can set per-artist release-type filters (album/single/EP/deluxe) that control which release types trigger alerts
   5. User can mute specific notification types per artist (e.g., deluxe/reissue alerts)
 
-**Plans**: 4/4 plans executed
+**Plans**: 4/6 plans executed (2 gap-closure plans added from 02-UAT.md)
 
 Plans:
 **Wave 1**
@@ -81,6 +81,14 @@ Plans:
 **Wave 4** *(blocked on Wave 3)*
 
 - [x] 02-04-PLAN.md — `PATCH /watchlist/{id}` independent preference axes with partial updates, CHECK-constraint backstop proof, phase-closing gate
+
+**Gap closure — Wave 1** *(from 02-UAT.md test 2: "fix both WRs")*
+
+- [ ] 02-05-PLAN.md — G-02-2a: widen `UpsertArtist`'s `ON CONFLICT` SET list so a re-add refreshes `disambiguation`/`image_url` instead of silently discarding them
+
+**Gap closure — Wave 2** *(blocked on Gap closure Wave 1)*
+
+- [ ] 02-06-PLAN.md — G-02-2b: collapse `UpdatePreferences` into one locked statement — honest 404 on the deleted-mid-write race, no lost update between concurrent PATCH calls
 
 ### Phase 3: External Clients & Search
 
