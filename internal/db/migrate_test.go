@@ -45,9 +45,12 @@ func closedPortDSN(t *testing.T) string {
 // closedPortKeywordValueDSN is closedPortDSN's libpq keyword/value-form
 // equivalent (host=... user=... password=... dbname=...) -- a form pgx and
 // golang-migrate both accept, and config.go places no format constraint on
-// DATABASE_URL that would rule it out. This exists to catch the CR-01
-// regression class: redactDSN previously only handled the URL form and
-// silently echoed a keyword/value DSN back verbatim, password included.
+// DATABASE_URL that would rule it out. Historically redactDSN was
+// url.Parse-based and silently echoed this form back verbatim, password
+// included, which is why the form is exercised here at all; redactDSN has
+// since been rebuilt on pgconn.ParseConfig and this helper's own migration
+// test only exercises the dial-failure path below, not redactDSN's or
+// redactError's regex/parse coverage -- see redact_test.go for that.
 func closedPortKeywordValueDSN(t *testing.T) string {
 	t.Helper()
 
@@ -262,13 +265,17 @@ func TestRunMigrations_NeverLogsDSN(t *testing.T) {
 	}
 }
 
-// TestRunMigrations_NeverLogsDSN_KeywordValueForm mirrors
+// TestRunMigrations_NeverLogsDSN_KeywordValueForm_DialFailurePath mirrors
 // TestRunMigrations_NeverLogsDSN but exercises a libpq keyword/value-form
-// DSN instead of the URL form, guarding against the CR-01 regression: a
-// hand-rolled url.Parse-based redactDSN silently echoed this DSN form back
-// verbatim (password included) because url.Parse treats a scheme-less
-// string as an opaque path.
-func TestRunMigrations_NeverLogsDSN_KeywordValueForm(t *testing.T) {
+// DSN instead of the URL form. Its DSN points at a closed port, so
+// RunMigrations fails at PingContext with a TCP dial-refused error -- a
+// dial-refused error string never contains DSN text at all, so this test
+// exercises the dial-failure path end to end and proves redactDSN produces
+// a usable target description for the keyword/value form. It does not, and
+// cannot, exercise redactError's regex coverage for that form (a
+// dial-refused error has no DSN text in it to fail to redact); that
+// coverage lives in redact_test.go's TestRedactError_NeverEchoesPassword.
+func TestRunMigrations_NeverLogsDSN_KeywordValueForm_DialFailurePath(t *testing.T) {
 	dsn := closedPortKeywordValueDSN(t)
 	buf := &syncBuffer{}
 	logger := newCapturingLogger(buf)

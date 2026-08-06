@@ -132,3 +132,32 @@ func TestRedactError_LeavesNonDSNTextAlone(t *testing.T) {
 		})
 	}
 }
+
+// TestRedactDSN_NeverEchoesPassword iterates the same dsnFixtures table
+// TestRedactError_NeverEchoesPassword uses, pinning redactDSN against the
+// same list. It is green both before and after this plan -- redactDSN
+// already delegates to pgconn.ParseConfig and handles every form. Its value
+// is not catching a bug today; it is that both redaction helpers are now
+// pinned against one shared list, so a DSN form added to that list for one
+// helper is automatically asserted against the other. The divergence CR-01
+// found -- one helper covering a form the other did not -- becomes
+// impossible to reintroduce silently.
+//
+// A fixture pgx cannot parse (the differently-cased keyword is not a libpq
+// keyword) makes redactDSN return its unparseable placeholder instead of a
+// host/database description. That still satisfies the assertion below and
+// is the correct behaviour -- it is not special-cased, and this test makes
+// no assertion about the placeholder's exact text, which belongs to
+// redactDSN alone.
+func TestRedactDSN_NeverEchoesPassword(t *testing.T) {
+	for _, f := range dsnFixtures {
+		t.Run(f.name, func(t *testing.T) {
+			got := redactDSN(f.dsn)
+			for _, secret := range f.mustNotContain {
+				if strings.Contains(got, secret) {
+					t.Fatalf("fixture %q: redactDSN(dsn) = %q, must not contain %q", f.name, got, secret)
+				}
+			}
+		})
+	}
+}
