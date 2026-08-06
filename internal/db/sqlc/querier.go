@@ -10,6 +10,14 @@ import (
 
 type Querier interface {
 	CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error)
+	// Both watchlist and artists have a column named id -- every selected
+	// column is explicitly aliased so sqlc emits a struct carrying both ID
+	// (the watchlist entry) and ArtistID (the master artist) rather than
+	// silently collapsing them (02-RESEARCH.md Pitfall 4). Name is not unique,
+	// so the artist id is a required, not cosmetic, ORDER BY tiebreak: without
+	// it, two equally-named artists would come back in whatever order the
+	// planner happens to choose, which is non-deterministic across runs.
+	ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 	Ping(ctx context.Context) (int32, error)
 	UpsertArtist(ctx context.Context, arg UpsertArtistParams) (Artist, error)
 }

@@ -64,6 +64,7 @@ func New(db Pinger, store watchlist.Store, logger *slog.Logger) *Server {
 
 	r.Get("/health", s.handleHealth)
 	r.Post("/watchlist", s.handleAddWatchlist)
+	r.Get("/watchlist", s.handleListWatchlist)
 
 	s.router = r
 	return s

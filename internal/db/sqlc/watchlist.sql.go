@@ -7,6 +7,8 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createWatchlistEntry = `-- name: CreateWatchlistEntry :one
@@ -33,4 +35,66 @@ func (q *Queries) CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistE
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listWatchlist = `-- name: ListWatchlist :many
+SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
+       a.disambiguation, a.image_url,
+       w.release_types, w.muted_event_types, w.created_at, w.updated_at
+FROM watchlist w
+JOIN artists a ON a.id = w.artist_id
+ORDER BY a.name ASC, a.id ASC
+`
+
+type ListWatchlistRow struct {
+	ID              int64              `json:"id"`
+	ArtistID        int64              `json:"artist_id"`
+	Mbid            string             `json:"mbid"`
+	Name            string             `json:"name"`
+	DeezerID        *string            `json:"deezer_id"`
+	Disambiguation  *string            `json:"disambiguation"`
+	ImageUrl        *string            `json:"image_url"`
+	ReleaseTypes    []string           `json:"release_types"`
+	MutedEventTypes []string           `json:"muted_event_types"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Both watchlist and artists have a column named id -- every selected
+// column is explicitly aliased so sqlc emits a struct carrying both ID
+// (the watchlist entry) and ArtistID (the master artist) rather than
+// silently collapsing them (02-RESEARCH.md Pitfall 4). Name is not unique,
+// so the artist id is a required, not cosmetic, ORDER BY tiebreak: without
+// it, two equally-named artists would come back in whatever order the
+// planner happens to choose, which is non-deterministic across runs.
+func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error) {
+	rows, err := q.db.Query(ctx, listWatchlist)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWatchlistRow
+	for rows.Next() {
+		var i ListWatchlistRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ArtistID,
+			&i.Mbid,
+			&i.Name,
+			&i.DeezerID,
+			&i.Disambiguation,
+			&i.ImageUrl,
+			&i.ReleaseTypes,
+			&i.MutedEventTypes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

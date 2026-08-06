@@ -154,3 +154,24 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(entry)
 }
+
+// handleListWatchlist implements GET /watchlist (WLST-04): every watchlisted
+// artist as a bare JSON array, with no envelope (D-12). An empty watchlist
+// still returns 200 with a body of exactly [] -- never null -- so the
+// nil-substitution below is a defensive backstop even though Service.List
+// already guarantees a non-nil slice.
+func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
+	entries, err := s.watchlist.List(r.Context())
+	if err != nil {
+		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if entries == nil {
+		entries = []watchlist.Entry{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(entries)
+}

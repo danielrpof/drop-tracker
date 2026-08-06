@@ -174,10 +174,34 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 	return toEntry(artist, entry), nil
 }
 
-// List is declared now so the Store contract never reshapes mid-phase.
-// Plan 02-03 fills this body; no route is registered against it until then.
-func (s *Service) List(_ context.Context) ([]Entry, error) {
-	return nil, errNotImplemented
+// List returns every watchlist entry, joined with its artist's master data,
+// ordered by artist name then artist id (WLST-04). The result is always
+// non-nil -- allocated with make([]Entry, 0, len(rows)) -- so an empty
+// watchlist encodes as JSON [] rather than null; every consumer from this
+// phase's own tests through Phase 6's UI is spared from special-casing nil.
+func (s *Service) List(ctx context.Context) ([]Entry, error) {
+	rows, err := s.q.ListWatchlist(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list watchlist: %w", err)
+	}
+
+	entries := make([]Entry, 0, len(rows))
+	for _, row := range rows {
+		entries = append(entries, Entry{
+			ID:              row.ID,
+			ArtistID:        row.ArtistID,
+			MBID:            row.Mbid,
+			Name:            row.Name,
+			DeezerID:        row.DeezerID,
+			Disambiguation:  row.Disambiguation,
+			ImageURL:        row.ImageUrl,
+			ReleaseTypes:    row.ReleaseTypes,
+			MutedEventTypes: row.MutedEventTypes,
+			CreatedAt:       row.CreatedAt.Time,
+			UpdatedAt:       row.UpdatedAt.Time,
+		})
+	}
+	return entries, nil
 }
 
 // UpdatePreferences is declared now so the Store contract never reshapes
