@@ -607,6 +607,368 @@ func TestWatchlist_Delete_BadIDReturns400(t *testing.T) {
 	}
 }
 
+// The five tests below cover PATCH /watchlist/{id} (WLST-05, WLST-06,
+// T-02-11): 200 with the full updated entry, 400 naming an invalid
+// preference value, 404 for a missing id, 400 for a malformed id (store
+// never called), and 400 for an over-posted body (T-02-11's mass-assignment
+// gate).
+
+func TestWatchlist_Patch_Returns200WithUpdatedEntry(t *testing.T) {
+	want := watchlist.Entry{
+		ID:              1,
+		ArtistID:        2,
+		MBID:            "mbid-x",
+		Name:            "Name X",
+		ReleaseTypes:    []string{"album", "ep"},
+		MutedEventTypes: []string{"deluxe_change"},
+	}
+	stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
+		return want, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const body = `{"release_types":["album","ep"]}`
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/watchlist/1", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /watchlist/1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+
+	var got watchlistEntryBody
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if got.ID != want.ID || got.ArtistID != want.ArtistID || got.MBID != want.MBID || got.Name != want.Name {
+		t.Fatalf("decoded body = %+v, want id/artist_id/mbid/name matching %+v", got, want)
+	}
+	if !reflect.DeepEqual(got.ReleaseTypes, want.ReleaseTypes) {
+		t.Fatalf("release_types = %v, want %v", got.ReleaseTypes, want.ReleaseTypes)
+	}
+	if !reflect.DeepEqual(got.MutedEventTypes, want.MutedEventTypes) {
+		t.Fatalf("muted_event_types = %v, want %v", got.MutedEventTypes, want.MutedEventTypes)
+	}
+}
+
+func TestWatchlist_Patch_InvalidValueReturns400(t *testing.T) {
+	stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
+		return watchlist.Entry{}, fmt.Errorf("%w: %q", watchlist.ErrInvalidReleaseType, "mixtape")
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const body = `{"release_types":["mixtape"]}`
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/watchlist/1", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /watchlist/1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	var eb errorBody
+	if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if !strings.Contains(eb.Error, "mixtape") {
+		t.Fatalf("error message = %q, want it to contain %q", eb.Error, "mixtape")
+	}
+}
+
+func TestWatchlist_Patch_MissingReturns404(t *testing.T) {
+	stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
+		return watchlist.Entry{}, watchlist.ErrNotFound
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const body = `{"release_types":["album"]}`
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/watchlist/1", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /watchlist/1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestWatchlist_Patch_BadIDReturns400(t *testing.T) {
+	paths := []string{"/watchlist/abc", "/watchlist/0"}
+
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			called := false
+			stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
+				called = true
+				return watchlist.Entry{}, nil
+			}}
+			srv := httpserver.New(noopPinger{}, stub, discardLogger())
+			ts := httptest.NewServer(srv.Router())
+			defer ts.Close()
+
+			const body = `{"release_types":["album"]}`
+			req, err := http.NewRequest(http.MethodPatch, ts.URL+p, strings.NewReader(body))
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("PATCH %s: %v", p, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+			if called {
+				t.Fatal("updateFunc was called for a malformed id")
+			}
+		})
+	}
+}
+
+func TestWatchlist_Patch_RejectsUnknownFields(t *testing.T) {
+	called := false
+	stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
+		called = true
+		return watchlist.Entry{}, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const body = `{"release_types":["album"],"artist_id":7}`
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/watchlist/1", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /watchlist/1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	if called {
+		t.Fatal("updateFunc was called for an over-posted body")
+	}
+}
+
+// TestWatchlist_FullLifecycle walks the full D-11 four-route surface against
+// one live server and real Postgres, demonstrating WLST-02 through WLST-06
+// end to end: add, list, narrow release types, mute an event category,
+// reject a duplicate add, remove, confirm removal, reject a repeat remove,
+// and re-add successfully with a fresh id.
+func TestWatchlist_FullLifecycle(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	store := watchlist.NewService(sqlc.New(pool))
+	srv := httpserver.New(pool, store, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	body := `{"mbid":"` + mbid + `","name":"Lifecycle Artist"}`
+
+	// POST a new artist -> 201.
+	resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /watchlist: %v", err)
+	}
+	var created watchlistEntryBody
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode POST response: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+
+	// GET -> the entry appears with default preferences.
+	resp, err = http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET /watchlist: %v", err)
+	}
+	var listed []watchlistEntryBody
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var found bool
+	for _, e := range listed {
+		if e.ID == created.ID {
+			found = true
+			if !reflect.DeepEqual(e.ReleaseTypes, watchlist.ReleaseTypes) {
+				t.Fatalf("listed release_types = %v, want default %v", e.ReleaseTypes, watchlist.ReleaseTypes)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("GET /watchlist did not include the just-created entry")
+	}
+
+	// PATCH narrowing release_types -> 200 with the narrowed set.
+	wantReleaseTypes := []string{"album", "ep"}
+	req, err := http.NewRequest(http.MethodPatch, fmt.Sprintf("%s/watchlist/%d", ts.URL, created.ID), strings.NewReader(`{"release_types":["album","ep"]}`))
+	if err != nil {
+		t.Fatalf("build first PATCH request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH release_types: %v", err)
+	}
+	var patched1 watchlistEntryBody
+	if err := json.NewDecoder(resp.Body).Decode(&patched1); err != nil {
+		t.Fatalf("decode first PATCH response: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("first PATCH status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if !reflect.DeepEqual(patched1.ReleaseTypes, wantReleaseTypes) {
+		t.Fatalf("release_types = %v, want %v", patched1.ReleaseTypes, wantReleaseTypes)
+	}
+
+	// PATCH muting an event category -> 200 with both axes as expected.
+	req, err = http.NewRequest(http.MethodPatch, fmt.Sprintf("%s/watchlist/%d", ts.URL, created.ID), strings.NewReader(`{"muted_event_types":["deluxe_change"]}`))
+	if err != nil {
+		t.Fatalf("build second PATCH request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH muted_event_types: %v", err)
+	}
+	var patched2 watchlistEntryBody
+	if err := json.NewDecoder(resp.Body).Decode(&patched2); err != nil {
+		t.Fatalf("decode second PATCH response: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("second PATCH status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if !reflect.DeepEqual(patched2.ReleaseTypes, wantReleaseTypes) {
+		t.Fatalf("release_types after second PATCH = %v, want unchanged %v", patched2.ReleaseTypes, wantReleaseTypes)
+	}
+	wantMuted := []string{"deluxe_change"}
+	if !reflect.DeepEqual(patched2.MutedEventTypes, wantMuted) {
+		t.Fatalf("muted_event_types = %v, want %v", patched2.MutedEventTypes, wantMuted)
+	}
+
+	// POST the same mbid again -> 409.
+	resp, err = http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("second POST /watchlist: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second POST status = %d, want %d", resp.StatusCode, http.StatusConflict)
+	}
+
+	// DELETE -> 204.
+	req, err = http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/watchlist/%d", ts.URL, created.ID), nil)
+	if err != nil {
+		t.Fatalf("build first DELETE request: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+
+	// GET -> the entry is gone.
+	resp, err = http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET after delete: %v", err)
+	}
+	var afterDelete []watchlistEntryBody
+	if err := json.NewDecoder(resp.Body).Decode(&afterDelete); err != nil {
+		t.Fatalf("decode GET-after-delete response: %v", err)
+	}
+	resp.Body.Close()
+	for _, e := range afterDelete {
+		if e.ID == created.ID {
+			t.Fatalf("GET after delete still contains entry id %d", created.ID)
+		}
+	}
+
+	// DELETE again -> 404.
+	req, err = http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/watchlist/%d", ts.URL, created.ID), nil)
+	if err != nil {
+		t.Fatalf("build second DELETE request: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("second DELETE: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("second DELETE status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	// POST the same mbid once more -> 201 with a new id.
+	resp, err = http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("third POST /watchlist: %v", err)
+	}
+	var recreated watchlistEntryBody
+	if err := json.NewDecoder(resp.Body).Decode(&recreated); err != nil {
+		t.Fatalf("decode third POST response: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("third POST status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+	if recreated.ID == created.ID {
+		t.Fatalf("re-added entry reused id %d, want a new id (no tombstone, D-10)", created.ID)
+	}
+}
+
 func TestWatchlist_Add_DoesNotLeakInternals(t *testing.T) {
 	addErr := errors.New("pq: connection to postgres://user:hunter2@db:5432 failed")
 	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {

@@ -613,6 +613,443 @@ func TestService_Remove_ThenReAddSucceeds(t *testing.T) {
 	}
 }
 
+// The seven tests below cover Service.UpdatePreferences (WLST-05, WLST-06,
+// D-11): independent partial updates to each preference axis, the
+// absent-vs-empty distinction, de-duplication/canonicalisation, allow-list
+// rejection with the stored row untouched, and an unknown id.
+
+func TestService_UpdatePreferences_SetsReleaseTypes(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Update Release Types Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	updated, err := svc.UpdatePreferences(ctx, entry.ID, watchlist.PreferencesParams{
+		ReleaseTypes: &[]string{"album", "ep"},
+	})
+	if err != nil {
+		t.Fatalf("UpdatePreferences: %v", err)
+	}
+
+	wantReleaseTypes := []string{"album", "ep"}
+	if !reflect.DeepEqual(updated.ReleaseTypes, wantReleaseTypes) {
+		t.Fatalf("release_types = %v, want %v", updated.ReleaseTypes, wantReleaseTypes)
+	}
+	if len(updated.MutedEventTypes) != 0 {
+		t.Fatalf("muted_event_types = %v, want empty (untouched axis)", updated.MutedEventTypes)
+	}
+
+	var releaseTypes, mutedEventTypes []string
+	row := pool.QueryRow(ctx, "SELECT release_types, muted_event_types FROM watchlist WHERE id = $1", entry.ID)
+	if err := row.Scan(&releaseTypes, &mutedEventTypes); err != nil {
+		t.Fatalf("query stored preferences: %v", err)
+	}
+	if !reflect.DeepEqual(releaseTypes, wantReleaseTypes) {
+		t.Fatalf("stored release_types = %v, want %v", releaseTypes, wantReleaseTypes)
+	}
+	if len(mutedEventTypes) != 0 {
+		t.Fatalf("stored muted_event_types = %v, want empty", mutedEventTypes)
+	}
+}
+
+func TestService_UpdatePreferences_SetsMutedEventTypes(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Update Muted Event Types Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	updated, err := svc.UpdatePreferences(ctx, entry.ID, watchlist.PreferencesParams{
+		MutedEventTypes: &[]string{"guest_feature"},
+	})
+	if err != nil {
+		t.Fatalf("UpdatePreferences: %v", err)
+	}
+
+	if !reflect.DeepEqual(updated.ReleaseTypes, watchlist.ReleaseTypes) {
+		t.Fatalf("release_types = %v, want unchanged default %v", updated.ReleaseTypes, watchlist.ReleaseTypes)
+	}
+	wantMutedEventTypes := []string{"guest_feature"}
+	if !reflect.DeepEqual(updated.MutedEventTypes, wantMutedEventTypes) {
+		t.Fatalf("muted_event_types = %v, want %v", updated.MutedEventTypes, wantMutedEventTypes)
+	}
+
+	var releaseTypes, mutedEventTypes []string
+	row := pool.QueryRow(ctx, "SELECT release_types, muted_event_types FROM watchlist WHERE id = $1", entry.ID)
+	if err := row.Scan(&releaseTypes, &mutedEventTypes); err != nil {
+		t.Fatalf("query stored preferences: %v", err)
+	}
+	if !reflect.DeepEqual(releaseTypes, watchlist.ReleaseTypes) {
+		t.Fatalf("stored release_types = %v, want unchanged default %v", releaseTypes, watchlist.ReleaseTypes)
+	}
+	if !reflect.DeepEqual(mutedEventTypes, wantMutedEventTypes) {
+		t.Fatalf("stored muted_event_types = %v, want %v", mutedEventTypes, wantMutedEventTypes)
+	}
+}
+
+func TestService_UpdatePreferences_AxesAreIndependent(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Axes Independent Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if _, err := svc.UpdatePreferences(ctx, entry.ID, watchlist.PreferencesParams{
+		ReleaseTypes: &[]string{"single"},
+	}); err != nil {
+		t.Fatalf("first UpdatePreferences: %v", err)
+	}
+
+	if _, err := svc.UpdatePreferences(ctx, entry.ID, watchlist.PreferencesParams{
+		MutedEventTypes: &[]string{"deluxe_change"},
+	}); err != nil {
+		t.Fatalf("second UpdatePreferences: %v", err)
+	}
+
+	var releaseTypes, mutedEventTypes []string
+	row := pool.QueryRow(ctx, "SELECT release_types, muted_event_types FROM watchlist WHERE id = $1", entry.ID)
+	if err := row.Scan(&releaseTypes, &mutedEventTypes); err != nil {
+		t.Fatalf("query stored preferences: %v", err)
+	}
+	if len(releaseTypes) != 1 || releaseTypes[0] != "single" {
+		t.Fatalf("release_types = %v, want [single] (the second call must not reset it)", releaseTypes)
+	}
+	if len(mutedEventTypes) != 1 || mutedEventTypes[0] != "deluxe_change" {
+		t.Fatalf("muted_event_types = %v, want [deluxe_change]", mutedEventTypes)
+	}
+}
+
+func TestService_UpdatePreferences_EmptyArrayIsNotOmission(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "release_types"},
+		{name: "muted_event_types"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pool := testutil.NewTestPool(t)
+			mbid := testMBID(t) + "-" + tt.name
+			ctx := context.Background()
+			t.Cleanup(func() {
+				if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+					t.Fatalf("cleanup: delete artists row: %v", err)
+				}
+			})
+
+			svc := watchlist.NewService(sqlc.New(pool))
+			entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Empty Not Omission Test"})
+			if err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+
+			empty := []string{}
+			var firstParams, secondParams watchlist.PreferencesParams
+			if tt.name == "release_types" {
+				firstParams.ReleaseTypes = &empty
+				secondParams.MutedEventTypes = &[]string{"new_release"}
+			} else {
+				firstParams.MutedEventTypes = &empty
+				secondParams.ReleaseTypes = &[]string{"album"}
+			}
+
+			first, err := svc.UpdatePreferences(ctx, entry.ID, firstParams)
+			if err != nil {
+				t.Fatalf("first UpdatePreferences (set empty): %v", err)
+			}
+
+			var firstGot []string
+			if tt.name == "release_types" {
+				firstGot = first.ReleaseTypes
+			} else {
+				firstGot = first.MutedEventTypes
+			}
+			if firstGot == nil || len(firstGot) != 0 {
+				t.Fatalf("after setting empty, %s = %v, want a non-nil empty slice", tt.name, firstGot)
+			}
+
+			second, err := svc.UpdatePreferences(ctx, entry.ID, secondParams)
+			if err != nil {
+				t.Fatalf("second UpdatePreferences (nil pointer for %s): %v", tt.name, err)
+			}
+
+			var secondGot []string
+			if tt.name == "release_types" {
+				secondGot = second.ReleaseTypes
+			} else {
+				secondGot = second.MutedEventTypes
+			}
+			if len(secondGot) != 0 {
+				t.Fatalf("after nil-pointer call, %s = %v, want [] (must stay empty, not reset)", tt.name, secondGot)
+			}
+		})
+	}
+}
+
+func TestService_UpdatePreferences_DeduplicatesAndCanonicalises(t *testing.T) {
+	tests := []struct {
+		name   string
+		axis   string
+		submit []string
+		want   []string
+	}{
+		{name: "release_types", axis: "release", submit: []string{"deluxe", "album", "album"}, want: []string{"album", "deluxe"}},
+		{name: "muted_event_types", axis: "muted", submit: []string{"deluxe_change", "new_release", "deluxe_change"}, want: []string{"new_release", "deluxe_change"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pool := testutil.NewTestPool(t)
+			mbid := testMBID(t) + "-" + tt.name
+			ctx := context.Background()
+			t.Cleanup(func() {
+				if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+					t.Fatalf("cleanup: delete artists row: %v", err)
+				}
+			})
+
+			svc := watchlist.NewService(sqlc.New(pool))
+			entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Dedup Canon Test"})
+			if err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+
+			var params watchlist.PreferencesParams
+			submit := tt.submit
+			if tt.axis == "release" {
+				params.ReleaseTypes = &submit
+			} else {
+				params.MutedEventTypes = &submit
+			}
+
+			updated, err := svc.UpdatePreferences(ctx, entry.ID, params)
+			if err != nil {
+				t.Fatalf("UpdatePreferences: %v", err)
+			}
+
+			var got []string
+			if tt.axis == "release" {
+				got = updated.ReleaseTypes
+			} else {
+				got = updated.MutedEventTypes
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("%s = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestService_UpdatePreferences_RejectsUnknownValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		axis    string
+		bad     []string
+		wantErr error
+	}{
+		{name: "release_types", axis: "release", bad: []string{"mixtape"}, wantErr: watchlist.ErrInvalidReleaseType},
+		{name: "muted_event_types", axis: "muted", bad: []string{"remix_drop"}, wantErr: watchlist.ErrInvalidEventType},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pool := testutil.NewTestPool(t)
+			mbid := testMBID(t) + "-" + tt.name
+			ctx := context.Background()
+			t.Cleanup(func() {
+				if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+					t.Fatalf("cleanup: delete artists row: %v", err)
+				}
+			})
+
+			svc := watchlist.NewService(sqlc.New(pool))
+			entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Rejects Unknown Test"})
+			if err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+
+			var params watchlist.PreferencesParams
+			bad := tt.bad
+			if tt.axis == "release" {
+				params.ReleaseTypes = &bad
+			} else {
+				params.MutedEventTypes = &bad
+			}
+
+			_, err = svc.UpdatePreferences(ctx, entry.ID, params)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want errors.Is(err, %v)", err, tt.wantErr)
+			}
+
+			var releaseTypes, mutedEventTypes []string
+			row := pool.QueryRow(ctx, "SELECT release_types, muted_event_types FROM watchlist WHERE id = $1", entry.ID)
+			if err := row.Scan(&releaseTypes, &mutedEventTypes); err != nil {
+				t.Fatalf("query stored preferences: %v", err)
+			}
+			if !reflect.DeepEqual(releaseTypes, watchlist.ReleaseTypes) {
+				t.Fatalf("release_types = %v, want unchanged default %v", releaseTypes, watchlist.ReleaseTypes)
+			}
+			if len(mutedEventTypes) != 0 {
+				t.Fatalf("muted_event_types = %v, want unchanged empty default", mutedEventTypes)
+			}
+		})
+	}
+}
+
+func TestService_UpdatePreferences_UnknownIDReturnsErrNotFound(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	_, err := svc.UpdatePreferences(ctx, 999999999, watchlist.PreferencesParams{
+		ReleaseTypes: &[]string{"album"},
+	})
+	if !errors.Is(err, watchlist.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, watchlist.ErrNotFound)", err)
+	}
+}
+
+// The four tests below prove the watchlist_release_types_valid and
+// watchlist_muted_event_types_valid CHECK constraints reject an
+// out-of-allow-list value written by raw SQL that bypasses Service entirely
+// -- the non-bypassable second layer behind normalizeSet's 400 (T-02-10).
+
+func TestCheckConstraint_RejectsUnknownReleaseType(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Constraint Release Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, "UPDATE watchlist SET release_types = ARRAY['mixtape']::text[] WHERE id = $1", entry.ID)
+	if err == nil {
+		t.Fatal("raw UPDATE with an unknown release type succeeded, want a CHECK constraint violation")
+	}
+
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("err = %v (%T), want *pgconn.PgError", err, err)
+	}
+	if pgErr.ConstraintName != "watchlist_release_types_valid" {
+		t.Fatalf("ConstraintName = %q, want %q", pgErr.ConstraintName, "watchlist_release_types_valid")
+	}
+}
+
+func TestCheckConstraint_RejectsUnknownEventType(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Constraint Event Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, "UPDATE watchlist SET muted_event_types = ARRAY['remix_drop']::text[] WHERE id = $1", entry.ID)
+	if err == nil {
+		t.Fatal("raw UPDATE with an unknown event type succeeded, want a CHECK constraint violation")
+	}
+
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("err = %v (%T), want *pgconn.PgError", err, err)
+	}
+	if pgErr.ConstraintName != "watchlist_muted_event_types_valid" {
+		t.Fatalf("ConstraintName = %q, want %q", pgErr.ConstraintName, "watchlist_muted_event_types_valid")
+	}
+}
+
+func TestCheckConstraint_AcceptsEmptyArrays(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Constraint Empty Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx,
+		"UPDATE watchlist SET release_types = '{}'::text[], muted_event_types = '{}'::text[] WHERE id = $1", entry.ID,
+	); err != nil {
+		t.Fatalf("UPDATE with empty arrays failed: %v (an empty set must be representable, not a constraint violation)", err)
+	}
+}
+
+func TestCheckConstraint_AcceptsFullAllowLists(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Constraint Full Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx,
+		"UPDATE watchlist SET release_types = $2::text[], muted_event_types = $3::text[] WHERE id = $1",
+		entry.ID, watchlist.ReleaseTypes, watchlist.EventTypes,
+	); err != nil {
+		t.Fatalf("UPDATE with every allow-listed value failed: %v (Go allow-list and DB CHECK constraint have drifted)", err)
+	}
+}
+
 func TestCheckConstraintRejectsUnknownValue(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	mbid := testMBID(t)
