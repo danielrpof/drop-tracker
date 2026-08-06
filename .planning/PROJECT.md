@@ -16,10 +16,10 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - ✓ sqlc-generated type-safe DB queries + golang-migrate schema migrations — Phase 01
 - ✓ Structured (slog-based) JSON logging — Phase 01
 - ✓ `.env.example` documenting all config, secrets via env vars only — nothing real committed — Phase 01
+- ✓ Watchlist CRUD API — add/remove/list artists, DB-backed in Postgres, with per-artist release-type filters and mutable notification-type preferences — Phase 02
 
 ### Active
 
-- [ ] Watchlist CRUD API — add/remove/list artists (later albums, producers), DB-backed in Postgres
 - [ ] Search-proxy API endpoints — live search against MusicBrainz/Deezer so the UI can look up artists to add
 - [ ] Scheduler (robfig/cron) polls MusicBrainz + Deezer per watchlist entry on a configurable interval
 - [ ] Diff engine compares poll results against the Postgres "seen" store to detect: new releases, new guest features, deluxe/tracklist changes
@@ -71,7 +71,7 @@ A single Go binary that reliably detects and notifies on new releases for watche
 | robfig/cron for scheduling | Closest equivalent to APScheduler; configurable per-source poll intervals | — Pending |
 | React (Vite) SPA embedded via go:embed | Keeps deployable to a single Go binary/image while still using a real frontend stack | — Pending |
 | Single Go binary/service architecture | Simpler CI/CD to start; still exercises full pipeline without microservice complexity | — Pending |
-| DB-backed watchlist with CRUD API | More realistic surface, more to test/lint/scan than a static config file | — Pending |
+| DB-backed watchlist with CRUD API | More realistic surface, more to test/lint/scan than a static config file | Validated Phase 02 — add/remove/list/update-preferences all live behind `internal/watchlist.Store`, the reusable domain surface later phases (search-proxy, poller) build on |
 | Live search-proxy endpoints | Lets the UI look up artists/albums against MusicBrainz/Deezer directly, not just local DB | — Pending |
 | httptest.Server for HTTP mocking in tests | Stdlib-only, no extra test dependency | — Pending |
 | "Full Pipeline" CI/CD depth (lint+test+scan+SBOM+semantic-release+push) | Matches the project's primary goal of practicing real DevOps pipelines | — Pending |
@@ -99,4 +99,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-05 after Phase 01 (foundation-data-layer-config-health)*
+*Last updated: 2026-08-06 after Phase 02 (watchlist-core)*
