@@ -8,9 +8,12 @@ package watchlist
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ReleaseTypes and EventTypes mirror the watchlist_release_types_valid and
@@ -134,7 +137,21 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 		MutedEventTypes: mutedEventTypes,
 	})
 	if err != nil {
-		return Entry{}, err
+		// D-09: a duplicate add is never treated as an implicit preferences
+		// update. All three conditions are required -- matching the
+		// SQLSTATE alone would misattribute a future unique violation on
+		// some other constraint to "artist already on watchlist"; matching
+		// on err.Error() text would break the moment Postgres changes its
+		// message wording or runs under a different locale. The
+		// UpsertArtist call above legitimately refreshed the artist's
+		// master name/deezer_id (D-03 master-data maintenance) but the
+		// watchlist row itself is left exactly as it was -- no fallthrough
+		// to an update, retry, or delete-and-reinsert.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation && pgErr.ConstraintName == "watchlist_artist_id_key" {
+			return Entry{}, ErrDuplicate
+		}
+		return Entry{}, fmt.Errorf("create watchlist entry: %w", err)
 	}
 
 	return toEntry(artist, entry), nil
