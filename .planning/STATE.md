@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 current_phase_name: watchlist-core
-status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-08-06T01:22:16.633Z"
+status: verifying
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-08-06T01:36:17.560Z"
 last_activity: 2026-08-05
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 02 (watchlist-core) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-05 — Phase 02 execution started
 
-Progress: [█████████░] 89%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [█████████░] 89%
 | Phase 02 P01 | 75m | 1 tasks | 18 files |
 | Phase 02 P02 | 20m | 2 tasks | 6 files |
 | Phase 02 P03 | 55m | 2 tasks | 8 files |
+| Phase 02 P04 | 40m | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 02-02]: Handler performs its own fail-fast membership check against watchlist.ReleaseTypes/EventTypes before calling Store.Add, so an invalid preference value never reaches the store -- Service.Add's normalizeSet remains the non-bypassable backstop
 - [Phase ?]: [Phase 02-03]: RED-phase tests for both List and Remove tasks were written and committed together (one test commit covering both tasks) since drafting happened in one pass; each task's GREEN implementation still landed in its own separate feat commit
 - [Phase ?]: [Phase 02-03]: TestService_List_EmptyReturnsNonNilSlice queries actual watchlist row count rather than assuming a truly empty table (testutil.NewTestPool resets schema, not table contents), asserting non-nil always and length-zero only when the count is genuinely zero
+- [Phase ?]: [Phase 02-04]: UpdatePreferences reads the current row via the existing ListWatchlist query filtered by id in Go rather than adding a dedicated single-row query, keeping the phase's sqlc query surface at exactly five
+- [Phase ?]: [Phase 02-04]: errNotImplemented sentinel removal folded into task 1's GREEN commit (replacing UpdatePreferences's body removed the last reference); task 2's placeholder gate was a grep-based verification, not a second removal step
 
 ### Pending Todos
 
@@ -112,6 +115,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-06T01:22:16.598Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-08-06T01:36:17.527Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None

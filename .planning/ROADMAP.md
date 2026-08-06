@@ -63,7 +63,7 @@ Plans:
   4. User can set per-artist release-type filters (album/single/EP/deluxe) that control which release types trigger alerts
   5. User can mute specific notification types per artist (e.g., deluxe/reissue alerts)
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -80,7 +80,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 02-04-PLAN.md — `PATCH /watchlist/{id}` independent preference axes with partial updates, CHECK-constraint backstop proof, phase-closing gate
+- [x] 02-04-PLAN.md — `PATCH /watchlist/{id}` independent preference axes with partial updates, CHECK-constraint backstop proof, phase-closing gate
 
 ### Phase 3: External Clients & Search
 
@@ -166,7 +166,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation — Data Layer, Config & Health | 5/5 | Complete    | 2026-08-05 |
-| 2. Watchlist Core | 3/4 | In Progress|  |
+| 2. Watchlist Core | 4/4 | In Progress|  |
 | 3. External Clients & Search | 0/TBD | Not started | - |
 | 4. Detection Engine | 0/TBD | Not started | - |
 | 5. Discord Notifications | 0/TBD | Not started | - |
