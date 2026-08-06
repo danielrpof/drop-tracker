@@ -384,6 +384,67 @@ func TestWatchlist_Add_RejectsOverlongFields(t *testing.T) {
 	}
 }
 
+// TestWatchlist_Add_BodyMustContainExactlyOneJSONValue pins WR-02 (G-02-1):
+// a body carrying a second JSON value concatenated after a well-formed
+// object must be rejected, with the store never reached -- json.Decoder
+// only consumes one value per call and never asserts end-of-stream, so a
+// smuggled second value was previously accepted and silently discarded. The
+// "store not called" assertion is the finding here; every 400 case must
+// also be indistinguishable on the wire from any other malformed body.
+func TestWatchlist_Add_BodyMustContainExactlyOneJSONValue(t *testing.T) {
+	const prefix = `{"mbid":"5b11f4ce-a62d-471e-81fc-a69a8278c7da","name":"Radiohead"}`
+
+	tests := []struct {
+		name       string
+		suffix     string
+		wantStatus int
+		wantCalled bool
+	}{
+		{name: "trailing object", suffix: `{"mbid":"other","name":"other"}`, wantStatus: http.StatusBadRequest, wantCalled: false},
+		{name: "trailing array", suffix: `[1,2]`, wantStatus: http.StatusBadRequest, wantCalled: false},
+		{name: "trailing scalar", suffix: `null`, wantStatus: http.StatusBadRequest, wantCalled: false},
+		{name: "trailing non-JSON", suffix: `not-json`, wantStatus: http.StatusBadRequest, wantCalled: false},
+		{name: "trailing whitespace only", suffix: "\n\t  ", wantStatus: http.StatusCreated, wantCalled: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
+				called = true
+				return watchlist.Entry{ID: 1, ArtistID: 1, MBID: "5b11f4ce-a62d-471e-81fc-a69a8278c7da", Name: "Radiohead"}, nil
+			}}
+			srv := httpserver.New(noopPinger{}, stub, discardLogger())
+			ts := httptest.NewServer(srv.Router())
+			defer ts.Close()
+
+			body := prefix + tt.suffix
+			resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+			if err != nil {
+				t.Fatalf("POST /watchlist: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+			if called != tt.wantCalled {
+				t.Fatalf("addFunc called = %v, want %v -- a smuggled trailing value (%q) must never reach the store", called, tt.wantCalled, tt.suffix)
+			}
+
+			if tt.wantStatus == http.StatusBadRequest {
+				var eb errorBody
+				if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+					t.Fatalf("decode response body: %v", err)
+				}
+				if eb.Error != "invalid request body" {
+					t.Fatalf("error message = %q, want %q -- a trailing-value rejection must be indistinguishable from any other malformed body", eb.Error, "invalid request body")
+				}
+			}
+		})
+	}
+}
+
 // The two tests below cover the empty-list contract for GET /watchlist
 // (WLST-04): whether the store returns an explicit empty slice or a nil
 // slice, the handler must always encode a bare `[]`, never `null`. The
@@ -1123,6 +1184,70 @@ func TestWatchlist_Patch_EmptyBodyStillRejectedEndToEnd(t *testing.T) {
 	}
 	if !afterUpdatedAt.Equal(beforeUpdatedAt) {
 		t.Fatalf("updated_at = %v, want unchanged %v", afterUpdatedAt, beforeUpdatedAt)
+	}
+}
+
+// TestWatchlist_Patch_BodyMustContainExactlyOneJSONValue is the PATCH
+// analogue of TestWatchlist_Add_BodyMustContainExactlyOneJSONValue (WR-02,
+// G-02-1). The trailing-object case supplies the *other* preference axis --
+// the exact smuggling shape the finding describes: today it answers 200
+// having applied only the first axis and silently dropped the second.
+func TestWatchlist_Patch_BodyMustContainExactlyOneJSONValue(t *testing.T) {
+	const prefix = `{"release_types":["album"]}`
+
+	tests := []struct {
+		name       string
+		suffix     string
+		wantStatus int
+		wantCalled bool
+	}{
+		{name: "trailing object (other axis)", suffix: `{"muted_event_types":["guest_feature"]}`, wantStatus: http.StatusBadRequest, wantCalled: false},
+		{name: "trailing array", suffix: `[1,2]`, wantStatus: http.StatusBadRequest, wantCalled: false},
+		{name: "trailing scalar", suffix: `null`, wantStatus: http.StatusBadRequest, wantCalled: false},
+		{name: "trailing non-JSON", suffix: `not-json`, wantStatus: http.StatusBadRequest, wantCalled: false},
+		{name: "trailing whitespace only", suffix: "\n\t  ", wantStatus: http.StatusOK, wantCalled: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
+				called = true
+				return watchlist.Entry{ID: 1, ArtistID: 1, ReleaseTypes: []string{"album"}}, nil
+			}}
+			srv := httpserver.New(noopPinger{}, stub, discardLogger())
+			ts := httptest.NewServer(srv.Router())
+			defer ts.Close()
+
+			body := prefix + tt.suffix
+			req, err := http.NewRequest(http.MethodPatch, ts.URL+"/watchlist/1", strings.NewReader(body))
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("PATCH /watchlist/1: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+			if called != tt.wantCalled {
+				t.Fatalf("updateFunc called = %v, want %v -- a smuggled trailing value (%q) must never reach the store", called, tt.wantCalled, tt.suffix)
+			}
+
+			if tt.wantStatus == http.StatusBadRequest {
+				var eb errorBody
+				if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+					t.Fatalf("decode response body: %v", err)
+				}
+				if eb.Error != "invalid request body" {
+					t.Fatalf("error message = %q, want %q -- a trailing-value rejection must be indistinguishable from any other malformed body", eb.Error, "invalid request body")
+				}
+			}
+		})
 	}
 }
 
