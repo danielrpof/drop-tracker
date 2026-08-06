@@ -39,7 +39,7 @@ func closedPortDSN(t *testing.T) string {
 		t.Fatalf("closedPortDSN: close listener: %v", err)
 	}
 
-	return fmt.Sprintf("postgres://drop_tracker:VerySecretPassw0rd@127.0.0.1:%d/drop_tracker?sslmode=disable", port)
+	return fmt.Sprintf("postgres://drop_tracker:local-test-fixture-password@127.0.0.1:%d/drop_tracker?sslmode=disable", port)
 }
 
 // closedPortKeywordValueDSN is closedPortDSN's libpq keyword/value-form
@@ -60,7 +60,7 @@ func closedPortKeywordValueDSN(t *testing.T) string {
 		t.Fatalf("closedPortKeywordValueDSN: close listener: %v", err)
 	}
 
-	return fmt.Sprintf("host=127.0.0.1 port=%d user=drop_tracker password=VerySecretPassw0rd dbname=drop_tracker sslmode=disable", port)
+	return fmt.Sprintf("host=127.0.0.1 port=%d user=drop_tracker password=local-test-fixture-password dbname=drop_tracker sslmode=disable", port)
 }
 
 // syncBuffer is a mutex-guarded bytes.Buffer used as a log sink, so the
@@ -245,7 +245,7 @@ func TestRunMigrations_NeverLogsDSN(t *testing.T) {
 		t.Fatal("RunMigrations: want non-nil error, got nil")
 	}
 
-	const password = "VerySecretPassw0rd"
+	const password = "local-test-fixture-password"
 	logOutput := buf.String()
 
 	if strings.Contains(logOutput, password) {
@@ -282,7 +282,7 @@ func TestRunMigrations_NeverLogsDSN_KeywordValueForm(t *testing.T) {
 		t.Fatal("RunMigrations: want non-nil error, got nil")
 	}
 
-	const password = "VerySecretPassw0rd"
+	const password = "local-test-fixture-password"
 	logOutput := buf.String()
 
 	if strings.Contains(logOutput, password) {

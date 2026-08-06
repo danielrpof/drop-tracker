@@ -97,7 +97,7 @@ func redactError(err error) string {
 }
 ```
 
-And add a regression test that actually forces a DSN-parse failure (e.g. `RunMigrations(ctx, "host=127.0.0.1 password=VerySecretPassw0rd dbname=x ==invalid==", ...)`) and asserts the password never appears in the captured log/error output — the current keyword/value test should be renamed or supplemented so it's clear which failure mode (dial vs. parse) each test actually covers.
+And add a regression test that actually forces a DSN-parse failure (e.g. `RunMigrations(ctx, "host=127.0.0.1 password=local-test-fixture-password dbname=x ==invalid==", ...)`) and asserts the password never appears in the captured log/error output — the current keyword/value test should be renamed or supplemented so it's clear which failure mode (dial vs. parse) each test actually covers.
 
 ## Warnings
 
