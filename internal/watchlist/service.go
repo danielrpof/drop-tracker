@@ -111,6 +111,32 @@ var _ Store = (*Service)(nil)
 // row with no watchlist row is a legitimate state that Phase 4 and Phase 6
 // will also produce.
 func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
+	// Validate both preference axes before any database call -- a rejected
+	// request must leave no artists row behind (D-05, D-08, D-11). The two
+	// axes are independent dimensions (catalog scope versus alert-noise
+	// control) and are never merged into one validated set.
+	var releaseTypes []string
+	if p.ReleaseTypes == nil {
+		releaseTypes = append([]string{}, ReleaseTypes...)
+	} else {
+		var err error
+		releaseTypes, err = normalizeSet(p.ReleaseTypes, ReleaseTypes, ErrInvalidReleaseType)
+		if err != nil {
+			return Entry{}, err
+		}
+	}
+
+	var mutedEventTypes []string
+	if p.MutedEventTypes == nil {
+		mutedEventTypes = []string{}
+	} else {
+		var err error
+		mutedEventTypes, err = normalizeSet(p.MutedEventTypes, EventTypes, ErrInvalidEventType)
+		if err != nil {
+			return Entry{}, err
+		}
+	}
+
 	artist, err := s.q.UpsertArtist(ctx, sqlc.UpsertArtistParams{
 		Mbid:           p.MBID,
 		DeezerID:       p.DeezerID,
@@ -120,15 +146,6 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 	})
 	if err != nil {
 		return Entry{}, err
-	}
-
-	releaseTypes := p.ReleaseTypes
-	if releaseTypes == nil {
-		releaseTypes = append([]string{}, ReleaseTypes...)
-	}
-	mutedEventTypes := p.MutedEventTypes
-	if mutedEventTypes == nil {
-		mutedEventTypes = []string{}
 	}
 
 	entry, err := s.q.CreateWatchlistEntry(ctx, sqlc.CreateWatchlistEntryParams{
@@ -174,6 +191,42 @@ func (s *Service) UpdatePreferences(_ context.Context, _ int64, _ PreferencesPar
 // Plan 02-03 fills this body; no route is registered against it until then.
 func (s *Service) Remove(_ context.Context, _ int64) error {
 	return errNotImplemented
+}
+
+// normalizeSet validates values against allowed and returns a new slice
+// containing each allowed value at most once, ordered by its position in
+// allowed -- so submission order never affects the stored/returned order and
+// a duplicate submission is silently collapsed rather than rejected (a
+// preference array is semantically a set; sending the same filter twice
+// expresses no contradiction). An empty or all-duplicate input yields
+// []string{}, never nil, so the JSON encoder emits [] rather than null. On
+// the first value outside allowed, normalizeSet returns
+// fmt.Errorf("%w: %q", invalidErr, value) -- errors.Is(err, invalidErr)
+// still matches, and the message names the offending value for the 400
+// response.
+func normalizeSet(values []string, allowed []string, invalidErr error) ([]string, error) {
+	seen := make(map[string]bool, len(values))
+	for _, v := range values {
+		found := false
+		for _, a := range allowed {
+			if v == a {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("%w: %q", invalidErr, v)
+		}
+		seen[v] = true
+	}
+
+	out := make([]string, 0, len(allowed))
+	for _, a := range allowed {
+		if seen[a] {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 // toEntry joins an artist row and its watchlist row into the API-facing
