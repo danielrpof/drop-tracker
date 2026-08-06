@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 2
-current_phase_name: Watchlist Core
+current_phase: 02
+current_phase_name: watchlist-core
 status: executing
-stopped_at: Phase 02 context gathered
-last_updated: "2026-08-06T00:10:31.910Z"
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-08-06T00:53:27.493Z"
 last_activity: 2026-08-05
-last_activity_desc: Phase 01 complete, transitioned to Phase 2
+last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 9
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 2 — Watchlist Core
+**Current focus:** Phase 02 — watchlist-core
 
 ## Current Position
 
-Phase: 2 — Watchlist Core
-Plan: Not started
+Phase: 02 (watchlist-core) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-08-05 — Phase 01 complete, transitioned to Phase 2
+Last activity: 2026-08-05 — Phase 02 execution started
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [██████████] 100%
 | Phase 01 P03 | 45m | 2 tasks | 3 files |
 | Phase 01 P04 | 65m | 2 tasks | 7 files |
 | Phase 01 P05 | 35m | 2 tasks | 2 files |
+| Phase 02 P01 | 75m | 1 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 01-05]: Made db.RunMigrations retry policy injectable (WithMaxAttempts/WithBaseDelay/WithMaxDelay) with DSN-to-safe-description redaction on every retry log line and the final error, without touching cmd/server/main.go's call site
 - [Phase 01 UAT/Security]: Graceful shutdown (WR-03) and the WR-01 migration-cancellation goroutine were confirmed by hand on this Windows dev box's WSL2 (real SIGTERM + `go test -race`), closing the two human-verification gaps this Windows sandbox couldn't exercise natively.
 - [Phase 01 Security]: `/gsd-secure-phase 01` closed all 18 registered threats (`threats_open: 0`). Two mitigation claims were corrected in the process: added `sqlc-version-check` (T-01-13, Makefile had no version guard) and a test proving secret-bearing config fields can never have their value echoed by a type-conversion error (T-01-09, the original "never echoes values" claim was inaccurate for non-secret typed fields). See 01-SECURITY.md.
+- [Phase ?]: [Phase 02-01]: httpserver.New widened to a three-arg constructor (db Pinger, store watchlist.Store, logger) -- Pinger stayed untouched, all eight existing call sites updated in the same commit
+- [Phase ?]: [Phase 02-01]: text[] + CHECK constraint chosen over native Postgres enum for release_types/muted_event_types, since both value sets are expected to grow (Phase 4 may rename them)
+- [Phase ?]: [Phase 02-01]: Fixed internal/db/migrate_test.go's from-scratch reset (drop whole public schema, not just schema_migrations) since 000002 now creates real domain tables a bare reset left behind
 
 ### Pending Todos
 
@@ -102,6 +106,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-05T22:58:41.770Z
-Stopped at: Phase 02 context gathered
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/02-watchlist-core/02-CONTEXT.md
+Last session: 2026-08-06T00:53:27.467Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None
