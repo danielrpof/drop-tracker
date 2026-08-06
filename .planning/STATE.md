@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: watchlist-core
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-08-06T00:53:27.493Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-08-06T01:08:44.775Z"
 last_activity: 2026-08-05
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 02 (watchlist-core) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-08-05 — Phase 02 execution started
 
-Progress: [███████░░░] 67%
+Progress: [████████░░] 78%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [███████░░░] 67%
 | Phase 01 P04 | 65m | 2 tasks | 7 files |
 | Phase 01 P05 | 35m | 2 tasks | 2 files |
 | Phase 02 P01 | 75m | 1 tasks | 18 files |
+| Phase 02 P02 | 20m | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 02-01]: httpserver.New widened to a three-arg constructor (db Pinger, store watchlist.Store, logger) -- Pinger stayed untouched, all eight existing call sites updated in the same commit
 - [Phase ?]: [Phase 02-01]: text[] + CHECK constraint chosen over native Postgres enum for release_types/muted_event_types, since both value sets are expected to grow (Phase 4 may rename them)
 - [Phase ?]: [Phase 02-01]: Fixed internal/db/migrate_test.go's from-scratch reset (drop whole public schema, not just schema_migrations) since 000002 now creates real domain tables a bare reset left behind
+- [Phase ?]: [Phase 02-02]: normalizeSet's unit test lives in a separate internal-package file (normalize_test.go, package watchlist) since it tests an unexported function; service_test.go stays package watchlist_test for the real-Postgres tests
+- [Phase ?]: [Phase 02-02]: Handler performs its own fail-fast membership check against watchlist.ReleaseTypes/EventTypes before calling Store.Add, so an invalid preference value never reaches the store -- Service.Add's normalizeSet remains the non-bypassable backstop
 
 ### Pending Todos
 
@@ -106,6 +109,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-06T00:53:27.467Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-08-06T01:08:44.744Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None
