@@ -265,6 +265,354 @@ func TestService_Add_RejectsUnknownPreferenceValues(t *testing.T) {
 	}
 }
 
+// The four tests below cover Service.List (WLST-04): every entry present
+// with both id columns distinct, deterministic name-then-id ordering, and a
+// non-nil empty-slice contract so the handler never has to special-case a
+// nil result.
+
+func TestService_List_ReturnsAllEntriesWithBothIDs(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	base := testMBID(t)
+	seedMBID := base + "-seed"
+	mbid1 := base + "-1"
+	mbid2 := base + "-2"
+	t.Cleanup(func() {
+		for _, m := range []string{seedMBID, mbid1, mbid2} {
+			if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", m); err != nil {
+				t.Fatalf("cleanup: delete artists row: %v", err)
+			}
+		}
+	})
+
+	// Seed a throwaway artist row (no watchlist entry) so the artists and
+	// watchlist id sequences cannot coincidentally align.
+	if _, err := pool.Exec(ctx, "INSERT INTO artists (mbid, name) VALUES ($1, $2)", seedMBID, "Seed Artist"); err != nil {
+		t.Fatalf("insert seed artist: %v", err)
+	}
+
+	e1, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid1, Name: "Entry One"})
+	if err != nil {
+		t.Fatalf("Add entry one: %v", err)
+	}
+	e2, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid2, Name: "Entry Two"})
+	if err != nil {
+		t.Fatalf("Add entry two: %v", err)
+	}
+
+	entries, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	var found1, found2 *watchlist.Entry
+	for i := range entries {
+		switch entries[i].MBID {
+		case mbid1:
+			found1 = &entries[i]
+		case mbid2:
+			found2 = &entries[i]
+		}
+	}
+	if found1 == nil || found2 == nil {
+		t.Fatalf("List did not return both added entries (found1=%v found2=%v)", found1, found2)
+	}
+
+	if found1.ID == found1.ArtistID {
+		t.Fatalf("entry one: ID (%d) and ArtistID (%d) coincide, want distinct values", found1.ID, found1.ArtistID)
+	}
+	if found2.ID == found2.ArtistID {
+		t.Fatalf("entry two: ID (%d) and ArtistID (%d) coincide, want distinct values", found2.ID, found2.ArtistID)
+	}
+	if found1.ID != e1.ID || found1.ArtistID != e1.ArtistID {
+		t.Fatalf("entry one: ID=%d ArtistID=%d, want ID=%d ArtistID=%d", found1.ID, found1.ArtistID, e1.ID, e1.ArtistID)
+	}
+	if found2.ID != e2.ID || found2.ArtistID != e2.ArtistID {
+		t.Fatalf("entry two: ID=%d ArtistID=%d, want ID=%d ArtistID=%d", found2.ID, found2.ArtistID, e2.ID, e2.ArtistID)
+	}
+	if found1.MBID != mbid1 || found1.Name != "Entry One" {
+		t.Fatalf("entry one: MBID=%q Name=%q, want MBID=%q Name=%q", found1.MBID, found1.Name, mbid1, "Entry One")
+	}
+	if !reflect.DeepEqual(found1.ReleaseTypes, watchlist.ReleaseTypes) {
+		t.Fatalf("entry one: ReleaseTypes=%v, want %v (from watchlist table, D-08 default)", found1.ReleaseTypes, watchlist.ReleaseTypes)
+	}
+	if len(found1.MutedEventTypes) != 0 {
+		t.Fatalf("entry one: MutedEventTypes=%v, want empty (D-08 default)", found1.MutedEventTypes)
+	}
+}
+
+func TestService_List_OrdersByNameThenID(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	base := testMBID(t)
+	mbidAA := base + "-aa"
+	mbidBB1 := base + "-bb1"
+	mbidBB2 := base + "-bb2"
+	t.Cleanup(func() {
+		for _, m := range []string{mbidAA, mbidBB1, mbidBB2} {
+			if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", m); err != nil {
+				t.Fatalf("cleanup: delete artists row: %v", err)
+			}
+		}
+	})
+
+	if _, err := svc.Add(ctx, watchlist.AddParams{MBID: mbidAA, Name: "AA"}); err != nil {
+		t.Fatalf("Add AA: %v", err)
+	}
+	bb1, err := svc.Add(ctx, watchlist.AddParams{MBID: mbidBB1, Name: "BB"})
+	if err != nil {
+		t.Fatalf("Add BB (first): %v", err)
+	}
+	bb2, err := svc.Add(ctx, watchlist.AddParams{MBID: mbidBB2, Name: "BB"})
+	if err != nil {
+		t.Fatalf("Add BB (second): %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		entries, err := svc.List(ctx)
+		if err != nil {
+			t.Fatalf("run %d: List: %v", i, err)
+		}
+
+		var filtered []watchlist.Entry
+		for _, e := range entries {
+			if e.MBID == mbidAA || e.MBID == mbidBB1 || e.MBID == mbidBB2 {
+				filtered = append(filtered, e)
+			}
+		}
+		if len(filtered) != 3 {
+			t.Fatalf("run %d: filtered entries = %d, want 3", i, len(filtered))
+		}
+		if filtered[0].MBID != mbidAA {
+			t.Fatalf("run %d: filtered[0].MBID = %q, want %q (AA sorts before BB)", i, filtered[0].MBID, mbidAA)
+		}
+		if filtered[1].ArtistID != bb1.ArtistID || filtered[2].ArtistID != bb2.ArtistID {
+			t.Fatalf("run %d: filtered[1].ArtistID=%d filtered[2].ArtistID=%d, want %d then %d (ascending artist id tiebreak among equal names)",
+				i, filtered[1].ArtistID, filtered[2].ArtistID, bb1.ArtistID, bb2.ArtistID)
+		}
+	}
+}
+
+func TestService_List_IdenticalNamesStayDistinct(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	base := testMBID(t)
+	mbid1 := base + "-x1"
+	mbid2 := base + "-x2"
+	t.Cleanup(func() {
+		for _, m := range []string{mbid1, mbid2} {
+			if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", m); err != nil {
+				t.Fatalf("cleanup: delete artists row: %v", err)
+			}
+		}
+	})
+
+	e1, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid1, Name: "Same Name"})
+	if err != nil {
+		t.Fatalf("Add entry one: %v", err)
+	}
+	e2, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid2, Name: "Same Name"})
+	if err != nil {
+		t.Fatalf("Add entry two: %v", err)
+	}
+
+	entries, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	var found1, found2 *watchlist.Entry
+	for i := range entries {
+		switch entries[i].MBID {
+		case mbid1:
+			found1 = &entries[i]
+		case mbid2:
+			found2 = &entries[i]
+		}
+	}
+	if found1 == nil || found2 == nil {
+		t.Fatalf("List did not return both same-named entries (found1=%v found2=%v)", found1, found2)
+	}
+	if found1.ID == found2.ID {
+		t.Fatalf("both entries share ID %d, want distinct ids", found1.ID)
+	}
+	if found1.ArtistID == found2.ArtistID {
+		t.Fatalf("both entries share ArtistID %d, want distinct artist ids", found1.ArtistID)
+	}
+	if found1.MBID == found2.MBID {
+		t.Fatalf("both entries share MBID %q, want distinct mbids", found1.MBID)
+	}
+	_ = e1
+	_ = e2
+}
+
+func TestService_List_EmptyReturnsNonNilSlice(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM watchlist").Scan(&count); err != nil {
+		t.Fatalf("query watchlist count: %v", err)
+	}
+
+	entries, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if entries == nil {
+		t.Fatal("List returned a nil slice, want a non-nil slice (nil encodes as JSON null)")
+	}
+	if count == 0 && len(entries) != 0 {
+		t.Fatalf("watchlist table was empty but List returned %d entries", len(entries))
+	}
+}
+
+// The five tests below cover Service.Remove (WLST-03): a real hard delete
+// that leaves the artists master row untouched (D-03), reports ErrNotFound
+// on a missing or already-removed id, and leaves no tombstone blocking a
+// fresh re-add with the same mbid (D-10).
+
+func TestService_Remove_DeletesRow(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Remove Deletes Row Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if err := svc.Remove(ctx, entry.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	entries, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, e := range entries {
+		if e.ID == entry.ID {
+			t.Fatalf("List still contains removed entry id %d", entry.ID)
+		}
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM watchlist WHERE id = $1", entry.ID).Scan(&count); err != nil {
+		t.Fatalf("query watchlist count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("watchlist row count = %d, want 0", count)
+	}
+}
+
+func TestService_Remove_LeavesArtistRowIntact(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Remove Leaves Artist Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if err := svc.Remove(ctx, entry.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artists WHERE mbid = $1", mbid).Scan(&count); err != nil {
+		t.Fatalf("query artists count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("artists row count = %d, want 1 (D-03: master row survives a watchlist removal)", count)
+	}
+}
+
+func TestService_Remove_SecondCallReturnsErrNotFound(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Remove Twice Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if err := svc.Remove(ctx, entry.ID); err != nil {
+		t.Fatalf("first Remove: %v", err)
+	}
+
+	err = svc.Remove(ctx, entry.ID)
+	if !errors.Is(err, watchlist.ErrNotFound) {
+		t.Fatalf("second Remove error = %v, want errors.Is(err, watchlist.ErrNotFound)", err)
+	}
+}
+
+func TestService_Remove_UnknownIDReturnsErrNotFound(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	err := svc.Remove(ctx, 999999999)
+	if !errors.Is(err, watchlist.ErrNotFound) {
+		t.Fatalf("Remove error = %v, want errors.Is(err, watchlist.ErrNotFound)", err)
+	}
+}
+
+func TestService_Remove_ThenReAddSucceeds(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	first, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Re-Add Test"})
+	if err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+
+	if err := svc.Remove(ctx, first.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	second, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Re-Add Test"})
+	if err != nil {
+		t.Fatalf("re-Add: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Fatalf("re-Add reused the removed watchlist id %d, want a new id (no tombstone, D-10)", first.ID)
+	}
+}
+
 func TestCheckConstraintRejectsUnknownValue(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	mbid := testMBID(t)

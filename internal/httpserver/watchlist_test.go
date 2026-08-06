@@ -7,13 +7,18 @@ package httpserver_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
@@ -21,6 +26,16 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
+
+// testMBID derives a short, unique-per-test mbid from t.Name() so tests
+// sharing one database never collide, without hardcoding a literal. Mirrors
+// internal/watchlist/service_test.go's helper of the same name -- kept
+// file-local here since it is unexported and this is a different package.
+func testMBID(t *testing.T) string {
+	t.Helper()
+	sum := sha256.Sum256([]byte(t.Name()))
+	return "test-" + hex.EncodeToString(sum[:])[:12]
+}
 
 // stubStore is a file-local double for watchlist.Store. Each method calls
 // its func field when set and otherwise returns a zero value with a nil
@@ -363,6 +378,230 @@ func TestWatchlist_Add_RejectsOverlongFields(t *testing.T) {
 			}
 			if called {
 				t.Fatal("addFunc was called for an overlong field")
+			}
+		})
+	}
+}
+
+// The two tests below cover the empty-list contract for GET /watchlist
+// (WLST-04): whether the store returns an explicit empty slice or a nil
+// slice, the handler must always encode a bare `[]`, never `null`. The
+// assertion is on raw response bytes, not a decoded value, since a decoded
+// nil slice and a decoded empty slice are indistinguishable in Go.
+
+func TestWatchlist_List_EmptyReturnsEmptyArray(t *testing.T) {
+	stub := stubStore{listFunc: func(context.Context) ([]watchlist.Entry, error) {
+		return []watchlist.Entry{}, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET /watchlist: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "[]" {
+		t.Fatalf("body = %q, want %q", got, "[]")
+	}
+}
+
+func TestWatchlist_List_NilSliceStillEncodesAsEmptyArray(t *testing.T) {
+	stub := stubStore{listFunc: func(context.Context) ([]watchlist.Entry, error) {
+		return nil, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET /watchlist: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "[]" {
+		t.Fatalf("body = %q, want %q (a nil store slice must still encode as an empty array)", got, "[]")
+	}
+}
+
+// TestWatchlist_Delete_ConcurrentSameIDYieldsOne204AndOne404 mirrors
+// TestHealth_Concurrent's goroutine/result-slice shape but against a real
+// Postgres-backed store, proving T-02-15's row-lock-based concurrency
+// guarantee end to end: two DELETE requests racing for the same watchlist id
+// produce exactly one 204 and one 404, never a 500.
+func TestWatchlist_Delete_ConcurrentSameIDYieldsOne204AndOne404(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	store := watchlist.NewService(sqlc.New(pool))
+	entry, err := store.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Concurrent Delete Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	srv := httpserver.New(pool, store, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const n = 2
+	statuses := make([]int, n)
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(idx int) {
+			defer wg.Done()
+
+			req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/watchlist/%d", ts.URL, entry.ID), nil)
+			if err != nil {
+				t.Errorf("request %d: build request: %v", idx, err)
+				return
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Errorf("request %d: %v", idx, err)
+				return
+			}
+			defer resp.Body.Close()
+			statuses[idx] = resp.StatusCode
+		}(i)
+	}
+	wg.Wait()
+
+	sort.Ints(statuses)
+	want := []int{http.StatusNoContent, http.StatusNotFound}
+	if !reflect.DeepEqual(statuses, want) {
+		t.Fatalf("sorted statuses = %v, want %v", statuses, want)
+	}
+}
+
+func TestWatchlist_Delete_MissingReturns404(t *testing.T) {
+	stub := stubStore{removeFunc: func(context.Context, int64) error {
+		return watchlist.ErrNotFound
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/watchlist/1", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /watchlist/1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	var eb errorBody
+	if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if eb.Error == "" {
+		t.Fatal("error message is empty, want a non-empty message")
+	}
+}
+
+func TestWatchlist_Delete_SuccessReturns204(t *testing.T) {
+	stub := stubStore{removeFunc: func(context.Context, int64) error {
+		return nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/watchlist/1", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /watchlist/1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("body length = %d, want 0 (204 must carry no payload)", len(data))
+	}
+}
+
+func TestWatchlist_Delete_BadIDReturns400(t *testing.T) {
+	paths := []string{
+		"/watchlist/abc",
+		"/watchlist/-1",
+		"/watchlist/0",
+		"/watchlist/9999999999999999999999",
+	}
+
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			called := false
+			stub := stubStore{removeFunc: func(context.Context, int64) error {
+				called = true
+				return nil
+			}}
+			srv := httpserver.New(noopPinger{}, stub, discardLogger())
+			ts := httptest.NewServer(srv.Router())
+			defer ts.Close()
+
+			req, err := http.NewRequest(http.MethodDelete, ts.URL+p, nil)
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("DELETE %s: %v", p, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+			if called {
+				t.Fatal("removeFunc was called for a malformed id")
 			}
 		})
 	}
