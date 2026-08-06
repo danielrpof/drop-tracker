@@ -38,7 +38,11 @@ var (
 	// ErrInvalidEventType is returned when an event type outside
 	// EventTypes is supplied.
 	ErrInvalidEventType = errors.New("invalid event type")
-
+	// ErrNoPreferencesSupplied is returned when a preferences update
+	// supplies neither axis: an update that changes nothing is a caller
+	// mistake, and reporting success for it would claim a change that never
+	// happened (WR-01, G-02-1).
+	ErrNoPreferencesSupplied = errors.New("no preferences supplied")
 )
 
 // Entry is the API-facing joined artist + watchlist row.
@@ -205,6 +209,13 @@ func (s *Service) List(ctx context.Context) ([]Entry, error) {
 // validated and written independently: nothing in this method may make one
 // axis's resolved value depend on the other's (D-05).
 //
+// A call supplying neither axis is rejected with ErrNoPreferencesSupplied
+// before the database is ever touched (WR-01, G-02-1). The rule lives here
+// rather than at the HTTP boundary because Store is documented above as the
+// reusable surface later phases build on -- a rule enforced only in
+// internal/httpserver would not protect Phase 3's search proxy or Phase 4's
+// poller, both of which are non-HTTP callers of this same method.
+//
 // The merge itself happens in a single round trip: UpdateWatchlistPreferences
 // resolves each untouched axis's carried-forward value from the row version
 // its own UPDATE locked, so there is no window between reading an axis and
@@ -214,6 +225,13 @@ func (s *Service) List(ctx context.Context) ([]Entry, error) {
 // which is translated to ErrNotFound below, the same honest 404 Remove
 // already produces from its :execrows count.
 func (s *Service) UpdatePreferences(ctx context.Context, id int64, p PreferencesParams) (Entry, error) {
+	// Reject an empty update before any database call -- and before the id
+	// lookup, so an empty update against an unknown id reports this
+	// sentinel, not ErrNotFound (WR-01, G-02-1).
+	if p.ReleaseTypes == nil && p.MutedEventTypes == nil {
+		return Entry{}, ErrNoPreferencesSupplied
+	}
+
 	// Validate first, before any database call, so a rejected request never
 	// leaves a partially-applied row behind.
 	params := sqlc.UpdateWatchlistPreferencesParams{

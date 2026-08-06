@@ -207,8 +207,10 @@ type updateWatchlistRequest struct {
 // nil field in the request means "leave this axis untouched"; an explicit
 // empty array means "watch/mute nothing on this axis" -- distinct states,
 // both representable via updateWatchlistRequest's *[]string fields. A body
-// that supplies neither key is rejected -- an empty PATCH is a caller
-// mistake, and a 200 to it would report a change that never happened.
+// that supplies neither key is rejected before the response is written --
+// the domain itself now enforces this rule and returns a dedicated sentinel
+// before touching the database (WR-01, G-02-1); this handler's job is only
+// to translate that rejection to 400.
 func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
 	id, err := parseWatchlistID(r)
 	if err != nil {
@@ -228,16 +230,14 @@ func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ReleaseTypes == nil && req.MutedEventTypes == nil {
-		writeError(w, http.StatusBadRequest, "no preferences supplied")
-		return
-	}
-
 	entry, err := s.watchlist.UpdatePreferences(r.Context(), id, watchlist.PreferencesParams{
 		ReleaseTypes:    req.ReleaseTypes,
 		MutedEventTypes: req.MutedEventTypes,
 	})
 	switch {
+	case errors.Is(err, watchlist.ErrNoPreferencesSupplied):
+		writeError(w, http.StatusBadRequest, "no preferences supplied")
+		return
 	case errors.Is(err, watchlist.ErrNotFound):
 		writeError(w, http.StatusNotFound, "watchlist entry not found")
 		return
