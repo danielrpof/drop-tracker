@@ -67,7 +67,8 @@ go install github.com/caarlos0/svu@latest
 curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.12.2
 
 # gitleaks: install via package manager, Go install, or download the release binary
-go install github.com/gitleaks/gitleaks/v8@v8.30.1
+# module path stayed under zricethezav after the repo moved to the gitleaks org
+go install github.com/zricethezav/gitleaks/v8@v8.30.1
 
 # Frontend
 npm create vite@latest frontend -- --template react-ts

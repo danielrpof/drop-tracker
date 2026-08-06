@@ -1,6 +1,9 @@
-.PHONY: build run test test-short test-integration sqlc sqlc-check sqlc-version-check db-up db-down
+.PHONY: build run test test-short test-integration sqlc sqlc-check sqlc-version-check db-up db-down hooks
 
 TEST_DATABASE_URL ?= postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable
+
+# Override on boxes where the interpreter is `python3` instead of `python`.
+PYTHON ?= python
 
 # Pinned exactly to the version verified in 01-RESEARCH.md's Package
 # Legitimacy Audit (T-01-13) -- a silent sqlc upgrade must fail generation
@@ -40,3 +43,10 @@ sqlc: sqlc-version-check
 sqlc-check: sqlc-version-check
 	sqlc generate
 	git diff --exit-code -- internal/db/sqlc/
+
+# Installs the pre-commit framework and the git hook shim it defines
+# (see .pre-commit-config.yaml). pre-commit builds the pinned gitleaks
+# binary itself from that config -- no separate gitleaks install needed.
+hooks:
+	$(PYTHON) -m pip install --user --upgrade pre-commit
+	$(PYTHON) -m pre_commit install --install-hooks
