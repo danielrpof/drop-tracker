@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -47,6 +48,34 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	_ = json.NewEncoder(w).Encode(errorResponse{Error: msg})
 }
 
+// decodeJSONBody is the one shared decode path for every watchlist JSON
+// route. It rejects unknown fields the same way both call sites already
+// did, and additionally asserts the body held exactly one JSON value: a
+// decoder consumes exactly one JSON value per call and never asserts
+// end-of-stream on its own, and DisallowUnknownFields constrains keys
+// *inside* the decoded object, not values concatenated after it -- so
+// neither mechanism already in place catches a second top-level value
+// (WR-02, G-02-1). The check is a second decode into a throwaway struct that
+// must report end-of-stream (errors.Is(err, io.EOF)); anything else -- a nil
+// error, a syntax error, a type error -- means the body carried more than
+// one JSON value.
+//
+// The helper deliberately does not classify its failure: every mode maps to
+// the same error, and by extension the same 400 with the same message, at
+// each call site. A caller learning which parser rule they tripped learns
+// about the parser, not about their request.
+func decodeJSONBody(r *http.Request, dst any) error {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("request body must contain exactly one JSON value")
+	}
+	return nil
+}
+
 // parseWatchlistID reads and validates the {id} path segment shared by
 // DELETE /watchlist/{id} (this plan) and plan 02-04's PATCH
 // /watchlist/{id}. Ids are BIGSERIAL, so 0 and negatives are never valid --
@@ -88,9 +117,7 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAddWatchlistBodyBytes)
 
 	var req addWatchlistRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -223,9 +250,7 @@ func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAddWatchlistBodyBytes)
 
 	var req updateWatchlistRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
