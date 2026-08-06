@@ -40,13 +40,15 @@ created: 2026-08-05
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | 0 | WLST-02 | T-02-TBD | Duplicate add returns 409, not a 500 or silent overwrite | unit + integration | `go test ./internal/httpserver/... ./internal/watchlist/... -race -count=1` | ❌ Wave 0 | ⬜ pending |
-| TBD | TBD | 0 | WLST-03 | T-02-TBD | Removing a missing id returns 404, not a 500 | unit + integration | `go test ./internal/httpserver/... ./internal/watchlist/... -race -count=1` | ❌ Wave 0 | ⬜ pending |
-| TBD | TBD | 0 | WLST-04 | — | Joined list query never collapses `watchlist.id`/`artists.id` into one field | integration | `go test ./internal/httpserver/... ./internal/watchlist/... -race -count=1` | ❌ Wave 0 | ⬜ pending |
-| TBD | TBD | 0 | WLST-05 | T-02-TBD | Invalid release-type value rejected at 400 (app layer) and by DB `CHECK` (backstop) | unit + integration | `go test ./internal/httpserver/... ./internal/watchlist/... -race -count=1` | ❌ Wave 0 | ⬜ pending |
-| TBD | TBD | 0 | WLST-06 | T-02-TBD | Invalid mute-event value rejected at 400 (app layer) and by DB `CHECK` (backstop) | unit + integration | `go test ./internal/httpserver/... ./internal/watchlist/... -race -count=1` | ❌ Wave 0 | ⬜ pending |
+| 02-01-T1 | 02-01 | 1 | WLST-02 | T-02-01, T-02-02, T-02-03 | Add path decodes into a DTO with `DisallowUnknownFields`; no raw SQL in the service; no driver error text in any response body | unit + integration | `go test ./internal/httpserver/ -run 'TestWatchlist_Add' -count=1` | ❌ created by this task | ⬜ pending |
+| 02-02-T1 | 02-02 | 2 | WLST-02 | T-02-14 | Duplicate add returns 409 via SQLSTATE 23505 on `watchlist_artist_id_key`, never a 500 and never a silent preferences overwrite | unit + integration | `go test ./internal/watchlist/... ./internal/httpserver/... -run 'Duplicate' -count=1` | ❌ created by this task | ⬜ pending |
+| 02-02-T2 | 02-02 | 2 | WLST-05, WLST-06 | T-02-04, T-02-05, T-02-13 | Body capped at 64 KiB, `mbid`/`name` rune-capped, out-of-allow-list preference values rejected 400 before any write | unit + integration | `go test ./internal/watchlist/... ./internal/httpserver/... -count=1` | ❌ created by this task | ⬜ pending |
+| 02-03-T1 | 02-03 | 3 | WLST-04 | T-02-08, T-02-09 | Joined list query aliases every column so `watchlist.id` and `artists.id` never collapse; empty result encodes as `[]` | integration | `go test ./internal/watchlist/... ./internal/httpserver/... -run 'List' -count=1` | ❌ created by this task | ⬜ pending |
+| 02-03-T2 | 02-03 | 3 | WLST-03 | T-02-07, T-02-15 | Path `{id}` parsed and bounds-checked before any query; removing a missing id returns 404, not a 500; concurrent deletes yield exactly one 204 and one 404 | unit + integration | `go test ./internal/httpserver/ -run 'TestWatchlist_Delete' -count=5` | ❌ created by this task | ⬜ pending |
+| 02-04-T1 | 02-04 | 4 | WLST-05, WLST-06 | T-02-10, T-02-11, T-02-16 | Invalid release-type or mute-event value rejected 400 with the stored row untouched; PATCH DTO carries only the two preference axes | unit + integration | `go test ./internal/watchlist/... ./internal/httpserver/... -count=1` | ❌ created by this task | ⬜ pending |
+| 02-04-T2 | 02-04 | 4 | WLST-02..WLST-06 | T-02-10, T-02-12 | DB `CHECK` constraints reject out-of-allow-list values written by raw SQL, independent of the Go layer; full lifecycle demonstrated end to end | integration | `go test ./... -count=1` | ❌ created by this task | ⬜ pending |
 
-*Task IDs and threat refs are finalized once PLAN.md and the `<threat_model>` blocks exist — the planner fills these in against this table's requirement rows.*
+*`-race` is deliberately absent from these commands: this dev machine's mingw64 toolchain cannot execute `cc1.exe`, documented in STATE.md from phases 01-02/01-03. The `-race` pass runs under WSL2 or in the Phase 7 CI job, matching the Phase 1 precedent.*
 
 ---
 
@@ -57,7 +59,7 @@ created: 2026-08-05
 - [ ] `sqlc.yaml` edits (`emit_interface: true`, `emit_pointers_for_null_types: true`) + `sqlc generate` regeneration
 - [ ] `internal/watchlist/service.go` + `service_test.go` — new package, no existing tests to build on
 - [ ] `internal/httpserver/watchlist.go` + `watchlist_test.go` — new handlers, following `health.go`/`health_test.go` shape
-- [ ] Updates to the 5 existing `httpserver.New(...)` call sites for the new constructor parameter (Research Pitfall 5: `cmd/server/main.go:80`, 4 calls in `health_test.go`, 1 in `boot_e2e_test.go:50`)
+- [ ] Updates to the **8** existing `httpserver.New(...)` call sites for the new constructor parameter, all in plan 02-01 task 1's single commit. 02-RESEARCH.md Pitfall 5 says 5 and undercounts: the verified set is `cmd/server/main.go:80`, `internal/httpserver/health_test.go:57,86,126,151`, `internal/httpserver/server_test.go:83,203`, `internal/httpserver/boot_e2e_test.go:50`
 
 ---
 
