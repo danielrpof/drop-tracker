@@ -110,6 +110,12 @@ None yet.
 
 None yet — Phase 01 fully closed (UAT 2/2, security 18/18).
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260806-hfn | Add a gitleaks pre-commit hook so secrets are caught locally before commit | 2026-08-06 | 18ad467 | [260806-hfn-add-a-gitleaks-pre-commit-hook-so-secret](./quick/260806-hfn-add-a-gitleaks-pre-commit-hook-so-secret/) |
+
 ## Deferred Items
 
 Items acknowledged and carried forward from previous milestone close:
