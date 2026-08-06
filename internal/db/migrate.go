@@ -81,6 +81,34 @@ func newRetryConfig(opts ...RetryOption) retryConfig {
 // errors can embed the DSN, and the DSN carries the Postgres password).
 var userInfoPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^/@\s]*@`)
 
+// kvPasswordPattern matches a libpq keyword/value-form password assignment
+// -- "password=..." -- including the whitespace-padded, single-quoted and
+// differently-cased spellings libpq accepts, plus a password passed as a
+// URL query parameter, which has the identical "password=value" shape once
+// URL query syntax is considered. It exists because userInfoPattern
+// requires an "@" and therefore structurally cannot reach either shape:
+// config.Config places no format constraint on DATABASE_URL, and pgx/
+// golang-migrate accept both the keyword/value DSN form and a
+// query-parameter password.
+//
+// The pattern deliberately requires an assignment (a "=" after the
+// keyword), not just the word "password" appearing in text: Postgres's own
+// authentication-failure message ("password authentication failed for user
+// ...") merely mentions the word without assigning one, and destroying
+// that text would cost real diagnostic value while protecting nothing.
+//
+// redactDSN solved the same problem for the DSN itself by delegating to
+// pgconn.ParseConfig -- a route unavailable here, since redactError's
+// input is arbitrary error text that merely happens to embed a DSN
+// somewhere inside it and is not parseable as one.
+//
+// The quoted alternative must come first in the alternation: Go's regexp
+// prefers the earlier alternative at a given starting position, so an
+// unquoted branch listed first would stop at the value's first space and
+// leave the remainder of a quoted value (which libpq permits containing
+// spaces) in the output.
+var kvPasswordPattern = regexp.MustCompile(`(?i)\bpassword\s*=\s*(?:'(?:[^'\\]|\\.)*'|\S+)`)
+
 // redactDSN reduces dsn to a credential-free "host=... database=..."
 // description, computed once at RunMigrations' entry so nothing downstream
 // ever needs the raw DSN again for logging or error messages.
@@ -102,10 +130,23 @@ func redactDSN(dsn string) string {
 }
 
 // redactError reduces err's message to a form that cannot carry
-// credentials: any DSN-shaped user-info segment is stripped before the
-// message is logged or wrapped into a returned error.
+// credentials. Two passes run in sequence: the URL-form userinfo strip
+// first, then the keyword/value substitution over its result. Order
+// matters -- the userinfo strip removes a whole "scheme://user:pass@" span
+// including the scheme, so running it first means the keyword/value pass
+// only ever sees what survived.
+//
+// Coverage: URL-form userinfo, keyword/value assignments in any accepted
+// spelling (whitespace-padded, single-quoted, differently-cased), and
+// password-bearing URL query parameters. This does not rely on any
+// driver's internal redaction: pgx v5.10.0's ParseConfigError happens to
+// self-redact its embedded connection string today, but that behaviour is
+// undocumented, covers exactly one error type, and a version bump could
+// remove it with no signal here (see internal/db/redact_test.go and
+// .planning/debug/migrate-redacterror-keyword-value-dsn-leak.md).
 func redactError(err error) string {
-	return userInfoPattern.ReplaceAllString(err.Error(), "")
+	s := userInfoPattern.ReplaceAllString(err.Error(), "")
+	return kvPasswordPattern.ReplaceAllString(s, "password=<redacted>")
 }
 
 // RunMigrations applies every embedded migration to the database at dsn,
