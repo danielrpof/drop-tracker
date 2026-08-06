@@ -5,8 +5,8 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: watchlist-core
 status: executing
-stopped_at: Completed 02-06-PLAN.md
-last_updated: "2026-08-06T16:37:03.324Z"
+stopped_at: Completed quick task 260806-hfn (gitleaks pre-commit hook)
+last_updated: "2026-08-06T18:06:06.739Z"
 last_activity: 2026-08-06
 last_activity_desc: Phase 02 execution started
 progress:
@@ -100,6 +100,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 02-04]: errNotImplemented sentinel removal folded into task 1's GREEN commit (replacing UpdatePreferences's body removed the last reference); task 2's placeholder gate was a grep-based verification, not a second removal step
 - [Phase ?]: [Phase 02-05]: Widened UpsertArtist's ON CONFLICT SET list to COALESCE disambiguation and image_url the same way deezer_id already was, closing gap G-02-2a (WR-01) -- regenerated sqlc output (artists.sql.go, querier.go) and two real-Postgres tests pin both the refresh-on-supplied and preserve-on-omitted halves of the contract
 - [Phase ?]: [Phase 02-06]: Rewrote UpdateWatchlistPreferences as a single data-modifying CTE (per-axis CASE/ELSE reading the row version the UPDATE itself locked) instead of a two-statement read-then-write, closing gap G-02-2b's lost-update and not-found-on-delete races; qualified every column reference inside the CTE's UPDATE to satisfy sqlc's ambiguity check
+- [Phase ?]: quick/260806-hfn: gitleaks pre-commit hook added and proven end-to-end; full-history scan found 4 pre-existing findings (fake test-fixture password), resolved via documented acceptance (not suppression) after 4 human checkpoints -- no history rewrite, no force-push
 
 ### Pending Todos
 
@@ -119,6 +120,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-06T16:37:03.291Z
-Stopped at: Completed 02-06-PLAN.md
+Last session: 2026-08-06T18:06:06.706Z
+Stopped at: Completed quick task 260806-hfn (gitleaks pre-commit hook)
 Resume file: None
