@@ -124,16 +124,21 @@ func TestRunMigrations_AppliesFromScratch(t *testing.T) {
 	dsn := testutil.RequirePostgresDSN(t)
 	ctx := context.Background()
 
-	// Reset state before running: drop schema_migrations if present, so
-	// this test proves the apply path rather than trivially landing on the
-	// no-change path when it happens to run after another test.
+	// Reset state before running: drop the entire public schema and recreate
+	// it empty, so this test proves the apply-from-scratch path rather than
+	// trivially landing on the no-change path when it happens to run after
+	// another test. Dropping only schema_migrations is not enough once a
+	// migration (000002_watchlist, Phase 2) creates domain tables: without
+	// this, a rerun would try to CREATE TABLE artists/watchlist against
+	// tables a prior test run already left behind and fail with a dirty
+	// migration state.
 	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	defer sqlDB.Close()
-	if _, err := sqlDB.ExecContext(ctx, "DROP TABLE IF EXISTS schema_migrations"); err != nil {
-		t.Fatalf("drop schema_migrations: %v", err)
+	if _, err := sqlDB.ExecContext(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
+		t.Fatalf("reset public schema: %v", err)
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -153,8 +158,11 @@ func TestRunMigrations_AppliesFromScratch(t *testing.T) {
 	if err := sqlDB.QueryRowContext(ctx, "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	if version != 1 || dirty {
-		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (1, false)", version, dirty)
+	// Phase 2 added migration 000002_watchlist, so "from scratch" now lands
+	// on version 2, not 1 (Phase 1's original value, before this migration
+	// existed).
+	if version != 2 || dirty {
+		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (2, false)", version, dirty)
 	}
 }
 

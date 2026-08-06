@@ -3,3 +3,27 @@
 //   sqlc v1.31.1
 
 package sqlc
+
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type Artist struct {
+	ID             int64              `json:"id"`
+	Mbid           string             `json:"mbid"`
+	DeezerID       *string            `json:"deezer_id"`
+	Name           string             `json:"name"`
+	Disambiguation *string            `json:"disambiguation"`
+	ImageUrl       *string            `json:"image_url"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Watchlist struct {
+	ID              int64              `json:"id"`
+	ArtistID        int64              `json:"artist_id"`
+	ReleaseTypes    []string           `json:"release_types"`
+	MutedEventTypes []string           `json:"muted_event_types"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}

@@ -15,8 +15,10 @@ import (
 
 	"github.com/danielrpof/drop-tracker/internal/config"
 	"github.com/danielrpof/drop-tracker/internal/db"
+	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
+	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
 // shutdownTimeout bounds how long graceful shutdown waits for in-flight
@@ -77,7 +79,8 @@ func run() error {
 	}
 	defer pool.Close()
 
-	srv := httpserver.New(pool, logger)
+	store := watchlist.NewService(sqlc.New(pool))
+	srv := httpserver.New(pool, store, logger)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	httpSrv := &http.Server{

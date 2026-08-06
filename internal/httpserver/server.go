@@ -10,6 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
+
+	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
 // Pinger is the minimal surface Server needs from a database handle.
@@ -23,21 +25,26 @@ type Pinger interface {
 
 // Server holds the dependencies the router needs to answer requests.
 type Server struct {
-	db     Pinger
-	router http.Handler
+	db        Pinger
+	watchlist watchlist.Store
+	router    http.Handler
 }
 
-// New builds a Server backed by db and logging through logger. The chi
-// middleware stack runs in this order: middleware.RequestID first so the
-// correlation ID exists in context for everything downstream, then
+// New builds a Server backed by db, store and logging through logger. The
+// chi middleware stack runs in this order: middleware.RequestID first so
+// the correlation ID exists in context for everything downstream, then
 // echoRequestID so the client can see the same ID via the X-Request-Id
 // response header, then httplog.RequestLogger so every request/response
 // emits a structured JSON log line carrying that ID (via LogExtraAttrs,
 // since httplog's own schema has no built-in request-ID field), then
 // middleware.Recoverer so a panic in a handler is converted into a 500
 // instead of crashing the process.
-func New(db Pinger, logger *slog.Logger) *Server {
-	s := &Server{db: db}
+//
+// store is a second, separate dependency rather than a widened Pinger --
+// widening Pinger's method set would break stubPinger, which today only
+// implements Ping (health_test.go).
+func New(db Pinger, store watchlist.Store, logger *slog.Logger) *Server {
+	s := &Server{db: db, watchlist: store}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -56,6 +63,7 @@ func New(db Pinger, logger *slog.Logger) *Server {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/health", s.handleHealth)
+	r.Post("/watchlist", s.handleAddWatchlist)
 
 	s.router = r
 	return s

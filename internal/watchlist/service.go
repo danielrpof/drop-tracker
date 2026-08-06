@@ -1,0 +1,178 @@
+// Package watchlist implements the watchlist domain: adding, listing,
+// updating preferences for, and removing artists a user is tracking. It
+// wraps the sqlc-generated Queries behind a narrow Store interface --
+// internal/httpserver's Pinger-analog for this phase -- so handler tests
+// can substitute a stub instead of a live Postgres connection.
+package watchlist
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
+)
+
+// ReleaseTypes and EventTypes mirror the watchlist_release_types_valid and
+// watchlist_muted_event_types_valid CHECK constraints
+// (internal/db/migrations/000002_watchlist.up.sql) -- the single Go-side
+// source of truth for both allow-lists.
+var (
+	ReleaseTypes = []string{"album", "single", "ep", "deluxe"}
+	EventTypes   = []string{"new_release", "guest_feature", "deluxe_change"}
+)
+
+var (
+	// ErrDuplicate is returned when an artist already on the watchlist is
+	// added again (D-09).
+	ErrDuplicate = errors.New("artist already on watchlist")
+	// ErrNotFound is returned when a watchlist entry id does not exist.
+	ErrNotFound = errors.New("watchlist entry not found")
+	// ErrInvalidReleaseType is returned when a release type outside
+	// ReleaseTypes is supplied.
+	ErrInvalidReleaseType = errors.New("invalid release type")
+	// ErrInvalidEventType is returned when an event type outside
+	// EventTypes is supplied.
+	ErrInvalidEventType = errors.New("invalid event type")
+
+	// errNotImplemented backs the three Store methods this plan declares
+	// but does not yet implement. Plan 02-03 fills List and Remove; plan
+	// 02-04 fills UpdatePreferences and carries the gate proving none of
+	// these bodies survive to the end of the phase. None of the three has
+	// a route registered against it until its own plan, so no half-built
+	// behaviour is reachable over HTTP at any point.
+	errNotImplemented = errors.New("watchlist: not implemented")
+)
+
+// Entry is the API-facing joined artist + watchlist row.
+type Entry struct {
+	ID              int64     `json:"id"`
+	ArtistID        int64     `json:"artist_id"`
+	MBID            string    `json:"mbid"`
+	Name            string    `json:"name"`
+	DeezerID        *string   `json:"deezer_id"`
+	Disambiguation  *string   `json:"disambiguation"`
+	ImageURL        *string   `json:"image_url"`
+	ReleaseTypes    []string  `json:"release_types"`
+	MutedEventTypes []string  `json:"muted_event_types"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// AddParams carries the fields needed to add a new artist to the
+// watchlist. ReleaseTypes and MutedEventTypes being nil means "apply the
+// D-08 defaults" -- all release types enabled, nothing muted.
+type AddParams struct {
+	MBID            string
+	Name            string
+	DeezerID        *string
+	Disambiguation  *string
+	ImageURL        *string
+	ReleaseTypes    []string
+	MutedEventTypes []string
+}
+
+// PreferencesParams carries a partial preferences update. A nil field means
+// "leave this axis untouched."
+type PreferencesParams struct {
+	ReleaseTypes    *[]string
+	MutedEventTypes *[]string
+}
+
+// Store is the minimal surface internal/httpserver needs for the watchlist
+// resource -- narrower than sqlc's generated Querier so a stub can
+// implement it in tests without a live Postgres connection. This mirrors
+// httpserver.Pinger (internal/httpserver/server.go).
+type Store interface {
+	Add(ctx context.Context, p AddParams) (Entry, error)
+	List(ctx context.Context) ([]Entry, error)
+	UpdatePreferences(ctx context.Context, id int64, p PreferencesParams) (Entry, error)
+	Remove(ctx context.Context, id int64) error
+}
+
+// Service is the sqlc-backed implementation of Store.
+type Service struct {
+	q sqlc.Querier
+}
+
+// NewService builds a Service backed by q.
+func NewService(q sqlc.Querier) *Service {
+	return &Service{q: q}
+}
+
+var _ Store = (*Service)(nil)
+
+// Add upserts the artist by mbid, then creates its watchlist entry. The two
+// writes are not wrapped in a transaction: under D-03, artists is master
+// data whose lifetime is independent of any watchlist entry, so an artists
+// row with no watchlist row is a legitimate state that Phase 4 and Phase 6
+// will also produce.
+func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
+	artist, err := s.q.UpsertArtist(ctx, sqlc.UpsertArtistParams{
+		Mbid:           p.MBID,
+		DeezerID:       p.DeezerID,
+		Name:           p.Name,
+		Disambiguation: p.Disambiguation,
+		ImageUrl:       p.ImageURL,
+	})
+	if err != nil {
+		return Entry{}, err
+	}
+
+	releaseTypes := p.ReleaseTypes
+	if releaseTypes == nil {
+		releaseTypes = append([]string{}, ReleaseTypes...)
+	}
+	mutedEventTypes := p.MutedEventTypes
+	if mutedEventTypes == nil {
+		mutedEventTypes = []string{}
+	}
+
+	entry, err := s.q.CreateWatchlistEntry(ctx, sqlc.CreateWatchlistEntryParams{
+		ArtistID:        artist.ID,
+		ReleaseTypes:    releaseTypes,
+		MutedEventTypes: mutedEventTypes,
+	})
+	if err != nil {
+		return Entry{}, err
+	}
+
+	return toEntry(artist, entry), nil
+}
+
+// List is declared now so the Store contract never reshapes mid-phase.
+// Plan 02-03 fills this body; no route is registered against it until then.
+func (s *Service) List(_ context.Context) ([]Entry, error) {
+	return nil, errNotImplemented
+}
+
+// UpdatePreferences is declared now so the Store contract never reshapes
+// mid-phase. Plan 02-04 fills this body; no route is registered against it
+// until then.
+func (s *Service) UpdatePreferences(_ context.Context, _ int64, _ PreferencesParams) (Entry, error) {
+	return Entry{}, errNotImplemented
+}
+
+// Remove is declared now so the Store contract never reshapes mid-phase.
+// Plan 02-03 fills this body; no route is registered against it until then.
+func (s *Service) Remove(_ context.Context, _ int64) error {
+	return errNotImplemented
+}
+
+// toEntry joins an artist row and its watchlist row into the API-facing
+// Entry shape.
+func toEntry(artist sqlc.Artist, w sqlc.Watchlist) Entry {
+	return Entry{
+		ID:              w.ID,
+		ArtistID:        artist.ID,
+		MBID:            artist.Mbid,
+		Name:            artist.Name,
+		DeezerID:        artist.DeezerID,
+		Disambiguation:  artist.Disambiguation,
+		ImageURL:        artist.ImageUrl,
+		ReleaseTypes:    w.ReleaseTypes,
+		MutedEventTypes: w.MutedEventTypes,
+		CreatedAt:       w.CreatedAt.Time,
+		UpdatedAt:       w.UpdatedAt.Time,
+	}
+}
