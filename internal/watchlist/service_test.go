@@ -14,10 +14,12 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -1075,6 +1077,152 @@ func TestService_UpdatePreferences_UnknownIDReturnsErrNotFound(t *testing.T) {
 	})
 	if !errors.Is(err, watchlist.ErrNotFound) {
 		t.Fatalf("err = %v, want errors.Is(err, watchlist.ErrNotFound)", err)
+	}
+}
+
+// TestService_UpdatePreferences_ConcurrentAxisWriteIsNotLost pins G-02-2b /
+// WR-02's lost-update failure mode: a PATCH to one axis must never revert a
+// concurrently committed write to the other axis. The interleaving is forced
+// deterministically with a held row lock (an uncommitted transaction), not a
+// race between two goroutines hoping to interleave -- so this test either
+// proves the property or it doesn't, on every run.
+//
+// Why this is red before the single-statement rewrite: the old
+// UpdatePreferences reads the current row via an unlocked ListWatchlist
+// SELECT, so it observes the pre-commit muted_event_types (empty) and later
+// writes that captured empty value back over the committed
+// {deluxe_change} -- silently erasing it. Step 6's mute assertion is the
+// failure.
+func TestService_UpdatePreferences_ConcurrentAxisWriteIsNotLost(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Concurrent Axis Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback(context.Background())
+
+	if _, err := tx.Exec(ctx, "UPDATE watchlist SET muted_event_types = ARRAY['deluxe_change']::text[] WHERE id = $1", entry.ID); err != nil {
+		t.Fatalf("held-lock update: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdatePreferences(ctx, entry.ID, watchlist.PreferencesParams{
+			ReleaseTypes: &[]string{"single"},
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-errCh:
+		t.Fatal("UpdatePreferences completed without ever waiting for the row lock held by the uncommitted transaction")
+	case <-time.After(300 * time.Millisecond):
+		// Expected: the goroutine is blocked behind the row lock.
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+
+	updateErr := <-errCh
+	if updateErr != nil {
+		t.Fatalf("UpdatePreferences: %v", updateErr)
+	}
+
+	var releaseTypes, mutedEventTypes []string
+	row := pool.QueryRow(ctx, "SELECT release_types, muted_event_types FROM watchlist WHERE id = $1", entry.ID)
+	if err := row.Scan(&releaseTypes, &mutedEventTypes); err != nil {
+		t.Fatalf("query stored preferences: %v", err)
+	}
+	if len(releaseTypes) != 1 || releaseTypes[0] != "single" {
+		t.Fatalf("release_types = %v, want [single]", releaseTypes)
+	}
+	if len(mutedEventTypes) != 1 || mutedEventTypes[0] != "deluxe_change" {
+		t.Fatalf("muted_event_types = %v, want [deluxe_change] (the committed value from the concurrent transaction must survive)", mutedEventTypes)
+	}
+}
+
+// TestService_UpdatePreferences_RowDeletedMidWriteReturnsErrNotFound pins
+// G-02-2b / WR-02's other failure mode: a PATCH blocked behind a concurrent
+// DELETE of the same row must resolve to watchlist.ErrNotFound, not a wrapped
+// driver error. Like its sibling above, the interleaving is forced
+// deterministically with a held row lock.
+//
+// Why this is red before the single-statement rewrite: the old
+// implementation's UPDATE returns pgx.ErrNoRows once the delete commits, and
+// that error is wrapped with fmt.Errorf("update watchlist preferences: %w",
+// err) without ever being translated to ErrNotFound -- which is exactly what
+// makes the handler answer 500 where it should answer 404.
+func TestService_UpdatePreferences_RowDeletedMidWriteReturnsErrNotFound(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Deleted Mid Write Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback(context.Background())
+
+	if _, err := tx.Exec(ctx, "DELETE FROM watchlist WHERE id = $1", entry.ID); err != nil {
+		t.Fatalf("held-lock delete: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdatePreferences(ctx, entry.ID, watchlist.PreferencesParams{
+			ReleaseTypes: &[]string{"album"},
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-errCh:
+		t.Fatal("UpdatePreferences completed without ever waiting for the row lock held by the uncommitted transaction")
+	case <-time.After(300 * time.Millisecond):
+		// Expected: the goroutine is blocked behind the row lock.
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+
+	updateErr := <-errCh
+	if !errors.Is(updateErr, watchlist.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, watchlist.ErrNotFound)", updateErr)
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(updateErr, &pgErr) {
+		t.Fatalf("err %v exposes a raw *pgconn.PgError to the caller", updateErr)
+	}
+	if errors.Is(updateErr, pgx.ErrNoRows) {
+		t.Fatalf("err = %v wraps pgx.ErrNoRows directly instead of the translated watchlist.ErrNotFound sentinel", updateErr)
 	}
 }
 
