@@ -23,7 +23,7 @@ import (
 const sampleArtistMBID = "9fff2f8a-21e6-47de-a2b8-7f449929d43f"
 
 const releaseGroupFixture = `{
-  "release-group-count": 61,
+  "release-group-count": 1,
   "release-group-offset": 0,
   "release-groups": [
     {

@@ -56,15 +56,23 @@ type releaseGroupEnvelope struct {
 	Offset        int            `json:"release-group-offset"`
 }
 
-// ReleaseGroupsByArtist browses MusicBrainz's release-groups for the artist
-// identified by mbid (D-10), returning results in MusicBrainz's own
-// upstream order -- this method never sorts. No "type" filter is sent:
-// Phase 4's per-artist release-type preferences (Phase 2 WLST-05) are
-// applied at detection time, and filtering at fetch time would make a
-// preference change silently invisible until the next full refetch.
+// ReleaseGroupsByArtist browses every release-group MusicBrainz has for the
+// artist identified by mbid (D-10), paginating as needed and returning
+// results in MusicBrainz's own upstream order across pages -- this method
+// never sorts. No "type" filter is sent: Phase 4's per-artist release-type
+// preferences (Phase 2 WLST-05) are applied at detection time, and
+// filtering at fetch time would make a preference change silently invisible
+// until the next full refetch.
 //
-// This issues exactly one page request; pagination across an artist's full
-// discography is added in a later plan step.
+// Pages are fetched sequentially (never concurrently) and bounded by
+// maxReleaseGroupPages (T-03-12, T-03-14): a malformed or hostile
+// release-group-count from upstream cannot drive an unbounded request loop,
+// and issuing pages concurrently would multiply this client's instantaneous
+// rate against MusicBrainz beyond the operator-configured limiter. Hitting
+// the page ceiling returns the accumulated groups and a nil error -- a
+// truncated fetch is a data-completeness limit, not a failure, and turning
+// it into an error would let one prolific artist abort the whole poll
+// cycle.
 func (c *Client) ReleaseGroupsByArtist(ctx context.Context, mbid string) ([]ReleaseGroup, error) {
 	trimmed := strings.TrimSpace(mbid)
 	if trimmed == "" {
@@ -74,13 +82,32 @@ func (c *Client) ReleaseGroupsByArtist(ctx context.Context, mbid string) ([]Rele
 		return nil, err
 	}
 
-	env, err := c.fetchReleaseGroupPage(ctx, trimmed, 0)
-	if err != nil {
-		return nil, err
+	groups := make([]ReleaseGroup, 0, releaseGroupPageSize)
+	offset := 0
+	for page := 0; page < maxReleaseGroupPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		env, err := c.fetchReleaseGroupPage(ctx, trimmed, offset)
+		if err != nil {
+			return nil, err
+		}
+
+		groups = append(groups, env.ReleaseGroups...)
+
+		// Terminate as soon as either holds: we've collected everything
+		// upstream reports (Count), or the page came back empty -- a
+		// runaway/hostile Count must never keep the loop spinning past an
+		// empty page (T-03-12).
+		if len(env.ReleaseGroups) == 0 || len(groups) >= env.Count {
+			return groups, nil
+		}
+		// Advance by the number of entries actually returned, not the
+		// requested page size, so a short page can never skip records.
+		offset += len(env.ReleaseGroups)
 	}
 
-	groups := make([]ReleaseGroup, 0, len(env.ReleaseGroups))
-	groups = append(groups, env.ReleaseGroups...)
 	return groups, nil
 }
 
