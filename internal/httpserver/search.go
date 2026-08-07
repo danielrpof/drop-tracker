@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/go-chi/httplog/v3"
 
+	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 )
 
@@ -102,6 +104,51 @@ func (s musicBrainzSource) SearchArtists(ctx context.Context, q string, limit in
 }
 
 var _ SearchSource = musicBrainzSource{}
+
+// deezerSource adapts deezer.ArtistSearcher into SearchSource. Defined here,
+// not in internal/deezer, so that package never needs to import
+// internal/httpserver -- the dependency direction stays one-way, mirroring
+// musicBrainzSource.
+type deezerSource struct {
+	client deezer.ArtistSearcher
+}
+
+// NewDeezerSource wraps c as a SearchSource named "deezer".
+func NewDeezerSource(c deezer.ArtistSearcher) SearchSource {
+	return deezerSource{client: c}
+}
+
+func (s deezerSource) Name() string { return "deezer" }
+
+func (s deezerSource) SearchArtists(ctx context.Context, q string, limit int) ([]SearchArtist, error) {
+	artists, err := s.client.SearchArtists(ctx, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SearchArtist, 0, len(artists))
+	for _, a := range artists {
+		var imageURL *string
+		if a.Picture != "" {
+			p := a.Picture
+			imageURL = &p
+		}
+		artistType := a.Type
+		if artistType == "" {
+			artistType = "artist"
+		}
+		out = append(out, SearchArtist{
+			Source:         "deezer",
+			ID:             strconv.FormatInt(a.ID, 10),
+			Name:           a.Name,
+			Disambiguation: nil,
+			Type:           artistType,
+			ImageURL:       imageURL,
+		})
+	}
+	return out, nil
+}
+
+var _ SearchSource = deezerSource{}
 
 // handleSearch implements GET /search (WLST-01, CLNT-03, D-01/D-02/D-03):
 // fans out to every configured source concurrently, using r.Context() so an

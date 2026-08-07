@@ -18,6 +18,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/config"
 	"github.com/danielrpof/drop-tracker/internal/db"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
+	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
@@ -87,11 +88,26 @@ func run() error {
 	// Exactly one *musicbrainz.Client and one rate.Limiter for the whole
 	// process (D-07) -- plan 03-04's poller reuses this same instance, so
 	// total outbound MusicBrainz rate stays bounded across search traffic
-	// and poll traffic together, not per-caller (T-03-08).
+	// and poll traffic together, not per-caller (T-03-08). Deliberately a
+	// separate limiter instance from dzLimiter below (D-08): MusicBrainz's
+	// ~1/sec pace must never throttle Deezer's faster pace, and vice versa.
 	mbLimiter := rate.NewLimiter(rate.Limit(cfg.MusicBrainzRateLimitPerSec), 1)
 	mbClient := musicbrainz.NewClient(cfg.MusicBrainzUserAgent, mbLimiter, nil)
 
-	srv := httpserver.New(pool, store, []httpserver.SearchSource{httpserver.NewMusicBrainzSource(mbClient)}, logger)
+	// Exactly one *deezer.Client and one rate.Limiter for the whole process
+	// (D-07, D-08) -- plan 03-04's Deezer poll cycle reuses this same
+	// instance, keeping every outbound Deezer request under a single shared
+	// budget. The rate is the per-second equivalent of Deezer's documented
+	// 50-per-5-second ceiling; the burst is the full five-second allowance,
+	// so a short burst is admitted and sustained traffic settles to the
+	// documented average.
+	dzLimiter := rate.NewLimiter(rate.Limit(float64(cfg.DeezerRateLimitPer5s)/5.0), cfg.DeezerRateLimitPer5s)
+	dzClient := deezer.NewClient(dzLimiter, nil)
+
+	srv := httpserver.New(pool, store, []httpserver.SearchSource{
+		httpserver.NewMusicBrainzSource(mbClient),
+		httpserver.NewDeezerSource(dzClient),
+	}, logger)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	httpSrv := &http.Server{
