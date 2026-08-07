@@ -10,15 +10,25 @@ package poller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
 
+	"github.com/robfig/cron/v3"
+
 	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
+
+// ErrCycleInProgress is returned by RunMusicBrainzCycle or RunDeezerCycle
+// when a previous cycle for that same source is still running. A tick that
+// arrives during a run is skipped, not queued behind it (D-09) -- queuing
+// would eventually run every missed cycle back to back, which is exactly
+// the compounding behavior the overlap guard exists to prevent.
+var ErrCycleInProgress = errors.New("poller: cycle already in progress")
 
 const (
 	// deezerAlbumPageSize bounds the page size ArtistAlbums is called with
@@ -67,23 +77,94 @@ type Poller struct {
 	logger   *slog.Logger
 	interval time.Duration
 
+	cron *cron.Cron
+
+	// runCtx/runCancel are set once, by Start, before cron.Start() begins
+	// dispatching ticks -- the write happens-before any goroutine cron
+	// spawns to run a job, per the Go memory model's goroutine-creation
+	// rule, so no separate synchronization is needed to read them from a
+	// cron job closure. Stop cancels runCancel so an in-flight cycle
+	// unwinds instead of racing the caller's next step (e.g. closing the
+	// database pool) against a request still in flight.
+	runCtx    context.Context
+	runCancel context.CancelFunc
+
 	mbRunning atomic.Bool
 	dzRunning atomic.Bool
 }
 
-// New builds a Poller over store, mb and dz, polling on interval once
-// scheduling is wired up. interval must be greater than zero.
+// New builds a Poller over store, mb and dz and registers two independent
+// cron entries -- one per source -- on the spec "@every <interval>".
+// Registering them as two separate AddFunc calls, each closing over one
+// cycle method, is what guarantees MusicBrainz's slower pace can never
+// delay or block Deezer's faster one (D-08). interval must be greater than
+// zero; New returns a non-nil error and registers no entry otherwise.
 func New(store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, interval time.Duration, logger *slog.Logger) (*Poller, error) {
 	if interval <= 0 {
 		return nil, fmt.Errorf("poller: interval must be greater than zero, got %s", interval)
 	}
-	return &Poller{
+
+	p := &Poller{
 		store:    store,
 		mb:       mb,
 		dz:       dz,
 		logger:   logger,
 		interval: interval,
-	}, nil
+		cron:     cron.New(),
+	}
+
+	spec := fmt.Sprintf("@every %s", interval.String())
+
+	if _, err := p.cron.AddFunc(spec, func() {
+		if err := p.RunMusicBrainzCycle(p.runCtx); err != nil && !errors.Is(err, ErrCycleInProgress) {
+			p.logger.Error("musicbrainz poll cycle failed", slog.String("poller_error", err.Error()))
+		}
+	}); err != nil {
+		return nil, fmt.Errorf("poller: register musicbrainz cron job: %w", err)
+	}
+
+	if _, err := p.cron.AddFunc(spec, func() {
+		if err := p.RunDeezerCycle(p.runCtx); err != nil && !errors.Is(err, ErrCycleInProgress) {
+			p.logger.Error("deezer poll cycle failed", slog.String("poller_error", err.Error()))
+		}
+	}); err != nil {
+		return nil, fmt.Errorf("poller: register deezer cron job: %w", err)
+	}
+
+	return p, nil
+}
+
+// Start begins scheduling both cron entries. ctx bounds the lifetime of
+// every cycle this Poller runs from now on -- Stop cancels the retained
+// child context derived from it, not ctx itself, so a caller can Stop
+// independently of whatever ctx they originally started with.
+func (p *Poller) Start(ctx context.Context) {
+	p.runCtx, p.runCancel = context.WithCancel(ctx)
+	p.logger.Info("poller starting", slog.Duration("interval", p.interval))
+	p.cron.Start()
+}
+
+// Stop stops scheduling new ticks and waits for any in-flight cycle to
+// finish, bounded by ctx. p.cron.Stop() itself only stops scheduling and
+// returns immediately with a context the caller must consume to observe
+// drain completion -- consuming it here, rather than ignoring it, is what
+// prevents an in-flight poll cycle from racing the database pool being
+// closed underneath it after Stop returns (03-RESEARCH.md pitfall 4). If
+// ctx expires first, the retained cycle context is cancelled so in-flight
+// requests unwind, and ctx's error is returned rather than blocking
+// forever on a hung upstream.
+func (p *Poller) Stop(ctx context.Context) error {
+	p.logger.Info("poller stopping")
+	stopCtx := p.cron.Stop()
+	select {
+	case <-stopCtx.Done():
+		return nil
+	case <-ctx.Done():
+		if p.runCancel != nil {
+			p.runCancel()
+		}
+		return ctx.Err()
+	}
 }
 
 // RunMusicBrainzCycle reads the live watchlist and calls
@@ -92,6 +173,19 @@ func New(store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, interval 
 // artist must not cost the rest of the cycle. The cycle itself writes
 // nothing to the database (D-04): it only logs.
 func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
+	// Compare-and-swap, not a mutex: a tick that arrives during a run must
+	// be *skipped*, not queued behind it (D-09) -- a mutex would serialise
+	// ticks into a backlog and eventually run every missed cycle back to
+	// back. Released via defer, not a store at the end of the function, so
+	// the guard also releases on an error return *and* on a panic -- a
+	// wedged flag would silently stop this source polling for the
+	// process's lifetime.
+	if !p.mbRunning.CompareAndSwap(false, true) {
+		p.logger.Warn("skipping poll cycle: previous cycle still in progress", slog.String("source", sourceMusicBrainz))
+		return ErrCycleInProgress
+	}
+	defer p.mbRunning.Store(false)
+
 	cycleID := fmt.Sprintf("musicbrainz-%d", nextCycleID.Add(1))
 	logger := p.logger.With(slog.String("source", sourceMusicBrainz), slog.String("cycle_id", cycleID))
 
@@ -132,6 +226,15 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 // logged and the cycle continues. The cycle writes nothing to the database
 // (D-04).
 func (p *Poller) RunDeezerCycle(ctx context.Context) error {
+	// See RunMusicBrainzCycle's comment on this same pattern -- dzRunning is
+	// a wholly independent guard from mbRunning (D-08), so an overlapping
+	// MusicBrainz cycle never blocks or delays a Deezer tick.
+	if !p.dzRunning.CompareAndSwap(false, true) {
+		p.logger.Warn("skipping poll cycle: previous cycle still in progress", slog.String("source", sourceDeezer))
+		return ErrCycleInProgress
+	}
+	defer p.dzRunning.Store(false)
+
 	cycleID := fmt.Sprintf("deezer-%d", nextCycleID.Add(1))
 	logger := p.logger.With(slog.String("source", sourceDeezer), slog.String("cycle_id", cycleID))
 
