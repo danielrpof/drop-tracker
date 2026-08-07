@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 03
 current_phase_name: external-clients-search
-status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-08-07T22:47:01.241Z"
+status: verifying
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-08-07T23:10:53.580Z"
 last_activity: 2026-08-07
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 17
-  completed_plans: 16
+  completed_plans: 17
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 03 (external-clients-search) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-07 — Phase 03 execution started
 
-Progress: [█████████░] 94%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -75,6 +75,7 @@ Progress: [█████████░] 94%
 | Phase 03 P01 | 20min | 2 tasks | 13 files |
 | Phase 03 P02 | 30min | 3 tasks | 8 files |
 | Phase 03 P03 | 30min | 2 tasks | 3 files |
+| Phase 03 P04 | 25min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -116,6 +117,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03-02]: WLST-01, CLNT-02, CLNT-03 marked complete -- 03-01 deliberately left WLST-01/CLNT-03 unmarked pending Deezer, which this plan supplies
 - [Phase ?]: [Phase 03-03]: Both TDD tasks' RED tests committed together (drafting in one pass), but each task's GREEN implementation landed in its own separate feat commit -- task 1 implements the single-page fetch only, task 2 extends it into the bounded pagination loop
 - [Phase ?]: [Phase 03-03]: Fixed releaseGroupFixture's release-group-count (61 -> 1) to match its static single-entry body once real pagination landed -- the mismatched count kept the loop re-fetching the same page until hitting the page ceiling
+- [Phase ?]: [Phase 03-04]: robfig/cron/v3 landed indirect in task 1 (go get, nothing imports it yet) and only became a direct dependency once task 2 imported it and go mod tidy re-ran -- task 1's own indirect-block acceptance grep is satisfied cumulatively by end of task 2, per the plan's own staged-action text
+- [Phase ?]: [Phase 03-04]: Stop()'s drain-semantics tests drive a real short cron interval and wait for a real dispatched tick rather than calling cycle methods directly -- cron.Cron.Stop()'s returned context only tracks cron-dispatched jobs via its own internal WaitGroup, so a directly-invoked cycle would make Stop() return immediately regardless of whether it had finished
+- [Phase ?]: [Phase 03-04]: CLNT-01/CLNT-02 were already checked off in REQUIREMENTS.md by 03-02/03-03 on the strength of the underlying client fetch methods existing, even though the requirement text names scheduled polling specifically -- this plan is what actually delivers that behavior; requirements.mark-complete re-run here as a no-op confirmation
 
 ### Pending Todos
 
@@ -141,6 +145,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-07T22:47:01.209Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-08-07T23:10:53.544Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None

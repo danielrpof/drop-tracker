@@ -107,7 +107,7 @@ Plans:
   2. System polls MusicBrainz for each watchlisted artist on a configurable schedule without exceeding MusicBrainz's rate limit
   3. System polls Deezer for each watchlisted artist on a configurable schedule without exceeding Deezer's rate limit
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -121,7 +121,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 03-04-PLAN.md — `internal/poller`: two independent cron cycles with per-source overlap guards, sequential per-artist polling, nil-`deezer_id` skip, and drain-before-pool-close shutdown
+- [x] 03-04-PLAN.md — `internal/poller`: two independent cron cycles with per-source overlap guards, sequential per-artist polling, nil-`deezer_id` skip, and drain-before-pool-close shutdown
 
 ### Phase 4: Detection Engine
 
@@ -194,7 +194,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Foundation — Data Layer, Config & Health | 5/5 | Complete    | 2026-08-05 |
 | 2. Watchlist Core | 8/8 | Complete    | 2026-08-06 |
-| 3. External Clients & Search | 3/4 | In Progress|  |
+| 3. External Clients & Search | 4/4 | In Progress|  |
 | 4. Detection Engine | 0/TBD | Not started | - |
 | 5. Discord Notifications | 0/TBD | Not started | - |
 | 6. Frontend & Release History | 0/TBD | Not started | - |
