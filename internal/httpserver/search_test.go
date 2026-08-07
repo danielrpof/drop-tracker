@@ -17,8 +17,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 )
+
+// stubDeezerArtistSearcher is a file-local double for deezer.ArtistSearcher,
+// used to drive httpserver.NewDeezerSource directly rather than through a
+// real *deezer.Client / httptest.Server pair -- internal/deezer/search_test.go
+// already covers the real client.
+type stubDeezerArtistSearcher struct {
+	searchFunc func(ctx context.Context, query string, limit int) ([]deezer.Artist, error)
+}
+
+func (s stubDeezerArtistSearcher) SearchArtists(ctx context.Context, query string, limit int) ([]deezer.Artist, error) {
+	if s.searchFunc != nil {
+		return s.searchFunc(ctx, query, limit)
+	}
+	return nil, nil
+}
+
+var _ deezer.ArtistSearcher = stubDeezerArtistSearcher{}
 
 // stubSearchSource is a file-local double for httpserver.SearchSource,
 // mirroring stubStore/stubPinger's func-field pattern.
@@ -396,5 +414,213 @@ func TestSearch_CancelledInboundRequestWritesNoPartialBody(t *testing.T) {
 	body := rec.Body.Bytes()
 	if len(body) != 0 && !json.Valid(body) {
 		t.Fatalf("body = %q, want either empty or a single complete JSON document", body)
+	}
+}
+
+// TestNewDeezerSource_MapsFields proves the deezer.Artist -> SearchArtist
+// mapping directly against the adapter: ID goes through
+// strconv.FormatInt(a.ID, 10), ImageURL comes from Picture when non-empty,
+// Disambiguation is always nil (Deezer has no equivalent field), Type falls
+// back to "artist" when the upstream field is empty, and Source is always
+// "deezer".
+func TestNewDeezerSource_MapsFields(t *testing.T) {
+	stub := stubDeezerArtistSearcher{searchFunc: func(ctx context.Context, query string, limit int) ([]deezer.Artist, error) {
+		return []deezer.Artist{
+			{ID: 246791, Name: "Drake", Picture: "https://api.deezer.com/artist/246791/image", Type: "artist"},
+			{ID: 999, Name: "No Picture No Type", Picture: "", Type: ""},
+		}, nil
+	}}
+	src := httpserver.NewDeezerSource(stub)
+
+	if got := src.Name(); got != "deezer" {
+		t.Fatalf("Name() = %q, want %q", got, "deezer")
+	}
+
+	artists, err := src.SearchArtists(context.Background(), "drake", 10)
+	if err != nil {
+		t.Fatalf("SearchArtists: %v", err)
+	}
+	if len(artists) != 2 {
+		t.Fatalf("len(artists) = %d, want 2", len(artists))
+	}
+
+	first := artists[0]
+	if first.Source != "deezer" {
+		t.Errorf("first.Source = %q, want %q", first.Source, "deezer")
+	}
+	if first.ID != "246791" {
+		t.Errorf("first.ID = %q, want %q", first.ID, "246791")
+	}
+	if first.Name != "Drake" {
+		t.Errorf("first.Name = %q, want %q", first.Name, "Drake")
+	}
+	if first.Disambiguation != nil {
+		t.Errorf("first.Disambiguation = %v, want nil", first.Disambiguation)
+	}
+	if first.Type != "artist" {
+		t.Errorf("first.Type = %q, want %q", first.Type, "artist")
+	}
+	if first.ImageURL == nil || *first.ImageURL != "https://api.deezer.com/artist/246791/image" {
+		t.Errorf("first.ImageURL = %v, want a pointer to the picture URL", first.ImageURL)
+	}
+
+	second := artists[1]
+	if second.ID != "999" {
+		t.Errorf("second.ID = %q, want %q", second.ID, "999")
+	}
+	if second.ImageURL != nil {
+		t.Errorf("second.ImageURL = %v, want nil for an empty Picture", second.ImageURL)
+	}
+	if second.Type != "artist" {
+		t.Errorf("second.Type = %q, want %q (fallback for an empty upstream type)", second.Type, "artist")
+	}
+}
+
+// TestSearch_BothSourcesOK proves the multi-source success shape: both
+// sources.musicbrainz and sources.deezer are present, each ok, each carrying
+// its own untouched artist list (D-01, D-02) -- an artist appearing under
+// both source stubs is not merged or deduped.
+func TestSearch_BothSourcesOK(t *testing.T) {
+	mb := stubSearchSource{name: "musicbrainz", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
+		return []httpserver.SearchArtist{{Source: "musicbrainz", ID: "9fff2f8a-21e6-47de-a2b8-7f449929d43f", Name: "Drake"}}, nil
+	}}
+	dz := stubSearchSource{name: "deezer", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
+		return []httpserver.SearchArtist{{Source: "deezer", ID: "246791", Name: "Drake"}}, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{mb, dz}, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/search?q=drake")
+	if err != nil {
+		t.Fatalf("GET /search: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body searchResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	mbResult, ok := body.Sources["musicbrainz"]
+	if !ok {
+		t.Fatal("sources.musicbrainz missing")
+	}
+	if mbResult.Status != "ok" || len(mbResult.Artists) != 1 || mbResult.Artists[0].Source != "musicbrainz" {
+		t.Fatalf("sources.musicbrainz = %+v, want one ok musicbrainz-sourced artist", mbResult)
+	}
+
+	dzResult, ok := body.Sources["deezer"]
+	if !ok {
+		t.Fatal("sources.deezer missing")
+	}
+	if dzResult.Status != "ok" || len(dzResult.Artists) != 1 || dzResult.Artists[0].Source != "deezer" {
+		t.Fatalf("sources.deezer = %+v, want one ok deezer-sourced artist", dzResult)
+	}
+
+	if mbResult.Artists[0].Name != dzResult.Artists[0].Name {
+		t.Fatalf("expected both sources to independently return %q, got %q and %q", "Drake", mbResult.Artists[0].Name, dzResult.Artists[0].Name)
+	}
+}
+
+// TestSearch_DeezerOnlyFailure proves the mirror image of
+// TestSearch_PartialFailure_OneSourceDownAnotherHealthy: Deezer erroring
+// while MusicBrainz succeeds still responds 200 with musicbrainz's results
+// intact and deezer degraded (D-03).
+func TestSearch_DeezerOnlyFailure(t *testing.T) {
+	const rawErr = "connection refused: deezer-error-marker"
+	healthy := stubSearchSource{name: "musicbrainz", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
+		return []httpserver.SearchArtist{{Source: "musicbrainz", ID: "9fff2f8a-21e6-47de-a2b8-7f449929d43f", Name: "Drake"}}, nil
+	}}
+	failing := stubSearchSource{name: "deezer", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
+		return nil, errors.New(rawErr)
+	}}
+	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{healthy, failing}, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/search?q=drake")
+	if err != nil {
+		t.Fatalf("GET /search: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+
+	var body searchResponseBody
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	mb, ok := body.Sources["musicbrainz"]
+	if !ok || mb.Status != "ok" || len(mb.Artists) != 1 {
+		t.Fatalf("sources.musicbrainz = %+v, want one healthy result", mb)
+	}
+
+	dz, ok := body.Sources["deezer"]
+	if !ok {
+		t.Fatal("sources.deezer missing")
+	}
+	if dz.Status != "error" {
+		t.Fatalf("sources.deezer.status = %q, want %q", dz.Status, "error")
+	}
+	if dz.Error != "source unavailable" {
+		t.Fatalf("sources.deezer.error = %q, want %q", dz.Error, "source unavailable")
+	}
+	if len(dz.Artists) != 0 {
+		t.Fatalf("sources.deezer.artists = %+v, want empty", dz.Artists)
+	}
+
+	if strings.Contains(string(data), rawErr) {
+		t.Fatalf("response body leaked raw upstream error text: %s", data)
+	}
+}
+
+// TestSearch_BothSourcesFailed proves that both sources failing at once is
+// still a 200 with both statuses "error" -- never a 5xx (D-03).
+func TestSearch_BothSourcesFailed(t *testing.T) {
+	mb := stubSearchSource{name: "musicbrainz", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
+		return nil, errors.New("musicbrainz down")
+	}}
+	dz := stubSearchSource{name: "deezer", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
+		return nil, errors.New("deezer down")
+	}}
+	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{mb, dz}, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/search?q=drake")
+	if err != nil {
+		t.Fatalf("GET /search: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d (both sources failing must never produce a 5xx)", resp.StatusCode, http.StatusOK)
+	}
+
+	var body searchResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	mbResult, ok := body.Sources["musicbrainz"]
+	if !ok || mbResult.Status != "error" {
+		t.Fatalf("sources.musicbrainz = %+v, want status error", mbResult)
+	}
+	dzResult, ok := body.Sources["deezer"]
+	if !ok || dzResult.Status != "error" {
+		t.Fatalf("sources.deezer = %+v, want status error", dzResult)
 	}
 }
