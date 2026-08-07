@@ -79,6 +79,15 @@ type ArtistSearcher interface {
 
 var _ ArtistSearcher = (*Client)(nil)
 
+// AlbumLister is the narrow seam plan 03-04's poller depends on (D-12),
+// mirroring ArtistSearcher's shape -- consumers depend on this interface,
+// never on *Client directly.
+type AlbumLister interface {
+	ArtistAlbums(ctx context.Context, artistID string, limit int) ([]Album, error)
+}
+
+var _ AlbumLister = (*Client)(nil)
+
 // APIError represents Deezer's in-body error envelope, returned with an
 // HTTP 200 status on a quota breach or other API-level failure
 // (03-RESEARCH.md pitfall 2, assumption A1) -- a client that only checks the
