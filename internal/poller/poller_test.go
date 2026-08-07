@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robfig/cron/v3"
+
 	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
@@ -60,6 +62,7 @@ func deezerID(id string) *string { return &id }
 type stubStore struct {
 	listFunc func(ctx context.Context) ([]watchlist.Entry, error)
 
+	listCalls   int32
 	addCalls    int32
 	updateCalls int32
 	removeCalls int32
@@ -71,6 +74,7 @@ func (s *stubStore) Add(ctx context.Context, p watchlist.AddParams) (watchlist.E
 }
 
 func (s *stubStore) List(ctx context.Context) ([]watchlist.Entry, error) {
+	atomic.AddInt32(&s.listCalls, 1)
 	if s.listFunc != nil {
 		return s.listFunc(ctx)
 	}
@@ -596,5 +600,329 @@ func TestNew_RejectsNonPositiveInterval(t *testing.T) {
 		if _, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, interval, logger); err == nil {
 			t.Fatalf("New with interval=%s: expected error, got nil", interval)
 		}
+	}
+}
+
+// --- Overlap guard (D-09) ---
+
+func TestMusicBrainzCycle_OverlapGuard_SkipsWhileInFlight(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return []musicbrainz.ReleaseGroup{}, nil
+	}}
+	logger, buf := newTestLogger()
+	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the first cycle to start")
+	}
+
+	err := p.RunMusicBrainzCycle(context.Background())
+	if !errors.Is(err, ErrCycleInProgress) {
+		t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
+	}
+	if got := atomic.LoadInt32(&store.listCalls); got != 1 {
+		t.Fatalf("store.listCalls = %d, want 1 (the skipped tick must perform zero store reads)", got)
+	}
+	if got := atomic.LoadInt32(&mb.calls); got != 1 {
+		t.Fatalf("mb.calls = %d, want 1 (the skipped tick must perform zero source calls)", got)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first RunMusicBrainzCycle: %v", err)
+	}
+
+	var warnFound bool
+	for _, rec := range decodeLogRecords(t, buf) {
+		if rec["level"] == "WARN" && rec["source"] == sourceMusicBrainz {
+			warnFound = true
+		}
+	}
+	if !warnFound {
+		t.Fatal("expected a warn-level log record naming the source for the skipped overlapping tick (D-09)")
+	}
+}
+
+func TestMusicBrainzCycle_GuardReleasesAfterCompletion_ThirdCallRunsNormally(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	mb := &fakeReleaseGroupSource{}
+	logger, _ := newTestLogger()
+	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
+
+	for i := 0; i < 3; i++ {
+		if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+			t.Fatalf("call %d: %v", i+1, err)
+		}
+	}
+	if got := atomic.LoadInt32(&mb.calls); got != 9 {
+		t.Fatalf("calls = %d, want 9 (3 cycles x 3 entries -- the guard must release after every completed cycle)", got)
+	}
+}
+
+func TestMusicBrainzCycle_GuardReleasesOnError(t *testing.T) {
+	callCount := 0
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
+		callCount++
+		if callCount == 1 {
+			return nil, errors.New("db down")
+		}
+		return nil, nil
+	}}
+	mb := &fakeReleaseGroupSource{}
+	logger, _ := newTestLogger()
+	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err == nil {
+		t.Fatal("expected an error from the first call")
+	}
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("second call after an error-returning cycle should run normally, got %v", err)
+	}
+}
+
+func TestMusicBrainzCycle_GuardReleasesOnPanic(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
+		return []watchlist.Entry{{MBID: "mbid-1", Name: "Artist One"}}, nil
+	}}
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		panic("boom")
+	}}
+	logger, _ := newTestLogger()
+	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
+
+	func() {
+		defer func() { _ = recover() }()
+		_ = p.RunMusicBrainzCycle(context.Background())
+	}()
+
+	if p.mbRunning.Load() {
+		t.Fatal("guard must be released after a panicking cycle -- a wedged flag would silently stop the source polling for the process's lifetime")
+	}
+
+	mb.fn = nil
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle after panic recovery: %v", err)
+	}
+}
+
+func TestDeezerCycle_RunsIndependentlyDuringMusicBrainzCycle(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return []musicbrainz.ReleaseGroup{}, nil
+	}}
+	dz := &fakeAlbumSource{}
+	logger, _ := newTestLogger()
+	p := newTestPoller(t, store, mb, dz, logger)
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the musicbrainz cycle to start")
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle while musicbrainz cycle is in flight: %v, want nil (the guards are independent, D-08)", err)
+	}
+	if got := atomic.LoadInt32(&dz.calls); got != 2 {
+		t.Fatalf("deezer calls = %d, want 2", got)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("musicbrainz cycle: %v", err)
+	}
+}
+
+// --- Cron registration ---
+
+func TestNew_RegistersTwoIndependentCronEntries(t *testing.T) {
+	logger, _ := newTestLogger()
+	store := &stubStore{}
+	p := newTestPoller(t, store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, logger)
+
+	if got := len(p.cron.Entries()); got != 2 {
+		t.Fatalf("len(cron.Entries()) = %d, want 2", got)
+	}
+}
+
+func TestNew_RegistersEveryIntervalSpecOnBothEntries(t *testing.T) {
+	logger, _ := newTestLogger()
+	for _, interval := range []time.Duration{15 * time.Minute, 90 * time.Second} {
+		t.Run(interval.String(), func(t *testing.T) {
+			store := &stubStore{}
+			p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, interval, logger)
+			if err != nil {
+				t.Fatalf("New(interval=%s): %v", interval, err)
+			}
+			entries := p.cron.Entries()
+			if len(entries) != 2 {
+				t.Fatalf("len(cron.Entries()) = %d, want 2", len(entries))
+			}
+			for _, entry := range entries {
+				schedule, ok := entry.Schedule.(cron.ConstantDelaySchedule)
+				if !ok {
+					t.Fatalf("entry.Schedule = %T, want cron.ConstantDelaySchedule (i.e. an @every spec)", entry.Schedule)
+				}
+				if schedule.Delay != interval {
+					t.Fatalf("entry delay = %s, want %s", schedule.Delay, interval)
+				}
+			}
+		})
+	}
+}
+
+func TestNew_ZeroOrNegativeIntervalRegistersNoCronEntry(t *testing.T) {
+	logger, _ := newTestLogger()
+	store := &stubStore{}
+	for _, interval := range []time.Duration{0, -1 * time.Second} {
+		p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, interval, logger)
+		if err == nil {
+			t.Fatalf("New(interval=%s): expected error, got nil", interval)
+		}
+		if p != nil {
+			t.Fatalf("New(interval=%s): expected nil Poller on error, got %+v", interval, p)
+		}
+	}
+}
+
+// --- Start / Stop ---
+//
+// cron.Cron.Stop()'s returned context only tracks jobs its own dispatch
+// loop started (via an internal sync.WaitGroup) -- a cycle invoked directly
+// by test code, bypassing cron, is invisible to it. So unlike the overlap
+// guard tests above, these three drive a real (short) interval and wait for
+// an actual cron tick, mirroring task 3's own real-tick lifecycle test.
+
+func TestStop_ReturnsNilOnceInFlightCycleFinishes(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
+		return []watchlist.Entry{{MBID: "mbid-1", Name: "Artist One"}}, nil
+	}}
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return []musicbrainz.ReleaseGroup{}, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, 50*time.Millisecond, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.Start(context.Background())
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for a real cron tick to start a cycle")
+	}
+
+	stopDone := make(chan error, 1)
+	go func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		stopDone <- p.Stop(stopCtx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+
+	if err := <-stopDone; err != nil {
+		t.Fatalf("Stop() = %v, want nil once the in-flight cycle drains", err)
+	}
+}
+
+func TestStop_ReturnsCallerContextErrorWhenCycleOutlivesIt(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
+		return []watchlist.Entry{{MBID: "mbid-1", Name: "Artist One"}}, nil
+	}}
+	started := make(chan struct{}, 1)
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		// Blocks until Stop cancels the retained cycle context (which only
+		// happens once the caller's Stop context has itself expired) --
+		// this is what proves Stop is bounded by the caller's context
+		// rather than blocking forever on a hung cycle.
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, 50*time.Millisecond, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.Start(context.Background())
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for a real cron tick to start a cycle")
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err = p.Stop(stopCtx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop() = %v, want context.DeadlineExceeded (the caller's context must bound the wait)", err)
+	}
+}
+
+func TestStop_NoFurtherCycleBeginsAfterStop(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
+	mb := &fakeReleaseGroupSource{}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, 30*time.Millisecond, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.Start(context.Background())
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&store.listCalls) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for at least one real cron tick")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop(): %v", err)
+	}
+
+	before := atomic.LoadInt32(&store.listCalls)
+	time.Sleep(150 * time.Millisecond) // several intervals' worth, had Stop not taken effect
+	after := atomic.LoadInt32(&store.listCalls)
+	if after != before {
+		t.Fatalf("store.listCalls changed from %d to %d after Stop -- a cycle began after Stop returned", before, after)
 	}
 }
