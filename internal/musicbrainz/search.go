@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -14,6 +15,22 @@ import (
 // ErrEmptyQuery is returned when SearchArtists is called with an
 // empty/whitespace-only query, before any outbound request is built.
 var ErrEmptyQuery = errors.New("musicbrainz: empty search query")
+
+// luceneSpecial matches every character (and the two-character operators
+// && / ||) that Lucene's query grammar treats specially. MusicBrainz's
+// /ws/2/artist search endpoint parses "query" as a Lucene expression, so an
+// unescaped caller-supplied string containing any of these either produces
+// a query MusicBrainz's parser rejects, or silently changes what is
+// matched (e.g. a stray OR/NOT widening or narrowing the search beyond the
+// literal string the user typed). See 03-REVIEW.md WR-01.
+var luceneSpecial = regexp.MustCompile(`([+\-!(){}\[\]^"~*?:\\]|&&|\|\|)`)
+
+// escapeLucene backslash-escapes every Lucene special character in s so it
+// is treated as a literal by MusicBrainz's query parser rather than as
+// query-grammar syntax.
+func escapeLucene(s string) string {
+	return luceneSpecial.ReplaceAllString(s, `\$1`)
+}
 
 // Artist is MusicBrainz's ws/2/artist search result shape, decoded from
 // the live-verified response documented in 03-RESEARCH.md. Only the fields
@@ -53,7 +70,7 @@ func (c *Client) SearchArtists(ctx context.Context, query string, limit int) ([]
 	// Lucene field-scoped form (artist:<query>) rather than a bare query,
 	// which would also match alias/sortname (03-RESEARCH.md Code
 	// Examples).
-	q.Set("query", "artist:"+trimmed)
+	q.Set("query", "artist:"+escapeLucene(trimmed))
 	q.Set("fmt", "json")
 	q.Set("limit", strconv.Itoa(clampLimit(limit)))
 	u.RawQuery = q.Encode()

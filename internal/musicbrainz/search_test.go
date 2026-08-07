@@ -156,6 +156,40 @@ func TestSearchArtists_QueryParams(t *testing.T) {
 	}
 }
 
+func TestSearchArtists_EscapesLuceneSpecialCharacters(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{name: "parentheses", query: "Wu-Tang (Clan)", want: `artist:Wu\-Tang \(Clan\)`},
+		{name: "colon and quote", query: `Weird: "Al"`, want: `artist:Weird\: \"Al\"`},
+		{name: "bracket and caret", query: "[Test]^3", want: `artist:\[Test\]\^3`},
+		{name: "boolean operators", query: "A && B || C", want: `artist:A \&& B \|| C`},
+		{name: "no special characters unchanged", query: "Drake", want: "artist:Drake"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotQuery string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.Query().Get("query")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(emptyFixture))
+			}))
+			defer ts.Close()
+
+			c := newTestClient(t, ts, "drop-tracker-test/1.0", unlimitedLimiter())
+			if _, err := c.SearchArtists(context.Background(), tt.query, 25); err != nil {
+				t.Fatalf("SearchArtists: %v", err)
+			}
+			if gotQuery != tt.want {
+				t.Errorf("query = %q, want %q", gotQuery, tt.want)
+			}
+		})
+	}
+}
+
 func TestSearchArtists_EmptyResultIsNonNilZeroLength(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
