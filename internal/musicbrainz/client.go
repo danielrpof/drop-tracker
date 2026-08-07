@@ -78,6 +78,18 @@ type ArtistSearcher interface {
 
 var _ ArtistSearcher = (*Client)(nil)
 
+// ReleaseGroupLister is the narrow seam plan 03-04's poller depends on,
+// mirroring ArtistSearcher (D-10): consumers depend on this interface,
+// never on *Client directly, so a test can substitute a stub with no real
+// HTTP client. Recordings-by-artist-credit (needed for Phase 4's
+// guest-feature detection) is deliberately absent until that phase's diff
+// logic needs it.
+type ReleaseGroupLister interface {
+	ReleaseGroupsByArtist(ctx context.Context, mbid string) ([]ReleaseGroup, error)
+}
+
+var _ ReleaseGroupLister = (*Client)(nil)
+
 // doRequest is the single request path for this package: it waits on
 // limiter before every call so no call site can bypass the rate limit
 // (D-07, T-03-08), then sets the identifying headers MusicBrainz's
