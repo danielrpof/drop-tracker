@@ -1,6 +1,6 @@
 // Command server is drop-tracker's single process entrypoint. It runs the
-// HTTP API today and will run the robfig/cron scheduler in this same
-// process starting Phase 3 — PROJECT.md locks a single-binary architecture.
+// HTTP API and the robfig/cron scheduler in this same process — PROJECT.md
+// locks a single-binary architecture.
 package main
 
 import (
@@ -22,6 +22,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
+	"github.com/danielrpof/drop-tracker/internal/poller"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
@@ -30,6 +31,11 @@ import (
 // (WR-03), so an operator-issued stop cannot hang the process indefinitely
 // if a handler never completes.
 const shutdownTimeout = 10 * time.Second
+
+// pollDrainTimeout bounds how long shutdown waits for an in-flight poll
+// cycle to finish before giving up, mirroring shutdownTimeout's reasoning:
+// a hung upstream must not make the process unkillable.
+const pollDrainTimeout = 10 * time.Second
 
 // HTTP server timeouts (WR-02): an http.Server with all zero-value timeouts
 // lets a client that opens a connection and sends headers/body slowly (or
@@ -108,6 +114,32 @@ func run() error {
 		httpserver.NewMusicBrainzSource(mbClient),
 		httpserver.NewDeezerSource(dzClient),
 	}, logger)
+
+	// pollr reuses the same mbClient/dzClient instances handed to
+	// httpserver.New above rather than constructing its own -- sharing the
+	// instance is what makes each source's rate.Limiter a whole-process
+	// budget: search traffic and poll traffic draw from the same token
+	// bucket, so a burst of /search calls can never push the combined
+	// outbound rate past what the operator configured (D-07).
+	pollr, err := poller.New(store, mbClient, dzClient, cfg.PollInterval, logger)
+	if err != nil {
+		return fmt.Errorf("build poller: %w", err)
+	}
+	pollr.Start(ctx)
+	// Deferred AFTER defer pool.Close() (above) so Go's LIFO defer ordering
+	// guarantees this drain runs *before* the pool closes -- a poll cycle
+	// still mid-request when the pool closes would surface as an
+	// intermittent connection error at shutdown, indistinguishable from
+	// data corruption rather than a shutdown race (03-RESEARCH.md pitfall
+	// 4). Do not move this defer earlier in the function: doing so would
+	// silently reverse the drain-before-close ordering it depends on.
+	defer func() {
+		drainCtx, cancel := context.WithTimeout(context.Background(), pollDrainTimeout)
+		defer cancel()
+		if err := pollr.Stop(drainCtx); err != nil {
+			logger.Error("poller drain failed", "poller_error", err.Error())
+		}
+	}()
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	httpSrv := &http.Server{

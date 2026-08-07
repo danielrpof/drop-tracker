@@ -926,3 +926,42 @@ func TestStop_NoFurtherCycleBeginsAfterStop(t *testing.T) {
 		t.Fatalf("store.listCalls changed from %d to %d after Stop -- a cycle began after Stop returned", before, after)
 	}
 }
+
+// TestPoller_StartStop_LifecycleWithRealCronTick is the only test in this
+// file that exercises a real cron tick end to end (Start -> at least one
+// real dispatch -> Stop) rather than driving a cycle method directly --
+// kept to a short interval and an explicit deadline so it stays well under
+// a second.
+func TestPoller_StartStop_LifecycleWithRealCronTick(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
+	mb := &fakeReleaseGroupSource{}
+	dz := &fakeAlbumSource{}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, dz, 50*time.Millisecond, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	p.Start(context.Background())
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&store.listCalls) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for at least one real cron tick to drive a cycle")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop() = %v, want nil", err)
+	}
+
+	before := atomic.LoadInt32(&store.listCalls)
+	time.Sleep(150 * time.Millisecond)
+	after := atomic.LoadInt32(&store.listCalls)
+	if after != before {
+		t.Fatalf("store.listCalls changed from %d to %d after Stop -- no further calls should arrive once Stop has returned", before, after)
+	}
+}
