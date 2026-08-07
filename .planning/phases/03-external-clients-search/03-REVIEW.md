@@ -2,7 +2,7 @@
 phase: 03-external-clients-search
 reviewed: 2026-08-07T00:00:00Z
 depth: standard
-files_reviewed: 20
+files_reviewed: 21
 files_reviewed_list:
   - cmd/server/main.go
   - go.mod
@@ -28,9 +28,9 @@ files_reviewed_list:
   - internal/poller/poller_test.go
 findings:
   critical: 0
-  warning: 3
-  info: 2
-  total: 5
+  warning: 2
+  info: 5
+  total: 7
 status: issues_found
 ---
 
@@ -38,30 +38,26 @@ status: issues_found
 
 **Reviewed:** 2026-08-07
 **Depth:** standard
-**Files Reviewed:** 20 (source) + test files
+**Files Reviewed:** 21
 **Status:** issues_found
 
 ## Summary
 
-This phase adds hand-rolled MusicBrainz and Deezer clients, the `GET /search` fan-out endpoint, and the cron-driven poller. The implementation is disciplined about the things the design docs call out explicitly: rate limiting is enforced on every outbound call through a single `doRequest` seam in both clients, upstream error text is never echoed to callers (verified by dedicated leak tests), context cancellation is respected throughout, and the overlap-guard/graceful-shutdown logic in `poller.go` and `main.go` is well reasoned and heavily tested (including the panic-releases-the-guard and cancel-mid-drain cases).
+This phase adds hand-rolled MusicBrainz and Deezer clients, the `GET /search` fan-out endpoint, and the cron-driven poller. Traced through both clients' `doRequest` seams, the pagination/overlap-guard logic in `poller.go`, and the shutdown/draining sequence in `cmd/server/main.go`: rate limiting is genuinely enforced on every outbound call (no call site bypasses `doRequest`), upstream error text is never echoed to `GET /search` callers, URL construction correctly escapes path segments (`url.PathEscape`) and query params (`url.Values.Encode`) so there's no path-traversal/redirect vector, context cancellation is honored end-to-end, and the LIFO-defer ordering that drains the poller before closing the DB pool in `main.go` is correct. No crash, data-loss, or security-boundary defect was found.
 
-No blocker-level defects were found. Two warning-level issues affect correctness/robustness of the two external-facing features this phase adds (search relevance and Deezer catalog completeness), and a couple of minor inconsistencies are noted as info.
+Two warning-level issues remain: unescaped user input flowing into MusicBrainz's Lucene query grammar, and an asymmetry between the two clients' pagination behavior that will become a real data-completeness bug once Phase 4 builds diff logic on top of it. The rest are maintainability/consistency notes.
 
 ## Warnings
 
 ### WR-01: MusicBrainz search query is not escaped for Lucene special characters
 
-**File:** `internal/musicbrainz/search.go:52-56`
-**Issue:** `SearchArtists` builds the MusicBrainz Lucene query by raw string concatenation:
+**File:** `internal/musicbrainz/search.go:52-59`
+**Issue:** `SearchArtists` concatenates the caller-supplied, trimmed query directly into MusicBrainz's Lucene query grammar with no escaping:
 ```go
-q := url.Values{}
 q.Set("query", "artist:"+trimmed)
 ```
-`trimmed` is the caller-supplied search string, forwarded verbatim into MusicBrainz's Lucene query grammar. Lucene treats `" ( ) [ ] { } ^ ~ * ? : \ + - ! AND OR NOT`-style tokens specially. A user searching for an artist name/alias containing any of these (parentheses in a disambiguation-style name, a leading `-` or `!`, an embedded `:`/`"`, etc.) will either get a query MusicBrainz's parser rejects outright (surfacing to the client as `"musicbrainz": {"status": "error"}` — search silently degraded) or, more subtly, a query that means something different than the literal artist name (e.g. a stray `OR`/`AND`/`NOT` token widening or narrowing the match in a way the user never intended). This is unescaped user input flowing into a structured query DSL — the same bug class as the SQL/NoSQL injection family, just against a read-only public search API rather than this service's own data store, so it degrades search relevance/availability rather than crossing a security boundary.
-
-There is no test in `internal/musicbrainz/search_test.go` covering a query containing Lucene metacharacters, which is why this gap wasn't caught.
-
-**Fix:** Escape Lucene special characters before concatenation (or quote the whole term and escape embedded quotes), e.g.:
+Lucene gives special meaning to `+ - ! ( ) { } [ ] ^ " ~ * ? : \ && ||` and the bare tokens `AND`/`OR`/`NOT`. An artist name or user-typed query containing any of these (e.g. a disambiguation-style name with parentheses, an embedded `:` or `"`, a leading `-`) either produces a query MusicBrainz's parser rejects — which `handleSearch` degrades to `"status":"error"` for that source, not a client-visible parse error — or silently changes what is matched (a stray `OR`/`NOT` widening/narrowing the search beyond the literal string the user typed). `maxSearchQueryRunes` in `internal/httpserver/search.go:22` bounds length but does nothing about grammar. There is no test in `internal/musicbrainz/search_test.go` exercising a query containing any Lucene metacharacter, so this gap has no regression coverage.
+**Fix:** Escape (or quote-and-escape) the term before concatenation:
 ```go
 var luceneSpecial = regexp.MustCompile(`([+\-!(){}\[\]^"~*?:\\]|&&|\|\|)`)
 
@@ -71,45 +67,71 @@ func escapeLucene(s string) string {
 ...
 q.Set("query", "artist:"+escapeLucene(trimmed))
 ```
-and add a test asserting a query like `Wu-Tang (Clan)` round-trips as a literal artist-name search rather than a parse error or unintended boolean query.
+and add a fixture-backed test asserting a query like `Wu-Tang (Clan)` round-trips as a literal artist-name search.
 
-### WR-02: Deezer's `ArtistAlbums` has no pagination, unlike MusicBrainz's `ReleaseGroupsByArtist`
+### WR-02: `deezer.ArtistAlbums` has no pagination, unlike `musicbrainz.ReleaseGroupsByArtist`
 
-**File:** `internal/deezer/albums.go:56-103`, `internal/poller/poller.go:36,259`
-**Issue:** `musicbrainz.ReleaseGroupsByArtist` explicitly paginates (bounded, sequential, up to `maxReleaseGroupPages * releaseGroupPageSize` = 1000 release-groups) so a prolific artist's full discography is fetched. `deezer.ArtistAlbums` has no equivalent loop — it issues exactly one request, capped by `clampLimit` at `maxLimit` (100), and the poller calls it with a fixed `deezerAlbumPageSize = 50`:
+**File:** `internal/deezer/albums.go:56-103`, `internal/poller/poller.go:34-36,259`
+**Issue:** `ReleaseGroupsByArtist` explicitly paginates, bounded and sequential, up to `maxReleaseGroupPages * releaseGroupPageSize` (1000) release-groups. `ArtistAlbums` has no equivalent loop: it issues exactly one request, capped by `clampLimit` at 100, and the poller calls it with a fixed page size of 50:
 ```go
+const deezerAlbumPageSize = 50
+...
 albums, err := p.dz.ArtistAlbums(ctx, *entry.DeezerID, deezerAlbumPageSize)
 ```
-This phase's poller only logs `item_count` and does no diffing yet (by design, per the package doc comment), but the client-level gap will carry forward unchanged into Phase 4's diff logic, where it becomes a real data-completeness bug: any watched artist with more than 50 albums/singles/EPs on Deezer (the package's own test fixture cites a `"total": 78` example) will have older catalog entries silently never fetched, and if Deezer's ordering ever changes or isn't strictly newest-first, a *new* release could fall outside the 50-item window and never be seen. Nothing in the code or comments documents an assumption about Deezer's default sort order that would justify skipping pagination here (contrast with `ReleaseGroupsByArtist`'s explicit T-03-12 reasoning for *why* MusicBrainz needs bounded pagination).
-
-**Fix:** Either (a) add a bounded pagination loop to `ArtistAlbums` mirroring `ReleaseGroupsByArtist`'s shape (sequential, capped, terminate on short/empty page), or (b) if single-page is intentional because Deezer returns newest-first, add a comment recording that assumption plus a test proving the assumption against a live-verified fixture, so a future reader/Phase-4 implementer doesn't have to rediscover the limitation.
-
-### WR-03: Duplicate hardcoded 10s shutdown timeouts in `main.go`
-
-**File:** `cmd/server/main.go:33,38`
-**Issue:** `shutdownTimeout` and `pollDrainTimeout` are two independently declared constants that both happen to be `10 * time.Second`. There's no structural link between them, so a future change to one (e.g. lengthening HTTP shutdown grace) is easy to make without noticing the poller drain budget should probably move too, or vice versa.
-**Fix:** Not urgent, but consider either a single shared constant with a comment explaining both timeouts intentionally share a budget, or distinct comments explicitly noting they are allowed to diverge.
+This phase's poller only logs `item_count` and writes nothing (D-04), so nothing breaks *today*. But the client-level gap carries forward unchanged: any watched artist with more than 50 Deezer catalog entries (the package's own fixture cites `"total": 78`) will silently never have its older releases fetched, and Phase 4's diff logic will inherit that truncation as a real data-completeness bug — a release could fall outside the 50-item window and never be detected. Nothing in the code documents an assumption about Deezer's sort order (e.g. "newest first, so a fixed window is safe") that would justify skipping pagination, in contrast to `ReleaseGroupsByArtist`'s explicit reasoning for why MusicBrainz needs the bounded loop it has.
+**Fix:** Either add a bounded pagination loop to `ArtistAlbums` mirroring `ReleaseGroupsByArtist`'s shape (sequential, capped, terminate on a short/empty page), or, if a single page is intentional because Deezer returns newest-first, record that assumption in a comment and add a test proving it against a live-verified fixture so Phase 4 doesn't have to rediscover the limitation the hard way.
 
 ## Info
 
-### IN-01: Inconsistent empty-`Type` fallback between search source adapters
+### IN-01: Inconsistent empty-`Type` fallback between the two search source adapters
 
 **File:** `internal/httpserver/search.go:82-104` (musicBrainzSource) vs `internal/httpserver/search.go:123-149` (deezerSource)
-**Issue:** `deezerSource.SearchArtists` defaults an empty upstream `Type` to `"artist"`:
+**Issue:** `deezerSource.SearchArtists` falls back an empty upstream `Type` to `"artist"`:
 ```go
 artistType := a.Type
 if artistType == "" {
     artistType = "artist"
 }
 ```
-`musicBrainzSource.SearchArtists` has no equivalent fallback — `Type: a.Type` is passed through as-is, so a MusicBrainz artist with an unset `type` field (a legitimate, documented MusicBrainz state) surfaces as `"type": ""` in the API response while the equivalent Deezer case surfaces as `"type": "artist"`. A frontend consuming this endpoint has to special-case per-source blank handling even though the response envelope is deliberately source-agnostic (D-01/D-02).
-**Fix:** Either apply the same `"artist"` fallback to the MusicBrainz adapter for consistency, or document why the two sources intentionally differ here.
+`musicBrainzSource.SearchArtists` has no equivalent — `Type: a.Type` passes through empty MusicBrainz `type` fields (a legitimate MusicBrainz state) as `"type": ""`, while the same situation on Deezer surfaces as `"type": "artist"`. The response envelope is deliberately source-agnostic (D-01/D-02), so this asymmetry pushes a per-source special case onto every consumer of `GET /search`.
+**Fix:** Apply the same fallback to `musicBrainzSource`, or add a comment explaining why the two sources are allowed to diverge here.
 
 ### IN-02: `RunMusicBrainzCycle`/`RunDeezerCycle` duplicate a large amount of boilerplate
 
 **File:** `internal/poller/poller.go:175-277`
-**Issue:** The two cycle methods (guard CAS, cycle-ID stamping, `store.List`, per-entry loop with `ctx.Err()` check, per-artist error logging, success logging) are structurally identical except for the source-specific call and the Deezer nil-check branch. This is a reasonable amount of duplication for two methods this size, but as Phase 4 adds a third/fourth source or diff logic, the duplicated skeleton will make it easy for a future edit to fix a bug in one cycle and forget the other (as already nearly happened with the guard/log-field parity between the two — currently they match, but nothing enforces that they continue to).
-**Fix:** Consider extracting a shared `runCycle(ctx, source string, running *atomic.Bool, fn func(watchlist.Entry) (int, error))` helper once a third call site exists; not necessary to do now given only two sources.
+**Issue:** The overlap-guard CAS, cycle-ID stamping, `store.List` call, per-entry loop with `ctx.Err()` check, per-artist error logging, and success logging are structurally identical between the two methods, differing only in the source-specific call and Deezer's nil-`DeezerID` skip branch. Currently the guard/log-field shape matches between the two, but nothing enforces that a future fix applied to one method also lands on the other.
+**Fix:** Consider extracting a shared `runCycle(ctx, source string, running *atomic.Bool, fn func(watchlist.Entry) (int, error)) error` helper once a third poll source exists; not necessary at two call sites.
+
+### IN-03: `doRequest`/`cancelReadCloser`/`clampLimit` are duplicated near-verbatim across the two client packages
+
+**File:** `internal/musicbrainz/client.go:33-37,112-164` vs `internal/deezer/client.go:22-37,147-196`
+**Issue:** Both packages independently define the same `maxLimit`/`defaultLimit` constants, the same `doRequest` timeout-wrapping/rate-limiting/header-setting sequence, the same `cancelReadCloser` body-wrapper type, and the same `clampLimit` function — differing only in the MusicBrainz variant setting a `User-Agent` header. This is ~70 lines of copy-pasted plumbing per package; a bug fix (e.g. to the cancel-func lifecycle, which is subtle enough to warrant its own paragraph of comments in both files) has to be applied twice by hand.
+**Fix:** Not urgent given only two clients exist, but if a third external client is added in a later phase, consider extracting a shared `internal/httpclient` package providing the rate-limited-`doRequest` + `cancelReadCloser` + `clampLimit` seam, parameterized by an optional header-setter.
+
+### IN-04: `shutdownTimeout` and `pollDrainTimeout` are two independently declared 10s constants
+
+**File:** `cmd/server/main.go:33,38`
+**Issue:** Both constants are `10 * time.Second` with no structural link between them:
+```go
+const shutdownTimeout = 10 * time.Second
+...
+const pollDrainTimeout = 10 * time.Second
+```
+A future change to one budget (e.g. lengthening the HTTP graceful-shutdown window) is easy to make without noticing the poller drain budget probably should move too, or without an explicit note that they're allowed to diverge.
+**Fix:** Either share one constant with a comment explaining both timeouts intentionally use the same budget, or add a comment on each noting they're independently tunable.
+
+### IN-05: `TestSearch_FanOutIsConcurrent` proves concurrency via a fixed sleep, which can flake under a loaded runner
+
+**File:** `internal/httpserver/search_test.go:264-312`
+**Issue:** The test starts two blocking source goroutines, then does
+```go
+time.Sleep(150 * time.Millisecond)
+mu.Lock()
+got := maxInFlight
+mu.Unlock()
+```
+to give both goroutines "a chance to reach the blocking point" before asserting `maxInFlight >= 2`. On a sufficiently starved CI runner (goroutine scheduling delay, GC pause, or a loaded shared build agent), 150ms may not be enough for both goroutines to have been scheduled and incremented `inFlight` before the assertion runs, producing an intermittent, hard-to-reproduce test failure unrelated to the code under test.
+**Fix:** Not urgent (150ms is a generous margin for two goroutines that do no real work before blocking), but a synchronization-based version — e.g. each source goroutine signals a `sync.WaitGroup`/channel on entry, and the test waits on both signals before reading `maxInFlight` — would remove the timing dependency entirely.
 
 ---
 
