@@ -27,24 +27,29 @@ type Pinger interface {
 type Server struct {
 	db        Pinger
 	watchlist watchlist.Store
+	sources   []SearchSource
 	router    http.Handler
 }
 
-// New builds a Server backed by db, store and logging through logger. The
-// chi middleware stack runs in this order: middleware.RequestID first so
-// the correlation ID exists in context for everything downstream, then
-// echoRequestID so the client can see the same ID via the X-Request-Id
-// response header, then httplog.RequestLogger so every request/response
-// emits a structured JSON log line carrying that ID (via LogExtraAttrs,
-// since httplog's own schema has no built-in request-ID field), then
-// middleware.Recoverer so a panic in a handler is converted into a 500
-// instead of crashing the process.
+// New builds a Server backed by db, store, sources and logging through
+// logger. The chi middleware stack runs in this order: middleware.RequestID
+// first so the correlation ID exists in context for everything downstream,
+// then echoRequestID so the client can see the same ID via the
+// X-Request-Id response header, then httplog.RequestLogger so every
+// request/response emits a structured JSON log line carrying that ID (via
+// LogExtraAttrs, since httplog's own schema has no built-in request-ID
+// field), then middleware.Recoverer so a panic in a handler is converted
+// into a 500 instead of crashing the process.
 //
 // store is a second, separate dependency rather than a widened Pinger --
 // widening Pinger's method set would break stubPinger, which today only
 // implements Ping (health_test.go).
-func New(db Pinger, store watchlist.Store, logger *slog.Logger) *Server {
-	s := &Server{db: db, watchlist: store}
+//
+// sources is a slice rather than one parameter per source (D-01, D-02) so
+// adding a source -- plan 03-02's Deezer -- is an append at the call site
+// instead of a signature change across every test.
+func New(db Pinger, store watchlist.Store, sources []SearchSource, logger *slog.Logger) *Server {
+	s := &Server{db: db, watchlist: store, sources: sources}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -63,6 +68,7 @@ func New(db Pinger, store watchlist.Store, logger *slog.Logger) *Server {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/health", s.handleHealth)
+	r.Get("/search", s.handleSearch)
 	r.Post("/watchlist", s.handleAddWatchlist)
 	r.Get("/watchlist", s.handleListWatchlist)
 	r.Patch("/watchlist/{id}", s.handleUpdateWatchlist)

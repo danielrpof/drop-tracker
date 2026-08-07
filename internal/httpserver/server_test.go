@@ -80,7 +80,7 @@ func newCapturingServer(t *testing.T, buf *syncBuffer) *httpserver.Server {
 
 	logger := logging.NewWithWriter(cfg, buf)
 	stub := stubPinger{pingFunc: func(context.Context) error { return nil }}
-	return httpserver.New(stub, stubStore{}, logger)
+	return httpserver.New(stub, stubStore{}, nil, logger)
 }
 
 func TestRequestID(t *testing.T) {
@@ -200,7 +200,7 @@ func TestNoDSNInLogs(t *testing.T) {
 	buf := &syncBuffer{}
 	logger := logging.NewWithWriter(cfg, buf)
 	stub := stubPinger{pingFunc: func(context.Context) error { return nil }}
-	srv := httpserver.New(stub, stubStore{}, logger)
+	srv := httpserver.New(stub, stubStore{}, nil, logger)
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 

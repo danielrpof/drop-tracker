@@ -13,11 +13,14 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/danielrpof/drop-tracker/internal/config"
 	"github.com/danielrpof/drop-tracker/internal/db"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
+	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
@@ -80,7 +83,15 @@ func run() error {
 	defer pool.Close()
 
 	store := watchlist.NewService(sqlc.New(pool))
-	srv := httpserver.New(pool, store, logger)
+
+	// Exactly one *musicbrainz.Client and one rate.Limiter for the whole
+	// process (D-07) -- plan 03-04's poller reuses this same instance, so
+	// total outbound MusicBrainz rate stays bounded across search traffic
+	// and poll traffic together, not per-caller (T-03-08).
+	mbLimiter := rate.NewLimiter(rate.Limit(cfg.MusicBrainzRateLimitPerSec), 1)
+	mbClient := musicbrainz.NewClient(cfg.MusicBrainzUserAgent, mbLimiter, nil)
+
+	srv := httpserver.New(pool, store, []httpserver.SearchSource{httpserver.NewMusicBrainzSource(mbClient)}, logger)
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	httpSrv := &http.Server{

@@ -50,7 +50,7 @@ func TestBootToHealth_EndToEnd(t *testing.T) {
 	defer pool.Close()
 
 	store := watchlist.NewService(sqlc.New(pool))
-	srv := httpserver.New(pool, store, logger)
+	srv := httpserver.New(pool, store, nil, logger)
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
