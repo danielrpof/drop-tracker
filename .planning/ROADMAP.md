@@ -107,12 +107,12 @@ Plans:
   2. System polls MusicBrainz for each watchlisted artist on a configurable schedule without exceeding MusicBrainz's rate limit
   3. System polls Deezer for each watchlisted artist on a configurable schedule without exceeding Deezer's rate limit
 
-**Plans**: 4 plans
+**Plans**: 1/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — Tracer: `GET /search?q=` end-to-end via a rate-limited, User-Agent-identified MusicBrainz client, with the source-keyed response envelope and the widened `httpserver.New`
+- [x] 03-01-PLAN.md — Tracer: `GET /search?q=` end-to-end via a rate-limited, User-Agent-identified MusicBrainz client, with the source-keyed response envelope and the widened `httpserver.New`
 
 **Wave 2** *(blocked on Wave 1)*
 
@@ -194,7 +194,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Foundation — Data Layer, Config & Health | 5/5 | Complete    | 2026-08-05 |
 | 2. Watchlist Core | 8/8 | Complete    | 2026-08-06 |
-| 3. External Clients & Search | 0/4 | Planned     | - |
+| 3. External Clients & Search | 1/4 | In Progress|  |
 | 4. Detection Engine | 0/TBD | Not started | - |
 | 5. Discord Notifications | 0/TBD | Not started | - |
 | 6. Frontend & Release History | 0/TBD | Not started | - |

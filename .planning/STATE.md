@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 3
-current_phase_name: External Clients & Search
+current_phase: 03
+current_phase_name: external-clients-search
 status: executing
-stopped_at: Phase 03 context gathered
-last_updated: "2026-08-07T21:05:42.442Z"
-last_activity: 2026-08-06
-last_activity_desc: Phase 02 complete, transitioned to Phase 3
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-08-07T22:01:09.979Z"
+last_activity: 2026-08-07
+last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 17
-  completed_plans: 13
+  completed_plans: 14
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 02 — watchlist-core
+**Current focus:** Phase 03 — external-clients-search
 
 ## Current Position
 
-Phase: 3 — External Clients & Search
-Plan: Not started
+Phase: 03 (external-clients-search) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-08-06 — Phase 02 complete, transitioned to Phase 3
+Last activity: 2026-08-07 — Phase 03 execution started
 
-Progress: [██████████] 100%
+Progress: [████████░░] 82%
 
 ## Performance Metrics
 
@@ -72,6 +72,7 @@ Progress: [██████████] 100%
 | Phase 02 P06 | 25min | 2 tasks | 6 files |
 | Phase 02 P07 | 40min | 2 tasks | 4 files |
 | Phase 02 P08 | 15min | 2 tasks | 3 files |
+| Phase 03 P01 | 20min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -106,6 +107,9 @@ Recent decisions affecting current work:
 - [Phase ?]: quick/260806-hfn: gitleaks pre-commit hook added and proven end-to-end; full-history scan found 4 pre-existing findings (fake test-fixture password), resolved via documented acceptance (not suppression) after 4 human checkpoints -- no history rewrite, no force-push
 - [Phase ?]: [Phase 02-07]: Closed gap G-02-1 (WR-01, WR-02) -- moved the neither-axis PATCH guard into Service.UpdatePreferences as ErrNoPreferencesSupplied (first statement, ahead of validation and the id lookup) and replaced both hand-copied JSON decode blocks in internal/httpserver/watchlist.go with a shared decodeJSONBody helper that rejects a body carrying a second JSON value
 - [Phase ?]: [Phase 02-08]: Closed gap G-02-2 (CR-01) -- added kvPasswordPattern to redactError for libpq keyword/value-form and query-parameter DSN passwords, gated by a unit-level dsnFixtures table shared with redactDSN since the reachable pgconn.ParseConfig failure path does not currently leak under pinned pgx v5.10.0's own self-redaction
+- [Phase ?]: [Phase 03-01]: doRequest wraps ctx in context.WithTimeout only when httpClient.Timeout > 0 -- a zero Timeout means unbounded in net/http's convention, and wrapping it unconditionally created an already-expired deadline that failed every httptest.Server-backed test
+- [Phase ?]: [Phase 03-01]: the WithTimeout cancel func is attached to the response body via a cancelReadCloser instead of deferred in doRequest, so the deadline bounds the caller's body read without truncating a healthy response
+- [Phase ?]: [Phase 03-01]: WLST-01 and CLNT-03 left unmarked in REQUIREMENTS.md -- both require MusicBrainz AND Deezer; plan 03-02 (which also lists both IDs) is deferred to close them
 
 ### Pending Todos
 
@@ -131,6 +135,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-06T21:07:54.091Z
-Stopped at: Phase 03 context gathered
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/03-external-clients-search/03-CONTEXT.md
+Last session: 2026-08-07T22:01:09.945Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None

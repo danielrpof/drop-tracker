@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 2
+open_count: 3
 waived_count: 0
 fixed_count: 0
-total_count: 2
-last_updated: 2026-08-06T18:05:12.264Z
+total_count: 3
+last_updated: 2026-08-07T22:00:10.701Z
 ---
 
 # Broken Windows Ledger
@@ -17,6 +17,7 @@ last_updated: 2026-08-06T18:05:12.264Z
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
 | 1 | 02 | stub | internal/watchlist/service.go |  | List/UpdatePreferences/Remove return errNotImplemented; no route registered against any of them until plans 02-03/02-04 fill the bodies | open |  | 2026-08-06T00:53:49.438Z |  |
 | 2 | quick-260806-hfn | deviation | internal/db/migrate_test.go |  | gitleaks history scan found 4 findings (fake DSN test-fixture password, no real credential) in commits fc3c02d/1dc505a/25c285c; accepted per human decision, not suppressed via .gitleaksignore -- see 260806-hfn-SUMMARY.md | open |  | 2026-08-06T18:05:12.264Z |  |
+| 3 | 03 | unrun-verify | internal/httpserver/search.go |  | Live happy-path human-check (curl against running binary + real musicbrainz.org, confirming real Drake artist results) could not run in this sandbox: no outbound TLS egress to musicbrainz.org. D-03 degraded-path behavior was confirmed live instead (200 with status:error, no leaked text). | open |  | 2026-08-07T22:00:10.701Z |  |
 
 ````json
 [
@@ -42,6 +43,18 @@ last_updated: 2026-08-06T18:05:12.264Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-06T18:05:12.264Z",
+    "resolved_at": null
+  },
+  {
+    "id": 3,
+    "kind": "unrun-verify",
+    "phase": "03",
+    "file": "internal/httpserver/search.go",
+    "line": null,
+    "description": "Live happy-path human-check (curl against running binary + real musicbrainz.org, confirming real Drake artist results) could not run in this sandbox: no outbound TLS egress to musicbrainz.org. D-03 degraded-path behavior was confirmed live instead (200 with status:error, no leaked text).",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-07T22:00:10.701Z",
     "resolved_at": null
   }
 ]
