@@ -18,7 +18,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### External Clients
 
-- [ ] **CLNT-01**: System polls MusicBrainz for each watchlisted artist on a configurable schedule, respecting MusicBrainz's rate limit
+- [x] **CLNT-01**: System polls MusicBrainz for each watchlisted artist on a configurable schedule, respecting MusicBrainz's rate limit
 - [x] **CLNT-02**: System polls Deezer for each watchlisted artist on a configurable schedule, respecting Deezer's rate limit
 - [x] **CLNT-03**: System exposes a live search-proxy endpoint that queries MusicBrainz and Deezer catalogs in real time
 
@@ -112,7 +112,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | WLST-05 | Phase 2 | Complete |
 | WLST-06 | Phase 2 | Complete |
 | WLST-01 | Phase 3 | Complete |
-| CLNT-01 | Phase 3 | Pending |
+| CLNT-01 | Phase 3 | Complete |
 | CLNT-02 | Phase 3 | Complete |
 | CLNT-03 | Phase 3 | Complete |
 | DTCT-01 | Phase 4 | Pending |
