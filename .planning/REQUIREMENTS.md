@@ -9,7 +9,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Watchlist
 
-- [ ] **WLST-01**: User can search MusicBrainz and Deezer catalogs to find an artist to add to the watchlist
+- [x] **WLST-01**: User can search MusicBrainz and Deezer catalogs to find an artist to add to the watchlist
 - [x] **WLST-02**: User can add an artist to the watchlist from search results
 - [x] **WLST-03**: User can remove an artist from the watchlist
 - [x] **WLST-04**: User can list all artists currently on the watchlist
@@ -19,8 +19,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### External Clients
 
 - [ ] **CLNT-01**: System polls MusicBrainz for each watchlisted artist on a configurable schedule, respecting MusicBrainz's rate limit
-- [ ] **CLNT-02**: System polls Deezer for each watchlisted artist on a configurable schedule, respecting Deezer's rate limit
-- [ ] **CLNT-03**: System exposes a live search-proxy endpoint that queries MusicBrainz and Deezer catalogs in real time
+- [x] **CLNT-02**: System polls Deezer for each watchlisted artist on a configurable schedule, respecting Deezer's rate limit
+- [x] **CLNT-03**: System exposes a live search-proxy endpoint that queries MusicBrainz and Deezer catalogs in real time
 
 ### Detection
 
@@ -111,10 +111,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | WLST-04 | Phase 2 | Complete |
 | WLST-05 | Phase 2 | Complete |
 | WLST-06 | Phase 2 | Complete |
-| WLST-01 | Phase 3 | Pending |
+| WLST-01 | Phase 3 | Complete |
 | CLNT-01 | Phase 3 | Pending |
-| CLNT-02 | Phase 3 | Pending |
-| CLNT-03 | Phase 3 | Pending |
+| CLNT-02 | Phase 3 | Complete |
+| CLNT-03 | Phase 3 | Complete |
 | DTCT-01 | Phase 4 | Pending |
 | DTCT-02 | Phase 4 | Pending |
 | DTCT-03 | Phase 4 | Pending |
