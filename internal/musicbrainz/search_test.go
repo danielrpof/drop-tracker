@@ -277,3 +277,38 @@ func TestSearchArtists_CancelledContextMakesZeroRequests(t *testing.T) {
 		t.Fatalf("requestCount = %d, want 0 (a cancelled context must not reach the server)", got)
 	}
 }
+
+// TestSearchArtists_TimeoutReturnsWrappedDeadlineExceeded proves T-03-03:
+// an upstream that never responds must fail within the client's own
+// timeout, not block indefinitely and not stall a caller (e.g. plan
+// 03-04's sequential poll loop) that waits on it.
+func TestSearchArtists_TimeoutReturnsWrappedDeadlineExceeded(t *testing.T) {
+	block := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-block // never responds within the test's lifetime
+	}))
+	defer func() {
+		close(block)
+		ts.Close()
+	}()
+
+	c := newTestClient(t, ts, "drop-tracker-test/1.0", unlimitedLimiter())
+	c.httpClient = &http.Client{Timeout: 200 * time.Millisecond}
+
+	start := time.Now()
+	artists, err := c.SearchArtists(context.Background(), "drake", 25)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("SearchArtists: got nil error, want a timeout error")
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("elapsed = %v, want SearchArtists to return promptly rather than block indefinitely", elapsed)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("SearchArtists error = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+	if artists != nil {
+		t.Fatalf("artists = %v, want nil", artists)
+	}
+}
