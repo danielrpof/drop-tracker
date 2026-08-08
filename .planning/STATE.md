@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: detection-engine
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-08-08T02:38:46.248Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-08-08T02:58:23.877Z"
 last_activity: 2026-08-07
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 21
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-08)
 ## Current Position
 
 Phase: 04 (detection-engine) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-08-07 — Phase 04 execution started
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -78,6 +78,7 @@ Progress: [█████████░] 86%
 | Phase 03 P03 | 30min | 2 tasks | 3 files |
 | Phase 03 P04 | 25min | 3 tasks | 5 files |
 | Phase 04 P01 | 30min | 3 tasks | 13 files |
+| Phase 04 P02 | 25min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -125,6 +126,8 @@ Recent decisions affecting current work:
 - [Phase 03 UAT]: Live MusicBrainz search UAT test failed with sources.musicbrainz.status:"error" on a real WSL2 dev machine; diagnosed as environmental (WSL2 TLS/MTU path issue to musicbrainz.org specifically, reproduced identically with plain curl bypassing this codebase's HTTP client entirely) -- not a drop-tracker defect. Backstop-assumption test (Deezer quota-error shape / MusicBrainz throttling) was knowingly skipped rather than forcing abusive live traffic against a third party. Both closed via human-approved gate override (marked pass in 03-UAT.md with full context preserved) so the automated completion predicate reflects the resolved outcome -- see 03-VERIFICATION.md Acknowledged Gaps.
 - [Phase ?]: [Phase 04-01]: Task 1 checkpoint resolved as option-a -- mutable track_count column on events, not a separate release_group_baselines table; column created now, populated starting in plan 04-04
 - [Phase ?]: [Phase 04-01]: newTestPoller took a variadic trailing EventRecorder parameter so the widened poller.New constructor did not require touching all existing test call sites
+- [Phase ?]: [Phase 04-02]: Existing 04-01 test fixtures updated to carry ReleaseTypes/PrimaryType since Task 1's D-17 filter now rejects an entry with no ReleaseTypes -- a real watchlist entry always has ReleaseTypes populated per Phase 2 D-08 defaults
+- [Phase ?]: [Phase 04-02]: DetectDeezer structurally mirrors DetectMusicBrainz (mute check, seed-mode check, seen-set lookup, per-item filter, insert) rather than sharing a generic helper, since the two sources differ in id formatting and filter input (RecordType vs PrimaryType)
 
 ### Pending Todos
 
@@ -150,6 +153,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-08T02:38:46.199Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-08-08T02:58:23.821Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None

@@ -137,7 +137,7 @@ Plans:
   4. The system never re-records or re-notifies for a release/change it has already seen
   5. The system never runs two poll cycles for the same source concurrently, even if a prior cycle is still running
 
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 
 Plans:
 **Wave 1**
@@ -146,7 +146,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 04-02-PLAN.md — `new_release` completeness: both preference axes applied at detection time (including the `deluxe` pseudo-type), per-source seed mode with `notified_at` pre-set, and the Deezer cycle as an independent second source
+- [x] 04-02-PLAN.md — `new_release` completeness: both preference axes applied at detection time (including the `deluxe` pseudo-type), per-source seed mode with `notified_at` pre-set, and the Deezer cycle as an independent second source
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -212,7 +212,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Foundation — Data Layer, Config & Health | 5/5 | Complete    | 2026-08-05 |
 | 2. Watchlist Core | 8/8 | Complete    | 2026-08-06 |
 | 3. External Clients & Search | 4/4 | Complete    | 2026-08-07 |
-| 4. Detection Engine | 1/4 | In Progress|  |
+| 4. Detection Engine | 2/4 | In Progress|  |
 | 5. Discord Notifications | 0/TBD | Not started | - |
 | 6. Frontend & Release History | 0/TBD | Not started | - |
 | 7. Containerization & CI/CD Pipeline | 0/TBD | Not started | - |
