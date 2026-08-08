@@ -86,7 +86,7 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 	type row struct {
 		externalID, releaseGroupMbid, title, artistName string
 		releaseDate, coverArtURL                        *string
-		eventType, source                                string
+		eventType, source                               string
 	}
 	var got []row
 	for rows.Next() {

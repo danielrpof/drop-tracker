@@ -18,6 +18,20 @@ type Querier interface {
 	// row-level lock on this single statement is what makes the split
 	// deterministic under concurrency (T-02-15).
 	DeleteWatchlistEntry(ctx context.Context, id int64) (int64, error)
+	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
+	// existing event rows for this artist+source means seed mode.
+	HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool, error)
+	// 0 rows affected means the dedup key (event_type, source, external_id)
+	// already existed (D-20) -- the caller does not treat this as an error,
+	// only as "not newly detected." Deliberately not the
+	// COALESCE(EXCLUDED.col, table.col) refresh shape UpsertArtist uses,
+	// because a re-detected event must keep its original snapshot (D-20):
+	// plain DO NOTHING, no SET clause at all.
+	InsertEvent(ctx context.Context, arg InsertEventParams) (int64, error)
+	// Feeds the fresh-vs-seen diff (D-10): a Detector builds a
+	// map[string]struct{} from this result and skips any externally-fetched
+	// id already present.
+	ListExternalIDs(ctx context.Context, arg ListExternalIDsParams) ([]string, error)
 	// Both watchlist and artists have a column named id -- every selected
 	// column is explicitly aliased so sqlc emits a struct carrying both ID
 	// (the watchlist entry) and ArtistID (the master artist) rather than

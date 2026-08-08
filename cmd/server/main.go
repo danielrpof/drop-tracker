@@ -19,6 +19,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/db"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/deezer"
+	"github.com/danielrpof/drop-tracker/internal/detection"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
@@ -91,6 +92,13 @@ func run() error {
 
 	store := watchlist.NewService(sqlc.New(pool))
 
+	// detector is the EventRecorder poller.New wires into RunMusicBrainzCycle
+	// (Phase 4, DTCT-01) -- a second sqlc.New(pool) instance, matching store's
+	// own pattern above: sqlc.Queries is a thin, stateless wrapper over pool,
+	// so a second instance shares the same connection pool without any extra
+	// coordination.
+	detector := detection.New(sqlc.New(pool))
+
 	// Exactly one *musicbrainz.Client and one rate.Limiter for the whole
 	// process (D-07) -- plan 03-04's poller reuses this same instance, so
 	// total outbound MusicBrainz rate stays bounded across search traffic
@@ -121,7 +129,7 @@ func run() error {
 	// budget: search traffic and poll traffic draw from the same token
 	// bucket, so a burst of /search calls can never push the combined
 	// outbound rate past what the operator configured (D-07).
-	pollr, err := poller.New(store, mbClient, dzClient, cfg.PollInterval, logger)
+	pollr, err := poller.New(store, mbClient, dzClient, detector, cfg.PollInterval, logger)
 	if err != nil {
 		return fmt.Errorf("build poller: %w", err)
 	}

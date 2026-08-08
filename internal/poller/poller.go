@@ -3,9 +3,11 @@
 // through the existing watchlist.Store seam (D-05), calls its source for
 // every entry sequentially -- one outbound request at a time, so the
 // configured per-source rate is never multiplied by concurrency (D-07) --
-// and logs one structured result per artist. This phase performs no
-// diffing and writes nothing to the database (D-04); Phase 4 replaces the
-// log statement with real diff logic against the "seen" store.
+// and logs one structured result per artist. Each MusicBrainz cycle then
+// hands its fetched results to the EventRecorder seam, which diffs them
+// against the seen store and records previously-unseen releases as event
+// rows (Phase 4, DTCT-01) -- this package still performs no diffing and
+// holds no database connection itself, it only calls the seam.
 package poller
 
 import (
@@ -58,6 +60,15 @@ type AlbumSource interface {
 
 var _ AlbumSource = (*deezer.Client)(nil)
 
+// EventRecorder is the narrow seam RunMusicBrainzCycle depends on to diff a
+// cycle's fetched results against the seen store and record
+// previously-unseen items as event rows -- declared here, in the consumer,
+// exactly as ReleaseGroupSource and AlbumSource are, so a test can
+// substitute a fake with no real database connection (Phase 4, DTCT-01).
+type EventRecorder interface {
+	DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error
+}
+
 // nextCycleID is a package-level counter rendered into each cycle's
 // correlation id (musicbrainz-<n> / deezer-<n>) so every log line emitted
 // within one cycle can be grouped, and two successive cycles for the same
@@ -70,9 +81,10 @@ var nextCycleID atomic.Uint64
 // coupling D-08 rejects -- MusicBrainz's slower pace must never delay or
 // block Deezer's faster one.
 type Poller struct {
-	store watchlist.Store
-	mb    ReleaseGroupSource
-	dz    AlbumSource
+	store  watchlist.Store
+	mb     ReleaseGroupSource
+	dz     AlbumSource
+	events EventRecorder
 
 	logger   *slog.Logger
 	interval time.Duration
@@ -93,13 +105,14 @@ type Poller struct {
 	dzRunning atomic.Bool
 }
 
-// New builds a Poller over store, mb and dz and registers two independent
-// cron entries -- one per source -- on the spec "@every <interval>".
-// Registering them as two separate AddFunc calls, each closing over one
-// cycle method, is what guarantees MusicBrainz's slower pace can never
-// delay or block Deezer's faster one (D-08). interval must be greater than
-// zero; New returns a non-nil error and registers no entry otherwise.
-func New(store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, interval time.Duration, logger *slog.Logger) (*Poller, error) {
+// New builds a Poller over store, mb, dz and events, and registers two
+// independent cron entries -- one per source -- on the spec
+// "@every <interval>". Registering them as two separate AddFunc calls, each
+// closing over one cycle method, is what guarantees MusicBrainz's slower
+// pace can never delay or block Deezer's faster one (D-08). interval must
+// be greater than zero; New returns a non-nil error and registers no entry
+// otherwise.
+func New(store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, events EventRecorder, interval time.Duration, logger *slog.Logger) (*Poller, error) {
 	if interval <= 0 {
 		return nil, fmt.Errorf("poller: interval must be greater than zero, got %s", interval)
 	}
@@ -108,6 +121,7 @@ func New(store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, interval 
 		store:    store,
 		mb:       mb,
 		dz:       dz,
+		events:   events,
 		logger:   logger,
 		interval: interval,
 		cron:     cron.New(),
@@ -168,10 +182,11 @@ func (p *Poller) Stop(ctx context.Context) error {
 }
 
 // RunMusicBrainzCycle reads the live watchlist and calls
-// ReleaseGroupsByArtist once per entry, sequentially. A per-artist error is
-// logged and the cycle continues to the next artist -- one unreachable
-// artist must not cost the rest of the cycle. The cycle itself writes
-// nothing to the database (D-04): it only logs.
+// ReleaseGroupsByArtist once per entry, sequentially, then hands the
+// fetched results to the EventRecorder seam so previously-unseen releases
+// are recorded (Phase 4, DTCT-01). A per-artist fetch or detection error is
+// logged and the cycle continues to the next artist -- one unreachable or
+// misbehaving artist must not cost the rest of the cycle.
 func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 	// Compare-and-swap, not a mutex: a tick that arrives during a run must
 	// be *skipped*, not queued behind it (D-09) -- a mutex would serialise
@@ -214,6 +229,15 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 			slog.String("artist_name", entry.Name),
 			slog.Int("item_count", len(groups)),
 		)
+
+		if err := p.events.DetectMusicBrainz(ctx, logger, entry, groups); err != nil {
+			logger.Error("detection failed",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("artist_name", entry.Name),
+				slog.String("detection_error", err.Error()),
+			)
+			continue
+		}
 	}
 
 	return nil
