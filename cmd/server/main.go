@@ -92,13 +92,6 @@ func run() error {
 
 	store := watchlist.NewService(sqlc.New(pool))
 
-	// detector is the EventRecorder poller.New wires into RunMusicBrainzCycle
-	// (Phase 4, DTCT-01) -- a second sqlc.New(pool) instance, matching store's
-	// own pattern above: sqlc.Queries is a thin, stateless wrapper over pool,
-	// so a second instance shares the same connection pool without any extra
-	// coordination.
-	detector := detection.New(sqlc.New(pool))
-
 	// Exactly one *musicbrainz.Client and one rate.Limiter for the whole
 	// process (D-07) -- plan 03-04's poller reuses this same instance, so
 	// total outbound MusicBrainz rate stays bounded across search traffic
@@ -107,6 +100,18 @@ func run() error {
 	// ~1/sec pace must never throttle Deezer's faster pace, and vice versa.
 	mbLimiter := rate.NewLimiter(rate.Limit(cfg.MusicBrainzRateLimitPerSec), 1)
 	mbClient := musicbrainz.NewClient(cfg.MusicBrainzUserAgent, mbLimiter, nil)
+
+	// detector is the EventRecorder poller.New wires into RunMusicBrainzCycle
+	// (Phase 4, DTCT-01/DTCT-03) -- a second sqlc.New(pool) instance, matching
+	// store's own pattern above: sqlc.Queries is a thin, stateless wrapper
+	// over pool, so a second instance shares the same connection pool
+	// without any extra coordination. mbClient doubles as the
+	// detection.RecordingSource for guest-feature detection's recording
+	// browse (D-05) -- the same rate-limited, User-Agent-identified instance
+	// RunMusicBrainzCycle already uses for release-groups, so guest-feature
+	// scanning draws from the same whole-process MusicBrainz budget (D-07),
+	// which is why detector construction moves below mbClient's.
+	detector := detection.New(sqlc.New(pool), mbClient)
 
 	// Exactly one *deezer.Client and one rate.Limiter for the whole process
 	// (D-07, D-08) -- plan 03-04's Deezer poll cycle reuses this same

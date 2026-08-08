@@ -21,6 +21,17 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
+// noRecordingSource is a no-op detection.RecordingSource double for tests
+// that only exercise the release-type/mute preference axes, not
+// guest-feature detection -- Phase 4 plan 04-03 widened New to require a
+// RecordingSource, and DetectMusicBrainz now always runs its guest-feature
+// pass, so every Detector built here needs one.
+type noRecordingSource struct{}
+
+func (noRecordingSource) RecordingsByArtist(ctx context.Context, mbid string) ([]musicbrainz.Recording, error) {
+	return nil, nil
+}
+
 func TestFilter_ReleaseTypeAllowed(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -235,7 +246,7 @@ func TestDetectMusicBrainz_FiltersByReleaseType(t *testing.T) {
 		{MBID: mbid + "-rg2", Title: "Single Release", PrimaryType: "Single"},
 	}
 
-	d := New(sqlc.New(pool))
+	d := New(sqlc.New(pool), noRecordingSource{})
 	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
@@ -269,7 +280,7 @@ func TestDetectMusicBrainz_SkipsMutedEventType(t *testing.T) {
 		{MBID: mbid + "-rg2", Title: "Second Album", PrimaryType: "Album"},
 	}
 
-	d := New(sqlc.New(pool))
+	d := New(sqlc.New(pool), noRecordingSource{})
 	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}

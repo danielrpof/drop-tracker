@@ -15,18 +15,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
+	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 )
 
-// Detector wraps sqlc.Querier -- the consuming package declares its own
-// narrower interface (poller.EventRecorder) rather than this type
-// depending on one, mirroring watchlist.Store/Service's split.
-type Detector struct {
-	q sqlc.Querier
+// RecordingSource is the narrow seam DetectMusicBrainz's guest-feature pass
+// depends on (DTCT-03) -- declared here, in the consumer, mirroring
+// poller.ReleaseGroupSource/AlbumSource and this package's own reliance on
+// sqlc.Querier (an interface, not a concrete *sqlc.Queries) rather than
+// *musicbrainz.Client directly, so a test can substitute a stub with no real
+// HTTP client.
+type RecordingSource interface {
+	RecordingsByArtist(ctx context.Context, mbid string) ([]musicbrainz.Recording, error)
 }
 
-// New builds a Detector backed by q.
-func New(q sqlc.Querier) *Detector {
-	return &Detector{q: q}
+// Detector wraps sqlc.Querier and a RecordingSource -- the consuming
+// package declares its own narrower interface (poller.EventRecorder) rather
+// than this type depending on one, mirroring watchlist.Store/Service's
+// split.
+type Detector struct {
+	q          sqlc.Querier
+	recordings RecordingSource
+}
+
+// New builds a Detector backed by q for the seen-store and recordings for
+// DTCT-03's guest-feature pass.
+func New(q sqlc.Querier, recordings RecordingSource) *Detector {
+	return &Detector{q: q, recordings: recordings}
 }
 
 // insertEvent calls InsertEvent and reports whether the row was newly
