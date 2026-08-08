@@ -32,6 +32,19 @@ func (noRecordingSource) RecordingsByArtist(ctx context.Context, mbid string) ([
 	return nil, nil
 }
 
+// noReleaseDetailSource is a no-op detection.ReleaseDetailSource double,
+// mirroring noRecordingSource -- Phase 4 plan 04-04 widened New to require
+// a ReleaseDetailSource, and DetectMusicBrainz now always runs its
+// deluxe-change pass, so every Detector built here needs one. Its
+// zero-return behavior is safe for these tests: none of their entries
+// enable deluxe detection (no "deluxe" in ReleaseTypes), so the deluxe pass
+// never calls it.
+type noReleaseDetailSource struct{}
+
+func (noReleaseDetailSource) ReleasesByReleaseGroup(ctx context.Context, groupMBID string) ([]musicbrainz.Release, error) {
+	return nil, nil
+}
+
 func TestFilter_ReleaseTypeAllowed(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -246,7 +259,7 @@ func TestDetectMusicBrainz_FiltersByReleaseType(t *testing.T) {
 		{MBID: mbid + "-rg2", Title: "Single Release", PrimaryType: "Single"},
 	}
 
-	d := New(sqlc.New(pool), noRecordingSource{})
+	d := New(sqlc.New(pool), noRecordingSource{}, noReleaseDetailSource{})
 	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
@@ -280,7 +293,7 @@ func TestDetectMusicBrainz_SkipsMutedEventType(t *testing.T) {
 		{MBID: mbid + "-rg2", Title: "Second Album", PrimaryType: "Album"},
 	}
 
-	d := New(sqlc.New(pool), noRecordingSource{})
+	d := New(sqlc.New(pool), noRecordingSource{}, noReleaseDetailSource{})
 	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}

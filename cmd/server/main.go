@@ -102,16 +102,18 @@ func run() error {
 	mbClient := musicbrainz.NewClient(cfg.MusicBrainzUserAgent, mbLimiter, nil)
 
 	// detector is the EventRecorder poller.New wires into RunMusicBrainzCycle
-	// (Phase 4, DTCT-01/DTCT-03) -- a second sqlc.New(pool) instance, matching
-	// store's own pattern above: sqlc.Queries is a thin, stateless wrapper
-	// over pool, so a second instance shares the same connection pool
-	// without any extra coordination. mbClient doubles as the
+	// (Phase 4, DTCT-01/DTCT-02/DTCT-03) -- a second sqlc.New(pool) instance,
+	// matching store's own pattern above: sqlc.Queries is a thin, stateless
+	// wrapper over pool, so a second instance shares the same connection
+	// pool without any extra coordination. mbClient doubles as both the
 	// detection.RecordingSource for guest-feature detection's recording
-	// browse (D-05) -- the same rate-limited, User-Agent-identified instance
-	// RunMusicBrainzCycle already uses for release-groups, so guest-feature
-	// scanning draws from the same whole-process MusicBrainz budget (D-07),
-	// which is why detector construction moves below mbClient's.
-	detector := detection.New(sqlc.New(pool), mbClient)
+	// browse (D-05) and the detection.ReleaseDetailSource for deluxe-change
+	// detection's per-release track-count fetch (D-01) -- the same
+	// rate-limited, User-Agent-identified instance RunMusicBrainzCycle
+	// already uses for release-groups, so both draw from the same
+	// whole-process MusicBrainz budget (D-07), which is why detector
+	// construction moves below mbClient's.
+	detector := detection.New(sqlc.New(pool), mbClient, mbClient)
 
 	// Exactly one *deezer.Client and one rate.Limiter for the whole process
 	// (D-07, D-08) -- plan 03-04's Deezer poll cycle reuses this same

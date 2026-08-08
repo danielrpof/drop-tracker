@@ -11,6 +11,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const groupTrackCountBaseline = `-- name: GroupTrackCountBaseline :one
+SELECT COALESCE(MAX(track_count), 0)::int AS baseline,
+       COUNT(track_count) > 0 AS has_baseline
+FROM events
+WHERE source = 'musicbrainz' AND release_group_mbid = $1
+`
+
+type GroupTrackCountBaselineRow struct {
+	Baseline    int32 `json:"baseline"`
+	HasBaseline bool  `json:"has_baseline"`
+}
+
+// Plan 04-04's baseline lookup for a release-group's deluxe-change
+// comparison (D-01/D-02), option-a resolution (04-01's Task 1 checkpoint):
+// track_count lives directly on the events row, not a second table.
+// has_baseline distinguishes "no baseline recorded yet" (COUNT is 0, this
+// group has never had track_count populated) from "baseline recorded as
+// zero" -- collapsing those two into one COALESCE(...,0) is exactly
+// 04-RESEARCH.md Pitfall #1's false-positive mechanism: the caller MUST
+// branch on has_baseline before comparing, never compare against baseline
+// alone.
+func (q *Queries) GroupTrackCountBaseline(ctx context.Context, releaseGroupMbid *string) (GroupTrackCountBaselineRow, error) {
+	row := q.db.QueryRow(ctx, groupTrackCountBaseline, releaseGroupMbid)
+	var i GroupTrackCountBaselineRow
+	err := row.Scan(&i.Baseline, &i.HasBaseline)
+	return i, err
+}
+
 const hasAnyEvent = `-- name: HasAnyEvent :one
 SELECT EXISTS(
     SELECT 1 FROM events WHERE artist_id = $1 AND source = $2
@@ -155,4 +183,28 @@ func (q *Queries) ListUnnotified(ctx context.Context) ([]Event, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setGroupTrackCountBaseline = `-- name: SetGroupTrackCountBaseline :execrows
+UPDATE events
+SET track_count = $2
+WHERE event_type = 'new_release' AND source = 'musicbrainz' AND external_id = $1
+`
+
+type SetGroupTrackCountBaselineParams struct {
+	ExternalID string `json:"external_id"`
+	TrackCount *int32 `json:"track_count"`
+}
+
+// Mutates track_count on the group's own new_release row -- this is
+// operational baseline state, not the D-12 display snapshot (title/
+// artist_name/release_date/cover_art_url), which stays write-once via
+// InsertEvent's ON CONFLICT DO NOTHING per D-20. No snapshot column is
+// ever written twice by this statement.
+func (q *Queries) SetGroupTrackCountBaseline(ctx context.Context, arg SetGroupTrackCountBaselineParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setGroupTrackCountBaseline, arg.ExternalID, arg.TrackCount)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

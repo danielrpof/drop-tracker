@@ -30,7 +30,7 @@ func TestDetectDeezer_NewRelease(t *testing.T) {
 		{ID: 222, Title: "Second Album", RecordType: "album", Cover: "https://example.test/222.jpg", ReleaseDate: "2021-06-15"},
 	}
 
-	d := detection.New(sqlc.New(pool), fakeRecordingSource{})
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
 	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("DetectDeezer: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestDetectDeezer_ReDetectionInsertsNothing(t *testing.T) {
 		{ID: 1, Title: "Album One", RecordType: "album"},
 		{ID: 2, Title: "Album Two", RecordType: "album"},
 	}
-	d := detection.New(sqlc.New(pool), fakeRecordingSource{})
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
 
 	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("first DetectDeezer: %v", err)
@@ -140,7 +140,7 @@ func TestDetectDeezer_FiltersByRecordType(t *testing.T) {
 		{ID: 3, Title: "Compilation", RecordType: "compilation"},
 	}
 
-	d := detection.New(sqlc.New(pool), fakeRecordingSource{})
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
 	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("DetectDeezer: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestDetectDeezer_SeedsIndependentlyOfMusicBrainz(t *testing.T) {
 	artistID := insertTestArtist(t, pool, mbid, "Cross Source Seed Artist")
 
 	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Cross Source Seed Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
-	d := detection.New(sqlc.New(pool), fakeRecordingSource{})
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
 
 	mbGroups := []musicbrainz.ReleaseGroup{{MBID: mbid + "-rg1", Title: "MB Album", PrimaryType: "Album"}}
 	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, mbGroups); err != nil {
@@ -216,7 +216,7 @@ func TestDetectDeezer_SameIDDifferentSourceCoexist(t *testing.T) {
 		t.Fatalf("seed musicbrainz InsertEvent: %v", err)
 	}
 
-	d := detection.New(q, fakeRecordingSource{})
+	d := detection.New(q, fakeRecordingSource{}, &fakeReleaseDetailSource{})
 	albums := []deezer.Album{{ID: sharedExternalID, Title: "Deezer Album", RecordType: "album"}}
 	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("DetectDeezer: %v", err)

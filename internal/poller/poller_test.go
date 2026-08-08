@@ -76,6 +76,18 @@ func (fakeRecordingSource) RecordingsByArtist(ctx context.Context, mbid string) 
 	return nil, nil
 }
 
+// fakeReleaseDetailSource is a no-op detection.ReleaseDetailSource double,
+// used only to satisfy detection.New's widened signature (Phase 4 plan
+// 04-04) for the integration tests below, which exercise new_release
+// wiring, not deluxe-change detection -- every release-group these tests
+// fetch is brand-new within its own cycle (D-04), so the deluxe pass never
+// calls this.
+type fakeReleaseDetailSource struct{}
+
+func (fakeReleaseDetailSource) ReleasesByReleaseGroup(ctx context.Context, groupMBID string) ([]musicbrainz.Release, error) {
+	return nil, nil
+}
+
 // stubStore is a file-local double for watchlist.Store, mirroring
 // internal/httpserver/watchlist_test.go's stubStore -- every write method
 // records its call count so a test can assert the poll cycle never writes
@@ -502,7 +514,7 @@ func TestPoller_RunMusicBrainzCycle_RecordsNewRelease(t *testing.T) {
 			{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"},
 		}, nil
 	}}
-	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{})
+	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{}, fakeReleaseDetailSource{})
 	logger, _ := newTestLogger()
 
 	p, err := New(store, mb, &fakeAlbumSource{}, recorder, 15*time.Minute, logger)
@@ -555,7 +567,7 @@ func TestPoller_RunDeezerCycle_RecordsNewRelease(t *testing.T) {
 			{ID: 2, Title: "Album Two", RecordType: "album"},
 		}, nil
 	}}
-	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{})
+	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{}, fakeReleaseDetailSource{})
 	logger, _ := newTestLogger()
 
 	p, err := New(store, &fakeReleaseGroupSource{}, dz, recorder, 15*time.Minute, logger)

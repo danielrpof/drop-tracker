@@ -28,19 +28,31 @@ type RecordingSource interface {
 	RecordingsByArtist(ctx context.Context, mbid string) ([]musicbrainz.Recording, error)
 }
 
-// Detector wraps sqlc.Querier and a RecordingSource -- the consuming
-// package declares its own narrower interface (poller.EventRecorder) rather
-// than this type depending on one, mirroring watchlist.Store/Service's
-// split.
+// ReleaseDetailSource is the narrow seam DetectMusicBrainz's deluxe-change
+// pass depends on (DTCT-02) -- declared here, in the consumer, mirroring
+// RecordingSource, so a test can substitute a stub with no real HTTP
+// client. Called only for release-groups already in the seen store (D-04);
+// detectDeluxeChanges never calls this for a group discovered in the same
+// cycle.
+type ReleaseDetailSource interface {
+	ReleasesByReleaseGroup(ctx context.Context, groupMBID string) ([]musicbrainz.Release, error)
+}
+
+// Detector wraps sqlc.Querier, a RecordingSource and a ReleaseDetailSource
+// -- the consuming package declares its own narrower interface
+// (poller.EventRecorder) rather than this type depending on one, mirroring
+// watchlist.Store/Service's split.
 type Detector struct {
 	q          sqlc.Querier
 	recordings RecordingSource
+	releases   ReleaseDetailSource
 }
 
-// New builds a Detector backed by q for the seen-store and recordings for
-// DTCT-03's guest-feature pass.
-func New(q sqlc.Querier, recordings RecordingSource) *Detector {
-	return &Detector{q: q, recordings: recordings}
+// New builds a Detector backed by q for the seen-store, recordings for
+// DTCT-03's guest-feature pass, and releases for DTCT-02's deluxe-change
+// pass.
+func New(q sqlc.Querier, recordings RecordingSource, releases ReleaseDetailSource) *Detector {
+	return &Detector{q: q, recordings: recordings, releases: releases}
 }
 
 // insertEvent calls InsertEvent and reports whether the row was newly
@@ -98,4 +110,38 @@ func nullableString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// groupBaseline returns the recorded track-count baseline for groupMBID
+// (04-01's option-a resolution: a mutable track_count column on the
+// group's own new_release event row) and whether a baseline has EVER been
+// recorded at all. Distinguishing "no baseline recorded yet" from
+// "baseline recorded as zero" is the entire mechanism preventing the
+// false-positive 04-RESEARCH.md Pitfall #1 describes -- a helper that
+// collapsed both to zero would report a real first-ever fetch as "the
+// count increased from 0," firing a spurious deluxe_change on every
+// release-group's first real comparison cycle.
+func (d *Detector) groupBaseline(ctx context.Context, groupMBID string) (baseline int, hasBaseline bool, err error) {
+	row, err := d.q.GroupTrackCountBaseline(ctx, &groupMBID)
+	if err != nil {
+		return 0, false, fmt.Errorf("detection: group baseline: %w", err)
+	}
+	return int(row.Baseline), row.HasBaseline, nil
+}
+
+// setGroupBaseline writes count as groupMBID's new baseline -- mutating the
+// track_count column on the group's own new_release row. This is
+// operational baseline state, not the D-12 display snapshot (title/
+// artist_name/release_date/cover_art_url), which stays write-once via
+// InsertEvent's ON CONFLICT DO NOTHING per D-20; no snapshot column is ever
+// touched by this call.
+func (d *Detector) setGroupBaseline(ctx context.Context, groupMBID string, count int) error {
+	trackCount := int32(count)
+	if _, err := d.q.SetGroupTrackCountBaseline(ctx, sqlc.SetGroupTrackCountBaselineParams{
+		ExternalID: groupMBID,
+		TrackCount: &trackCount,
+	}); err != nil {
+		return fmt.Errorf("detection: set group baseline: %w", err)
+	}
+	return nil
 }

@@ -18,6 +18,16 @@ type Querier interface {
 	// row-level lock on this single statement is what makes the split
 	// deterministic under concurrency (T-02-15).
 	DeleteWatchlistEntry(ctx context.Context, id int64) (int64, error)
+	// Plan 04-04's baseline lookup for a release-group's deluxe-change
+	// comparison (D-01/D-02), option-a resolution (04-01's Task 1 checkpoint):
+	// track_count lives directly on the events row, not a second table.
+	// has_baseline distinguishes "no baseline recorded yet" (COUNT is 0, this
+	// group has never had track_count populated) from "baseline recorded as
+	// zero" -- collapsing those two into one COALESCE(...,0) is exactly
+	// 04-RESEARCH.md Pitfall #1's false-positive mechanism: the caller MUST
+	// branch on has_baseline before comparing, never compare against baseline
+	// alone.
+	GroupTrackCountBaseline(ctx context.Context, releaseGroupMbid *string) (GroupTrackCountBaselineRow, error)
 	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
 	// existing event rows for this artist+source means seed mode.
 	HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool, error)
@@ -47,6 +57,12 @@ type Querier interface {
 	// planner happens to choose, which is non-deterministic across runs.
 	ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 	Ping(ctx context.Context) (int32, error)
+	// Mutates track_count on the group's own new_release row -- this is
+	// operational baseline state, not the D-12 display snapshot (title/
+	// artist_name/release_date/cover_art_url), which stays write-once via
+	// InsertEvent's ON CONFLICT DO NOTHING per D-20. No snapshot column is
+	// ever written twice by this statement.
+	SetGroupTrackCountBaseline(ctx context.Context, arg SetGroupTrackCountBaselineParams) (int64, error)
 	// The partial-update merge happens inside this statement, not in Go: each
 	// axis is resolved by a CASE whose ELSE names the column itself, so the
 	// value carried forward for an untouched axis is read from the row version

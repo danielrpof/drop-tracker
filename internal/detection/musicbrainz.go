@@ -16,6 +16,7 @@ const (
 	sourceMusicBrainz     = "musicbrainz"
 	eventTypeNewRelease   = "new_release"
 	eventTypeGuestFeature = "guest_feature"
+	eventTypeDeluxeChange = "deluxe_change"
 )
 
 // DetectMusicBrainz diffs groups -- freshly fetched for entry via
@@ -23,20 +24,29 @@ const (
 // previously-unseen release-group as a new_release event (DTCT-01), gated by
 // both of entry's preference axes (D-17, D-18) and by per-source seed mode
 // (D-13/D-14/D-15). It then runs detectGuestFeatures (DTCT-03), which fetches
-// and diffs entry's recording-by-artist-credit browse in the same call --
-// one MusicBrainz poll cycle covers both new_release and guest_feature
-// detection under the same PollInterval and rate limiter (D-07), with no
-// second scheduler cadence. No deluxe-change here -- that is a later plan.
+// and diffs entry's recording-by-artist-credit browse in the same call, and
+// detectDeluxeChanges (DTCT-02), which fetches per-release track-count
+// detail for release-groups already in the seen store -- one MusicBrainz
+// poll cycle covers all three under the same PollInterval and rate limiter
+// (D-07), with no second scheduler cadence.
 //
-// The seed-mode decision (isSeedMode) is made exactly once, before either
+// The seed-mode decision (isSeedMode) is made exactly once, before any
 // pass, and its resulting notified_at value is threaded into every
-// insertEvent call this whole method makes -- across both event types.
-// Reading it lazily per pass would flip the answer mid-call (the
-// new_release pass's own inserts would make the guest_feature pass see a
-// non-zero event count for the source and read as already-seeded) and leave
-// the later pass's rows unseeded, violating D-13's "every row from one seed
-// cycle shares one timestamp" contract now that two event types share one
-// (artist_id, source) seed-mode scope.
+// insertEvent call this whole method makes -- across all three event types.
+// Reading it lazily per pass would flip the answer mid-call (an earlier
+// pass's own inserts would make a later pass see a non-zero event count for
+// the source and read as already-seeded) and leave that pass's rows
+// unseeded, violating D-13's "every row from one seed cycle shares one
+// timestamp" contract now that three event types share one (artist_id,
+// source) seed-mode scope.
+//
+// preCycleSeenGroups -- the set of release-group MBIDs already recorded as
+// new_release events -- is likewise captured exactly once, before the
+// new_release pass inserts anything this cycle, and handed to
+// detectDeluxeChanges unchanged. Re-querying it after the new_release pass
+// would include groups that pass just inserted a moment earlier in this
+// same call, so a brand-new group would receive a release-detail fetch on
+// its own discovery cycle -- exactly what D-04 forbids.
 //
 // The mute axis (D-18) is checked once per event type, before its own
 // pass's fetch/seen-set/insert work: a muted event type does no seen-set
@@ -58,6 +68,11 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 	}
 	notifiedAt := seedNotifiedAt(seedMode)
 
+	preCycleSeenGroups, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceMusicBrainz, eventTypeNewRelease)
+	if err != nil {
+		return err
+	}
+
 	if eventTypeMuted(entry, eventTypeNewRelease) {
 		logger.Info("detection result",
 			slog.String("artist_mbid", entry.MBID),
@@ -68,10 +83,7 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 			slog.Bool("muted", true),
 		)
 	} else {
-		seen, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceMusicBrainz, eventTypeNewRelease)
-		if err != nil {
-			return err
-		}
+		seen := preCycleSeenGroups
 
 		inserted := 0
 		filtered := 0
@@ -119,7 +131,11 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 		)
 	}
 
-	return d.detectGuestFeatures(ctx, logger, entry, seedMode, notifiedAt)
+	if err := d.detectGuestFeatures(ctx, logger, entry, seedMode, notifiedAt); err != nil {
+		return err
+	}
+
+	return d.detectDeluxeChanges(ctx, logger, entry, groups, preCycleSeenGroups, notifiedAt)
 }
 
 // detectGuestFeatures diffs entry's recordings-by-artist-credit browse
@@ -213,6 +229,155 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 		slog.Int("recording_count", len(recordings)),
 		slog.Int("inserted_count", inserted),
 		slog.Bool("seed_mode", seedMode),
+		slog.Bool("page_ceiling_reached", pageCeilingReached),
+	)
+
+	return nil
+}
+
+// detectDeluxeChanges diffs freshGroups against preCycleSeen -- the
+// pre-cycle new_release seen-set DetectMusicBrainz captured before its own
+// pass ran -- and, for every group already in that set, fetches per-release
+// track-count detail and compares it against a persisted baseline (D-01,
+// D-02). A release-group not in preCycleSeen was discovered for the first
+// time this very cycle: D-04 forbids fetching its release detail in the
+// same cycle it was discovered, so it is skipped entirely, at zero request
+// cost.
+//
+// Both preference gates (deluxeDetectionEnabled, eventTypeMuted) are
+// checked before any fetch: an artist who has not opted into deluxe alerts,
+// or who has muted deluxe_change, costs zero release-detail requests.
+//
+// For each already-seen group, the maximum TrackCount() across its fetched
+// releases is compared against groupBaseline's recorded value:
+//   - No baseline recorded yet: the fresh maximum silently BECOMES the
+//     baseline (setGroupBaseline) and no event fires -- a first measurement
+//     is a baseline, not an observed increase (04-RESEARCH.md Pitfall #1).
+//   - Baseline exists and the fresh maximum is greater: a deluxe_change
+//     event is inserted, keyed on the winning release's own MBID (D-10),
+//     and the baseline advances to the new maximum.
+//   - Baseline exists and the fresh maximum is equal or lower: no event,
+//     baseline left untouched -- D-02 counts increases only, and lowering
+//     the baseline on a downward blip would let the same tracklist re-fire
+//     later.
+//
+// A fresh maximum of 0 (absent/empty media, or media entries with no
+// track-count) means the response carried no usable data -- the group is
+// skipped and the baseline (if any) is left untouched, exactly like a
+// group that was never fetched.
+//
+// A per-group release-detail error is logged and that group is skipped;
+// the pass continues to the next group and this method still returns nil,
+// so one unreachable release-group never discards the cycle's other
+// events (mirrors detectGuestFeatures's own error-isolation contract).
+func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, freshGroups []musicbrainz.ReleaseGroup, preCycleSeen map[string]struct{}, notifiedAt pgtype.Timestamptz) error {
+	if !deluxeDetectionEnabled(entry) {
+		return nil
+	}
+	if eventTypeMuted(entry, eventTypeDeluxeChange) {
+		return nil
+	}
+
+	detailFetchCount := 0
+	baselineEstablishedCount := 0
+	inserted := 0
+	pageCeilingReached := false
+
+	// range only -- freshGroups is externally-supplied (T-04-01, ASVS V5).
+	for _, g := range freshGroups {
+		if _, ok := preCycleSeen[g.MBID]; !ok {
+			// D-04: a group discovered this very cycle gets no release-detail
+			// fetch -- it is a new_release event and nothing else.
+			continue
+		}
+
+		detailFetchCount++
+		releases, err := d.releases.ReleasesByReleaseGroup(ctx, g.MBID)
+		if err != nil {
+			logger.Error("release detail fetch failed",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("release_group_mbid", g.MBID),
+				slog.String("musicbrainz_error", err.Error()),
+			)
+			continue
+		}
+		if len(releases) >= musicbrainz.MaxReleaseBrowseItems {
+			pageCeilingReached = true
+		}
+
+		// The comparison uses the maximum total track count across every
+		// release in the group (D-02), never the first or last encountered
+		// -- the outcome must not depend on upstream ordering.
+		maxCount := 0
+		var winner musicbrainz.Release
+		// range only -- releases is externally-supplied (T-04-01, ASVS V5).
+		for _, r := range releases {
+			if tc := r.TrackCount(); tc > maxCount {
+				maxCount = tc
+				winner = r
+			}
+		}
+		if maxCount == 0 {
+			// No usable media data in this fetch -- not "the release has no
+			// tracks." Leave any existing baseline untouched.
+			continue
+		}
+
+		baseline, hasBaseline, err := d.groupBaseline(ctx, g.MBID)
+		if err != nil {
+			return err
+		}
+
+		switch {
+		case !hasBaseline:
+			if err := d.setGroupBaseline(ctx, g.MBID, maxCount); err != nil {
+				return err
+			}
+			baselineEstablishedCount++
+			logger.Info("baseline_established",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("release_group_mbid", g.MBID),
+				slog.Int("track_count", maxCount),
+			)
+		case maxCount > baseline:
+			groupMBID := g.MBID
+			coverArt := coverArtURLForReleaseGroup(groupMBID)
+			trackCount := int32(maxCount)
+			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
+				ArtistID:         entry.ArtistID,
+				Source:           sourceMusicBrainz,
+				EventType:        eventTypeDeluxeChange,
+				ExternalID:       winner.MBID,
+				ReleaseGroupMbid: &groupMBID,
+				Title:            winner.Title,
+				ArtistName:       entry.Name,
+				ReleaseDate:      nullableString(winner.Date),
+				CoverArtUrl:      &coverArt,
+				TrackCount:       &trackCount,
+				NotifiedAt:       notifiedAt,
+			})
+			if err != nil {
+				return fmt.Errorf("detection: detect deluxe changes: %w", err)
+			}
+			if newly {
+				inserted++
+			}
+			if err := d.setGroupBaseline(ctx, g.MBID, maxCount); err != nil {
+				return err
+			}
+		default:
+			// Equal or lower: D-02 counts increases only. A lower count is
+			// an upstream data correction, and lowering the baseline would
+			// let the same tracklist re-fire later.
+		}
+	}
+
+	logger.Info("detection result",
+		slog.String("artist_mbid", entry.MBID),
+		slog.String("event_type", eventTypeDeluxeChange),
+		slog.Int("detail_fetch_count", detailFetchCount),
+		slog.Int("baseline_established_count", baselineEstablishedCount),
+		slog.Int("inserted_count", inserted),
 		slog.Bool("page_ceiling_reached", pageCeilingReached),
 	)
 
