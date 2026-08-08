@@ -19,10 +19,10 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - ✓ Watchlist CRUD API — add/remove/list artists, DB-backed in Postgres, with per-artist release-type filters and mutable notification-type preferences — Phase 02
 - ✓ Search-proxy API endpoints — live search against MusicBrainz/Deezer so the UI can look up artists to add — Phase 03
 - ✓ Scheduler (robfig/cron) polls MusicBrainz + Deezer per watchlist entry on a configurable interval — Phase 03
+- ✓ Diff engine compares poll results against the Postgres "seen" store to detect: new releases, new guest features, deluxe/tracklist changes — Phase 04
 
 ### Active
 
-- [ ] Diff engine compares poll results against the Postgres "seen" store to detect: new releases, new guest features, deluxe/tracklist changes
 - [ ] Notifier posts detected changes to a Discord webhook
 - [ ] React (Vite) SPA UI for browsing/managing the watchlist, built and embedded into the Go binary via `go:embed` — single deployable image
 - [ ] Multi-stage Dockerfile: slim base image, non-root user, single final image containing API+UI
@@ -100,4 +100,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-08 after Phase 03 (external-clients-search)*
+*Last updated: 2026-08-08 after Phase 04 (detection-engine)*
