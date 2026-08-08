@@ -909,6 +909,75 @@ func TestPoller_RunMusicBrainzCycle_GuardReleasedAfterDetectionError(t *testing.
 	}
 }
 
+func TestPoller_RunDeezerCycle_SkipsWhenAlreadyRunning(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	dz := &fakeAlbumSource{}
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunDeezerCycle(context.Background()) }()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the first cycle to block inside the detection call")
+	}
+
+	err = p.RunDeezerCycle(context.Background())
+	if !errors.Is(err, ErrCycleInProgress) {
+		t.Fatalf("second RunDeezerCycle error = %v, want ErrCycleInProgress", err)
+	}
+	if got := atomic.LoadInt32(&events.deezerCalls); got != 1 {
+		t.Fatalf("events.deezerCalls = %d, want 1 (the skipped tick must perform zero detection calls)", got)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first RunDeezerCycle: %v", err)
+	}
+}
+
+func TestPoller_RunDeezerCycle_GuardReleasedAfterDetectionError(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	dz := &fakeAlbumSource{}
+	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error {
+		return errors.New("detection exploded")
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("first RunDeezerCycle returned %v, want nil (a detection error is not a cycle failure)", err)
+	}
+	if p.dzRunning.Load() {
+		t.Fatal("guard must be released after a cycle whose every artist's detection call errored")
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("second RunDeezerCycle: %v, want nil (guard must have released after the first)", err)
+	}
+	if got := atomic.LoadInt32(&events.deezerCalls); got != 4 {
+		t.Fatalf("events.deezerCalls = %d, want 4 (2 cycles x 2 entries with a non-nil DeezerID)", got)
+	}
+}
+
 func TestPoller_RunMusicBrainzCycle_DetectionErrorIsolatedPerArtist(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
 		return []watchlist.Entry{
