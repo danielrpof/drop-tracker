@@ -24,11 +24,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Detection
 
-- [ ] **DTCT-01**: System detects a new release-group for a watchlisted artist and records it as a "new release" event
+- [x] **DTCT-01**: System detects a new release-group for a watchlisted artist and records it as a "new release" event
 - [ ] **DTCT-02**: System detects a new release inside an existing release-group with an expanded tracklist and records it as a "deluxe/tracklist-change" event
 - [ ] **DTCT-03**: System detects a recording where a watchlisted artist appears in the artist-credit list without being the primary artist, and records it as a "guest feature" event
-- [ ] **DTCT-04**: System does not re-notify for a release/change it has already recorded (idempotent "seen" store)
-- [ ] **DTCT-05**: System does not process a poll cycle concurrently if a prior cycle for the same source is still running (no duplicate/overlapping detection runs)
+- [x] **DTCT-04**: System does not re-notify for a release/change it has already recorded (idempotent "seen" store)
+- [x] **DTCT-05**: System does not process a poll cycle concurrently if a prior cycle for the same source is still running (no duplicate/overlapping detection runs)
 
 ### Notifications
 
@@ -115,11 +115,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLNT-01 | Phase 3 | Complete |
 | CLNT-02 | Phase 3 | Complete |
 | CLNT-03 | Phase 3 | Complete |
-| DTCT-01 | Phase 4 | Pending |
+| DTCT-01 | Phase 4 | Complete |
 | DTCT-02 | Phase 4 | Pending |
 | DTCT-03 | Phase 4 | Pending |
-| DTCT-04 | Phase 4 | Pending |
-| DTCT-05 | Phase 4 | Pending |
+| DTCT-04 | Phase 4 | Complete |
+| DTCT-05 | Phase 4 | Complete |
 | NTFY-01 | Phase 5 | Pending |
 | NTFY-02 | Phase 5 | Pending |
 | NTFY-03 | Phase 5 | Pending |

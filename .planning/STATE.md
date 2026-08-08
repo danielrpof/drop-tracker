@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 4
-current_phase_name: Detection Engine
+current_phase: 04
+current_phase_name: detection-engine
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-08-08T02:09:02.860Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-08-08T02:38:46.248Z"
 last_activity: 2026-08-07
-last_activity_desc: Phase 03 complete, transitioned to Phase 4
+last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 21
-  completed_plans: 17
+  completed_plans: 18
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-08)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 4 — Detection Engine
+**Current focus:** Phase 04 — detection-engine
 
 ## Current Position
 
-Phase: 4 — Detection Engine
-Plan: Not started
+Phase: 04 (detection-engine) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-08-07 — Phase 03 complete, transitioned to Phase 4
+Last activity: 2026-08-07 — Phase 04 execution started
 
-Progress: [██████████] 100%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -77,6 +77,7 @@ Progress: [██████████] 100%
 | Phase 03 P02 | 30min | 3 tasks | 8 files |
 | Phase 03 P03 | 30min | 2 tasks | 3 files |
 | Phase 03 P04 | 25min | 3 tasks | 5 files |
+| Phase 04 P01 | 30min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03-04]: Stop()'s drain-semantics tests drive a real short cron interval and wait for a real dispatched tick rather than calling cycle methods directly -- cron.Cron.Stop()'s returned context only tracks cron-dispatched jobs via its own internal WaitGroup, so a directly-invoked cycle would make Stop() return immediately regardless of whether it had finished
 - [Phase ?]: [Phase 03-04]: CLNT-01/CLNT-02 were already checked off in REQUIREMENTS.md by 03-02/03-03 on the strength of the underlying client fetch methods existing, even though the requirement text names scheduled polling specifically -- this plan is what actually delivers that behavior; requirements.mark-complete re-run here as a no-op confirmation
 - [Phase 03 UAT]: Live MusicBrainz search UAT test failed with sources.musicbrainz.status:"error" on a real WSL2 dev machine; diagnosed as environmental (WSL2 TLS/MTU path issue to musicbrainz.org specifically, reproduced identically with plain curl bypassing this codebase's HTTP client entirely) -- not a drop-tracker defect. Backstop-assumption test (Deezer quota-error shape / MusicBrainz throttling) was knowingly skipped rather than forcing abusive live traffic against a third party. Both closed via human-approved gate override (marked pass in 03-UAT.md with full context preserved) so the automated completion predicate reflects the resolved outcome -- see 03-VERIFICATION.md Acknowledged Gaps.
+- [Phase ?]: [Phase 04-01]: Task 1 checkpoint resolved as option-a -- mutable track_count column on events, not a separate release_group_baselines table; column created now, populated starting in plan 04-04
+- [Phase ?]: [Phase 04-01]: newTestPoller took a variadic trailing EventRecorder parameter so the widened poller.New constructor did not require touching all existing test call sites
 
 ### Pending Todos
 
@@ -147,6 +150,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-08T01:07:36.103Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-detection-engine/04-CONTEXT.md
+Last session: 2026-08-08T02:38:46.199Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
