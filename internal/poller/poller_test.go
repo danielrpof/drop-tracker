@@ -144,16 +144,19 @@ func (f *fakeReleaseGroupSource) ReleaseGroupsByArtist(ctx context.Context, mbid
 }
 
 // fakeEventRecorder is a file-local double for EventRecorder, mirroring
-// fakeReleaseGroupSource/fakeAlbumSource's call-tracking convention. fn is
-// nil by default (a silent no-op success), matching what a real Detector
-// with nothing new to record would do.
+// fakeReleaseGroupSource/fakeAlbumSource's call-tracking convention. fn and
+// deezerFn are nil by default (a silent no-op success), matching what a real
+// Detector with nothing new to record would do.
 type fakeEventRecorder struct {
-	fn func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error
+	fn       func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error
+	deezerFn func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error
 
-	calls int32
+	calls       int32
+	deezerCalls int32
 
-	mu    sync.Mutex
-	mbids []string
+	mu          sync.Mutex
+	mbids       []string
+	deezerMBIDs []string
 }
 
 func (f *fakeEventRecorder) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
@@ -164,6 +167,18 @@ func (f *fakeEventRecorder) DetectMusicBrainz(ctx context.Context, logger *slog.
 
 	if f.fn != nil {
 		return f.fn(ctx, entry, groups)
+	}
+	return nil
+}
+
+func (f *fakeEventRecorder) DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) error {
+	atomic.AddInt32(&f.deezerCalls, 1)
+	f.mu.Lock()
+	f.deezerMBIDs = append(f.deezerMBIDs, entry.MBID)
+	f.mu.Unlock()
+
+	if f.deezerFn != nil {
+		return f.deezerFn(ctx, entry, albums)
 	}
 	return nil
 }
@@ -501,6 +516,89 @@ func TestPoller_RunMusicBrainzCycle_RecordsNewRelease(t *testing.T) {
 }
 
 // --- Deezer cycle ---
+
+// TestPoller_RunDeezerCycle_RecordsNewRelease is the Deezer-side twin of
+// TestPoller_RunMusicBrainzCycle_RecordsNewRelease (04-01): the end-to-end
+// proof that the widened EventRecorder seam is actually wired into
+// RunDeezerCycle, not just that detection.Detector.DetectDeezer works in
+// isolation (04-RESEARCH.md's TestPoller_RunDeezerCycle_RecordsNewRelease).
+func TestPoller_RunDeezerCycle_RecordsNewRelease(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testArtistMBID(t)
+
+	var artistID int64
+	if err := pool.QueryRow(ctx, "INSERT INTO artists (mbid, name) VALUES ($1, $2) RETURNING id", mbid, "Deezer Poller Integration Artist").Scan(&artistID); err != nil {
+		t.Fatalf("insert test artist: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE id = $1", artistID); err != nil {
+			t.Fatalf("cleanup: delete artist: %v", err)
+		}
+	})
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Deezer Poller Integration Artist", DeezerID: deezerID("999"), ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return []watchlist.Entry{entry}, nil }}
+	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+		return []deezer.Album{
+			{ID: 1, Title: "Album One", RecordType: "album"},
+			{ID: 2, Title: "Album Two", RecordType: "album"},
+		}, nil
+	}}
+	recorder := detection.New(sqlc.New(pool))
+	logger, _ := newTestLogger()
+
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, recorder, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(ctx); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx,
+		"SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'new_release' AND source = 'deezer'", artistID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("event row count = %d, want 2 (the seam must actually be wired into RunDeezerCycle)", count)
+	}
+}
+
+// TestPoller_RunDeezerCycle_SkipsNilDeezerID proves the EventRecorder seam
+// is never even reached for an entry with a nil DeezerID -- no fetch, no
+// recorder call, no row, exactly as before this plan (TestDeezerCycle_
+// SkipsNilDeezerID above already proves the no-fetch half; this test proves
+// the widened recorder wiring didn't change that contract).
+func TestPoller_RunDeezerCycle_SkipsNilDeezerID(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	dz := &fakeAlbumSource{}
+	events := &fakeEventRecorder{}
+	logger, _ := newTestLogger()
+	p := newTestPoller(t, store, &fakeReleaseGroupSource{}, dz, logger, events)
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&dz.calls); got != 2 {
+		t.Fatalf("dz.calls = %d, want 2 (only the two non-nil DeezerID entries)", got)
+	}
+	if got := atomic.LoadInt32(&events.deezerCalls); got != 2 {
+		t.Fatalf("events.deezerCalls = %d, want 2 (only the two non-nil DeezerID entries)", got)
+	}
+	events.mu.Lock()
+	calledMBIDs := append([]string(nil), events.deezerMBIDs...)
+	events.mu.Unlock()
+	for _, mbid := range calledMBIDs {
+		if mbid == "mbid-2" {
+			t.Fatalf("DetectDeezer called for mbid-2, which has a nil DeezerID and must be skipped entirely")
+		}
+	}
+}
 
 func TestDeezerCycle_SkipsNilDeezerID(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
