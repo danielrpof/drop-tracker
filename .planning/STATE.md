@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05
 current_phase_name: discord-notifications
-status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-08-08T20:49:49.567Z"
+status: verifying
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-08-08T21:20:29.654Z"
 last_activity: 2026-08-08
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 24
-  completed_plans: 23
+  completed_plans: 24
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-08)
 
 Phase: 05 (discord-notifications) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-08 — Phase 05 execution started
 
-Progress: [██████████] 96%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -84,6 +84,7 @@ Progress: [██████████] 96%
 | Phase 04 P04 | 40min | 2 tasks | 12 files |
 | Phase 05 P01 | 55min | 2 tasks | 15 files |
 | Phase 05 P02 | 45min | 2 tasks | 7 files |
+| Phase 05 P03 | 40min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -142,6 +143,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 05-01]: internal/notifier.Notifier uses an atomic.Bool CAS-skip guard (D-06), mirroring poller's mbRunning/dzRunning idiom, not a blocking mutex -- a slow rate-limited send burst from one cycle must never stall the other cycle's own notify call.
 - [Phase ?]: [Phase 05-02]: Extracted releaseTypeForStorage helper in musicbrainz.go so the absent-PrimaryType-stores-NULL behavior is unit-testable directly, since releaseTypeAllowed filters an empty PrimaryType before DetectMusicBrainz's insert is ever reached
 - [Phase ?]: [Phase 05-02]: Placed real-Postgres release_type/previous_track_count assertions in detector_test.go/deezer_test.go (the codebase's established real-Postgres test files for DetectMusicBrainz/DetectDeezer) rather than musicbrainz_test.go as the plan's frontmatter literally named, since musicbrainz_test.go is this codebase's whitebox-only, no-DB test file
+- [Phase ?]: [Phase 05-03]: Added a seed cycle to the NTFY-04 through-notifier test since a bare first-cycle new_release row is always pre-notified by D-14's seed mode, leaving NotifyPending nothing to drain
 
 ### Pending Todos
 
@@ -167,6 +169,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-08T20:49:49.509Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-08-08T21:20:29.600Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
