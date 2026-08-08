@@ -32,7 +32,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Notifications
 
-- [ ] **NTFY-01**: System posts a Discord webhook message for each detected new-release event, including title, artist, cover art, release date, and release type
+- [x] **NTFY-01**: System posts a Discord webhook message for each detected new-release event, including title, artist, cover art, release date, and release type
 - [ ] **NTFY-02**: System posts a visually distinct Discord webhook message for detected guest-feature events
 - [ ] **NTFY-03**: System posts a visually distinct Discord webhook message for detected deluxe/tracklist-change events
 - [ ] **NTFY-04**: System suppresses notifications for artists/release-types the user has muted via notification preferences
@@ -120,7 +120,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DTCT-03 | Phase 4 | Complete |
 | DTCT-04 | Phase 4 | Complete |
 | DTCT-05 | Phase 4 | Complete |
-| NTFY-01 | Phase 5 | Pending |
+| NTFY-01 | Phase 5 | Complete |
 | NTFY-02 | Phase 5 | Pending |
 | NTFY-03 | Phase 5 | Pending |
 | NTFY-04 | Phase 5 | Pending |

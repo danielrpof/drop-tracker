@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 5
-current_phase_name: Discord Notifications
+current_phase: 05
+current_phase_name: discord-notifications
 status: executing
-stopped_at: Phase 05 context gathered
-last_updated: "2026-08-08T18:36:33.183Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-08-08T19:13:22.225Z"
 last_activity: 2026-08-08
-last_activity_desc: Phase 04 complete, transitioned to Phase 5
+last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 24
-  completed_plans: 21
+  completed_plans: 22
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-08)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 04 — detection-engine
+**Current focus:** Phase 05 — discord-notifications
 
 ## Current Position
 
-Phase: 5 — Discord Notifications
-Plan: Not started
+Phase: 05 (discord-notifications) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-08-08 — Phase 04 complete, transitioned to Phase 5
+Last activity: 2026-08-08 — Phase 05 execution started
 
-Progress: [██████████] 100%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -82,6 +82,7 @@ Progress: [██████████] 100%
 | Phase 04 P02 | 25min | 3 tasks | 13 files |
 | Phase 04 P03 | 45min | 2 tasks | 10 files |
 | Phase 04 P04 | 40min | 2 tasks | 12 files |
+| Phase 05 P01 | 55min | 2 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -135,6 +136,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04-03]: isGuestFeature/displayArtistName unit tests live in a new internal/detection/musicbrainz_test.go (package detection, whitebox) since isGuestFeature is unexported -- mirrors filter_test.go's convention
 - [Phase ?]: [Phase 04-04]: groupBaseline returns (baseline int, hasBaseline bool, error) rather than collapsing 'no baseline' and 'baseline is zero' into one value -- the load-bearing distinction preventing 04-RESEARCH.md Pitfall #1's false-positive deluxe_change on a group's first real comparison cycle
 - [Phase ?]: [Phase 04-04]: preCycleSeenGroups is captured once at the top of DetectMusicBrainz, before the new_release pass inserts anything, and threaded unchanged into detectDeluxeChanges -- guarantees D-04 (a group discovered this very cycle never gets a release-detail fetch in the same cycle)
+- [Phase ?]: [Phase 05-01]: Migration 000004 added previous_track_count/release_type nullable columns to events (D-04, NTFY-01); MarkNotified added as an idempotent AND notified_at IS NULL ack (D-09). Fixed migrate_test.go's hardcoded schema version (3 -> 4) as a direct, in-scope consequence.
+- [Phase ?]: [Phase 05-01]: internal/discord.Client never wraps httpClient.Do's raw error (Go's *url.Error embeds the full request URL, and a Discord webhook path IS its secret token) -- returns a fixed error string instead (T-05-01).
+- [Phase ?]: [Phase 05-01]: internal/notifier.Notifier uses an atomic.Bool CAS-skip guard (D-06), mirroring poller's mbRunning/dzRunning idiom, not a blocking mutex -- a slow rate-limited send burst from one cycle must never stall the other cycle's own notify call.
 
 ### Pending Todos
 
@@ -160,6 +164,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-08T16:53:15.586Z
-Stopped at: Phase 05 context gathered
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/05-discord-notifications/05-CONTEXT.md
+Last session: 2026-08-08T19:13:22.191Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None
