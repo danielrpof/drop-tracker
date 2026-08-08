@@ -43,9 +43,15 @@ blocked: 0
 
 - gap_id: G-03-1
   truth: "sources.musicbrainz.status is \"ok\" with real, 36-character MBID artist entries"
-  status: failed
+  status: resolved
+  resolved_by: acknowledged-environmental
+  resolved_at: 2026-08-08
   reason: "User reported: curl against WSL2-run binary returned sources.deezer.status ok (10 real artists) but sources.musicbrainz.status was \"error\" (artists: [])."
   severity: major
   test: 1
-  artifacts: []
+  root_cause: "Environmental — not a drop-tracker defect. The exact log line captured (\"musicbrainz: do request: Get https://musicbrainz.org/ws/2/artist...: EOF\") reproduced identically with plain curl (bypassing this codebase's HTTP client entirely) from the same WSL2 machine: TLS handshake fails with 'unexpected eof while reading' / server-sent 'decode error' alert immediately after ClientHello. IPv6 route to musicbrainz.org was unreachable, falling back to IPv4, where the TLS ClientHello appears to be corrupted/fragmented in transit — consistent with a WSL2 virtual-adapter MTU/Path-MTU-Discovery issue specific to this one host (Deezer's TLS handshake, a different cert chain/ClientHello size, succeeds over the same network path). This is the third independent environment (original executor sandbox, verifier sandbox, and now this real dev machine) to hit the identical TLS-layer failure against musicbrainz.org specifically, while Deezer succeeds every time — strong evidence this is outside application code's control."
+  artifacts:
+    - path: "internal/musicbrainz/client.go"
+      issue: "None found — reviewed doRequest/NewClient: plain http.Client with only a Timeout set, no custom Transport/TLS config that could explain a host-specific EOF. Ruled out as the cause since plain curl reproduces the identical failure without this code in the path."
   missing: []
+  debug_session: "diagnosed inline during /gsd-verify-work — no code fix applicable; see reason/root_cause above"
