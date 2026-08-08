@@ -22,6 +22,14 @@ import (
 // the caller supplies no client, mirroring musicbrainz.defaultTimeout.
 const defaultTimeout = 10 * time.Second
 
+// maxRetryAfter clamps the wait honored on a 429 response (D-08). A 429's
+// retry_after is only floor-guarded against non-positive values elsewhere;
+// this ceiling protects against a malformed or unexpectedly large value
+// blocking sendAttempt for an unbounded duration. Declared as a var (not a
+// const) so client_test.go can shrink it to make the clamp's regression
+// test fast and deterministic rather than waiting out a real 30s window.
+var maxRetryAfter = 30 * time.Second
+
 // Embed is Discord's webhook embed object -- the fields this project uses.
 // Color is a decimal RGB int, never a hex string; Discord ignores a string
 // color. Fields carry omitempty except where a zero value is meaningful (no
@@ -146,6 +154,13 @@ func (c *Client) sendAttempt(ctx context.Context, embed Embed, allowRetry bool) 
 		wait := time.Duration(rl.RetryAfter * float64(time.Second))
 		if wait <= 0 {
 			wait = time.Second
+		} else if wait > maxRetryAfter {
+			// A malformed or unexpectedly large retry_after (e.g. a
+			// proxy/CDN error page mis-decoded as JSON, or a future
+			// Discord API change) must not block sendAttempt for an
+			// unbounded duration -- the caller's ctx (the ambient poll
+			// cycle) has no deadline of its own.
+			wait = maxRetryAfter
 		}
 		select {
 		case <-time.After(wait):

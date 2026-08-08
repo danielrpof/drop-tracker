@@ -149,6 +149,48 @@ func TestSend_429Twice_ReturnsErrorAfterSingleRetry(t *testing.T) {
 	}
 }
 
+// TestSend_429RetryAfterClamped is the WR-04 regression guard: an
+// unexpectedly large retry_after value must be clamped to maxRetryAfter
+// rather than blocking sendAttempt for an unbounded duration. maxRetryAfter
+// is temporarily shrunk so this test stays fast and deterministic instead
+// of waiting out a real 30s window.
+func TestSend_429RetryAfterClamped(t *testing.T) {
+	origMax := maxRetryAfter
+	maxRetryAfter = 50 * time.Millisecond
+	t.Cleanup(func() { maxRetryAfter = origMax })
+
+	var reqCount int32
+	var firstTime, secondTime time.Time
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&reqCount, 1)
+		if n == 1 {
+			firstTime = time.Now()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			// Absurdly large retry_after (1 hour) -- must be clamped down
+			// to maxRetryAfter, not honored verbatim.
+			_, _ = w.Write([]byte(`{"message":"rate limited","retry_after":3600,"global":false}`))
+			return
+		}
+		secondTime = time.Now()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	c := NewClient(ts.URL, ts.Client())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := c.Send(ctx, Embed{Title: "x"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	gap := secondTime.Sub(firstTime)
+	if gap > 2*time.Second {
+		t.Fatalf("gap between requests = %s, want it clamped near maxRetryAfter (50ms), not the unclamped 3600s retry_after", gap)
+	}
+}
+
 func TestSend_UnexpectedStatus_ReturnsErrorNamingOnlyTheCode(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
