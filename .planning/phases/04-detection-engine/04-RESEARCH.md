@@ -498,22 +498,28 @@ Not applicable in the traditional sense — MusicBrainz's `ws/2` API is a long-s
 
 **None of these assumptions block planning** — all degrade gracefully to "write slightly more defensive code / add one more Wave 0 test" rather than invalidating the phase's architecture. A1/A2 (the exact MusicBrainz JSON shapes) are the ones most worth a deliberate checkpoint: recommend the plan's first task for each new fetch method be RED-phase `httptest.Server` fixture tests using the shapes above, with an explicit note in the task that the fixture is `[ASSUMED]` pending live re-verification if MusicBrainz becomes reachable again.
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All three questions below were resolved during phase planning. Each carries an inline
+`RESOLVED:` note naming the plan and task that settles it. Nothing here blocks execution.
 
 1. **Does `new_release` detection apply to Deezer polling, or is it MusicBrainz-only for v1?**
    - What we know: D-03/D-08 explicitly restrict deluxe-change and guest-feature to MusicBrainz-only; D-15's own rationale ("an artist added MusicBrainz-only whose `deezer_id` is backfilled later would otherwise have their entire Deezer catalog dumped as 'new releases'") strongly implies Deezer-sourced `new_release` events are in scope, but D-10's dedup-key definition doesn't explicitly address a Deezer-sourced `new_release`'s ID space.
    - What's unclear: Whether the planner should treat this as settled (dual-source `new_release`, per D-15's rationale) or flag it back to the user as a scope clarification.
    - Recommendation: Treat as settled dual-source (the `source` column design in this research handles it cleanly either way, per Assumption A5's low-risk-either-way note) — re-litigating this with the user would likely just re-derive D-15's own stated rationale.
+   - **RESOLVED:** Settled as dual-source, exactly as recommended. Plan `04-02` Task 3 ("Extend detection to the Deezer poll cycle as an independent second source") implements `DetectDeezer` writing `source='deezer'`, `event_type='new_release'` rows, per D-15's rationale. Its `TestDetectDeezer_SameIDDifferentSourceCoexist` and `TestDetectDeezer_SeedsIndependentlyOfMusicBrainz` cases pin the `source`-discriminated ID space that D-10 left implicit, which also confirms Assumption A5's `source` column is load-bearing rather than always-`'musicbrainz'`.
 
 2. **Where does the deluxe-change baseline live?**
    - What we know: See Common Pitfalls #1 in full — this is the single most important open design question in this phase.
    - What's unclear: Whether the recommended `track_count` mutable column is the right shape, or whether the planner prefers a cleaner separation (e.g. a tiny second non-event `release_group_baselines` table, explicitly scoped outside D-09's "one combined table" language since D-09 is about the event/dedup log specifically, not all persisted poll-cycle state).
    - Recommendation: Either resolution works; the plan MUST address this explicitly (with a passing test proving the first-comparison-cycle does not false-positive) rather than leaving it implicit — this is the phase's highest-risk correctness gap.
+   - **RESOLVED:** Escalated to the developer rather than decided by the planner, because it is a one-way door gated on migration `000003_events`. Plan `04-01` Task 1 is a `checkpoint:decision` ("Decide where the deluxe-change track-count baseline is persisted") presenting exactly the two shapes weighed here — option-a mutable `track_count` column on `events` (this research's recommendation, and the checkpoint's stated recommendation) vs. option-b a separate `release_group_baselines` table. The false-positive hazard is closed independently of which option wins: both are establish-then-compare, and Plan `04-04` Task 1's first-comparison-cycle behavior proves the baseline-establishing fetch fires no `deluxe_change` event.
 
 3. **Exact request shape for `ReleasesByReleaseGroup`/`RecordingsByArtist` — live-unverified this session**
    - What we know: Envelope/field-name shapes are `[ASSUMED]` per A1/A2 above, by direct analogy to Phase 3's live-verified `release-group` browse shape.
    - What's unclear: Whether MusicBrainz will be reachable (from either this dev machine or Claude's own tooling) by the time this phase executes, given the broader March-2026 bot-blocking trend found this session.
    - Recommendation: Build and merge the httptest-fixture-driven unit tests regardless (CLAUDE.md already mandates no live calls in CI) — treat any live confirmation as a nice-to-have UAT step, not a blocker, exactly matching Phase 3's already-accepted precedent (03-VERIFICATION.md Acknowledged Gaps).
+   - **RESOLVED:** Fixture-based TDD, as recommended — the `[ASSUMED]` shapes are pinned by `httptest.Server` fixtures written before the client code, never by live calls. `RecordingsByArtist` (A2) is covered by Plan `04-03` Task 1 (`TestRecordingsByArtist_RequestShape` asserts the emitted query params; `_DecodesEnvelope` and `_Paginates` pin the envelope). `ReleasesByReleaseGroup` (A1) is covered by Plan `04-04` Task 1 (`TestReleasesByReleaseGroup_RequestShape`, `_DecodesEnvelope`, `_Paginates`). Live re-verification against musicbrainz.org stays best-effort UAT per Phase 3's accepted precedent (03-VERIFICATION.md Acknowledged Gaps) and is explicitly not blocking.
 
 ## Environment Availability
 
