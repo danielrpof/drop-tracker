@@ -22,8 +22,12 @@ import (
 )
 
 // defaultSpacing is the inter-send pause between consecutive events in one
-// NotifyPending pass (D-07): inside the decision's stated 350-500ms band,
-// comfortably under Discord's ~30-per-minute per-webhook ceiling.
+// NotifyPending pass (D-07): inside the decision's stated 350-500ms band.
+// Discord's documented per-webhook rate limit is 5 requests per 2 seconds
+// (~150/min, not the ~30/min this comment previously and incorrectly
+// cited). 400ms yields ~2.5 sends/second sustained, i.e. ~150/min --
+// right at that ceiling, which is why this constant sits inside the
+// decision's band rather than at its lower (safer) end.
 const defaultSpacing = 400 * time.Millisecond
 
 // Sender is the narrow seam NotifyPending depends on for outbound delivery,
