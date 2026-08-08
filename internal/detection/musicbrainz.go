@@ -19,11 +19,17 @@ const (
 
 // DetectMusicBrainz diffs groups -- freshly fetched for entry via
 // ReleaseGroupsByArtist -- against the seen store and records each
-// previously-unseen release-group as a new_release event (DTCT-01). No
-// guest-feature, no deluxe-change, no seed mode, no preference filtering
-// here -- this is the thinnest complete slice; those are later plans.
-// notified_at is always NULL from this method; seed mode (D-13) arrives in
-// plan 04-02.
+// previously-unseen release-group as a new_release event (DTCT-01), gated by
+// both of entry's preference axes (D-17, D-18). No guest-feature, no
+// deluxe-change, no seed mode here -- those are later plans. notified_at is
+// always NULL from this method; seed mode (D-13) arrives in plan 04-02.
+//
+// The mute axis (D-18) is checked once, before the loop: an entry that has
+// muted new_release skips every group with no seen-set lookup and no insert
+// at all. The release-type axis (D-17) is checked per group, inside the
+// loop, before the seen-set lookup -- a group failing either check never
+// reaches the database, so the seen store only ever holds what the artist's
+// current preferences actually want.
 //
 // A group whose MBID is already in the seen store is skipped without an
 // InsertEvent call -- the ON CONFLICT DO NOTHING clause would no-op it
@@ -31,15 +37,32 @@ const (
 // on a typical steady-state cycle, the overwhelming majority of an
 // artist's discography.
 func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+	if eventTypeMuted(entry, eventTypeNewRelease) {
+		logger.Info("detection result",
+			slog.String("artist_mbid", entry.MBID),
+			slog.String("event_type", eventTypeNewRelease),
+			slog.Int("candidate_count", len(groups)),
+			slog.Int("inserted_count", 0),
+			slog.Int("filtered_count", len(groups)),
+			slog.Bool("muted", true),
+		)
+		return nil
+	}
+
 	seen, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceMusicBrainz, eventTypeNewRelease)
 	if err != nil {
 		return err
 	}
 
 	inserted := 0
+	filtered := 0
 	// range only -- groups is an externally-supplied slice (T-04-01, ASVS
 	// V5); never index a fixed position on it.
 	for _, g := range groups {
+		if !releaseTypeAllowed(entry, g.PrimaryType) {
+			filtered++
+			continue
+		}
 		if _, ok := seen[g.MBID]; ok {
 			continue
 		}
@@ -72,6 +95,7 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 		slog.String("event_type", eventTypeNewRelease),
 		slog.Int("candidate_count", len(groups)),
 		slog.Int("inserted_count", inserted),
+		slog.Int("filtered_count", filtered),
 	)
 
 	return nil

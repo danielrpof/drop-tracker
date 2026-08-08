@@ -64,10 +64,10 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 	mbid := testMBID(t)
 	artistID := insertTestArtist(t, pool, mbid, "Test Artist")
 
-	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Test Artist"}
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Test Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
 	groups := []musicbrainz.ReleaseGroup{
-		{MBID: mbid + "-rg1", Title: "First Album", FirstReleaseDate: "2020-01-01"},
-		{MBID: mbid + "-rg2", Title: "Second Album", FirstReleaseDate: "2021-06-15"},
+		{MBID: mbid + "-rg1", Title: "First Album", PrimaryType: "Album", FirstReleaseDate: "2020-01-01"},
+		{MBID: mbid + "-rg2", Title: "Second Album", PrimaryType: "Album", FirstReleaseDate: "2021-06-15"},
 	}
 
 	d := detection.New(sqlc.New(pool))
@@ -167,9 +167,9 @@ func TestDetectMusicBrainz_NewRelease_UndatedGroup(t *testing.T) {
 	mbid := testMBID(t)
 	artistID := insertTestArtist(t, pool, mbid, "Undated Group Artist")
 
-	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Undated Group Artist"}
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Undated Group Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
 	groups := []musicbrainz.ReleaseGroup{
-		{MBID: mbid + "-rg1", Title: "Undated Album", FirstReleaseDate: ""},
+		{MBID: mbid + "-rg1", Title: "Undated Album", PrimaryType: "Album", FirstReleaseDate: ""},
 	}
 
 	d := detection.New(sqlc.New(pool))
@@ -313,10 +313,10 @@ func TestDetectMusicBrainz_ReDetectionInsertsNothing(t *testing.T) {
 	mbid := testMBID(t)
 	artistID := insertTestArtist(t, pool, mbid, "Re-Detection Artist")
 
-	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Re-Detection Artist"}
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Re-Detection Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
 	groups := []musicbrainz.ReleaseGroup{
-		{MBID: mbid + "-rg1", Title: "Album One"},
-		{MBID: mbid + "-rg2", Title: "Album Two"},
+		{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+		{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"},
 	}
 	d := detection.New(sqlc.New(pool))
 
@@ -342,11 +342,11 @@ func TestDetectMusicBrainz_PartialCycleResumes(t *testing.T) {
 	mbid := testMBID(t)
 	artistID := insertTestArtist(t, pool, mbid, "Partial Cycle Artist")
 
-	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Partial Cycle Artist"}
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Partial Cycle Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
 	all := []musicbrainz.ReleaseGroup{
-		{MBID: mbid + "-rg1", Title: "Album One"},
-		{MBID: mbid + "-rg2", Title: "Album Two"},
-		{MBID: mbid + "-rg3", Title: "Album Three"},
+		{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+		{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"},
+		{MBID: mbid + "-rg3", Title: "Album Three", PrimaryType: "Album"},
 	}
 	d := detection.New(sqlc.New(pool))
 
@@ -383,11 +383,11 @@ func TestDetectMusicBrainz_InsertionOrderIsStable(t *testing.T) {
 	mbid := testMBID(t)
 	artistID := insertTestArtist(t, pool, mbid, "Insertion Order Artist")
 
-	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Insertion Order Artist"}
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Insertion Order Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
 	groups := []musicbrainz.ReleaseGroup{
-		{MBID: mbid + "-rg1", Title: "Album One"},
-		{MBID: mbid + "-rg2", Title: "Album Two"},
-		{MBID: mbid + "-rg3", Title: "Album Three"},
+		{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+		{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"},
+		{MBID: mbid + "-rg3", Title: "Album Three", PrimaryType: "Album"},
 	}
 	d := detection.New(sqlc.New(pool))
 	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {

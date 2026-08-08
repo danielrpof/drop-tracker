@@ -469,12 +469,12 @@ func TestPoller_RunMusicBrainzCycle_RecordsNewRelease(t *testing.T) {
 		}
 	})
 
-	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Poller Integration Artist"}
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Poller Integration Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return []watchlist.Entry{entry}, nil }}
 	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, m string) ([]musicbrainz.ReleaseGroup, error) {
 		return []musicbrainz.ReleaseGroup{
-			{MBID: mbid + "-rg1", Title: "Album One"},
-			{MBID: mbid + "-rg2", Title: "Album Two"},
+			{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+			{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"},
 		}, nil
 	}}
 	recorder := detection.New(sqlc.New(pool))
