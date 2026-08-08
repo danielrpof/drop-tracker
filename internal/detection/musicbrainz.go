@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
@@ -20,16 +18,24 @@ const (
 // DetectMusicBrainz diffs groups -- freshly fetched for entry via
 // ReleaseGroupsByArtist -- against the seen store and records each
 // previously-unseen release-group as a new_release event (DTCT-01), gated by
-// both of entry's preference axes (D-17, D-18). No guest-feature, no
-// deluxe-change, no seed mode here -- those are later plans. notified_at is
-// always NULL from this method; seed mode (D-13) arrives in plan 04-02.
+// both of entry's preference axes (D-17, D-18) and by per-source seed mode
+// (D-13/D-14/D-15). No guest-feature, no deluxe-change here -- those are
+// later plans.
 //
 // The mute axis (D-18) is checked once, before the loop: an entry that has
-// muted new_release skips every group with no seen-set lookup and no insert
-// at all. The release-type axis (D-17) is checked per group, inside the
-// loop, before the seen-set lookup -- a group failing either check never
-// reaches the database, so the seen store only ever holds what the artist's
-// current preferences actually want.
+// muted new_release skips every group with no seen-set lookup, no seed-mode
+// check and no insert at all. The release-type axis (D-17) is checked per
+// group, inside the loop, before the seen-set lookup -- a group failing
+// either check never reaches the database, so the seen store only ever
+// holds what the artist's current preferences actually want.
+//
+// The seed-mode decision (isSeedMode) is made exactly once, before the
+// loop, and its resulting notified_at value is threaded into every
+// insertEvent call for this cycle -- reading it lazily after the first
+// insert would flip the answer mid-cycle (this artist would then have a
+// non-zero event count for the source) and leave the remaining rows
+// unseeded, violating D-13's "every row from one seed cycle shares one
+// timestamp" contract.
 //
 // A group whose MBID is already in the seen store is skipped without an
 // InsertEvent call -- the ON CONFLICT DO NOTHING clause would no-op it
@@ -48,6 +54,12 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 		)
 		return nil
 	}
+
+	seedMode, err := d.isSeedMode(ctx, entry.ArtistID, sourceMusicBrainz)
+	if err != nil {
+		return err
+	}
+	notifiedAt := seedNotifiedAt(seedMode)
 
 	seen, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceMusicBrainz, eventTypeNewRelease)
 	if err != nil {
@@ -80,7 +92,7 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 			ReleaseDate:      nullableString(g.FirstReleaseDate),
 			CoverArtUrl:      &coverArt,
 			TrackCount:       nil,
-			NotifiedAt:       pgtype.Timestamptz{},
+			NotifiedAt:       notifiedAt,
 		})
 		if err != nil {
 			return fmt.Errorf("detection: detect musicbrainz: %w", err)
@@ -96,6 +108,7 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 		slog.Int("candidate_count", len(groups)),
 		slog.Int("inserted_count", inserted),
 		slog.Int("filtered_count", filtered),
+		slog.Bool("seed_mode", seedMode),
 	)
 
 	return nil

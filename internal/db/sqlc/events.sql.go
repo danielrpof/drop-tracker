@@ -113,3 +113,46 @@ func (q *Queries) ListExternalIDs(ctx context.Context, arg ListExternalIDsParams
 	}
 	return items, nil
 }
+
+const listUnnotified = `-- name: ListUnnotified :many
+SELECT id, artist_id, source, event_type, external_id, release_group_mbid, title, artist_name, release_date, cover_art_url, track_count, notified_at, created_at FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC
+`
+
+// D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
+// created_at ASC, id ASC for a deterministic total order (a plain
+// created_at ordering alone is not unique -- a seed cycle's rows share one
+// timestamp, see seedNotifiedAt). This is also the instrument plan 04-02's
+// own tests use to prove seeded rows are excluded (D-13).
+func (q *Queries) ListUnnotified(ctx context.Context) ([]Event, error) {
+	rows, err := q.db.Query(ctx, listUnnotified)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Event
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.ID,
+			&i.ArtistID,
+			&i.Source,
+			&i.EventType,
+			&i.ExternalID,
+			&i.ReleaseGroupMbid,
+			&i.Title,
+			&i.ArtistName,
+			&i.ReleaseDate,
+			&i.CoverArtUrl,
+			&i.TrackCount,
+			&i.NotifiedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

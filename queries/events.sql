@@ -25,3 +25,11 @@ SELECT external_id FROM events WHERE artist_id = $1 AND source = $2 AND event_ty
 SELECT EXISTS(
     SELECT 1 FROM events WHERE artist_id = $1 AND source = $2
 ) AS has_any;
+
+-- name: ListUnnotified :many
+-- D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
+-- created_at ASC, id ASC for a deterministic total order (a plain
+-- created_at ordering alone is not unique -- a seed cycle's rows share one
+-- timestamp, see seedNotifiedAt). This is also the instrument plan 04-02's
+-- own tests use to prove seeded rows are excluded (D-13).
+SELECT * FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC;

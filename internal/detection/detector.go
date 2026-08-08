@@ -10,6 +10,9 @@ package detection
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 )
@@ -36,6 +39,40 @@ func (d *Detector) insertEvent(ctx context.Context, params sqlc.InsertEventParam
 		return false, fmt.Errorf("detection: insert event: %w", err)
 	}
 	return affected > 0, nil
+}
+
+// isSeedMode reports whether artistID's first-ever detection cycle for
+// source has arrived -- D-14's implicit detection: zero existing event rows
+// for this (artist_id, source) pair means seed mode, with no explicit
+// seeded_at column. Scoped per source (D-15) so an artist whose deezer_id is
+// backfilled long after being added seeds their Deezer catalogue
+// independently instead of having it dumped as new releases the first time
+// Deezer data appears.
+//
+// Known, accepted edge: because the dedup key excludes artist_id (D-10), an
+// artist whose entire catalogue was already recorded under a collaborator
+// (a different artist's cycle inserted the same external_id first) keeps
+// zero rows of their own and therefore stays in seed mode indefinitely.
+// That is the documented consequence of D-10 plus D-14, not a defect this
+// method works around.
+func (d *Detector) isSeedMode(ctx context.Context, artistID int64, source string) (bool, error) {
+	hasAny, err := d.q.HasAnyEvent(ctx, sqlc.HasAnyEventParams{ArtistID: artistID, Source: source})
+	if err != nil {
+		return false, fmt.Errorf("detection: has any event: %w", err)
+	}
+	return !hasAny, nil
+}
+
+// seedNotifiedAt returns the notified_at value a Detect* call should store
+// for every row it inserts this cycle: in seed mode, a single
+// time.Now().UTC() captured once (never re-read per row, so every row from
+// one seed cycle shares one timestamp -- D-13); otherwise the zero-value
+// pgtype.Timestamptz, which encodes SQL NULL.
+func seedNotifiedAt(seedMode bool) pgtype.Timestamptz {
+	if !seedMode {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 }
 
 // nullableString turns an empty string into a nil *string. MusicBrainz
