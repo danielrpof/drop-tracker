@@ -4,11 +4,11 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05
 current_phase_name: discord-notifications
-status: verifying
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-08-08T21:20:29.654Z"
+status: complete
+stopped_at: Phase 05 verified and closed out (26/28 must-haves, 4/4 roadmap SCs; 2 human-verification items accepted open, see 05-VERIFICATION.md)
+last_updated: "2026-08-08T23:45:00.000Z"
 last_activity: 2026-08-08
-last_activity_desc: Phase 05 execution started
+last_activity_desc: Phase 05 closed out -- docs committed, ROADMAP/STATE marked complete, backstop truncation/budget truths closed by test
 progress:
   total_phases: 5
   completed_phases: 5
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-08)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 05 — discord-notifications
+**Current focus:** Phase 06 — frontend & release history (not yet started)
 
 ## Current Position
 
-Phase: 05 (discord-notifications) — EXECUTING
+Phase: 05 (discord-notifications) — COMPLETE
 Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-08-08 — Phase 05 execution started
+Status: Verified (26/28 must-haves, all 4 roadmap SCs) and formally closed out. 2 open human-verification items (live Discord render/mention-suppression check; can only be confirmed by a human with a real webhook) accepted and carried forward, not blocking.
+Last activity: 2026-08-08 — Phase 05 closed out
 
 Progress: [██████████] 100%
 
@@ -144,6 +144,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 05-02]: Extracted releaseTypeForStorage helper in musicbrainz.go so the absent-PrimaryType-stores-NULL behavior is unit-testable directly, since releaseTypeAllowed filters an empty PrimaryType before DetectMusicBrainz's insert is ever reached
 - [Phase ?]: [Phase 05-02]: Placed real-Postgres release_type/previous_track_count assertions in detector_test.go/deezer_test.go (the codebase's established real-Postgres test files for DetectMusicBrainz/DetectDeezer) rather than musicbrainz_test.go as the plan's frontmatter literally named, since musicbrainz_test.go is this codebase's whitebox-only, no-DB test file
 - [Phase ?]: [Phase 05-03]: Added a seed cycle to the NTFY-04 through-notifier test since a bare first-cycle new_release row is always pre-notified by D-14's seed mode, leaving NotifyPending nothing to drain
+- [quick/260808-pt0]: `/gsd-audit-milestone` was scoped to phases 1-5 only (user choice) since phases 6-7 are unplanned (`Plans: TBD`) -- auditing them now would only report "not started," already known from ROADMAP.md. Full v1.0 audit deferred until phases 6-7 complete; see `.planning/v1.0-MILESTONE-AUDIT.md`.
+- [quick/260808-pt0]: Closed Phase 5's two open backstop-tier truths partially -- the 256-rune title boundary and total-embed-budget checks were closeable by an automated test and now are (`internal/notifier/format_test.go`); the live Discord rendering/mention-suppression check is not automatable and stays open, tracked under Blockers/Concerns rather than silently dropped.
 
 ### Pending Todos
 
@@ -152,12 +154,14 @@ None yet.
 ### Blockers/Concerns
 
 - ⚠️ [Phase 03] musicbrainz.org's TLS handshake fails from this developer's WSL2 network path (confirmed environmental via plain curl, not app code) -- Deezer unaffected. If future live testing on this machine needs real MusicBrainz data, expect the same failure; see PROJECT.md Context and Broken Windows Ledger entry #3 (waived).
+- ⚠️ [Phase 05] Live Discord rendering + mention-suppression check remains open -- requires a real `DISCORD_WEBHOOK_URL` and a human looking at an actual Discord channel; cannot be automated. See 05-VERIFICATION.md Human Verification Required #1.
 
 ### Quick Tasks Completed
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260806-hfn | Add a gitleaks pre-commit hook so secrets are caught locally before commit | 2026-08-06 | 18ad467 | [260806-hfn-add-a-gitleaks-pre-commit-hook-so-secret](./quick/260806-hfn-add-a-gitleaks-pre-commit-hook-so-secret/) |
+| 260808-pt0 | Close out Phase 5: commit docs, cleanup stray binary, mark phase complete, close backstop truncation test | 2026-08-08 | cbe73af | [260808-pt0-close-out-phase-5-commit-docs-cleanup-st](./quick/260808-pt0-close-out-phase-5-commit-docs-cleanup-st/) |
 
 ## Deferred Items
 
@@ -169,6 +173,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-08T21:20:29.600Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-08-08T23:45:00.000Z
+Stopped at: Phase 05 closed out (quick/260808-pt0); ready to begin Phase 06 (frontend-release-history) via /gsd-discuss-phase 6
 Resume file: None

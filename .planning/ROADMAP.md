@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Watchlist Core** - Users can add, remove, list, and configure per-artist alert preferences through a tested watchlist API (completed 2026-08-06)
 - [x] **Phase 3: External Clients & Search** - Rate-limited MusicBrainz/Deezer clients power a live search-proxy and scheduled polling (completed 2026-08-07)
 - [x] **Phase 4: Detection Engine** - Poll results are diffed against a "seen" store to reliably detect new releases, guest features, and deluxe/tracklist changes without duplicates or overlapping runs (completed 2026-08-08)
-- [ ] **Phase 5: Discord Notifications** - Detected events are posted to Discord with distinct formatting per event type, honoring mute preferences
+- [x] **Phase 5: Discord Notifications** - Detected events are posted to Discord with distinct formatting per event type, honoring mute preferences (completed 2026-08-08)
 - [ ] **Phase 6: Frontend & Release History** - Users manage their watchlist and browse detected release history entirely through a web UI
 - [ ] **Phase 7: Containerization & CI/CD Pipeline** - The app ships as a single scanned, versioned, non-root Docker image via an automated GitHub Actions pipeline, with docker-compose for local dev
 
@@ -217,6 +217,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Watchlist Core | 8/8 | Complete    | 2026-08-06 |
 | 3. External Clients & Search | 4/4 | Complete    | 2026-08-07 |
 | 4. Detection Engine | 4/4 | Complete    | 2026-08-08 |
-| 5. Discord Notifications | 3/3 | In Progress|  |
+| 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
 | 6. Frontend & Release History | 0/TBD | Not started | - |
 | 7. Containerization & CI/CD Pipeline | 0/TBD | Not started | - |
