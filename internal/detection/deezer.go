@@ -69,6 +69,12 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 			continue
 		}
 
+		// Deezer's live-observed RecordType values are already lowercase, so
+		// no extra normalization is applied here -- but nullableString still
+		// routes an absent record_type to SQL NULL rather than "". Deezer's
+		// casing for non-"album" record types (single/ep/compilation) is an
+		// open upstream assumption carried from Phase 3 (03-RESEARCH.md
+		// Assumption A2), not something this line guarantees.
 		newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
 			ArtistID:         entry.ArtistID,
 			Source:           sourceDeezer,
@@ -80,6 +86,7 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 			ReleaseDate:      nullableString(a.ReleaseDate),
 			CoverArtUrl:      nullableString(a.Cover),
 			TrackCount:       nil,
+			ReleaseType:      nullableString(a.RecordType),
 			NotifiedAt:       notifiedAt,
 		})
 		if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -111,6 +112,7 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 				ReleaseDate:      nullableString(g.FirstReleaseDate),
 				CoverArtUrl:      &coverArt,
 				TrackCount:       nil,
+				ReleaseType:      releaseTypeForStorage(g.PrimaryType),
 				NotifiedAt:       notifiedAt,
 			})
 			if err != nil {
@@ -343,18 +345,24 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 			groupMBID := g.MBID
 			coverArt := coverArtURLForReleaseGroup(groupMBID)
 			trackCount := int32(maxCount)
+			// D-04: capture the pre-update baseline now, before
+			// setGroupBaseline below overwrites the group's track_count with
+			// the new maximum -- the old count exists nowhere else once that
+			// call lands.
+			previousTrackCount := int32(baseline)
 			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
-				ArtistID:         entry.ArtistID,
-				Source:           sourceMusicBrainz,
-				EventType:        eventTypeDeluxeChange,
-				ExternalID:       winner.MBID,
-				ReleaseGroupMbid: &groupMBID,
-				Title:            winner.Title,
-				ArtistName:       entry.Name,
-				ReleaseDate:      nullableString(winner.Date),
-				CoverArtUrl:      &coverArt,
-				TrackCount:       &trackCount,
-				NotifiedAt:       notifiedAt,
+				ArtistID:           entry.ArtistID,
+				Source:             sourceMusicBrainz,
+				EventType:          eventTypeDeluxeChange,
+				ExternalID:         winner.MBID,
+				ReleaseGroupMbid:   &groupMBID,
+				Title:              winner.Title,
+				ArtistName:         entry.Name,
+				ReleaseDate:        nullableString(winner.Date),
+				CoverArtUrl:        &coverArt,
+				TrackCount:         &trackCount,
+				PreviousTrackCount: &previousTrackCount,
+				NotifiedAt:         notifiedAt,
 			})
 			if err != nil {
 				return fmt.Errorf("detection: detect deluxe changes: %w", err)
@@ -441,6 +449,18 @@ func (d *Detector) seenExternalIDs(ctx context.Context, artistID int64, source, 
 		seen[id] = struct{}{}
 	}
 	return seen, nil
+}
+
+// releaseTypeForStorage returns the same lowercased, trimmed normalization
+// releaseTypeAllowed already applies to a release-group's raw PrimaryType --
+// storing the identical vocabulary (detectableReleaseTypes) keeps a future
+// query grouping events by release_type in agreement with the preference
+// axis that let the row through in the first place. Wrapped in
+// nullableString so an absent PrimaryType stores SQL NULL rather than an
+// empty-string literal (D-04, 05-RESEARCH.md Pitfall 3) -- display
+// title-casing is the formatter's concern, not storage's.
+func releaseTypeForStorage(primaryType string) *string {
+	return nullableString(strings.ToLower(strings.TrimSpace(primaryType)))
 }
 
 // coverArtURLForReleaseGroup builds the deterministic Cover Art Archive URL
