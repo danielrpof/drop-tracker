@@ -17,11 +17,11 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - ✓ Structured (slog-based) JSON logging — Phase 01
 - ✓ `.env.example` documenting all config, secrets via env vars only — nothing real committed — Phase 01
 - ✓ Watchlist CRUD API — add/remove/list artists, DB-backed in Postgres, with per-artist release-type filters and mutable notification-type preferences — Phase 02
+- ✓ Search-proxy API endpoints — live search against MusicBrainz/Deezer so the UI can look up artists to add — Phase 03
+- ✓ Scheduler (robfig/cron) polls MusicBrainz + Deezer per watchlist entry on a configurable interval — Phase 03
 
 ### Active
 
-- [ ] Search-proxy API endpoints — live search against MusicBrainz/Deezer so the UI can look up artists to add
-- [ ] Scheduler (robfig/cron) polls MusicBrainz + Deezer per watchlist entry on a configurable interval
 - [ ] Diff engine compares poll results against the Postgres "seen" store to detect: new releases, new guest features, deluxe/tracklist changes
 - [ ] Notifier posts detected changes to a Discord webhook
 - [ ] React (Vite) SPA UI for browsing/managing the watchlist, built and embedded into the Go binary via `go:embed` — single deployable image
@@ -46,6 +46,7 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - Greenfield repo — currently contains only `README.md`, `LICENSE`, and `.gitignore`.
 - Deployment is intentionally phased: local-only (docker-compose) while the app is being built out, then a self-hosted VPS via an SSH-based deploy action once there's a stable, feature-complete version worth demoing live.
 - MusicBrainz and Deezer clients should be real, testable HTTP clients — tests mock the external calls with `httptest.Server`, not fake/stub business logic.
+- musicbrainz.org's TLS handshake fails with an `unexpected eof`/server `decode_error` alert from this developer's WSL2 network path specifically — reproduced identically with plain `curl` (bypassing drop-tracker's Go client entirely), confirmed environmental (not a code defect) during Phase 03 UAT. Deezer is unaffected. If a future phase's live testing hits the same MusicBrainz-only TLS failure on this machine, this is already a known, accepted limitation — see `.planning/phases/03-external-clients-search/03-VERIFICATION.md` Acknowledged Gaps and Broken Windows Ledger entry #3 (waived).
 - Config/settings library (pydantic-settings equivalent — e.g. envconfig/viper) and exact structured-logging setup are implementation details left to phase research/planning rather than locked here.
 
 ## Constraints
@@ -68,12 +69,12 @@ A single Go binary that reliably detects and notifies on new releases for watche
 | chi router | stdlib-idiomatic, minimal footprint for a small API surface | Validated Phase 01 — `/health` route + `go-chi/httplog` request logging wired |
 | sqlc for DB access | Type-safe generated queries; codegen step is itself a nice CI showcase | Validated Phase 01 — `make sqlc-check` regenerates and diffs committed output; version-pinned via `sqlc-version-check` |
 | golang-migrate for migrations | Widely used, plain SQL up/down files, simple CI integration | Validated Phase 01 — embedded (`go:embed`) migrations run at boot with a bounded retry loop and context-cancellation support |
-| robfig/cron for scheduling | Closest equivalent to APScheduler; configurable per-source poll intervals | — Pending |
+| robfig/cron for scheduling | Closest equivalent to APScheduler; configurable per-source poll intervals | Validated Phase 03 — two independent cron entries (MusicBrainz/Deezer), each behind its own CAS overlap guard so one source's pace never blocks the other |
 | React (Vite) SPA embedded via go:embed | Keeps deployable to a single Go binary/image while still using a real frontend stack | — Pending |
 | Single Go binary/service architecture | Simpler CI/CD to start; still exercises full pipeline without microservice complexity | — Pending |
 | DB-backed watchlist with CRUD API | More realistic surface, more to test/lint/scan than a static config file | Validated Phase 02 — add/remove/list/update-preferences all live behind `internal/watchlist.Store`, the reusable domain surface later phases (search-proxy, poller) build on |
-| Live search-proxy endpoints | Lets the UI look up artists/albums against MusicBrainz/Deezer directly, not just local DB | — Pending |
-| httptest.Server for HTTP mocking in tests | Stdlib-only, no extra test dependency | — Pending |
+| Live search-proxy endpoints | Lets the UI look up artists/albums against MusicBrainz/Deezer directly, not just local DB | Validated Phase 03 — `GET /search` fans out concurrently to both sources, source-tagged, D-03 partial-failure contract (one source down never fails the whole request) |
+| httptest.Server for HTTP mocking in tests | Stdlib-only, no extra test dependency | Validated Phase 03 — `internal/musicbrainz`/`internal/deezer` clients tested exclusively against `httptest.Server` fixtures per CLAUDE.md's no-live-calls-in-CI constraint |
 | "Full Pipeline" CI/CD depth (lint+test+scan+SBOM+semantic-release+push) | Matches the project's primary goal of practicing real DevOps pipelines | — Pending |
 | ghcr.io as image registry | Free, zero extra secrets, tightly integrated with GitHub Actions | — Pending |
 | Structured logging only for v1 (no Prometheus/Grafana yet) | Keeps initial scope tight; metrics can be layered on later | Validated Phase 01 — `log/slog` JSON logging via `go-chi/httplog`, wired with a secret-redaction pattern for the DB DSN |
@@ -99,4 +100,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-06 after Phase 02 (watchlist-core)*
+*Last updated: 2026-08-08 after Phase 03 (external-clients-search)*
