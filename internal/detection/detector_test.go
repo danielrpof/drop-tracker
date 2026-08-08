@@ -427,3 +427,269 @@ func TestDetectMusicBrainz_InsertionOrderIsStable(t *testing.T) {
 // mirroring internal/watchlist/service_test.go's strptr -- so callers never
 // take the address of a loop variable or a shared literal by accident.
 func nullableStringForTest(s string) *string { return &s }
+
+// The tests below (04-02 task 2) prove D-13 through D-16's seed-mode
+// contract: a newly watched artist's existing catalogue is absorbed into
+// the seen store as already-notified rather than queued for alerting, later
+// cycles leave new events unnotified, seeding is per-source, and a
+// watchlist remove-then-re-add resumes rather than re-seeds.
+
+// unnotifiedForArtist filters q.ListUnnotified's global result down to
+// artistID's rows -- ListUnnotified has no per-artist parameter (it is
+// Phase 5's cross-artist notify-queue query), and every test in this
+// package shares one database, so tests run sequentially (never
+// t.Parallel) and each cleans up its own artist (and, via ON DELETE
+// CASCADE, its own events) before the next test's insert.
+func unnotifiedForArtist(t *testing.T, q sqlc.Querier, ctx context.Context, artistID int64) []sqlc.Event {
+	t.Helper()
+	all, err := q.ListUnnotified(ctx)
+	if err != nil {
+		t.Fatalf("ListUnnotified: %v", err)
+	}
+	var mine []sqlc.Event
+	for _, e := range all {
+		if e.ArtistID == artistID {
+			mine = append(mine, e)
+		}
+	}
+	return mine
+}
+
+func TestDetector_SeedMode_FirstCyclePreNotifies(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Seed Mode Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Seed Mode Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	groups := []musicbrainz.ReleaseGroup{
+		{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+		{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"},
+		{MBID: mbid + "-rg3", Title: "Album Three", PrimaryType: "Album"},
+	}
+
+	q := sqlc.New(pool)
+	d := detection.New(q)
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	rows, err := pool.Query(ctx, "SELECT notified_at IS NOT NULL FROM events WHERE artist_id = $1", artistID)
+	if err != nil {
+		t.Fatalf("query events: %v", err)
+	}
+	defer rows.Close()
+	var count int
+	for rows.Next() {
+		var notified bool
+		if err := rows.Scan(&notified); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if !notified {
+			t.Fatal("seed-cycle row has NULL notified_at, want non-NULL")
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("event row count = %d, want 3", count)
+	}
+
+	if got := unnotifiedForArtist(t, q, ctx, artistID); len(got) != 0 {
+		t.Fatalf("ListUnnotified returned %d rows for a seeded artist, want 0", len(got))
+	}
+}
+
+func TestDetector_SecondCycleLeavesNotifiedAtNull(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Second Cycle Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Second Cycle Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	seedGroups := []musicbrainz.ReleaseGroup{
+		{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+		{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"},
+		{MBID: mbid + "-rg3", Title: "Album Three", PrimaryType: "Album"},
+	}
+
+	q := sqlc.New(pool)
+	d := detection.New(q)
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, seedGroups); err != nil {
+		t.Fatalf("seed DetectMusicBrainz: %v", err)
+	}
+
+	nextGroups := append(append([]musicbrainz.ReleaseGroup{}, seedGroups...),
+		musicbrainz.ReleaseGroup{MBID: mbid + "-rg4", Title: "Album Four", PrimaryType: "Album"})
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nextGroups); err != nil {
+		t.Fatalf("second DetectMusicBrainz: %v", err)
+	}
+
+	var notifiedCount, unnotifiedCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND notified_at IS NOT NULL", artistID).Scan(&notifiedCount); err != nil {
+		t.Fatalf("count notified: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND notified_at IS NULL", artistID).Scan(&unnotifiedCount); err != nil {
+		t.Fatalf("count unnotified: %v", err)
+	}
+	if notifiedCount != 3 {
+		t.Fatalf("notified row count = %d, want 3 (the seeded rows must stay notified)", notifiedCount)
+	}
+	if unnotifiedCount != 1 {
+		t.Fatalf("unnotified row count = %d, want 1 (only the new group)", unnotifiedCount)
+	}
+
+	got := unnotifiedForArtist(t, q, ctx, artistID)
+	if len(got) != 1 {
+		t.Fatalf("ListUnnotified returned %d rows for this artist, want 1", len(got))
+	}
+	if got[0].ExternalID != mbid+"-rg4" {
+		t.Fatalf("unnotified row external_id = %q, want %q", got[0].ExternalID, mbid+"-rg4")
+	}
+}
+
+func TestDetector_SeedModeIsPerSource(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Per Source Seed Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Per Source Seed Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	groups := []musicbrainz.ReleaseGroup{
+		{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+	}
+
+	q := sqlc.New(pool)
+	d := detection.New(q)
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	hasMB, err := q.HasAnyEvent(ctx, sqlc.HasAnyEventParams{ArtistID: artistID, Source: "musicbrainz"})
+	if err != nil {
+		t.Fatalf("HasAnyEvent(musicbrainz): %v", err)
+	}
+	if !hasMB {
+		t.Fatal("HasAnyEvent(musicbrainz) = false, want true after a musicbrainz cycle")
+	}
+
+	hasDZ, err := q.HasAnyEvent(ctx, sqlc.HasAnyEventParams{ArtistID: artistID, Source: "deezer"})
+	if err != nil {
+		t.Fatalf("HasAnyEvent(deezer): %v", err)
+	}
+	if hasDZ {
+		t.Fatal("HasAnyEvent(deezer) = true, want false -- a musicbrainz-only cycle must not seed the deezer source (D-15)")
+	}
+}
+
+func TestDetector_ReAddDoesNotReSeed(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Re-Add Artist")
+
+	var watchlistID int64
+	if err := pool.QueryRow(ctx, "INSERT INTO watchlist (artist_id) VALUES ($1) RETURNING id", artistID).Scan(&watchlistID); err != nil {
+		t.Fatalf("insert watchlist row: %v", err)
+	}
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Re-Add Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	seedGroups := []musicbrainz.ReleaseGroup{
+		{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+	}
+
+	q := sqlc.New(pool)
+	d := detection.New(q)
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, seedGroups); err != nil {
+		t.Fatalf("seed DetectMusicBrainz: %v", err)
+	}
+
+	// Remove then re-add the watchlist row -- event rows are keyed on
+	// artist_id (Phase 2 D-03 master data), which survives watchlist-row
+	// deletion, so this must not put the artist back into seed mode (D-16).
+	if _, err := pool.Exec(ctx, "DELETE FROM watchlist WHERE id = $1", watchlistID); err != nil {
+		t.Fatalf("delete watchlist row: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO watchlist (artist_id) VALUES ($1)", artistID); err != nil {
+		t.Fatalf("re-insert watchlist row: %v", err)
+	}
+
+	nextGroups := append(append([]musicbrainz.ReleaseGroup{}, seedGroups...),
+		musicbrainz.ReleaseGroup{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"})
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nextGroups); err != nil {
+		t.Fatalf("post-re-add DetectMusicBrainz: %v", err)
+	}
+
+	var notifiedAt *string
+	if err := pool.QueryRow(ctx, "SELECT notified_at::text FROM events WHERE artist_id = $1 AND external_id = $2", artistID, mbid+"-rg2").Scan(&notifiedAt); err != nil {
+		t.Fatalf("query new row notified_at: %v", err)
+	}
+	if notifiedAt != nil {
+		t.Fatalf("notified_at for the post-re-add row = %v, want NULL (a re-add must not re-seed)", *notifiedAt)
+	}
+}
+
+func TestDetector_SeedModeRespectsFilters(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Seed Filter Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Seed Filter Artist", ReleaseTypes: []string{"album"}}
+	groups := []musicbrainz.ReleaseGroup{
+		{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+		{MBID: mbid + "-rg2", Title: "Single One", PrimaryType: "Single"},
+	}
+
+	q := sqlc.New(pool)
+	d := detection.New(q)
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1", artistID).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("event row count = %d, want 1 (filtering applies in seed mode too, D-17)", count)
+	}
+}
+
+func TestDetector_SeedRowsShareOneTimestamp(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Seed Timestamp Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Seed Timestamp Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	groups := []musicbrainz.ReleaseGroup{
+		{MBID: mbid + "-rg1", Title: "Album One", PrimaryType: "Album"},
+		{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"},
+		{MBID: mbid + "-rg3", Title: "Album Three", PrimaryType: "Album"},
+	}
+
+	q := sqlc.New(pool)
+	d := detection.New(q)
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	rows, err := pool.Query(ctx, "SELECT DISTINCT notified_at FROM events WHERE artist_id = $1", artistID)
+	if err != nil {
+		t.Fatalf("query distinct notified_at: %v", err)
+	}
+	defer rows.Close()
+	var distinctCount int
+	for rows.Next() {
+		distinctCount++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	if distinctCount != 1 {
+		t.Fatalf("distinct notified_at values = %d, want 1 (every row from one seed cycle must share one timestamp)", distinctCount)
+	}
+}
