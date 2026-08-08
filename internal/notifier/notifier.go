@@ -136,6 +136,18 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 				slog.String("error", err.Error()),
 			)
 		} else if _, err := n.q.MarkNotified(ctx, ev.ID); err != nil {
+			// WR-03: Discord has already durably accepted this send, but
+			// this process failed to acknowledge it in the DB -- the next
+			// pass will re-select and re-send this row, producing a
+			// visible duplicate notification. Log at Warn (distinct from
+			// a generic ListUnnotified-level DB outage) before returning,
+			// so this specific failure mode is identifiable in production
+			// logs rather than indistinguishable from any other DB error.
+			logger.Warn("mark notified failed after a successful send: next pass will re-send this event",
+				slog.Int64("event_id", ev.ID),
+				slog.String("event_type", ev.EventType),
+				slog.String("error", err.Error()),
+			)
 			return fmt.Errorf("notifier: mark notified: %w", err)
 		}
 

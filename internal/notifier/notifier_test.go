@@ -386,6 +386,58 @@ func TestNotifyPending_BatchSpacingBetweenSends(t *testing.T) {
 	}
 }
 
+// markNotifiedFailingQuerier wraps a real sqlc.Querier and overrides only
+// MarkNotified to always fail, delegating every other method (ListUnnotified
+// included) to the real, Postgres-backed querier -- lets a test land
+// squarely in the narrow "Send succeeded, MarkNotified failed" window WR-03
+// describes without hand-writing every other Querier method.
+type markNotifiedFailingQuerier struct {
+	sqlc.Querier
+}
+
+func (markNotifiedFailingQuerier) MarkNotified(ctx context.Context, id int64) (int64, error) {
+	return 0, errors.New("mark notified exploded")
+}
+
+// TestNotifyPending_MarkNotifiedFails_LogsWarnAndReturnsError is the WR-03
+// regression guard: a MarkNotified failure after a successful Send is a
+// known duplicate-post risk window (the row's notified_at stays NULL, so
+// the next pass re-sends it) -- this must be logged at Warn, distinguishable
+// from a generic DB-outage error, and still returned as a hard failure.
+func TestNotifyPending_MarkNotifiedFails_LogsWarnAndReturnsError(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "marknotifiedfail")
+	eventID := insertPendingEvent(t, pool, artistID, "marknotifiedfail-ext-1")
+
+	sender := &fakeSender{}
+	n := notifier.New(markNotifiedFailingQuerier{Querier: q}, sender, time.Millisecond)
+
+	err := n.NotifyPending(context.Background(), logger)
+	if err == nil {
+		t.Fatal("NotifyPending: expected an error when MarkNotified fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "mark notified exploded") {
+		t.Fatalf("error = %q, want it to wrap the MarkNotified failure", err.Error())
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls = %d, want 1 (Send must have succeeded before MarkNotified failed)", got)
+	}
+	if isNotified(t, pool, eventID) {
+		t.Fatal("notified_at should still be NULL: MarkNotified failed, so the DB was never updated")
+	}
+
+	logOut := buf.String()
+	if !strings.Contains(logOut, "mark notified exploded") {
+		t.Fatalf("expected the MarkNotified failure to be logged, got: %s", logOut)
+	}
+	if !strings.Contains(strings.ToLower(logOut), `"level":"warn"`) {
+		t.Fatalf("expected a Warn-level log line for the MarkNotified failure, got: %s", logOut)
+	}
+}
+
 // TestNotifyPending_SpacingAppliedEvenAfterFailedSend is the WR-01
 // regression guard: the inter-send spacing wait must not be skipped on a
 // failed Send, since a backlog of failing sends (e.g. during a Discord
