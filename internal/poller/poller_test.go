@@ -207,6 +207,28 @@ func (f *fakeEventRecorder) DetectDeezer(ctx context.Context, logger *slog.Logge
 
 var _ EventRecorder = (*fakeEventRecorder)(nil)
 
+// fakeNotifier is a file-local double for poller.Notifier, mirroring
+// fakeEventRecorder's call-tracking convention. Declared here rather than
+// importing internal/notifier -- the test only needs something that
+// satisfies this package's own locally-declared seam (04-01's
+// EventRecorder-import-freedom acceptance criteria applies equally to
+// Notifier).
+type fakeNotifier struct {
+	fn func(ctx context.Context, logger *slog.Logger) error
+
+	calls int32
+}
+
+func (f *fakeNotifier) NotifyPending(ctx context.Context, logger *slog.Logger) error {
+	atomic.AddInt32(&f.calls, 1)
+	if f.fn != nil {
+		return f.fn(ctx, logger)
+	}
+	return nil
+}
+
+var _ Notifier = (*fakeNotifier)(nil)
+
 // testArtistMBID derives a short, unique-per-test artist mbid from
 // t.Name(), matching internal/watchlist/service_test.go's testMBID
 // convention -- used only by the real-Postgres integration tests in this
@@ -272,7 +294,7 @@ func newTestPoller(t *testing.T, store watchlist.Store, mb ReleaseGroupSource, d
 	if len(events) > 0 {
 		er = events[0]
 	}
-	p, err := New(store, mb, dz, er, 15*time.Minute, logger)
+	p, err := New(store, mb, dz, er, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -517,7 +539,7 @@ func TestPoller_RunMusicBrainzCycle_RecordsNewRelease(t *testing.T) {
 	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{}, fakeReleaseDetailSource{})
 	logger, _ := newTestLogger()
 
-	p, err := New(store, mb, &fakeAlbumSource{}, recorder, 15*time.Minute, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, recorder, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -570,7 +592,7 @@ func TestPoller_RunDeezerCycle_RecordsNewRelease(t *testing.T) {
 	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{}, fakeReleaseDetailSource{})
 	logger, _ := newTestLogger()
 
-	p, err := New(store, &fakeReleaseGroupSource{}, dz, recorder, 15*time.Minute, logger)
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, recorder, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -826,7 +848,7 @@ func TestNew_RejectsNonPositiveInterval(t *testing.T) {
 	logger, _ := newTestLogger()
 	store := &stubStore{}
 	for _, interval := range []time.Duration{0, -1 * time.Second} {
-		if _, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, interval, logger); err == nil {
+		if _, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, interval, logger); err == nil {
 			t.Fatalf("New with interval=%s: expected error, got nil", interval)
 		}
 	}
@@ -854,7 +876,7 @@ func TestPoller_RunMusicBrainzCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 		return nil
 	}}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, events, 15*time.Minute, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -889,7 +911,7 @@ func TestPoller_RunMusicBrainzCycle_GuardReleasedAfterDetectionError(t *testing.
 		return errors.New("detection exploded")
 	}}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, events, 15*time.Minute, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -923,7 +945,7 @@ func TestPoller_RunDeezerCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 		return nil
 	}}
 	logger, _ := newTestLogger()
-	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, 15*time.Minute, logger)
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -958,7 +980,7 @@ func TestPoller_RunDeezerCycle_GuardReleasedAfterDetectionError(t *testing.T) {
 		return errors.New("detection exploded")
 	}}
 	logger, _ := newTestLogger()
-	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, 15*time.Minute, logger)
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -994,7 +1016,7 @@ func TestPoller_RunMusicBrainzCycle_DetectionErrorIsolatedPerArtist(t *testing.T
 		return nil
 	}}
 	logger, buf := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, events, 15*time.Minute, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1030,7 +1052,7 @@ func TestPoller_RunMusicBrainzCycle_EmptyWatchlist(t *testing.T) {
 	mb := &fakeReleaseGroupSource{}
 	events := &fakeEventRecorder{}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, events, 15*time.Minute, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1061,7 +1083,7 @@ func TestPoller_CyclesAreIndependentAcrossSources(t *testing.T) {
 	}}
 	dz := &fakeAlbumSource{}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, dz, events, 15*time.Minute, logger)
+	p, err := New(store, mb, dz, events, &fakeNotifier{}, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1256,7 +1278,7 @@ func TestNew_RegistersEveryIntervalSpecOnBothEntries(t *testing.T) {
 	for _, interval := range []time.Duration{15 * time.Minute, 90 * time.Second} {
 		t.Run(interval.String(), func(t *testing.T) {
 			store := &stubStore{}
-			p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, interval, logger)
+			p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, interval, logger)
 			if err != nil {
 				t.Fatalf("New(interval=%s): %v", interval, err)
 			}
@@ -1281,7 +1303,7 @@ func TestNew_ZeroOrNegativeIntervalRegistersNoCronEntry(t *testing.T) {
 	logger, _ := newTestLogger()
 	store := &stubStore{}
 	for _, interval := range []time.Duration{0, -1 * time.Second} {
-		p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, interval, logger)
+		p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, interval, logger)
 		if err == nil {
 			t.Fatalf("New(interval=%s): expected error, got nil", interval)
 		}
@@ -1314,7 +1336,7 @@ func TestStop_ReturnsNilOnceInFlightCycleFinishes(t *testing.T) {
 		return []musicbrainz.ReleaseGroup{}, nil
 	}}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, 50*time.Millisecond, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 50*time.Millisecond, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1359,7 +1381,7 @@ func TestStop_ReturnsCallerContextErrorWhenCycleOutlivesIt(t *testing.T) {
 		return nil, ctx.Err()
 	}}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, 50*time.Millisecond, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 50*time.Millisecond, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1383,7 +1405,7 @@ func TestStop_NoFurtherCycleBeginsAfterStop(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
 	mb := &fakeReleaseGroupSource{}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, 30*time.Millisecond, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 30*time.Millisecond, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1421,7 +1443,7 @@ func TestPoller_StartStop_LifecycleWithRealCronTick(t *testing.T) {
 	mb := &fakeReleaseGroupSource{}
 	dz := &fakeAlbumSource{}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, dz, &fakeEventRecorder{}, 50*time.Millisecond, logger)
+	p, err := New(store, mb, dz, &fakeEventRecorder{}, &fakeNotifier{}, 50*time.Millisecond, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

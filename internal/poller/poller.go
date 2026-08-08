@@ -72,6 +72,18 @@ type EventRecorder interface {
 	DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) error
 }
 
+// Notifier is the narrow seam RunMusicBrainzCycle and RunDeezerCycle depend
+// on to drain the events outbox at the end of their own per-artist loop
+// (D-05) -- declared here, in the consumer, exactly as EventRecorder is, so
+// a test can substitute a fake with no real Discord client or database
+// connection. It has no disabled-state concept: cmd/server/main.go's
+// notifier.Select owns D-10's gate and always hands New a non-nil Notifier
+// (a real one, or notifier.NoOp), so neither cycle method ever nil-checks
+// this field.
+type Notifier interface {
+	NotifyPending(ctx context.Context, logger *slog.Logger) error
+}
+
 // nextCycleID is a package-level counter rendered into each cycle's
 // correlation id (musicbrainz-<n> / deezer-<n>) so every log line emitted
 // within one cycle can be grouped, and two successive cycles for the same
@@ -84,10 +96,11 @@ var nextCycleID atomic.Uint64
 // coupling D-08 rejects -- MusicBrainz's slower pace must never delay or
 // block Deezer's faster one.
 type Poller struct {
-	store  watchlist.Store
-	mb     ReleaseGroupSource
-	dz     AlbumSource
-	events EventRecorder
+	store    watchlist.Store
+	mb       ReleaseGroupSource
+	dz       AlbumSource
+	events   EventRecorder
+	notifier Notifier
 
 	logger   *slog.Logger
 	interval time.Duration
@@ -108,14 +121,14 @@ type Poller struct {
 	dzRunning atomic.Bool
 }
 
-// New builds a Poller over store, mb, dz and events, and registers two
-// independent cron entries -- one per source -- on the spec
+// New builds a Poller over store, mb, dz, events and notifier, and
+// registers two independent cron entries -- one per source -- on the spec
 // "@every <interval>". Registering them as two separate AddFunc calls, each
 // closing over one cycle method, is what guarantees MusicBrainz's slower
 // pace can never delay or block Deezer's faster one (D-08). interval must
 // be greater than zero; New returns a non-nil error and registers no entry
 // otherwise.
-func New(store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, events EventRecorder, interval time.Duration, logger *slog.Logger) (*Poller, error) {
+func New(store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, events EventRecorder, notifier Notifier, interval time.Duration, logger *slog.Logger) (*Poller, error) {
 	if interval <= 0 {
 		return nil, fmt.Errorf("poller: interval must be greater than zero, got %s", interval)
 	}
@@ -125,6 +138,7 @@ func New(store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, events Ev
 		mb:       mb,
 		dz:       dz,
 		events:   events,
+		notifier: notifier,
 		logger:   logger,
 		interval: interval,
 		cron:     cron.New(),
@@ -243,6 +257,16 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 		}
 	}
 
+	// D-05: notify inline, at the end of the cycle, using this cycle's own
+	// logger so notifier lines inherit the source/cycle_id correlation
+	// attributes rather than starting a fresh logger. A delivery failure is
+	// logged, not returned -- it must never turn an otherwise-successful
+	// detection cycle into a failed one, mirroring how a per-artist
+	// detection error above is logged rather than propagated.
+	if err := p.notifier.NotifyPending(ctx, logger); err != nil {
+		logger.Error("notify pending failed", slog.String("notifier_error", err.Error()))
+	}
+
 	return nil
 }
 
@@ -309,6 +333,12 @@ func (p *Poller) RunDeezerCycle(ctx context.Context) error {
 			)
 			continue
 		}
+	}
+
+	// See RunMusicBrainzCycle's identical comment on this same call -- D-05,
+	// logged not returned.
+	if err := p.notifier.NotifyPending(ctx, logger); err != nil {
+		logger.Error("notify pending failed", slog.String("notifier_error", err.Error()))
 	}
 
 	return nil

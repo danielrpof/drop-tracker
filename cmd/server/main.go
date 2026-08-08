@@ -23,6 +23,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
+	"github.com/danielrpof/drop-tracker/internal/notifier"
 	"github.com/danielrpof/drop-tracker/internal/poller"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
@@ -130,13 +131,21 @@ func run() error {
 		httpserver.NewDeezerSource(dzClient),
 	}, logger)
 
+	// notif is the poller.Notifier plan 05-01's Select wires in: it owns
+	// D-10's gate (empty DISCORD_WEBHOOK_URL -> notifier.NoOp, so poller.New's
+	// notifier argument is always non-nil and neither cycle method ever
+	// nil-checks it) rather than branching on cfg.DiscordWebhookURL here. A
+	// third sqlc.New(pool) instance, matching store/detector's own pattern
+	// above -- sqlc.Queries is a stateless wrapper over the shared pool.
+	notif := notifier.Select(cfg.DiscordWebhookURL, sqlc.New(pool), nil, logger)
+
 	// pollr reuses the same mbClient/dzClient instances handed to
 	// httpserver.New above rather than constructing its own -- sharing the
 	// instance is what makes each source's rate.Limiter a whole-process
 	// budget: search traffic and poll traffic draw from the same token
 	// bucket, so a burst of /search calls can never push the combined
 	// outbound rate past what the operator configured (D-07).
-	pollr, err := poller.New(store, mbClient, dzClient, detector, cfg.PollInterval, logger)
+	pollr, err := poller.New(store, mbClient, dzClient, detector, notif, cfg.PollInterval, logger)
 	if err != nil {
 		return fmt.Errorf("build poller: %w", err)
 	}
