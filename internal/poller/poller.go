@@ -3,11 +3,12 @@
 // through the existing watchlist.Store seam (D-05), calls its source for
 // every entry sequentially -- one outbound request at a time, so the
 // configured per-source rate is never multiplied by concurrency (D-07) --
-// and logs one structured result per artist. Each MusicBrainz cycle then
-// hands its fetched results to the EventRecorder seam, which diffs them
-// against the seen store and records previously-unseen releases as event
-// rows (Phase 4, DTCT-01) -- this package still performs no diffing and
-// holds no database connection itself, it only calls the seam.
+// and logs one structured result per artist. Each cycle then hands its
+// fetched results to the EventRecorder seam, which diffs them against the
+// seen store and records previously-unseen releases as event rows (Phase 4,
+// DTCT-01; the Deezer half of this wiring is plan 04-02) -- this package
+// still performs no diffing and holds no database connection itself, it
+// only calls the seam.
 package poller
 
 import (
@@ -60,13 +61,15 @@ type AlbumSource interface {
 
 var _ AlbumSource = (*deezer.Client)(nil)
 
-// EventRecorder is the narrow seam RunMusicBrainzCycle depends on to diff a
-// cycle's fetched results against the seen store and record
-// previously-unseen items as event rows -- declared here, in the consumer,
-// exactly as ReleaseGroupSource and AlbumSource are, so a test can
-// substitute a fake with no real database connection (Phase 4, DTCT-01).
+// EventRecorder is the narrow seam RunMusicBrainzCycle and RunDeezerCycle
+// depend on to diff a cycle's fetched results against the seen store and
+// record previously-unseen items as event rows -- declared here, in the
+// consumer, exactly as ReleaseGroupSource and AlbumSource are, so a test can
+// substitute a fake with no real database connection (Phase 4, DTCT-01;
+// DetectDeezer added in plan 04-02).
 type EventRecorder interface {
 	DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error
+	DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) error
 }
 
 // nextCycleID is a package-level counter rendered into each cycle's
@@ -244,11 +247,13 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 }
 
 // RunDeezerCycle reads the live watchlist and calls ArtistAlbums once per
-// entry that carries a non-nil DeezerID, sequentially. An entry with a nil
-// DeezerID is skipped with a logged reason and no HTTP request -- there is
-// no name-search fallback to backfill it (D-06). A per-artist error is
-// logged and the cycle continues. The cycle writes nothing to the database
-// (D-04).
+// entry that carries a non-nil DeezerID, sequentially, then hands the
+// fetched albums to the EventRecorder seam so previously-unseen albums are
+// recorded as new_release events in Deezer's own id namespace (Phase 4,
+// plan 04-02). An entry with a nil DeezerID is skipped with a logged reason
+// and no HTTP request, no recorder call, and no row -- there is no
+// name-search fallback to backfill it (D-06). A per-artist fetch or
+// detection error is logged and the cycle continues to the next artist.
 func (p *Poller) RunDeezerCycle(ctx context.Context) error {
 	// See RunMusicBrainzCycle's comment on this same pattern -- dzRunning is
 	// a wholly independent guard from mbRunning (D-08), so an overlapping
@@ -295,6 +300,15 @@ func (p *Poller) RunDeezerCycle(ctx context.Context) error {
 			slog.String("artist_name", entry.Name),
 			slog.Int("item_count", len(albums)),
 		)
+
+		if err := p.events.DetectDeezer(ctx, logger, entry, albums); err != nil {
+			logger.Error("detection failed",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("artist_name", entry.Name),
+				slog.String("detection_error", err.Error()),
+			)
+			continue
+		}
 	}
 
 	return nil
