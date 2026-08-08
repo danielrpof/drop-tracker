@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: detection-engine
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-08-08T02:58:23.877Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-08-08T03:18:27.641Z"
 last_activity: 2026-08-07
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 21
-  completed_plans: 19
+  completed_plans: 20
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-08)
 ## Current Position
 
 Phase: 04 (detection-engine) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-08-07 — Phase 04 execution started
 
-Progress: [█████████░] 90%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -79,6 +79,7 @@ Progress: [█████████░] 90%
 | Phase 03 P04 | 25min | 3 tasks | 5 files |
 | Phase 04 P01 | 30min | 3 tasks | 13 files |
 | Phase 04 P02 | 25min | 3 tasks | 13 files |
+| Phase 04 P03 | 45min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -128,6 +129,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04-01]: newTestPoller took a variadic trailing EventRecorder parameter so the widened poller.New constructor did not require touching all existing test call sites
 - [Phase ?]: [Phase 04-02]: Existing 04-01 test fixtures updated to carry ReleaseTypes/PrimaryType since Task 1's D-17 filter now rejects an entry with no ReleaseTypes -- a real watchlist entry always has ReleaseTypes populated per Phase 2 D-08 defaults
 - [Phase ?]: [Phase 04-02]: DetectDeezer structurally mirrors DetectMusicBrainz (mute check, seed-mode check, seen-set lookup, per-item filter, insert) rather than sharing a generic helper, since the two sources differ in id formatting and filter input (RecordType vs PrimaryType)
+- [Phase ?]: [Phase 04-03]: Centralized seedMode/notifiedAt computation to the top of DetectMusicBrainz, shared by both new_release and guest_feature passes -- an independent per-pass isSeedMode call would have seen the other pass's just-inserted rows and flipped seed mode mid-cycle, unseeding a newly-watched artist's guest-feature catalogue on their first poll
+- [Phase ?]: [Phase 04-03]: isGuestFeature/displayArtistName unit tests live in a new internal/detection/musicbrainz_test.go (package detection, whitebox) since isGuestFeature is unexported -- mirrors filter_test.go's convention
 
 ### Pending Todos
 
@@ -153,6 +156,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-08T02:58:23.821Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-08-08T03:18:27.598Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None

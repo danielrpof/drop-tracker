@@ -137,7 +137,7 @@ Plans:
   4. The system never re-records or re-notifies for a release/change it has already seen
   5. The system never runs two poll cycles for the same source concurrently, even if a prior cycle is still running
 
-**Plans**: 2/4 plans executed
+**Plans**: 3/4 plans executed
 
 Plans:
 **Wave 1**
@@ -150,7 +150,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 04-03-PLAN.md — Guest-feature slice: `RecordingsByArtist` bounded browse plus the positional artist-credit rule, malformed-credit guards, and page-ceiling visibility
+- [x] 04-03-PLAN.md — Guest-feature slice: `RecordingsByArtist` bounded browse plus the positional artist-credit rule, malformed-credit guards, and page-ceiling visibility
 
 **Wave 4** *(blocked on Wave 3)*
 
@@ -212,7 +212,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Foundation — Data Layer, Config & Health | 5/5 | Complete    | 2026-08-05 |
 | 2. Watchlist Core | 8/8 | Complete    | 2026-08-06 |
 | 3. External Clients & Search | 4/4 | Complete    | 2026-08-07 |
-| 4. Detection Engine | 2/4 | In Progress|  |
+| 4. Detection Engine | 3/4 | In Progress|  |
 | 5. Discord Notifications | 0/TBD | Not started | - |
 | 6. Frontend & Release History | 0/TBD | Not started | - |
 | 7. Containerization & CI/CD Pipeline | 0/TBD | Not started | - |
