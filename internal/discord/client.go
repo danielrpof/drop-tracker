@@ -51,7 +51,20 @@ type EmbedImage struct {
 // webhookPayload is the execute-webhook request body shape: a single-embed
 // slice per send, matching D-07's one-event-per-message contract.
 type webhookPayload struct {
-	Embeds []Embed `json:"embeds"`
+	Embeds          []Embed         `json:"embeds"`
+	AllowedMentions allowedMentions `json:"allowed_mentions"`
+}
+
+// allowedMentions suppresses Discord's default mention-parsing behavior.
+// Absent this field, Discord parses @everyone/@here/role/user mention
+// tokens found in embed description/field values and converts them into
+// real, notification-triggering pings. ArtistName (and other embed field
+// values) originate from MusicBrainz/Deezer -- community-editable,
+// semi-trusted data -- so this project has no legitimate use case for a
+// notification ever pinging anyone. Parse is always sent as an empty,
+// non-nil slice so the JSON encodes as "parse":[] rather than "parse":null.
+type allowedMentions struct {
+	Parse []string `json:"parse"`
 }
 
 // retry429Body is Discord's documented 429 JSON body shape.
@@ -97,7 +110,10 @@ func (c *Client) Send(ctx context.Context, embed Embed) error {
 // embed). allowRetry gates the 429 retry recursion so a second 429 cannot
 // retry again -- D-08 is honor-Retry-After-once, not a retry loop.
 func (c *Client) sendAttempt(ctx context.Context, embed Embed, allowRetry bool) error {
-	body, err := json.Marshal(webhookPayload{Embeds: []Embed{embed}})
+	body, err := json.Marshal(webhookPayload{
+		Embeds:          []Embed{embed},
+		AllowedMentions: allowedMentions{Parse: []string{}},
+	})
 	if err != nil {
 		return fmt.Errorf("discord: marshal embed: %w", err)
 	}

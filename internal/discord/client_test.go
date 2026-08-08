@@ -59,6 +59,46 @@ func TestSend_Success204(t *testing.T) {
 	}
 }
 
+// TestSend_AllowedMentionsAlwaysSuppressed is the CR-01 regression guard:
+// every outbound payload must carry an empty allowed_mentions.parse list so
+// a community-editable ArtistName containing @everyone/@here/a role or user
+// mention token can never trigger a live Discord ping.
+func TestSend_AllowedMentionsAlwaysSuppressed(t *testing.T) {
+	var gotBody []byte
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		gotBody = body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	c := NewClient(ts.URL, ts.Client())
+	embed := Embed{Title: "New Release", Fields: []EmbedField{{Name: "Artist", Value: "@everyone"}}}
+	if err := c.Send(context.Background(), embed); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if !strings.Contains(string(gotBody), `"allowed_mentions":{"parse":[]}`) {
+		t.Fatalf("request body = %s, want it to contain \"allowed_mentions\":{\"parse\":[]}", gotBody)
+	}
+
+	var payload webhookPayload
+	if err := json.Unmarshal(gotBody, &payload); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	if payload.AllowedMentions.Parse == nil || len(payload.AllowedMentions.Parse) != 0 {
+		t.Fatalf("AllowedMentions.Parse = %v, want empty non-nil slice", payload.AllowedMentions.Parse)
+	}
+	// Fix belongs at the transport layer, not string-mangling display data:
+	// the field value itself is expected to survive unescaped.
+	if payload.Embeds[0].Fields[0].Value != "@everyone" {
+		t.Fatalf("Embeds[0].Fields[0].Value = %q, want %q (unescaped -- suppression happens via allowed_mentions)", payload.Embeds[0].Fields[0].Value, "@everyone")
+	}
+}
+
 func TestSend_429ThenSuccess_HonorsRetryAfter(t *testing.T) {
 	var reqCount int32
 	var firstTime, secondTime time.Time
