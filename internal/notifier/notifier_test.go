@@ -386,6 +386,53 @@ func TestNotifyPending_BatchSpacingBetweenSends(t *testing.T) {
 	}
 }
 
+// TestNotifyPending_SpacingAppliedEvenAfterFailedSend is the WR-01
+// regression guard: the inter-send spacing wait must not be skipped on a
+// failed Send, since a backlog of failing sends (e.g. during a Discord
+// outage) is exactly the scenario D-07's pacing exists to protect.
+func TestNotifyPending_SpacingAppliedEvenAfterFailedSend(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "failspacing")
+	insertPendingEvent(t, pool, artistID, "failspacing-ext-1")
+	insertPendingEvent(t, pool, artistID, "failspacing-ext-2")
+	insertPendingEvent(t, pool, artistID, "failspacing-ext-3")
+
+	var mu sync.Mutex
+	var timestamps []time.Time
+	failing := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		mu.Lock()
+		timestamps = append(timestamps, time.Now())
+		mu.Unlock()
+		return errors.New("send exploded")
+	}}
+
+	const spacing = 50 * time.Millisecond
+	n := notifier.New(q, failing, spacing)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil (a send failure must not abort the pass, D-09)", err)
+	}
+
+	mu.Lock()
+	got := append([]time.Time(nil), timestamps...)
+	mu.Unlock()
+	if len(got) != 3 {
+		t.Fatalf("recorded %d sends, want 3", len(got))
+	}
+
+	gapsMet := 0
+	for i := 1; i < len(got); i++ {
+		if got[i].Sub(got[i-1]) >= spacing {
+			gapsMet++
+		}
+	}
+	if gapsMet < 2 {
+		t.Fatalf("only %d of 2 required inter-send gaps were >= %v on the all-failed path (spacing must not be skipped after a failed Send); timestamps: %v", gapsMet, spacing, got)
+	}
+}
+
 // TestNotifyPending_BatchMidFailureContinuesToLaterRows is the load-bearing
 // proof the plan's prohibition calls out: it does not stop at "the pass
 // returned nil" (a regression that aborted after the first failure would

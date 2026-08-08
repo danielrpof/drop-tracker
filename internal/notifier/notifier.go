@@ -131,13 +131,17 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 				slog.String("event_type", ev.EventType),
 				slog.String("error", err.Error()),
 			)
-			continue
-		}
-
-		if _, err := n.q.MarkNotified(ctx, ev.ID); err != nil {
+		} else if _, err := n.q.MarkNotified(ctx, ev.ID); err != nil {
 			return fmt.Errorf("notifier: mark notified: %w", err)
 		}
 
+		// Apply the spacing wait unconditionally, including after a failed
+		// Send (WR-01): D-07's whole purpose is to keep this project's
+		// outbound rate under Discord's per-webhook ceiling, and skipping
+		// the wait on the error path would fire the rest of a backlog
+		// back-to-back with zero pacing during exactly the scenario --
+		// a Discord outage or sustained rate-limit condition -- where
+		// hammering the upstream is most likely to make things worse.
 		if i < len(events)-1 {
 			select {
 			case <-time.After(n.spacing):
