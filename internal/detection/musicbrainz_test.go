@@ -22,6 +22,38 @@ func creditFor(mbid, name string) musicbrainz.ArtistCreditEntry {
 	return e
 }
 
+func TestReleaseTypeForStorage(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+
+	tests := []struct {
+		name        string
+		primaryType string
+		want        *string
+	}{
+		{"typical MusicBrainz value is lowercased", "Album", strPtr("album")},
+		{"surrounding whitespace is trimmed", "  Single  ", strPtr("single")},
+		{"absent primary type stores SQL NULL, not an empty string", "", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := releaseTypeForStorage(tt.primaryType)
+			if tt.want == nil {
+				if got != nil {
+					t.Fatalf("releaseTypeForStorage(%q) = %q, want nil", tt.primaryType, *got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("releaseTypeForStorage(%q) = nil, want %q", tt.primaryType, *tt.want)
+			}
+			if *got != *tt.want {
+				t.Fatalf("releaseTypeForStorage(%q) = %q, want %q", tt.primaryType, *got, *tt.want)
+			}
+		})
+	}
+}
+
 func TestIsGuestFeature_EmptyCredit(t *testing.T) {
 	nilCredit := musicbrainz.Recording{MBID: "rec1", Title: "Track", ArtistCredit: nil}
 	if isGuestFeature(nilCredit, "watched-mbid") {

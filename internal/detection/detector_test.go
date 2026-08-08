@@ -174,7 +174,7 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 	}
 
 	rows, err := pool.Query(ctx, `SELECT external_id, release_group_mbid, title, artist_name,
-		release_date, cover_art_url, event_type, source
+		release_date, cover_art_url, event_type, source, release_type
 		FROM events WHERE artist_id = $1 ORDER BY external_id`, artistID)
 	if err != nil {
 		t.Fatalf("query events: %v", err)
@@ -185,12 +185,13 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 		externalID, releaseGroupMbid, title, artistName string
 		releaseDate, coverArtURL                        *string
 		eventType, source                               string
+		releaseType                                     *string
 	}
 	var got []row
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.externalID, &r.releaseGroupMbid, &r.title, &r.artistName,
-			&r.releaseDate, &r.coverArtURL, &r.eventType, &r.source); err != nil {
+			&r.releaseDate, &r.coverArtURL, &r.eventType, &r.source, &r.releaseType); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
 		got = append(got, r)
@@ -233,6 +234,9 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 		}
 		if got[i].source != "musicbrainz" {
 			t.Fatalf("row %d source = %q, want musicbrainz", i, got[i].source)
+		}
+		if got[i].releaseType == nil || *got[i].releaseType != "album" {
+			t.Fatalf("row %d release_type = %v, want %q (lowercased/trimmed PrimaryType %q)", i, got[i].releaseType, "album", "Album")
 		}
 	}
 }
@@ -823,9 +827,11 @@ func TestDetectMusicBrainz_GuestFeature(t *testing.T) {
 
 	var eventType, source, externalID, title, artistName string
 	var releaseGroupMbid, releaseDate, coverArtURL *string
-	row := pool.QueryRow(ctx, `SELECT event_type, source, external_id, release_group_mbid, release_date, cover_art_url, title, artist_name
+	var releaseType *string
+	var previousTrackCount *int32
+	row := pool.QueryRow(ctx, `SELECT event_type, source, external_id, release_group_mbid, release_date, cover_art_url, title, artist_name, release_type, previous_track_count
 		FROM events WHERE artist_id = $1 AND event_type = 'guest_feature'`, artistID)
-	if err := row.Scan(&eventType, &source, &externalID, &releaseGroupMbid, &releaseDate, &coverArtURL, &title, &artistName); err != nil {
+	if err := row.Scan(&eventType, &source, &externalID, &releaseGroupMbid, &releaseDate, &coverArtURL, &title, &artistName, &releaseType, &previousTrackCount); err != nil {
 		t.Fatalf("query guest_feature row: %v", err)
 	}
 	if eventType != "guest_feature" {
@@ -851,6 +857,12 @@ func TestDetectMusicBrainz_GuestFeature(t *testing.T) {
 	}
 	if artistName != "Primary Artist" {
 		t.Errorf("artist_name = %q, want %q (the primary credit's artist, not the watched artist)", artistName, "Primary Artist")
+	}
+	if releaseType != nil {
+		t.Errorf("release_type = %v, want NULL (neither NTFY-02 nor any requirement asks for it on guest_feature)", *releaseType)
+	}
+	if previousTrackCount != nil {
+		t.Errorf("previous_track_count = %v, want NULL", *previousTrackCount)
 	}
 }
 
@@ -1167,9 +1179,10 @@ func TestDetectMusicBrainz_DeluxeChange_FiresOnIncrease(t *testing.T) {
 
 	var eventType, source, externalID, releaseGroupMbid, title string
 	var trackCount int32
-	row := pool.QueryRow(ctx, `SELECT event_type, source, external_id, release_group_mbid, title, track_count
+	var previousTrackCount *int32
+	row := pool.QueryRow(ctx, `SELECT event_type, source, external_id, release_group_mbid, title, track_count, previous_track_count
 		FROM events WHERE artist_id = $1 AND event_type = 'deluxe_change'`, artistID)
-	if err := row.Scan(&eventType, &source, &externalID, &releaseGroupMbid, &title, &trackCount); err != nil {
+	if err := row.Scan(&eventType, &source, &externalID, &releaseGroupMbid, &title, &trackCount, &previousTrackCount); err != nil {
 		t.Fatalf("query deluxe_change row: %v", err)
 	}
 	if eventType != "deluxe_change" {
@@ -1189,6 +1202,9 @@ func TestDetectMusicBrainz_DeluxeChange_FiresOnIncrease(t *testing.T) {
 	}
 	if trackCount != 18 {
 		t.Errorf("track_count = %d, want 18", trackCount)
+	}
+	if previousTrackCount == nil || *previousTrackCount != 12 {
+		t.Errorf("previous_track_count = %v, want 12 (the pre-change baseline, captured before setGroupBaseline overwrote it, D-04)", previousTrackCount)
 	}
 
 	var deluxeCount int

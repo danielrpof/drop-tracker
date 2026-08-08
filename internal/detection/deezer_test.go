@@ -36,7 +36,7 @@ func TestDetectDeezer_NewRelease(t *testing.T) {
 	}
 
 	rows, err := pool.Query(ctx, `SELECT external_id, release_group_mbid, title, artist_name,
-		release_date, cover_art_url, event_type, source
+		release_date, cover_art_url, event_type, source, release_type
 		FROM events WHERE artist_id = $1 ORDER BY external_id`, artistID)
 	if err != nil {
 		t.Fatalf("query events: %v", err)
@@ -47,12 +47,13 @@ func TestDetectDeezer_NewRelease(t *testing.T) {
 		externalID, title, artistName              string
 		releaseGroupMbid, releaseDate, coverArtURL *string
 		eventType, source                          string
+		releaseType                                *string
 	}
 	var got []row
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.externalID, &r.releaseGroupMbid, &r.title, &r.artistName,
-			&r.releaseDate, &r.coverArtURL, &r.eventType, &r.source); err != nil {
+			&r.releaseDate, &r.coverArtURL, &r.eventType, &r.source, &r.releaseType); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
 		got = append(got, r)
@@ -94,6 +95,9 @@ func TestDetectDeezer_NewRelease(t *testing.T) {
 		}
 		if got[i].source != "deezer" {
 			t.Fatalf("row %d source = %q, want deezer", i, got[i].source)
+		}
+		if got[i].releaseType == nil || *got[i].releaseType != "album" {
+			t.Fatalf("row %d release_type = %v, want %q", i, got[i].releaseType, "album")
 		}
 	}
 }
