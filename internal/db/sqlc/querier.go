@@ -36,7 +36,11 @@ type Querier interface {
 	// only as "not newly detected." Deliberately not the
 	// COALESCE(EXCLUDED.col, table.col) refresh shape UpsertArtist uses,
 	// because a re-detected event must keep its original snapshot (D-20):
-	// plain DO NOTHING, no SET clause at all.
+	// plain DO NOTHING, no SET clause at all. previous_track_count and
+	// release_type (Phase 5's D-04/Pitfall-3 columns) are appended after the
+	// existing eleven columns, as $12/$13, so every pre-existing positional
+	// parameter keeps its number -- D-20's write-once guarantee applies to
+	// these two snapshot columns exactly as it does to the original nine.
 	InsertEvent(ctx context.Context, arg InsertEventParams) (int64, error)
 	// Feeds the fresh-vs-seen diff (D-10): a Detector builds a
 	// map[string]struct{} from this result and skips any externally-fetched
@@ -56,6 +60,12 @@ type Querier interface {
 	// it, two equally-named artists would come back in whatever order the
 	// planner happens to choose, which is non-deterministic across runs.
 	ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
+	// Precondition: only ever called after discord.Client.Send has confirmed a
+	// 204 for this row (D-09) -- never before. The AND notified_at IS NULL
+	// predicate is load-bearing, not decorative: it makes the ack idempotent, so
+	// a second acknowledgement of an already-delivered row affects zero rows
+	// instead of overwriting the recorded delivery time.
+	MarkNotified(ctx context.Context, id int64) (int64, error)
 	Ping(ctx context.Context) (int32, error)
 	// Mutates track_count on the group's own new_release row -- this is
 	// operational baseline state, not the D-12 display snapshot (title/

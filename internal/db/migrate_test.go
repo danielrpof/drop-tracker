@@ -161,10 +161,11 @@ func TestRunMigrations_AppliesFromScratch(t *testing.T) {
 	if err := sqlDB.QueryRowContext(ctx, "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	// Phase 4 added migration 000003_events, so "from scratch" now lands on
-	// version 3, not 2 (Phase 2's value, before this migration existed).
-	if version != 3 || dirty {
-		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (3, false)", version, dirty)
+	// Phase 5 added migration 000004_events_display_fields, so "from
+	// scratch" now lands on version 4, not 3 (Phase 4's value, before this
+	// migration existed).
+	if version != 4 || dirty {
+		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (4, false)", version, dirty)
 	}
 }
 

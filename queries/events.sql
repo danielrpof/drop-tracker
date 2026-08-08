@@ -4,12 +4,17 @@
 -- only as "not newly detected." Deliberately not the
 -- COALESCE(EXCLUDED.col, table.col) refresh shape UpsertArtist uses,
 -- because a re-detected event must keep its original snapshot (D-20):
--- plain DO NOTHING, no SET clause at all.
+-- plain DO NOTHING, no SET clause at all. previous_track_count and
+-- release_type (Phase 5's D-04/Pitfall-3 columns) are appended after the
+-- existing eleven columns, as $12/$13, so every pre-existing positional
+-- parameter keeps its number -- D-20's write-once guarantee applies to
+-- these two snapshot columns exactly as it does to the original nine.
 INSERT INTO events (
     artist_id, source, event_type, external_id, release_group_mbid,
-    title, artist_name, release_date, cover_art_url, track_count, notified_at
+    title, artist_name, release_date, cover_art_url, track_count, notified_at,
+    previous_track_count, release_type
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
 ON CONFLICT (event_type, source, external_id) DO NOTHING;
 
@@ -58,3 +63,11 @@ WHERE source = 'musicbrainz' AND release_group_mbid = $1;
 UPDATE events
 SET track_count = $2
 WHERE event_type = 'new_release' AND source = 'musicbrainz' AND external_id = $1;
+
+-- name: MarkNotified :execrows
+-- Precondition: only ever called after discord.Client.Send has confirmed a
+-- 204 for this row (D-09) -- never before. The AND notified_at IS NULL
+-- predicate is load-bearing, not decorative: it makes the ack idempotent, so
+-- a second acknowledgement of an already-delivered row affects zero rows
+-- instead of overwriting the recorded delivery time.
+UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL;

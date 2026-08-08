@@ -20,19 +20,21 @@ type Artist struct {
 }
 
 type Event struct {
-	ID               int64              `json:"id"`
-	ArtistID         int64              `json:"artist_id"`
-	Source           string             `json:"source"`
-	EventType        string             `json:"event_type"`
-	ExternalID       string             `json:"external_id"`
-	ReleaseGroupMbid *string            `json:"release_group_mbid"`
-	Title            string             `json:"title"`
-	ArtistName       string             `json:"artist_name"`
-	ReleaseDate      *string            `json:"release_date"`
-	CoverArtUrl      *string            `json:"cover_art_url"`
-	TrackCount       *int32             `json:"track_count"`
-	NotifiedAt       pgtype.Timestamptz `json:"notified_at"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ID                 int64              `json:"id"`
+	ArtistID           int64              `json:"artist_id"`
+	Source             string             `json:"source"`
+	EventType          string             `json:"event_type"`
+	ExternalID         string             `json:"external_id"`
+	ReleaseGroupMbid   *string            `json:"release_group_mbid"`
+	Title              string             `json:"title"`
+	ArtistName         string             `json:"artist_name"`
+	ReleaseDate        *string            `json:"release_date"`
+	CoverArtUrl        *string            `json:"cover_art_url"`
+	TrackCount         *int32             `json:"track_count"`
+	NotifiedAt         pgtype.Timestamptz `json:"notified_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	PreviousTrackCount *int32             `json:"previous_track_count"`
+	ReleaseType        *string            `json:"release_type"`
 }
 
 type Watchlist struct {

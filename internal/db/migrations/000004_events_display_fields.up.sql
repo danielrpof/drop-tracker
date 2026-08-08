@@ -1,0 +1,23 @@
+-- Phase 5 (discord-notifications): two nullable, additive display columns
+-- Phase 4's detection code already computes in memory but never persists.
+--
+-- previous_track_count exists because track_count (000003_events.up.sql)
+-- only ever holds the CURRENT baseline -- it is overwritten in place by
+-- SetGroupTrackCountBaseline every time a deluxe_change is detected, so the
+-- pre-update value is lost the moment the baseline advances. NTFY-03's
+-- old -> new track-count delta (D-03) needs both numbers, so the old one
+-- must be captured into the event row itself at insert time (D-04), before
+-- setGroupBaseline overwrites it.
+--
+-- release_type exists because NTFY-01 names "release type" as a required
+-- display field and no column holds it today: MusicBrainz's PrimaryType and
+-- Deezer's RecordType are both read by Phase 4's detection code, but only as
+-- an in-memory filter predicate (releaseTypeAllowed) -- neither is ever
+-- assigned into InsertEventParams (05-RESEARCH.md Pitfall 3).
+--
+-- Both are nullable with no DEFAULT, matching 000003's own nullable-column
+-- style (release_group_mbid, release_date): write-once display-snapshot
+-- fields read only by the notifier, not operational state, so there is no
+-- correct non-NULL default for a row that predates this migration.
+ALTER TABLE events ADD COLUMN previous_track_count INT;
+ALTER TABLE events ADD COLUMN release_type TEXT;

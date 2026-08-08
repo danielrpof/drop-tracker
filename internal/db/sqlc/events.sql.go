@@ -62,25 +62,28 @@ func (q *Queries) HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool,
 const insertEvent = `-- name: InsertEvent :execrows
 INSERT INTO events (
     artist_id, source, event_type, external_id, release_group_mbid,
-    title, artist_name, release_date, cover_art_url, track_count, notified_at
+    title, artist_name, release_date, cover_art_url, track_count, notified_at,
+    previous_track_count, release_type
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
 ON CONFLICT (event_type, source, external_id) DO NOTHING
 `
 
 type InsertEventParams struct {
-	ArtistID         int64              `json:"artist_id"`
-	Source           string             `json:"source"`
-	EventType        string             `json:"event_type"`
-	ExternalID       string             `json:"external_id"`
-	ReleaseGroupMbid *string            `json:"release_group_mbid"`
-	Title            string             `json:"title"`
-	ArtistName       string             `json:"artist_name"`
-	ReleaseDate      *string            `json:"release_date"`
-	CoverArtUrl      *string            `json:"cover_art_url"`
-	TrackCount       *int32             `json:"track_count"`
-	NotifiedAt       pgtype.Timestamptz `json:"notified_at"`
+	ArtistID           int64              `json:"artist_id"`
+	Source             string             `json:"source"`
+	EventType          string             `json:"event_type"`
+	ExternalID         string             `json:"external_id"`
+	ReleaseGroupMbid   *string            `json:"release_group_mbid"`
+	Title              string             `json:"title"`
+	ArtistName         string             `json:"artist_name"`
+	ReleaseDate        *string            `json:"release_date"`
+	CoverArtUrl        *string            `json:"cover_art_url"`
+	TrackCount         *int32             `json:"track_count"`
+	NotifiedAt         pgtype.Timestamptz `json:"notified_at"`
+	PreviousTrackCount *int32             `json:"previous_track_count"`
+	ReleaseType        *string            `json:"release_type"`
 }
 
 // 0 rows affected means the dedup key (event_type, source, external_id)
@@ -88,7 +91,11 @@ type InsertEventParams struct {
 // only as "not newly detected." Deliberately not the
 // COALESCE(EXCLUDED.col, table.col) refresh shape UpsertArtist uses,
 // because a re-detected event must keep its original snapshot (D-20):
-// plain DO NOTHING, no SET clause at all.
+// plain DO NOTHING, no SET clause at all. previous_track_count and
+// release_type (Phase 5's D-04/Pitfall-3 columns) are appended after the
+// existing eleven columns, as $12/$13, so every pre-existing positional
+// parameter keeps its number -- D-20's write-once guarantee applies to
+// these two snapshot columns exactly as it does to the original nine.
 func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertEvent,
 		arg.ArtistID,
@@ -102,6 +109,8 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64
 		arg.CoverArtUrl,
 		arg.TrackCount,
 		arg.NotifiedAt,
+		arg.PreviousTrackCount,
+		arg.ReleaseType,
 	)
 	if err != nil {
 		return 0, err
@@ -143,7 +152,7 @@ func (q *Queries) ListExternalIDs(ctx context.Context, arg ListExternalIDsParams
 }
 
 const listUnnotified = `-- name: ListUnnotified :many
-SELECT id, artist_id, source, event_type, external_id, release_group_mbid, title, artist_name, release_date, cover_art_url, track_count, notified_at, created_at FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC
+SELECT id, artist_id, source, event_type, external_id, release_group_mbid, title, artist_name, release_date, cover_art_url, track_count, notified_at, created_at, previous_track_count, release_type FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC
 `
 
 // D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
@@ -174,6 +183,8 @@ func (q *Queries) ListUnnotified(ctx context.Context) ([]Event, error) {
 			&i.TrackCount,
 			&i.NotifiedAt,
 			&i.CreatedAt,
+			&i.PreviousTrackCount,
+			&i.ReleaseType,
 		); err != nil {
 			return nil, err
 		}
@@ -183,6 +194,23 @@ func (q *Queries) ListUnnotified(ctx context.Context) ([]Event, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const markNotified = `-- name: MarkNotified :execrows
+UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL
+`
+
+// Precondition: only ever called after discord.Client.Send has confirmed a
+// 204 for this row (D-09) -- never before. The AND notified_at IS NULL
+// predicate is load-bearing, not decorative: it makes the ack idempotent, so
+// a second acknowledgement of an already-delivered row affects zero rows
+// instead of overwriting the recorded delivery time.
+func (q *Queries) MarkNotified(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, markNotified, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setGroupTrackCountBaseline = `-- name: SetGroupTrackCountBaseline :execrows
