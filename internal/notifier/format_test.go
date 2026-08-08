@@ -313,6 +313,61 @@ func TestFormatEmbed_FieldValueTruncatedToRuneLimit(t *testing.T) {
 	}
 }
 
+// TestFormatEmbed_TitleExactly256Runes_RoundTripsUnchanged closes the
+// backstop-tier boundary truth from 05-02-PLAN.md: truncateRunes's `<=`
+// comparison implies a title at exactly the 256-rune limit is accepted
+// unmodified, not treated as oversized -- this pins that exact boundary
+// directly (prior coverage only exercised 300 runes, strictly over the
+// limit).
+func TestFormatEmbed_TitleExactly256Runes_RoundTripsUnchanged(t *testing.T) {
+	title := strings.Repeat("水", titleLimit) // 3-byte CJK rune, exactly at the boundary
+	if got := utf8.RuneCountInString(title); got != titleLimit {
+		t.Fatalf("test fixture has %d runes, want exactly %d", got, titleLimit)
+	}
+
+	got := truncateRunes(title, titleLimit)
+
+	if got != title {
+		t.Fatalf("truncateRunes(256-rune title, %d) = %d runes, want unchanged at %d",
+			titleLimit, utf8.RuneCountInString(got), titleLimit)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("result is not valid UTF-8")
+	}
+}
+
+// TestFormatEmbed_WorstCaseFullyPopulatedEmbed_StaysUnderDiscordTotalBudget
+// closes the second backstop-tier truth from 05-02-PLAN.md: per-field
+// truncation (256-rune title + up to three 1024-rune fields) must keep a
+// fully-populated new_release embed's total character count under
+// Discord's documented ~6000-character per-embed budget. This codebase
+// never sets Description/Footer/Author, so Title + Fields(Name+Value) is
+// the complete budget surface.
+func TestFormatEmbed_WorstCaseFullyPopulatedEmbed_StaysUnderDiscordTotalBudget(t *testing.T) {
+	const discordEmbedTotalBudget = 6000
+
+	ev := sqlc.Event{
+		Source:      sourceMusicBrainz,
+		EventType:   eventTypeNewRelease,
+		ExternalID:  "rg-1",
+		Title:       strings.Repeat("a", 300),  // truncates to titleLimit (256)
+		ArtistName:  strings.Repeat("b", 1100), // truncates to fieldValueLimit (1024)
+		ReleaseDate: strPtr(strings.Repeat("c", 1100)),
+		ReleaseType: strPtr(strings.Repeat("d", 1100)),
+	}
+	embed := formatEmbed(ev)
+
+	total := utf8.RuneCountInString(embed.Title)
+	for _, f := range embed.Fields {
+		total += utf8.RuneCountInString(f.Name) + utf8.RuneCountInString(f.Value)
+	}
+
+	if total > discordEmbedTotalBudget {
+		t.Fatalf("worst-case fully-populated embed totals %d runes across title+fields, want <= %d (Discord's documented per-embed budget)",
+			total, discordEmbedTotalBudget)
+	}
+}
+
 func TestFormatEmbed_URLsMatchExpectedHostAndPath(t *testing.T) {
 	tests := []struct {
 		name       string

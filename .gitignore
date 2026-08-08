@@ -1,5 +1,6 @@
 # Go build artifacts
 /bin/
+/server
 *.exe
 *.test
 *.out
