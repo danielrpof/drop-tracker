@@ -10,6 +10,8 @@ package poller
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -21,10 +23,19 @@ import (
 
 	"github.com/robfig/cron/v3"
 
+	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/deezer"
+	"github.com/danielrpof/drop-tracker/internal/detection"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
+	"github.com/danielrpof/drop-tracker/internal/testutil"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
+
+// var _ EventRecorder = (*detection.Detector)(nil) asserts detection.Detector
+// satisfies the seam poller.go declares, kept here (not in cmd/server/main.go
+// or production poller.go) so internal/poller itself stays free of a
+// detection import (04-01 acceptance criteria).
+var _ EventRecorder = (*detection.Detector)(nil)
 
 // newTestLogger builds a *slog.Logger writing newline-delimited JSON into
 // buf, so a test can decode each emitted record and assert on its
@@ -132,6 +143,43 @@ func (f *fakeReleaseGroupSource) ReleaseGroupsByArtist(ctx context.Context, mbid
 	return nil, nil
 }
 
+// fakeEventRecorder is a file-local double for EventRecorder, mirroring
+// fakeReleaseGroupSource/fakeAlbumSource's call-tracking convention. fn is
+// nil by default (a silent no-op success), matching what a real Detector
+// with nothing new to record would do.
+type fakeEventRecorder struct {
+	fn func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error
+
+	calls int32
+
+	mu    sync.Mutex
+	mbids []string
+}
+
+func (f *fakeEventRecorder) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+	atomic.AddInt32(&f.calls, 1)
+	f.mu.Lock()
+	f.mbids = append(f.mbids, entry.MBID)
+	f.mu.Unlock()
+
+	if f.fn != nil {
+		return f.fn(ctx, entry, groups)
+	}
+	return nil
+}
+
+var _ EventRecorder = (*fakeEventRecorder)(nil)
+
+// testArtistMBID derives a short, unique-per-test artist mbid from
+// t.Name(), matching internal/watchlist/service_test.go's testMBID
+// convention -- used only by the real-Postgres integration tests in this
+// file, which need a genuine artists row to satisfy events' foreign key.
+func testArtistMBID(t *testing.T) string {
+	t.Helper()
+	sum := sha256.Sum256([]byte(t.Name()))
+	return "test-" + hex.EncodeToString(sum[:])[:12]
+}
+
 // fakeAlbumSource is fakeReleaseGroupSource's Deezer-side twin.
 type fakeAlbumSource struct {
 	fn func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error)
@@ -176,9 +224,18 @@ func threeEntries() []watchlist.Entry {
 	}
 }
 
-func newTestPoller(t *testing.T, store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, logger *slog.Logger) *Poller {
+// newTestPoller builds a Poller for tests that don't care about detection,
+// defaulting events to a no-op fakeEventRecorder -- events is variadic so
+// this helper's signature (and all its existing call sites) stays stable
+// across New's widened parameter list; a test that does care passes its own
+// recorder explicitly.
+func newTestPoller(t *testing.T, store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, logger *slog.Logger, events ...EventRecorder) *Poller {
 	t.Helper()
-	p, err := New(store, mb, dz, 15*time.Minute, logger)
+	var er EventRecorder = &fakeEventRecorder{}
+	if len(events) > 0 {
+		er = events[0]
+	}
+	p, err := New(store, mb, dz, er, 15*time.Minute, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -391,6 +448,58 @@ func TestMusicBrainzCycle_ContextCancelledStopsIteration(t *testing.T) {
 	}
 }
 
+// TestPoller_RunMusicBrainzCycle_RecordsNewRelease is the end-to-end proof
+// that the EventRecorder seam is actually wired into RunMusicBrainzCycle,
+// not just that detection.Detector works in isolation (04-01 task 2): a
+// real detection.Detector over a real pool, driven through the cycle
+// exactly as cmd/server/main.go wires it, must leave the same event rows
+// TestDetectMusicBrainz_NewRelease proves at the detection-package level.
+func TestPoller_RunMusicBrainzCycle_RecordsNewRelease(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testArtistMBID(t)
+
+	var artistID int64
+	if err := pool.QueryRow(ctx, "INSERT INTO artists (mbid, name) VALUES ($1, $2) RETURNING id", mbid, "Poller Integration Artist").Scan(&artistID); err != nil {
+		t.Fatalf("insert test artist: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE id = $1", artistID); err != nil {
+			t.Fatalf("cleanup: delete artist: %v", err)
+		}
+	})
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Poller Integration Artist"}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return []watchlist.Entry{entry}, nil }}
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, m string) ([]musicbrainz.ReleaseGroup, error) {
+		return []musicbrainz.ReleaseGroup{
+			{MBID: mbid + "-rg1", Title: "Album One"},
+			{MBID: mbid + "-rg2", Title: "Album Two"},
+		}, nil
+	}}
+	recorder := detection.New(sqlc.New(pool))
+	logger, _ := newTestLogger()
+
+	p, err := New(store, mb, &fakeAlbumSource{}, recorder, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(ctx); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx,
+		"SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'new_release' AND source = 'musicbrainz'", artistID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("event row count = %d, want 2 (the seam must actually be wired into RunMusicBrainzCycle)", count)
+	}
+}
+
 // --- Deezer cycle ---
 
 func TestDeezerCycle_SkipsNilDeezerID(t *testing.T) {
@@ -597,7 +706,7 @@ func TestNew_RejectsNonPositiveInterval(t *testing.T) {
 	logger, _ := newTestLogger()
 	store := &stubStore{}
 	for _, interval := range []time.Duration{0, -1 * time.Second} {
-		if _, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, interval, logger); err == nil {
+		if _, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, interval, logger); err == nil {
 			t.Fatalf("New with interval=%s: expected error, got nil", interval)
 		}
 	}
@@ -772,7 +881,7 @@ func TestNew_RegistersEveryIntervalSpecOnBothEntries(t *testing.T) {
 	for _, interval := range []time.Duration{15 * time.Minute, 90 * time.Second} {
 		t.Run(interval.String(), func(t *testing.T) {
 			store := &stubStore{}
-			p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, interval, logger)
+			p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, interval, logger)
 			if err != nil {
 				t.Fatalf("New(interval=%s): %v", interval, err)
 			}
@@ -797,7 +906,7 @@ func TestNew_ZeroOrNegativeIntervalRegistersNoCronEntry(t *testing.T) {
 	logger, _ := newTestLogger()
 	store := &stubStore{}
 	for _, interval := range []time.Duration{0, -1 * time.Second} {
-		p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, interval, logger)
+		p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, interval, logger)
 		if err == nil {
 			t.Fatalf("New(interval=%s): expected error, got nil", interval)
 		}
@@ -830,7 +939,7 @@ func TestStop_ReturnsNilOnceInFlightCycleFinishes(t *testing.T) {
 		return []musicbrainz.ReleaseGroup{}, nil
 	}}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, 50*time.Millisecond, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, 50*time.Millisecond, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -875,7 +984,7 @@ func TestStop_ReturnsCallerContextErrorWhenCycleOutlivesIt(t *testing.T) {
 		return nil, ctx.Err()
 	}}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, 50*time.Millisecond, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, 50*time.Millisecond, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -899,7 +1008,7 @@ func TestStop_NoFurtherCycleBeginsAfterStop(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
 	mb := &fakeReleaseGroupSource{}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, 30*time.Millisecond, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, 30*time.Millisecond, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -937,7 +1046,7 @@ func TestPoller_StartStop_LifecycleWithRealCronTick(t *testing.T) {
 	mb := &fakeReleaseGroupSource{}
 	dz := &fakeAlbumSource{}
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, dz, 50*time.Millisecond, logger)
+	p, err := New(store, mb, dz, &fakeEventRecorder{}, 50*time.Millisecond, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
