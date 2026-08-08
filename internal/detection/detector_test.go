@@ -17,13 +17,18 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/detection"
+	"github.com/danielrpof/drop-tracker/internal/discord"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
+	"github.com/danielrpof/drop-tracker/internal/notifier"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -1062,6 +1067,126 @@ func TestDetectMusicBrainz_GuestFeature_Muted(t *testing.T) {
 	}
 	if newReleaseCount != 1 {
 		t.Fatalf("new_release event row count = %d, want 1 (mute is per-event-type; new_release must still land)", newReleaseCount)
+	}
+}
+
+// TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier extends
+// TestDetectMusicBrainz_GuestFeature_Muted's proof through the notifier
+// path (NTFY-04): a muted guest_feature never becomes a row (restated here
+// as a precondition check, so a future regression fails at the right
+// layer), and a real NotifyPending call against a real discord.Client only
+// ever delivers the sibling new_release event from the same detection
+// cycle -- the muted recording's distinguishing title never appears in any
+// request the notifier issues.
+func TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Muted Guest Artist Notifier")
+	entry := watchlist.Entry{
+		ArtistID:        artistID,
+		MBID:            mbid,
+		Name:            "Muted Guest Artist Notifier",
+		ReleaseTypes:    []string{"album", "single", "ep", "deluxe"},
+		MutedEventTypes: []string{"guest_feature"},
+	}
+	seedGroups := []musicbrainz.ReleaseGroup{{MBID: mbid + "-seed-rg", Title: "Seed Album", PrimaryType: "Album"}}
+	groups := append(append([]musicbrainz.ReleaseGroup{}, seedGroups...),
+		musicbrainz.ReleaseGroup{MBID: mbid + "-rg1", Title: "Allowed Release", PrimaryType: "Album"})
+	recordings := []musicbrainz.Recording{
+		{
+			MBID:  mbid + "-rec1",
+			Title: "Suppressed Guest Track",
+			ArtistCredit: []musicbrainz.ArtistCreditEntry{
+				mkCredit("other-mbid", "Other Artist"),
+				mkCredit(mbid, "Muted Guest Artist Notifier"),
+			},
+		},
+	}
+
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings}, &fakeReleaseDetailSource{})
+
+	// Seed cycle first (D-14): a bare DetectMusicBrainz call establishes
+	// this (artist_id, source) pair as no-longer-first-cycle, so the real
+	// test cycle below inserts a genuinely unnotified new_release row
+	// rather than a pre-notified seed row -- otherwise NotifyPending would
+	// have nothing pending to drain and this test would prove nothing about
+	// the notifier path. The seed cycle's own recording is intentionally
+	// omitted (fakeRecordingSource{} default, no-op) so it contributes no
+	// guest_feature noise.
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, seedGroups); err != nil {
+		t.Fatalf("seed DetectMusicBrainz: %v", err)
+	}
+
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	// Precondition: confirm detection's own mute filter ran -- the same
+	// assertion TestDetectMusicBrainz_GuestFeature_Muted already makes,
+	// restated here so a regression at the detection layer fails at this
+	// layer, not the notifier layer exercised below. newReleaseCount is 2
+	// (the seed cycle's own row plus the second cycle's genuinely-new
+	// "Allowed Release" row) since the seed cycle intentionally inserts one
+	// real new_release row to end seed mode.
+	var guestCount, newReleaseCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'guest_feature'", artistID).Scan(&guestCount); err != nil {
+		t.Fatalf("count guest_feature events: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'new_release'", artistID).Scan(&newReleaseCount); err != nil {
+		t.Fatalf("count new_release events: %v", err)
+	}
+	if guestCount != 0 {
+		t.Fatalf("guest_feature event row count = %d, want 0 (muted)", guestCount)
+	}
+	if newReleaseCount != 2 {
+		t.Fatalf("new_release event row count = %d, want 2 (the seed row plus the second cycle's new row; mute is per-event-type, new_release must still land)", newReleaseCount)
+	}
+
+	var eventID int64
+	if err := pool.QueryRow(ctx, "SELECT id FROM events WHERE artist_id = $1 AND event_type = 'new_release' AND external_id = $2", artistID, mbid+"-rg1").Scan(&eventID); err != nil {
+		t.Fatalf("select new_release event id: %v", err)
+	}
+
+	var mu sync.Mutex
+	reqCount := 0
+	var bodies []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		reqCount++
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	client := discord.NewClient(ts.URL, ts.Client())
+	n := notifier.New(sqlc.New(pool), client, time.Millisecond)
+	if err := n.NotifyPending(ctx, testLogger()); err != nil {
+		t.Fatalf("NotifyPending: %v", err)
+	}
+
+	mu.Lock()
+	gotReqCount := reqCount
+	gotBodies := append([]string(nil), bodies...)
+	mu.Unlock()
+
+	if gotReqCount != 1 {
+		t.Fatalf("server received %d requests, want exactly 1 (only the new_release event)", gotReqCount)
+	}
+	for _, b := range gotBodies {
+		if strings.Contains(b, "Suppressed Guest Track") {
+			t.Fatalf("a request body contained the muted guest_feature recording's distinguishing title -- it must never reach the notifier: %s", b)
+		}
+	}
+
+	var notified bool
+	if err := pool.QueryRow(ctx, "SELECT notified_at IS NOT NULL FROM events WHERE id = $1", eventID).Scan(&notified); err != nil {
+		t.Fatalf("query notified_at: %v", err)
+	}
+	if !notified {
+		t.Fatal("new_release row's notified_at should be non-NULL after NotifyPending")
 	}
 }
 
