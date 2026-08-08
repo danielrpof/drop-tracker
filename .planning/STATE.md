@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: discord-notifications
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-08-08T19:13:22.225Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-08-08T20:49:49.567Z"
 last_activity: 2026-08-08
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 24
-  completed_plans: 22
+  completed_plans: 23
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-08-08)
 ## Current Position
 
 Phase: 05 (discord-notifications) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-08-08 — Phase 05 execution started
 
-Progress: [█████████░] 92%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -83,6 +83,7 @@ Progress: [█████████░] 92%
 | Phase 04 P03 | 45min | 2 tasks | 10 files |
 | Phase 04 P04 | 40min | 2 tasks | 12 files |
 | Phase 05 P01 | 55min | 2 tasks | 15 files |
+| Phase 05 P02 | 45min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 05-01]: Migration 000004 added previous_track_count/release_type nullable columns to events (D-04, NTFY-01); MarkNotified added as an idempotent AND notified_at IS NULL ack (D-09). Fixed migrate_test.go's hardcoded schema version (3 -> 4) as a direct, in-scope consequence.
 - [Phase ?]: [Phase 05-01]: internal/discord.Client never wraps httpClient.Do's raw error (Go's *url.Error embeds the full request URL, and a Discord webhook path IS its secret token) -- returns a fixed error string instead (T-05-01).
 - [Phase ?]: [Phase 05-01]: internal/notifier.Notifier uses an atomic.Bool CAS-skip guard (D-06), mirroring poller's mbRunning/dzRunning idiom, not a blocking mutex -- a slow rate-limited send burst from one cycle must never stall the other cycle's own notify call.
+- [Phase ?]: [Phase 05-02]: Extracted releaseTypeForStorage helper in musicbrainz.go so the absent-PrimaryType-stores-NULL behavior is unit-testable directly, since releaseTypeAllowed filters an empty PrimaryType before DetectMusicBrainz's insert is ever reached
+- [Phase ?]: [Phase 05-02]: Placed real-Postgres release_type/previous_track_count assertions in detector_test.go/deezer_test.go (the codebase's established real-Postgres test files for DetectMusicBrainz/DetectDeezer) rather than musicbrainz_test.go as the plan's frontmatter literally named, since musicbrainz_test.go is this codebase's whitebox-only, no-DB test file
 
 ### Pending Todos
 
@@ -164,6 +167,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-08T19:13:22.191Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-08-08T20:49:49.509Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
