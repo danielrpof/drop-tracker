@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 04
 current_phase_name: detection-engine
-status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-08-08T03:18:27.641Z"
+status: verifying
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-08-08T03:40:14.685Z"
 last_activity: 2026-08-07
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 21
-  completed_plans: 20
+  completed_plans: 21
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-08)
 
 Phase: 04 (detection-engine) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-07 — Phase 04 execution started
 
-Progress: [██████████] 95%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -80,6 +80,7 @@ Progress: [██████████] 95%
 | Phase 04 P01 | 30min | 3 tasks | 13 files |
 | Phase 04 P02 | 25min | 3 tasks | 13 files |
 | Phase 04 P03 | 45min | 2 tasks | 10 files |
+| Phase 04 P04 | 40min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -131,6 +132,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04-02]: DetectDeezer structurally mirrors DetectMusicBrainz (mute check, seed-mode check, seen-set lookup, per-item filter, insert) rather than sharing a generic helper, since the two sources differ in id formatting and filter input (RecordType vs PrimaryType)
 - [Phase ?]: [Phase 04-03]: Centralized seedMode/notifiedAt computation to the top of DetectMusicBrainz, shared by both new_release and guest_feature passes -- an independent per-pass isSeedMode call would have seen the other pass's just-inserted rows and flipped seed mode mid-cycle, unseeding a newly-watched artist's guest-feature catalogue on their first poll
 - [Phase ?]: [Phase 04-03]: isGuestFeature/displayArtistName unit tests live in a new internal/detection/musicbrainz_test.go (package detection, whitebox) since isGuestFeature is unexported -- mirrors filter_test.go's convention
+- [Phase ?]: [Phase 04-04]: groupBaseline returns (baseline int, hasBaseline bool, error) rather than collapsing 'no baseline' and 'baseline is zero' into one value -- the load-bearing distinction preventing 04-RESEARCH.md Pitfall #1's false-positive deluxe_change on a group's first real comparison cycle
+- [Phase ?]: [Phase 04-04]: preCycleSeenGroups is captured once at the top of DetectMusicBrainz, before the new_release pass inserts anything, and threaded unchanged into detectDeluxeChanges -- guarantees D-04 (a group discovered this very cycle never gets a release-detail fetch in the same cycle)
 
 ### Pending Todos
 
@@ -156,6 +159,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-08T03:18:27.598Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-08-08T03:40:14.637Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None
