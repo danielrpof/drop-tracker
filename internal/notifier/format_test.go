@@ -182,12 +182,12 @@ func TestFormatEmbed_DeluxeChange_BothCountsPresent(t *testing.T) {
 
 func TestFormatEmbed_DeluxeChange_NilPreviousTrackCount(t *testing.T) {
 	ev := sqlc.Event{
-		Source:      sourceMusicBrainz,
-		EventType:   eventTypeDeluxeChange,
-		ExternalID:  "rel-mbid-1",
-		Title:       "Album (Deluxe)",
-		ArtistName:  "Test Artist",
-		TrackCount:  i32Ptr(18),
+		Source:     sourceMusicBrainz,
+		EventType:  eventTypeDeluxeChange,
+		ExternalID: "rel-mbid-1",
+		Title:      "Album (Deluxe)",
+		ArtistName: "Test Artist",
+		TrackCount: i32Ptr(18),
 		// PreviousTrackCount left nil -- a row inserted before migration 000004.
 	}
 
