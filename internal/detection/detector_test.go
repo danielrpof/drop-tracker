@@ -185,3 +185,245 @@ func TestDetectMusicBrainz_NewRelease_UndatedGroup(t *testing.T) {
 		t.Fatal("release_date is not NULL for an undated group, want NULL")
 	}
 }
+
+// The tests below (04-01 task 3) prove the idempotency and overlap-guard
+// contracts the tracer above now depends on: DTCT-04's dedup mechanism
+// (04-RESEARCH.md Assumption A4, Pitfall #2) and D-19's re-derivation
+// recovery model, proven against real Postgres rather than assumed.
+
+func TestInsertEvent_Idempotent(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Idempotent Artist")
+
+	q := sqlc.New(pool)
+	params := sqlc.InsertEventParams{
+		ArtistID:   artistID,
+		Source:     "musicbrainz",
+		EventType:  "new_release",
+		ExternalID: mbid + "-rg1",
+		Title:      "Album",
+		ArtistName: "Idempotent Artist",
+	}
+
+	first, err := q.InsertEvent(ctx, params)
+	if err != nil {
+		t.Fatalf("first InsertEvent: %v", err)
+	}
+	if first != 1 {
+		t.Fatalf("first InsertEvent affected rows = %d, want 1", first)
+	}
+
+	second, err := q.InsertEvent(ctx, params)
+	if err != nil {
+		t.Fatalf("second InsertEvent: %v", err)
+	}
+	if second != 0 {
+		t.Fatalf("second InsertEvent affected rows = %d, want 0 (dedup key already existed)", second)
+	}
+}
+
+func TestInsertEvent_SnapshotIsWriteOnce(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Snapshot Write Once Artist")
+
+	q := sqlc.New(pool)
+	externalID := mbid + "-rg1"
+	first := sqlc.InsertEventParams{
+		ArtistID:    artistID,
+		Source:      "musicbrainz",
+		EventType:   "new_release",
+		ExternalID:  externalID,
+		Title:       "Original Title",
+		ArtistName:  "Original Artist Name",
+		ReleaseDate: nullableStringForTest("2020-01-01"),
+		CoverArtUrl: nullableStringForTest("https://example.test/original.jpg"),
+	}
+	if affected, err := q.InsertEvent(ctx, first); err != nil || affected != 1 {
+		t.Fatalf("first InsertEvent: affected=%d err=%v, want affected=1 err=nil", affected, err)
+	}
+
+	conflicting := first
+	conflicting.Title = "Changed Title"
+	conflicting.ArtistName = "Changed Artist Name"
+	conflicting.ReleaseDate = nullableStringForTest("2099-12-31")
+	conflicting.CoverArtUrl = nullableStringForTest("https://example.test/changed.jpg")
+	if affected, err := q.InsertEvent(ctx, conflicting); err != nil || affected != 0 {
+		t.Fatalf("conflicting InsertEvent: affected=%d err=%v, want affected=0 err=nil", affected, err)
+	}
+
+	var title, artistName, releaseDate, coverArtURL string
+	row := pool.QueryRow(ctx, "SELECT title, artist_name, release_date, cover_art_url FROM events WHERE artist_id = $1 AND external_id = $2", artistID, externalID)
+	if err := row.Scan(&title, &artistName, &releaseDate, &coverArtURL); err != nil {
+		t.Fatalf("query stored snapshot: %v", err)
+	}
+	if title != "Original Title" {
+		t.Fatalf("title = %q, want %q (D-20: snapshot is write-once)", title, "Original Title")
+	}
+	if artistName != "Original Artist Name" {
+		t.Fatalf("artist_name = %q, want %q", artistName, "Original Artist Name")
+	}
+	if releaseDate != "2020-01-01" {
+		t.Fatalf("release_date = %q, want %q", releaseDate, "2020-01-01")
+	}
+	if coverArtURL != "https://example.test/original.jpg" {
+		t.Fatalf("cover_art_url = %q, want %q", coverArtURL, "https://example.test/original.jpg")
+	}
+}
+
+func TestInsertEvent_SourceSeparatesNamespaces(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Source Namespace Artist")
+
+	q := sqlc.New(pool)
+	sharedExternalID := "123456" // plausible as both an MBID-shaped and a Deezer numeric id
+
+	mbParams := sqlc.InsertEventParams{
+		ArtistID: artistID, Source: "musicbrainz", EventType: "new_release",
+		ExternalID: sharedExternalID, Title: "MB Album", ArtistName: "Source Namespace Artist",
+	}
+	dzParams := mbParams
+	dzParams.Source = "deezer"
+	dzParams.Title = "Deezer Album"
+
+	if affected, err := q.InsertEvent(ctx, mbParams); err != nil || affected != 1 {
+		t.Fatalf("musicbrainz InsertEvent: affected=%d err=%v, want affected=1 err=nil", affected, err)
+	}
+	if affected, err := q.InsertEvent(ctx, dzParams); err != nil || affected != 1 {
+		t.Fatalf("deezer InsertEvent: affected=%d err=%v, want affected=1 err=nil (a different source is a different dedup key)", affected, err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND external_id = $2", artistID, sharedExternalID).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("event row count = %d, want 2 (source must separate the dedup namespace)", count)
+	}
+}
+
+func TestDetectMusicBrainz_ReDetectionInsertsNothing(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Re-Detection Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Re-Detection Artist"}
+	groups := []musicbrainz.ReleaseGroup{
+		{MBID: mbid + "-rg1", Title: "Album One"},
+		{MBID: mbid + "-rg2", Title: "Album Two"},
+	}
+	d := detection.New(sqlc.New(pool))
+
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("first DetectMusicBrainz: %v", err)
+	}
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("second DetectMusicBrainz: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1", artistID).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("event row count = %d, want 2 (re-detection must insert nothing new)", count)
+	}
+}
+
+func TestDetectMusicBrainz_PartialCycleResumes(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Partial Cycle Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Partial Cycle Artist"}
+	all := []musicbrainz.ReleaseGroup{
+		{MBID: mbid + "-rg1", Title: "Album One"},
+		{MBID: mbid + "-rg2", Title: "Album Two"},
+		{MBID: mbid + "-rg3", Title: "Album Three"},
+	}
+	d := detection.New(sqlc.New(pool))
+
+	// Simulate a cycle that crashed after writing only the first group
+	// (D-19: recovery is re-derivation, not resume state).
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, all[:1]); err != nil {
+		t.Fatalf("partial DetectMusicBrainz: %v", err)
+	}
+
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, all); err != nil {
+		t.Fatalf("full re-derivation DetectMusicBrainz: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1", artistID).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("event row count = %d, want 3 (exactly the two missing rows must appear, no duplicate of the first)", count)
+	}
+
+	var dupCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND external_id = $2", artistID, all[0].MBID).Scan(&dupCount); err != nil {
+		t.Fatalf("count first group's rows: %v", err)
+	}
+	if dupCount != 1 {
+		t.Fatalf("rows for the first (already-recorded) group = %d, want 1", dupCount)
+	}
+}
+
+func TestDetectMusicBrainz_InsertionOrderIsStable(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Insertion Order Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Insertion Order Artist"}
+	groups := []musicbrainz.ReleaseGroup{
+		{MBID: mbid + "-rg1", Title: "Album One"},
+		{MBID: mbid + "-rg2", Title: "Album Two"},
+		{MBID: mbid + "-rg3", Title: "Album Three"},
+	}
+	d := detection.New(sqlc.New(pool))
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	rows, err := pool.Query(ctx, "SELECT external_id FROM events WHERE artist_id = $1 ORDER BY created_at ASC, id ASC", artistID)
+	if err != nil {
+		t.Fatalf("query events: %v", err)
+	}
+	defer rows.Close()
+
+	var got []string
+	for rows.Next() {
+		var externalID string
+		if err := rows.Scan(&externalID); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, externalID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+
+	want := []string{groups[0].MBID, groups[1].MBID, groups[2].MBID}
+	if len(got) != len(want) {
+		t.Fatalf("got %d rows, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("row %d external_id = %q, want %q (ORDER BY created_at ASC, id ASC must reproduce input order)", i, got[i], want[i])
+		}
+	}
+}
+
+// nullableStringForTest returns a pointer to a freshly allocated copy of s,
+// mirroring internal/watchlist/service_test.go's strptr -- so callers never
+// take the address of a loop variable or a shared literal by accident.
+func nullableStringForTest(s string) *string { return &s }

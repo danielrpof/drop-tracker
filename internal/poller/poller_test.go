@@ -712,6 +712,192 @@ func TestNew_RejectsNonPositiveInterval(t *testing.T) {
 	}
 }
 
+// --- EventRecorder-wired overlap guard and error isolation (04-01 task 3) ---
+//
+// These prove the same overlap-guard and error-isolation contracts the
+// existing "Overlap guard (D-09)" section below already covers for the
+// MusicBrainz *fetch* step, but now with detection wired into the cycle:
+// blocking happens inside the recorder call, not the fetch call, and a
+// detection error (not just a fetch error) must be isolated per artist.
+
+func TestPoller_RunMusicBrainzCycle_SkipsWhenAlreadyRunning(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	mb := &fakeReleaseGroupSource{}
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, events, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the first cycle to block inside the detection call")
+	}
+
+	err = p.RunMusicBrainzCycle(context.Background())
+	if !errors.Is(err, ErrCycleInProgress) {
+		t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
+	}
+	if got := atomic.LoadInt32(&events.calls); got != 1 {
+		t.Fatalf("events.calls = %d, want 1 (the skipped tick must perform zero detection calls)", got)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first RunMusicBrainzCycle: %v", err)
+	}
+}
+
+func TestPoller_RunMusicBrainzCycle_GuardReleasedAfterDetectionError(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	mb := &fakeReleaseGroupSource{}
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+		return errors.New("detection exploded")
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, events, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("first RunMusicBrainzCycle returned %v, want nil (a detection error is not a cycle failure)", err)
+	}
+	if p.mbRunning.Load() {
+		t.Fatal("guard must be released after a cycle whose every artist's detection call errored")
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("second RunMusicBrainzCycle: %v, want nil (guard must have released after the first)", err)
+	}
+	if got := atomic.LoadInt32(&events.calls); got != 6 {
+		t.Fatalf("events.calls = %d, want 6 (2 cycles x 3 entries)", got)
+	}
+}
+
+func TestPoller_RunMusicBrainzCycle_DetectionErrorIsolatedPerArtist(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
+		return []watchlist.Entry{
+			{MBID: "mbid-1", Name: "Artist One"},
+			{MBID: "mbid-2", Name: "Artist Two"},
+		}, nil
+	}}
+	mb := &fakeReleaseGroupSource{}
+	failOn := "mbid-1"
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+		if entry.MBID == failOn {
+			return errors.New("detection exploded for this artist")
+		}
+		return nil
+	}}
+	logger, buf := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, events, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle returned %v, want nil (a per-artist detection failure is not a cycle failure)", err)
+	}
+
+	if got := atomic.LoadInt32(&events.calls); got != 2 {
+		t.Fatalf("events.calls = %d, want 2 (both artists must still be attempted)", got)
+	}
+	events.mu.Lock()
+	gotMBIDs := append([]string(nil), events.mbids...)
+	events.mu.Unlock()
+	if len(gotMBIDs) != 2 || gotMBIDs[0] != "mbid-1" || gotMBIDs[1] != "mbid-2" {
+		t.Fatalf("events.mbids = %v, want [mbid-1 mbid-2] (the second artist's detection must still run)", gotMBIDs)
+	}
+
+	records := decodeLogRecords(t, buf)
+	var errRecord map[string]any
+	for _, rec := range records {
+		if rec["artist_mbid"] == failOn && rec["level"] == "ERROR" && rec["detection_error"] != nil {
+			errRecord = rec
+		}
+	}
+	if errRecord == nil {
+		t.Fatalf("no error-level record with detection_error found for artist_mbid=%s; records=%v", failOn, records)
+	}
+}
+
+func TestPoller_RunMusicBrainzCycle_EmptyWatchlist(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
+	mb := &fakeReleaseGroupSource{}
+	events := &fakeEventRecorder{}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, events, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&events.calls); got != 0 {
+		t.Fatalf("events.calls = %d, want 0 (an empty watchlist writes nothing)", got)
+	}
+	if p.mbRunning.Load() {
+		t.Fatal("guard must be released after an empty-watchlist cycle")
+	}
+}
+
+func TestPoller_CyclesAreIndependentAcrossSources(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	mb := &fakeReleaseGroupSource{}
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}}
+	dz := &fakeAlbumSource{}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, dz, events, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the musicbrainz cycle to block inside the detection call")
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle while musicbrainz cycle is blocked inside detection: %v, want nil (the guards are independent, D-08)", err)
+	}
+	if got := atomic.LoadInt32(&dz.calls); got != 2 {
+		t.Fatalf("deezer calls = %d, want 2", got)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("musicbrainz cycle: %v", err)
+	}
+}
+
 // --- Overlap guard (D-09) ---
 
 func TestMusicBrainzCycle_OverlapGuard_SkipsWhileInFlight(t *testing.T) {
