@@ -297,3 +297,38 @@ func TestReleasesByReleaseGroup_EmptyResultIsNonNilZeroLength(t *testing.T) {
 		t.Fatalf("len(releases) = %d, want 0", len(releases))
 	}
 }
+
+// --- Task 2: page-ceiling truncation ---
+
+func TestReleasesByReleaseGroup_StopsAtPageCeiling(t *testing.T) {
+	var mu sync.Mutex
+	requestCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestCount++
+		mu.Unlock()
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		w.Header().Set("Content-Type", "application/json")
+		// Always claims a huge count while always returning a full page --
+		// a hostile/runaway upstream that would otherwise drive requests
+		// forever (T-04-19).
+		_, _ = w.Write([]byte(buildReleasePageJSON(1000000, offset, releasePageSize)))
+	}))
+	defer ts.Close()
+
+	c := newTestClient(t, ts, "drop-tracker-test/1.0", unlimitedLimiter())
+	releases, err := c.ReleasesByReleaseGroup(context.Background(), sampleReleaseGroupMBID)
+	if err != nil {
+		t.Fatalf("ReleasesByReleaseGroup: %v", err)
+	}
+	if len(releases) != MaxReleaseBrowseItems {
+		t.Fatalf("len(releases) = %d, want %d", len(releases), MaxReleaseBrowseItems)
+	}
+
+	mu.Lock()
+	got := requestCount
+	mu.Unlock()
+	if got != maxReleasePages {
+		t.Fatalf("requestCount = %d, want exactly maxReleasePages (%d)", got, maxReleasePages)
+	}
+}

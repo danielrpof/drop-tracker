@@ -230,3 +230,30 @@ func TestDetectDeezer_SameIDDifferentSourceCoexist(t *testing.T) {
 		t.Fatalf("event row count = %d, want 2 (source must separate the dedup namespace)", count)
 	}
 }
+
+// TestDetectDeezer_NeverProducesDeluxeChange proves D-03 architecturally:
+// DetectDeezer has no deluxe-change branch at all (see deezer.go's own
+// doc comment) -- this test pins that as an observable behavior rather
+// than an implementation detail a future edit could silently regress.
+func TestDetectDeezer_NeverProducesDeluxeChange(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Deezer No Deluxe Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Deezer No Deluxe Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	albums := []deezer.Album{{ID: 1, Title: "Album", RecordType: "album"}}
+
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
+	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
+		t.Fatalf("DetectDeezer: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'deluxe_change' AND source = 'deezer'", artistID).Scan(&count); err != nil {
+		t.Fatalf("count deluxe_change events: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("deluxe_change event row count = %d, want 0 (D-03: deluxe-change detection is MusicBrainz-only)", count)
+	}
+}
