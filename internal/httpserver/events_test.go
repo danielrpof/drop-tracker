@@ -22,6 +22,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/events"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
+	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
 // stubEventsStore is a file-local double for events.Store, mirroring
@@ -178,6 +179,161 @@ func TestHandleListEvents_StoreErrorReturns500WithFixedMessage(t *testing.T) {
 	}
 }
 
+// recordingQuerier is a minimal sqlc.Querier double that records the
+// ListEventsParams it receives and returns an empty result. It embeds a nil
+// sqlc.Querier so it satisfies the interface without implementing every
+// method -- only ListEvents is ever called through it. This is used solely
+// to prove the limit=100000 case reaches events.Service.List's own clamp
+// (T-06-06): stubEventsStore bypasses the domain service entirely, so it
+// cannot observe that clamp.
+type recordingQuerier struct {
+	sqlc.Querier
+	gotParams sqlc.ListEventsParams
+}
+
+func (q *recordingQuerier) ListEvents(_ context.Context, arg sqlc.ListEventsParams) ([]sqlc.ListEventsRow, error) {
+	q.gotParams = arg
+	return nil, nil
+}
+
+var _ sqlc.Querier = (*recordingQuerier)(nil)
+
+// TestHandleListEvents_Validation pins HIST-01/T-06-06 through T-06-10: every
+// malformed artist_id/event_type/cursor/limit is rejected with a 400 before
+// the store is ever called, an empty param is treated as absent rather than
+// malformed, valid filters populate ListParams, and an over-large limit is
+// clamped rather than rejected.
+func TestHandleListEvents_Validation(t *testing.T) {
+	t.Run("rejects malformed params without calling the store", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			query string
+		}{
+			{"artist_id non-numeric", "artist_id=abc"},
+			{"artist_id zero", "artist_id=0"},
+			{"artist_id negative", "artist_id=-3"},
+			{"cursor non-numeric", "cursor=abc"},
+			{"cursor zero", "cursor=0"},
+			{"event_type not allow-listed", "event_type=bogus"},
+			{"limit zero", "limit=0"},
+			{"limit negative", "limit=-1"},
+			{"limit non-numeric", "limit=abc"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				called := false
+				stub := stubEventsStore{listFunc: func(context.Context, events.ListParams) (events.Page, error) {
+					called = true
+					return events.Page{}, nil
+				}}
+				srv := httpserver.New(noopPinger{}, stubStore{}, stub, nil, discardLogger())
+				ts := httptest.NewServer(srv.Router())
+				defer ts.Close()
+
+				resp, err := http.Get(ts.URL + "/events?" + tc.query)
+				if err != nil {
+					t.Fatalf("GET /events?%s: %v", tc.query, err)
+				}
+				defer resp.Body.Close()
+
+				if resp.StatusCode != http.StatusBadRequest {
+					t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+				}
+				data, err := io.ReadAll(resp.Body)
+				if err != nil {
+					t.Fatalf("read response body: %v", err)
+				}
+				var eb errorBody
+				if err := json.Unmarshal(data, &eb); err != nil {
+					t.Fatalf("decode response body: %v", err)
+				}
+				if eb.Error == "" {
+					t.Fatalf("error body has empty message: %s", data)
+				}
+				if strings.Contains(strings.ToLower(eb.Error), "sql") || strings.Contains(eb.Error, "pq:") {
+					t.Fatalf("error body looks like it leaked driver text: %s", data)
+				}
+				if called {
+					t.Fatalf("store.List was called for a rejected request (%s)", tc.query)
+				}
+			})
+		}
+	})
+
+	t.Run("empty artist_id is treated as absent, not malformed", func(t *testing.T) {
+		called := false
+		stub := stubEventsStore{listFunc: func(_ context.Context, p events.ListParams) (events.Page, error) {
+			called = true
+			if p.ArtistID != nil {
+				t.Fatalf("ArtistID = %v, want nil for an empty artist_id param", *p.ArtistID)
+			}
+			return events.Page{}, nil
+		}}
+		srv := httpserver.New(noopPinger{}, stubStore{}, stub, nil, discardLogger())
+		ts := httptest.NewServer(srv.Router())
+		defer ts.Close()
+
+		resp, err := http.Get(ts.URL + "/events?artist_id=")
+		if err != nil {
+			t.Fatalf("GET /events?artist_id=: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		if !called {
+			t.Fatal("store.List was not called for an empty (absent) artist_id")
+		}
+	})
+
+	t.Run("artist_id and event_type filters both populate ListParams", func(t *testing.T) {
+		var got events.ListParams
+		stub := stubEventsStore{listFunc: func(_ context.Context, p events.ListParams) (events.Page, error) {
+			got = p
+			return events.Page{}, nil
+		}}
+		srv := httpserver.New(noopPinger{}, stubStore{}, stub, nil, discardLogger())
+		ts := httptest.NewServer(srv.Router())
+		defer ts.Close()
+
+		resp, err := http.Get(ts.URL + "/events?artist_id=7&event_type=new_release")
+		if err != nil {
+			t.Fatalf("GET /events: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		if got.ArtistID == nil || *got.ArtistID != 7 {
+			t.Fatalf("ArtistID = %v, want 7", got.ArtistID)
+		}
+		if got.EventType == nil || *got.EventType != "new_release" {
+			t.Fatalf("EventType = %v, want new_release", got.EventType)
+		}
+	})
+
+	t.Run("limit above the maximum is clamped, not rejected", func(t *testing.T) {
+		rq := &recordingQuerier{}
+		svc := events.NewService(rq)
+		srv := httpserver.New(noopPinger{}, stubStore{}, svc, nil, discardLogger())
+		ts := httptest.NewServer(srv.Router())
+		defer ts.Close()
+
+		resp, err := http.Get(ts.URL + "/events?limit=100000")
+		if err != nil {
+			t.Fatalf("GET /events?limit=100000: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		if rq.gotParams.PageSize > events.MaxPageSize {
+			t.Fatalf("requested PageSize = %d, want <= %d (events.MaxPageSize)", rq.gotParams.PageSize, events.MaxPageSize)
+		}
+	})
+}
+
 // The tests below exercise events.Service.List against real Postgres,
 // proving the keyset pagination and ordering contract ListEvents (and its
 // Service wrapper) provide -- newest first, no row appears on two
@@ -273,6 +429,152 @@ func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
 	if page3.NextCursor != nil {
 		t.Fatalf("page3 next_cursor = %v, want nil (partial page)", page3.NextCursor)
 	}
+}
+
+// insertTestEventTyped mirrors insertTestEvent but takes an explicit
+// event_type, so TestListEvents_Filters can seed all three event types per
+// artist (HIST-01's filter-composition coverage).
+func insertTestEventTyped(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID, eventType string) int64 {
+	t.Helper()
+	var id int64
+	row := pool.QueryRow(context.Background(), `
+		INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name)
+		VALUES ($1, 'musicbrainz', $2, $3, 'Title', 'Artist')
+		RETURNING id`, artistID, eventType, externalID)
+	if err := row.Scan(&id); err != nil {
+		t.Fatalf("insert test event: %v", err)
+	}
+	return id
+}
+
+// TestListEvents_Filters proves the artist_id and event_type filters apply
+// independently and compose (HIST-01, D-06), and that a cursor page and its
+// predecessor share no row. Two distinct artists are each seeded with all
+// three event types, so a filter that silently did nothing to the predicate
+// would fail an assertion here.
+func TestListEvents_Filters(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	// testMBID derives its value from t.Name() alone, so two calls with the
+	// same t return the same string -- distinct suffixes keep artist A and
+	// artist B from colliding on the mbid unique constraint.
+	base := testMBID(t)
+	mbidA := base + "-a"
+	mbidB := base + "-b"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = ANY($1)", []string{mbidA, mbidB}); err != nil {
+			t.Fatalf("cleanup: delete artists rows: %v", err)
+		}
+	})
+
+	artistA := insertTestArtist(t, pool, mbidA)
+	artistB := insertTestArtist(t, pool, mbidB)
+
+	// eventIDs[artistID][eventType] = the id inserted for that combination.
+	eventIDs := map[int64]map[string]int64{artistA: {}, artistB: {}}
+	for _, artistID := range []int64{artistA, artistB} {
+		mbid := mbidA
+		if artistID == artistB {
+			mbid = mbidB
+		}
+		for _, et := range watchlist.EventTypes {
+			eventIDs[artistID][et] = insertTestEventTyped(t, pool, artistID, mbid+"-"+et, et)
+		}
+	}
+
+	svc := events.NewService(sqlc.New(pool))
+
+	t.Run("artist_id filter applies independently", func(t *testing.T) {
+		page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistA})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(page.Events) != len(watchlist.EventTypes) {
+			t.Fatalf("len(Events) = %d, want %d", len(page.Events), len(watchlist.EventTypes))
+		}
+		for _, e := range page.Events {
+			if e.ArtistID != artistA {
+				t.Fatalf("event %d has ArtistID %d, want %d -- artist filter leaked another artist's row", e.ID, e.ArtistID, artistA)
+			}
+		}
+	})
+
+	t.Run("event_type filter applies independently", func(t *testing.T) {
+		et := "deluxe_change"
+		page, err := svc.List(context.Background(), events.ListParams{EventType: &et, PageSize: events.MaxPageSize})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		seen := make(map[int64]bool, len(page.Events))
+		for _, e := range page.Events {
+			if e.EventType != et {
+				t.Fatalf("event %d has EventType %q, want %q -- event_type filter leaked a non-matching row", e.ID, e.EventType, et)
+			}
+			seen[e.ID] = true
+		}
+		if !seen[eventIDs[artistA][et]] {
+			t.Fatalf("expected artist A's %s event (id %d) in the filtered results", et, eventIDs[artistA][et])
+		}
+		if !seen[eventIDs[artistB][et]] {
+			t.Fatalf("expected artist B's %s event (id %d) in the filtered results", et, eventIDs[artistB][et])
+		}
+		// A filter that silently did nothing would also return the other
+		// two event types for these two artists -- assert those specific
+		// ids are absent.
+		for _, otherType := range watchlist.EventTypes {
+			if otherType == et {
+				continue
+			}
+			if seen[eventIDs[artistA][otherType]] || seen[eventIDs[artistB][otherType]] {
+				t.Fatalf("event_type=%s filter returned a %s row -- filter did not apply", et, otherType)
+			}
+		}
+	})
+
+	t.Run("artist_id and event_type filters compose", func(t *testing.T) {
+		et := "guest_feature"
+		page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistA, EventType: &et})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(page.Events) != 1 {
+			t.Fatalf("len(Events) = %d, want 1 (artist_id and event_type both applied)", len(page.Events))
+		}
+		if page.Events[0].ID != eventIDs[artistA][et] {
+			t.Fatalf("event id = %d, want %d", page.Events[0].ID, eventIDs[artistA][et])
+		}
+		if page.Events[0].ArtistID != artistA || page.Events[0].EventType != et {
+			t.Fatalf("event = %+v, want ArtistID %d and EventType %q", page.Events[0], artistA, et)
+		}
+	})
+
+	t.Run("a cursor page shares no row with its predecessor", func(t *testing.T) {
+		seen := make(map[int64]bool)
+		var cursor *int64
+		total := 0
+		for i := 0; i < len(watchlist.EventTypes)+1; i++ { // one extra iteration guards against an infinite loop if pagination breaks
+			page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistA, PageSize: 1, Cursor: cursor})
+			if err != nil {
+				t.Fatalf("List (page %d): %v", i, err)
+			}
+			if len(page.Events) == 0 {
+				break
+			}
+			for _, e := range page.Events {
+				if seen[e.ID] {
+					t.Fatalf("event id %d appeared on two pages", e.ID)
+				}
+				seen[e.ID] = true
+				total++
+			}
+			cursor = page.NextCursor
+			if cursor == nil {
+				break
+			}
+		}
+		if total != len(watchlist.EventTypes) {
+			t.Fatalf("total events paged through = %d, want %d", total, len(watchlist.EventTypes))
+		}
+	})
 }
 
 func TestListEvents_NoMatchingRowsReturnsNonNilEmptySlice(t *testing.T) {
