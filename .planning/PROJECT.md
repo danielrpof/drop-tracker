@@ -20,11 +20,11 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - ✓ Search-proxy API endpoints — live search against MusicBrainz/Deezer so the UI can look up artists to add — Phase 03
 - ✓ Scheduler (robfig/cron) polls MusicBrainz + Deezer per watchlist entry on a configurable interval — Phase 03
 - ✓ Diff engine compares poll results against the Postgres "seen" store to detect: new releases, new guest features, deluxe/tracklist changes — Phase 04
+- ✓ Notifier posts detected changes to a Discord webhook — Phase 05
+- ✓ React (Vite) SPA UI for browsing/managing the watchlist, built and embedded into the Go binary via `go:embed` — single deployable image — Phase 06
 
 ### Active
 
-- [ ] Notifier posts detected changes to a Discord webhook
-- [ ] React (Vite) SPA UI for browsing/managing the watchlist, built and embedded into the Go binary via `go:embed` — single deployable image
 - [ ] Multi-stage Dockerfile: slim base image, non-root user, single final image containing API+UI
 - [ ] docker-compose for local dev (app + Postgres) — partial: Postgres service exists (Phase 01), app service not yet added
 - [ ] pre-commit hooks: golangci-lint, gitleaks
@@ -70,7 +70,7 @@ A single Go binary that reliably detects and notifies on new releases for watche
 | sqlc for DB access | Type-safe generated queries; codegen step is itself a nice CI showcase | Validated Phase 01 — `make sqlc-check` regenerates and diffs committed output; version-pinned via `sqlc-version-check` |
 | golang-migrate for migrations | Widely used, plain SQL up/down files, simple CI integration | Validated Phase 01 — embedded (`go:embed`) migrations run at boot with a bounded retry loop and context-cancellation support |
 | robfig/cron for scheduling | Closest equivalent to APScheduler; configurable per-source poll intervals | Validated Phase 03 — two independent cron entries (MusicBrainz/Deezer), each behind its own CAS overlap guard so one source's pace never blocks the other |
-| React (Vite) SPA embedded via go:embed | Keeps deployable to a single Go binary/image while still using a real frontend stack | — Pending |
+| React (Vite) SPA embedded via go:embed | Keeps deployable to a single Go binary/image while still using a real frontend stack | Validated Phase 06 — React Router SPA Mode (`ssr: false`), `internal/webassets` embeds `build/client` via `//go:embed all:build/client`, chi `NotFound` fallback serves `index.html` for client-side routes while explicit API routes still resolve first |
 | Single Go binary/service architecture | Simpler CI/CD to start; still exercises full pipeline without microservice complexity | — Pending |
 | DB-backed watchlist with CRUD API | More realistic surface, more to test/lint/scan than a static config file | Validated Phase 02 — add/remove/list/update-preferences all live behind `internal/watchlist.Store`, the reusable domain surface later phases (search-proxy, poller) build on |
 | Live search-proxy endpoints | Lets the UI look up artists/albums against MusicBrainz/Deezer directly, not just local DB | Validated Phase 03 — `GET /search` fans out concurrently to both sources, source-tagged, D-03 partial-failure contract (one source down never fails the whole request) |
@@ -100,4 +100,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-08 after Phase 04 (detection-engine)*
+*Last updated: 2026-08-11 after Phase 06 (frontend-release-history)*

@@ -2,35 +2,35 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 06
-current_phase_name: frontend-release-history
-status: executing
-stopped_at: Phase 06 UI-SPEC approved
-last_updated: "2026-08-11T04:09:46.432Z"
-last_activity: 2026-08-10
-last_activity_desc: Phase 06 execution started
+current_phase: 7
+current_phase_name: Containerization & CI/CD Pipeline
+status: planning
+stopped_at: Phase 06 complete, ready to plan Phase 7
+last_updated: "2026-08-11T21:30:00.000Z"
+last_activity: 2026-08-11
+last_activity_desc: Phase 06 complete, transitioned to Phase 7
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 28
-  completed_plans: 24
+  completed_plans: 28
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-08)
+See: .planning/PROJECT.md (updated 2026-08-11)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 06 — frontend-release-history
+**Current focus:** Phase 7 — Containerization & CI/CD Pipeline
 
 ## Current Position
 
-Phase: 06 (frontend-release-history) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 06
-Last activity: 2026-08-10 — Phase 06 execution started
+Phase: 7 — Containerization & CI/CD Pipeline
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-11 — Phase 06 complete, transitioned to Phase 7
 
 Progress: [██████████] 100%
 
@@ -38,7 +38,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 21
+- Total plans completed: 25
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -50,6 +50,7 @@ Progress: [██████████] 100%
 | 02 | 8 | - | - |
 | 03 | 4 | - | - |
 | 04 | 4 | - | - |
+| 06 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -146,6 +147,12 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 05-03]: Added a seed cycle to the NTFY-04 through-notifier test since a bare first-cycle new_release row is always pre-notified by D-14's seed mode, leaving NotifyPending nothing to drain
 - [quick/260808-pt0]: `/gsd-audit-milestone` was scoped to phases 1-5 only (user choice) since phases 6-7 are unplanned (`Plans: TBD`) -- auditing them now would only report "not started," already known from ROADMAP.md. Full v1.0 audit deferred until phases 6-7 complete; see `.planning/v1.0-MILESTONE-AUDIT.md`.
 - [quick/260808-pt0]: Closed Phase 5's two open backstop-tier truths partially -- the 256-rune title boundary and total-embed-budget checks were closeable by an automated test and now are (`internal/notifier/format_test.go`); the live Discord rendering/mention-suppression check is not automatable and stays open, tracked under Blockers/Concerns rather than silently dropped.
+- [Phase 06-01]: React Router SPA Mode (`ssr: false`) scaffold embedded via `internal/webassets`'s `//go:embed all:build/client`, with a chi `NotFound`-registered fallback serving `index.html` for client-side routes while every explicit API route still resolves first; `Makefile`'s `web` target rebuilds and replaces the committed `internal/webassets/build/client/` tree so a Node-less clone still builds/tests/vets clean.
+- [Phase 06]: All XSS-surfaced threats (event titles, artist names/disambiguation, search-result text from MusicBrainz/Deezer) closed via plain-JSX-text-node rendering only -- a repo-wide `dangerouslySetInnerHTML` grep across `web/app/` returns zero matches.
+- [Phase 06-03]: Optimistic preference-toggle rollback (T-06-13, D-12 prohibition) -- pre-toggle state is restored and a failure toast fires on any non-OK PATCH response, so the UI never keeps showing an unsaved value as persisted; confirmed live via UAT (forced PATCH failure, checkbox reverted, toast shown).
+- [Phase 06-04]: Search-as-you-type debounced ~300ms with `AbortController` supersession cancellation, backed by the existing per-source `rate.Limiter` and a fixed `searchResultLimit` of 10 -- bounds outbound MusicBrainz/Deezer traffic regardless of client behavior.
+- [Phase 06 Security]: `/gsd-secure-phase 06` closed all 23 registered threats across the phase's 4 plans (19 mitigated, 4 accepted with documented rationale) via L1 grep-depth verification against the implementation -- ASVS level 1, no deeper auditor pass required. See 06-SECURITY.md.
+- [Phase 06 UAT]: Search-result popularity ranking / same-name disambiguation accepted as a valid, out-of-scope enhancement rather than a defect; captured as backlog Phase 999.1 in ROADMAP.md.
 
 ### Pending Todos
 
@@ -173,6 +180,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-11T02:55:48.568Z
-Stopped at: Phase 06 UI-SPEC approved
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/06-frontend-release-history/06-UI-SPEC.md
+Last session: 2026-08-11T21:30:00.000Z
+Stopped at: Phase 06 complete, ready to plan Phase 7
+Resume file: None
