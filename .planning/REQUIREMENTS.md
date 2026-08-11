@@ -39,7 +39,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### History
 
-- [ ] **HIST-01**: User can view a history of detected events (new release, guest feature, deluxe change) per artist, including what changed
+- [x] **HIST-01**: User can view a history of detected events (new release, guest feature, deluxe change) per artist, including what changed
 
 ### Operations
 
@@ -51,7 +51,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **UI-01**: User can search for and add an artist to the watchlist via the web UI
 - [ ] **UI-02**: User can view and manage (remove, set preferences) their watchlist via the web UI
-- [ ] **UI-03**: User can browse a feed/history of detected release events via the web UI
+- [x] **UI-03**: User can browse a feed/history of detected release events via the web UI
 
 ### CI/CD Pipeline
 
@@ -126,8 +126,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NTFY-04 | Phase 5 | Complete |
 | UI-01 | Phase 6 | Pending |
 | UI-02 | Phase 6 | Pending |
-| UI-03 | Phase 6 | Pending |
-| HIST-01 | Phase 6 | Pending |
+| UI-03 | Phase 6 | Complete |
+| HIST-01 | Phase 6 | Complete |
 | CICD-01 | Phase 7 | Pending |
 | CICD-02 | Phase 7 | Pending |
 | CICD-03 | Phase 7 | Pending |
