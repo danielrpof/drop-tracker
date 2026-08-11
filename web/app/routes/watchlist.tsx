@@ -50,9 +50,16 @@ export default function Watchlist() {
   // handleEntryChange is passed down to PreferenceToggles (via
   // WatchlistRow) so its optimistic-update-then-rollback logic writes
   // straight into this route's own entries state -- the single source of
-  // truth every row renders from.
-  function handleEntryChange(updated: WatchlistEntry) {
-    setEntries((rows) => (rows ? rows.map((r) => (r.id === updated.id ? updated : r)) : rows))
+  // truth every row renders from. It merges a partial patch onto whatever
+  // the row currently is (the functional setEntries updater reads the
+  // latest state, never a stale closure), not a full-row replacement --
+  // see PreferenceToggles' onEntryChange doc comment for why: two
+  // concurrent single-axis PATCHes must never let one axis's response
+  // clobber the other axis's already-applied value.
+  function handleEntryChange(id: number, patch: Partial<WatchlistEntry>) {
+    setEntries((rows) =>
+      rows ? rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) : rows,
+    )
   }
 
   // handleAddSearchResult wires SearchResultsColumns' "Add to Watchlist"
@@ -69,14 +76,29 @@ export default function Watchlist() {
   // failure shows the generic add-failure toast; SearchResultsColumns'
   // per-row pending state returns the result to an addable state on its
   // own once this promise settles.
+  //
+  // Only a MusicBrainz result carries a real mbid -- a Deezer result's `id`
+  // is a Deezer catalog id with no relation to MusicBrainz, and POST
+  // /watchlist treats mbid as the artist's canonical identity with no
+  // format validation (internal/httpserver/watchlist.go), so passing it
+  // through would silently and permanently break that artist's
+  // MusicBrainz-sourced release detection. SearchResultsColumns already
+  // disables the "Add to Watchlist" action for Deezer results (this
+  // project has no cross-source identity resolution), so sourceName here
+  // should always be "musicbrainz"; the guard below is defense-in-depth,
+  // not the primary safeguard.
   async function handleAddSearchResult(sourceName: string, result: SearchArtist) {
+    if (sourceName !== "musicbrainz") {
+      toast.error("Can't add this artist yet -- search MusicBrainz instead.")
+      return
+    }
     try {
       await addWatchlist({
         mbid: result.id,
         name: result.name,
         imageUrl: result.image_url ?? undefined,
         disambiguation: result.disambiguation ?? undefined,
-        deezerId: sourceName === "deezer" ? result.id : undefined,
+        deezerId: undefined,
       })
       refresh()
     } catch (err) {

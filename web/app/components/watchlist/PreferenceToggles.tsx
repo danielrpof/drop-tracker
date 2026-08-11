@@ -13,9 +13,20 @@ import { type WatchlistEntry, updateWatchlistPreferences } from "~/lib/api"
 // states, so a toggle handler must never resolve/send the other axis.
 export interface PreferenceTogglesProps {
   entry: WatchlistEntry
-  onEntryChange: (updated: WatchlistEntry) => void
+  onEntryChange: (id: number, patch: Partial<WatchlistEntry>) => void
 }
 
+// onEntryChange takes a partial patch keyed by axis, not a full-row
+// replacement: toggling release-type and mute checkboxes in quick
+// succession fires two independent, concurrently in-flight PATCHes, and
+// the server correctly serializes the writes (row lock + CASE-based
+// partial update in internal/watchlist), but each response's HTTP body is
+// only a snapshot of the row as of that PATCH's own commit -- it does not
+// know about the other axis's just-applied change. Merging a full-row
+// response into state would let the slower response's stale snapshot
+// clobber the other axis's already-applied value if it resolves second. A
+// partial patch merged by the parent's functional state update (against
+// the current row, not a stale closure) only ever touches its own axis.
 export function PreferenceToggles({ entry, onEntryChange }: PreferenceTogglesProps) {
   const [releasePending, setReleasePending] = useState(false)
   const [mutePending, setMutePending] = useState(false)
@@ -31,13 +42,13 @@ export function PreferenceToggles({ entry, onEntryChange }: PreferenceTogglesPro
     const previous = entry.release_types
     const optimistic = next ? [...previous, type] : previous.filter((t) => t !== type)
 
-    onEntryChange({ ...entry, release_types: optimistic })
+    onEntryChange(entry.id, { release_types: optimistic })
     setReleasePending(true)
     try {
       const updated = await updateWatchlistPreferences(entry.id, { releaseTypes: optimistic })
-      onEntryChange(updated)
+      onEntryChange(entry.id, { release_types: updated.release_types })
     } catch {
-      onEntryChange({ ...entry, release_types: previous })
+      onEntryChange(entry.id, { release_types: previous })
       toast.error("Couldn't update preferences — try again.")
     } finally {
       setReleasePending(false)
@@ -48,13 +59,13 @@ export function PreferenceToggles({ entry, onEntryChange }: PreferenceTogglesPro
     const previous = entry.muted_event_types
     const optimistic = next ? [...previous, type] : previous.filter((t) => t !== type)
 
-    onEntryChange({ ...entry, muted_event_types: optimistic })
+    onEntryChange(entry.id, { muted_event_types: optimistic })
     setMutePending(true)
     try {
       const updated = await updateWatchlistPreferences(entry.id, { mutedEventTypes: optimistic })
-      onEntryChange(updated)
+      onEntryChange(entry.id, { muted_event_types: updated.muted_event_types })
     } catch {
-      onEntryChange({ ...entry, muted_event_types: previous })
+      onEntryChange(entry.id, { muted_event_types: previous })
       toast.error("Couldn't update preferences — try again.")
     } finally {
       setMutePending(false)

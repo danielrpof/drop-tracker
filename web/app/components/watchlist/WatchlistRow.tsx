@@ -8,7 +8,7 @@ import { PreferenceToggles } from "./PreferenceToggles"
 
 export interface WatchlistRowProps {
   entry: WatchlistEntry
-  onEntryChange: (updated: WatchlistEntry) => void
+  onEntryChange: (id: number, patch: Partial<WatchlistEntry>) => void
   onRemove: (entry: WatchlistEntry) => void
 }
 

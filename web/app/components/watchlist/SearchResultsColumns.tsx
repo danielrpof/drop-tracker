@@ -104,8 +104,11 @@ function SourceColumn({
               sourceName={sourceName}
               artist={artist}
               alreadyWatching={
-                watchlistEntries?.some((entry) => entry.mbid === artist.id) ??
-                false
+                watchlistEntries?.some((entry) =>
+                  sourceName === "deezer"
+                    ? entry.deezer_id === artist.id
+                    : entry.mbid === artist.id,
+                ) ?? false
               }
               onAdd={onAdd}
             />
@@ -127,11 +130,18 @@ interface SearchResultRowProps {
 // one-line-truncated disambiguation when present, all as plain JSX text
 // nodes -- every one of these strings comes from a third-party catalogue,
 // so this tree never reaches for React's raw-HTML injection escape hatch.
-// The trailing control is either the disabled "Already watching" state
-// (D-11, cross-referenced against the already-loaded watchlist entries by
-// mbid) or the "Add to Watchlist" action, which tracks its own pending
-// state so a failed add returns the row to addable without affecting any
-// other row.
+// The trailing control is one of three states: the disabled "Already
+// watching" state (D-11, cross-referenced against the already-loaded
+// watchlist entries by source-appropriate id -- mbid for MusicBrainz,
+// deezer_id for Deezer); a disabled "Search MusicBrainz to add" state for
+// Deezer-sourced results (POST /watchlist requires a real, non-empty mbid
+// -- internal/httpserver/watchlist.go -- and this project has no
+// cross-source identity resolution between the two catalogues, so a
+// Deezer result's numeric catalog id can never be a valid mbid; passing it
+// as one would silently and permanently break that artist's
+// MusicBrainz-sourced release detection); or the "Add to Watchlist" action
+// for addable MusicBrainz results, which tracks its own pending state so a
+// failed add returns the row to addable without affecting any other row.
 function SearchResultRow({
   sourceName,
   artist,
@@ -139,6 +149,7 @@ function SearchResultRow({
   onAdd,
 }: SearchResultRowProps) {
   const [pending, setPending] = useState(false)
+  const canAdd = sourceName === "musicbrainz"
 
   async function handleClick() {
     setPending(true)
@@ -166,6 +177,16 @@ function SearchResultRow({
       {alreadyWatching ? (
         <Button variant="secondary" size="sm" disabled className="shrink-0">
           Already watching
+        </Button>
+      ) : !canAdd ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled
+          title="This project can't yet match a Deezer artist to its MusicBrainz identity -- search MusicBrainz to add this artist and get release detection."
+          className="shrink-0"
+        >
+          Search MusicBrainz to add
         </Button>
       ) : (
         <Button
