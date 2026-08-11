@@ -187,7 +187,7 @@ Plans:
   2. User can view and manage (remove, set preferences on) their watchlist via the web UI
   3. User can browse a feed/history of detected release events per artist via the web UI, including what changed
 
-**Plans**: 1/4 plans executed
+**Plans**: 3/4 plans executed
 **UI hint**: yes
 
 Plans:
@@ -197,8 +197,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 06-02-PLAN.md — History feed completeness: validated/clamped `artist_id`/`event_type`/`cursor`/`limit` params, and type-specific art-forward event cards with filters, load-more and every empty/loading/error state
-- [ ] 06-03-PLAN.md — Watchlist tab: the artist list with all its states, inline preference toggles with optimistic rollback, and one-click remove with an honestly-labelled Undo
+- [x] 06-02-PLAN.md — History feed completeness: validated/clamped `artist_id`/`event_type`/`cursor`/`limit` params, and type-specific art-forward event cards with filters, load-more and every empty/loading/error state
+- [x] 06-03-PLAN.md — Watchlist tab: the artist list with all its states, inline preference toggles with optimistic rollback, and one-click remove with an honestly-labelled Undo
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -232,5 +232,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. External Clients & Search | 4/4 | Complete    | 2026-08-07 |
 | 4. Detection Engine | 4/4 | Complete    | 2026-08-08 |
 | 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
-| 6. Frontend & Release History | 1/4 | In Progress|  |
+| 6. Frontend & Release History | 3/4 | In Progress|  |
 | 7. Containerization & CI/CD Pipeline | 0/TBD | Not started | - |
