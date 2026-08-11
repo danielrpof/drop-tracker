@@ -79,6 +79,7 @@ created: 2026-08-11
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-08-11 | 23 | 19 closed + 4 accepted | 0 | gsd-secure-phase (L1 grep-depth, orchestrator) |
+| 2026-08-11 | 23 | 19 closed + 4 accepted | 0 | gsd-secure-phase re-audit (short-circuit: threats_open=0, register_authored_at_plan_time=true, asvs_level=1; working tree unchanged since prior audit — spot-verified T-06-09/12/18 XSS grep still clean) |
 
 ---
 
