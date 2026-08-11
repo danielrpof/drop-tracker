@@ -234,3 +234,16 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
 | 6. Frontend & Release History | 3/4 | In Progress|  |
 | 7. Containerization & CI/CD Pipeline | 0/TBD | Not started | - |
+
+## Backlog
+
+### Phase 999.1: Search result popularity sorting and same-name disambiguation (BACKLOG)
+
+**Goal:** [Captured for future planning] — Sort watchlist artist search results by popularity and improve disambiguation between same-named artists (e.g. multiple "Drake"s), so the intended artist isn't buried under less-relevant same-named matches.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Context (captured during Phase 6 UAT, 06-04): MusicBrainz's search API doesn't rank by popularity, and its `disambiguation` field is community-sourced and often blank for lesser-known same-named artists. The Watchlist search UI already renders `disambiguation` when present (`SearchResultsColumns.tsx`) — the gap is upstream ranking, not the UI. Likely needs a popularity signal (Deezer search results carry fan-count data not currently captured by `internal/deezer`) and/or better MusicBrainz result ranking in `internal/httpserver/search.go`.
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
