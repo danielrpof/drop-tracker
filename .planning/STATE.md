@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 05
-current_phase_name: discord-notifications
-status: complete
+current_phase: 06
+current_phase_name: frontend-release-history
+status: executing
 stopped_at: Phase 06 UI-SPEC approved
-last_updated: "2026-08-11T04:05:54.017Z"
-last_activity: 2026-08-08
-last_activity_desc: Phase 05 closed out
+last_updated: "2026-08-11T04:09:46.432Z"
+last_activity: 2026-08-10
+last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 6
   completed_phases: 5
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-08)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 06 — frontend & release history (not yet started)
+**Current focus:** Phase 06 — frontend-release-history
 
 ## Current Position
 
-Phase: 05 (discord-notifications) — COMPLETE
-Plan: 3 of 3
-Status: Verified (26/28 must-haves, all 4 roadmap SCs) and formally closed out. 2 open human-verification items (live Discord render/mention-suppression check; can only be confirmed by a human with a real webhook) accepted and carried forward, not blocking.
-Last activity: 2026-08-08 — Phase 05 closed out
+Phase: 06 (frontend-release-history) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 06
+Last activity: 2026-08-10 — Phase 06 execution started
 
 Progress: [██████████] 100%
 
