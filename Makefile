@@ -1,4 +1,4 @@
-.PHONY: build run test test-short test-integration sqlc sqlc-check sqlc-version-check db-up db-down hooks
+.PHONY: build run test test-short test-integration sqlc sqlc-check sqlc-version-check db-up db-down hooks web
 
 TEST_DATABASE_URL ?= postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable
 
@@ -43,6 +43,22 @@ sqlc: sqlc-version-check
 sqlc-check: sqlc-version-check
 	sqlc generate
 	git diff --exit-code -- internal/db/sqlc/
+
+# Builds the SPA (web/) and replaces the committed
+# internal/webassets/build/client/ tree with the fresh output, so
+# go:embed picks up the latest build. --frozen-lockfile refuses to
+# silently resolve a different dependency version than pnpm-lock.yaml
+# pins (T-06-SC). Phase 7's multi-stage Docker image rebuilds this output
+# in its own Node build stage rather than trusting the tree committed
+# here -- the commit exists solely so `go build`, `go vet` and
+# `go test ./...` all work on a clone that has never run the Node
+# toolchain (06-RESEARCH.md).
+web:
+	cd web && pnpm install --frozen-lockfile
+	cd web && pnpm run build
+	rm -rf internal/webassets/build/client
+	mkdir -p internal/webassets/build
+	cp -r web/build/client internal/webassets/build/client
 
 # Installs the pre-commit framework and the git hook shim it defines
 # (see .pre-commit-config.yaml). pre-commit builds the pinned gitleaks

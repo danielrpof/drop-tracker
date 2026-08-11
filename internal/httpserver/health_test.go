@@ -54,7 +54,7 @@ func discardLogger() *slog.Logger {
 
 func TestHealth_Up(t *testing.T) {
 	pool := testutil.NewTestPool(t)
-	srv := httpserver.New(pool, stubStore{}, nil, discardLogger())
+	srv := httpserver.New(pool, stubStore{}, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -83,7 +83,7 @@ func TestHealth_Up(t *testing.T) {
 func TestHealth_Down(t *testing.T) {
 	pingErr := errors.New("connection refused: db-error-marker")
 	stub := stubPinger{pingFunc: func(context.Context) error { return pingErr }}
-	srv := httpserver.New(stub, stubStore{}, nil, discardLogger())
+	srv := httpserver.New(stub, stubStore{}, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -123,7 +123,7 @@ func TestHealth_DownOnTimeout(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}}
-	srv := httpserver.New(stub, stubStore{}, nil, discardLogger())
+	srv := httpserver.New(stub, stubStore{}, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -148,7 +148,7 @@ func TestHealth_DownOnTimeout(t *testing.T) {
 
 func TestHealth_Concurrent(t *testing.T) {
 	pool := testutil.NewTestPool(t)
-	srv := httpserver.New(pool, stubStore{}, nil, discardLogger())
+	srv := httpserver.New(pool, stubStore{}, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 

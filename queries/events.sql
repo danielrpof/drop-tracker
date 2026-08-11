@@ -71,3 +71,30 @@ WHERE event_type = 'new_release' AND source = 'musicbrainz' AND external_id = $1
 -- a second acknowledgement of an already-delivered row affects zero rows
 -- instead of overwriting the recorded delivery time.
 UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL;
+
+-- name: ListEvents :many
+-- Phase 6's HIST-01 history feed backing query (D-05): one global
+-- chronological read across all watched artists, newest first -- not a
+-- per-artist drill-down. Ordered and keyset-paginated on id DESC, not
+-- created_at: this file's own ListUnnotified comment already documents why
+-- created_at alone is not a unique order -- a seed cycle inserts many rows
+-- sharing one created_at timestamp, so ordering by it alone would make page
+-- boundaries non-deterministic across a "load more" click (06-RESEARCH.md
+-- Pattern 2, Pitfall 2). id (BIGSERIAL) is already unique and monotonic and
+-- needs no secondary tiebreak column.
+--
+-- artist_id, event_type and cursor are all optional sqlc.narg filters, each
+-- cast on both sides of its "IS NULL OR" predicate so sqlc's type inference
+-- has no ambiguity. "IS NULL OR" keeps one static SQL string sqlc can
+-- type-check, instead of building WHERE clauses in Go (06-RESEARCH.md
+-- Anti-Patterns). cursor is absent on the first page and set to the previous
+-- page's last row's id on subsequent pages.
+SELECT id, artist_id, source, event_type, external_id, release_group_mbid,
+       title, artist_name, release_date, cover_art_url, track_count,
+       previous_track_count, release_type, notified_at, created_at
+FROM events
+WHERE (sqlc.narg('artist_id')::bigint IS NULL OR artist_id = sqlc.narg('artist_id')::bigint)
+  AND (sqlc.narg('event_type')::text IS NULL OR event_type = sqlc.narg('event_type')::text)
+  AND (sqlc.narg('cursor')::bigint IS NULL OR id < sqlc.narg('cursor')::bigint)
+ORDER BY id DESC
+LIMIT sqlc.arg('page_size');

@@ -42,6 +42,23 @@ type Querier interface {
 	// parameter keeps its number -- D-20's write-once guarantee applies to
 	// these two snapshot columns exactly as it does to the original nine.
 	InsertEvent(ctx context.Context, arg InsertEventParams) (int64, error)
+	// Phase 6's HIST-01 history feed backing query (D-05): one global
+	// chronological read across all watched artists, newest first -- not a
+	// per-artist drill-down. Ordered and keyset-paginated on id DESC, not
+	// created_at: this file's own ListUnnotified comment already documents why
+	// created_at alone is not a unique order -- a seed cycle inserts many rows
+	// sharing one created_at timestamp, so ordering by it alone would make page
+	// boundaries non-deterministic across a "load more" click (06-RESEARCH.md
+	// Pattern 2, Pitfall 2). id (BIGSERIAL) is already unique and monotonic and
+	// needs no secondary tiebreak column.
+	//
+	// artist_id, event_type and cursor are all optional sqlc.narg filters, each
+	// cast on both sides of its "IS NULL OR" predicate so sqlc's type inference
+	// has no ambiguity. "IS NULL OR" keeps one static SQL string sqlc can
+	// type-check, instead of building WHERE clauses in Go (06-RESEARCH.md
+	// Anti-Patterns). cursor is absent on the first page and set to the previous
+	// page's last row's id on subsequent pages.
+	ListEvents(ctx context.Context, arg ListEventsParams) ([]ListEventsRow, error)
 	// Feeds the fresh-vs-seen diff (D-10): a Detector builds a
 	// map[string]struct{} from this result and skips any externally-fetched
 	// id already present.

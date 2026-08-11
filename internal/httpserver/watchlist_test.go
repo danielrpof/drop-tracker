@@ -125,7 +125,7 @@ func TestWatchlist_AddEndToEnd(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	store := watchlist.NewService(sqlc.New(pool))
-	srv := httpserver.New(pool, store, nil, discardLogger())
+	srv := httpserver.New(pool, store, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -191,7 +191,7 @@ func TestWatchlist_Add_RejectsBlankFields(t *testing.T) {
 				called = true
 				return watchlist.Entry{}, nil
 			}}
-			srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+			srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 			ts := httptest.NewServer(srv.Router())
 			defer ts.Close()
 
@@ -225,7 +225,7 @@ func TestWatchlist_Add_RejectsUnknownFields(t *testing.T) {
 		called = true
 		return watchlist.Entry{}, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -248,7 +248,7 @@ func TestWatchlist_Add_DuplicateReturns409(t *testing.T) {
 	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
 		return watchlist.Entry{}, watchlist.ErrDuplicate
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -290,7 +290,7 @@ func TestWatchlist_Add_InvalidPreferenceValueReturns400(t *testing.T) {
 		called = true
 		return watchlist.Entry{}, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -323,7 +323,7 @@ func TestWatchlist_Add_RejectsOversizeBody(t *testing.T) {
 		called = true
 		return watchlist.Entry{}, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -359,7 +359,7 @@ func TestWatchlist_Add_RejectsOverlongFields(t *testing.T) {
 				called = true
 				return watchlist.Entry{}, nil
 			}}
-			srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+			srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 			ts := httptest.NewServer(srv.Router())
 			defer ts.Close()
 
@@ -405,7 +405,7 @@ func TestWatchlist_Add_RejectsOverlongOptionalMetadata(t *testing.T) {
 				called = true
 				return watchlist.Entry{}, nil
 			}}
-			srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+			srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 			ts := httptest.NewServer(srv.Router())
 			defer ts.Close()
 
@@ -440,7 +440,7 @@ func TestWatchlist_Add_TrimsOptionalMetadataWhitespace(t *testing.T) {
 		got = p
 		return watchlist.Entry{}, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -505,7 +505,7 @@ func TestWatchlist_Add_BodyMustContainExactlyOneJSONValue(t *testing.T) {
 				called = true
 				return watchlist.Entry{ID: 1, ArtistID: 1, MBID: "5b11f4ce-a62d-471e-81fc-a69a8278c7da", Name: "Radiohead"}, nil
 			}}
-			srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+			srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 			ts := httptest.NewServer(srv.Router())
 			defer ts.Close()
 
@@ -546,7 +546,7 @@ func TestWatchlist_List_EmptyReturnsEmptyArray(t *testing.T) {
 	stub := stubStore{listFunc: func(context.Context) ([]watchlist.Entry, error) {
 		return []watchlist.Entry{}, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -576,7 +576,7 @@ func TestWatchlist_List_NilSliceStillEncodesAsEmptyArray(t *testing.T) {
 	stub := stubStore{listFunc: func(context.Context) ([]watchlist.Entry, error) {
 		return nil, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -623,7 +623,7 @@ func TestWatchlist_Delete_ConcurrentSameIDYieldsOne204AndOne404(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	srv := httpserver.New(pool, store, nil, discardLogger())
+	srv := httpserver.New(pool, store, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -686,7 +686,7 @@ func TestWatchlist_Patch_ConcurrentDifferentAxesBothSurvive(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	srv := httpserver.New(pool, store, nil, discardLogger())
+	srv := httpserver.New(pool, store, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -783,7 +783,7 @@ func TestWatchlist_Patch_ConcurrentWithDeleteNeverReturns500(t *testing.T) {
 	})
 
 	store := watchlist.NewService(sqlc.New(pool))
-	srv := httpserver.New(pool, store, nil, discardLogger())
+	srv := httpserver.New(pool, store, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -882,7 +882,7 @@ func TestWatchlist_Delete_MissingReturns404(t *testing.T) {
 	stub := stubStore{removeFunc: func(context.Context, int64) error {
 		return watchlist.ErrNotFound
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -913,7 +913,7 @@ func TestWatchlist_Delete_SuccessReturns204(t *testing.T) {
 	stub := stubStore{removeFunc: func(context.Context, int64) error {
 		return nil
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -955,7 +955,7 @@ func TestWatchlist_Delete_BadIDReturns400(t *testing.T) {
 				called = true
 				return nil
 			}}
-			srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+			srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 			ts := httptest.NewServer(srv.Router())
 			defer ts.Close()
 
@@ -997,7 +997,7 @@ func TestWatchlist_Patch_Returns200WithUpdatedEntry(t *testing.T) {
 	stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
 		return want, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -1039,7 +1039,7 @@ func TestWatchlist_Patch_InvalidValueReturns400(t *testing.T) {
 	stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
 		return watchlist.Entry{}, fmt.Errorf("%w: %q", watchlist.ErrInvalidReleaseType, "mixtape")
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -1072,7 +1072,7 @@ func TestWatchlist_Patch_MissingReturns404(t *testing.T) {
 	stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
 		return watchlist.Entry{}, watchlist.ErrNotFound
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -1103,7 +1103,7 @@ func TestWatchlist_Patch_BadIDReturns400(t *testing.T) {
 				called = true
 				return watchlist.Entry{}, nil
 			}}
-			srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+			srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 			ts := httptest.NewServer(srv.Router())
 			defer ts.Close()
 
@@ -1135,7 +1135,7 @@ func TestWatchlist_Patch_RejectsUnknownFields(t *testing.T) {
 		called = true
 		return watchlist.Entry{}, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -1174,7 +1174,7 @@ func TestWatchlist_Patch_NoPreferencesSuppliedReturns400(t *testing.T) {
 		gotParams = p
 		return watchlist.Entry{}, watchlist.ErrNoPreferencesSupplied
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -1241,7 +1241,7 @@ func TestWatchlist_Patch_EmptyBodyStillRejectedEndToEnd(t *testing.T) {
 		t.Fatalf("query updated_at before PATCH: %v", err)
 	}
 
-	srv := httpserver.New(pool, store, nil, discardLogger())
+	srv := httpserver.New(pool, store, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -1306,7 +1306,7 @@ func TestWatchlist_Patch_BodyMustContainExactlyOneJSONValue(t *testing.T) {
 				called = true
 				return watchlist.Entry{ID: 1, ArtistID: 1, ReleaseTypes: []string{"album"}}, nil
 			}}
-			srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+			srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 			ts := httptest.NewServer(srv.Router())
 			defer ts.Close()
 
@@ -1357,7 +1357,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	})
 
 	store := watchlist.NewService(sqlc.New(pool))
-	srv := httpserver.New(pool, store, nil, discardLogger())
+	srv := httpserver.New(pool, store, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -1529,7 +1529,7 @@ func TestWatchlist_Add_DoesNotLeakInternals(t *testing.T) {
 	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
 		return watchlist.Entry{}, addErr
 	}}
-	srv := httpserver.New(noopPinger{}, stub, nil, discardLogger())
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 

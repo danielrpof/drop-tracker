@@ -17,6 +17,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/config"
 	"github.com/danielrpof/drop-tracker/internal/db"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
+	"github.com/danielrpof/drop-tracker/internal/events"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
@@ -50,7 +51,8 @@ func TestBootToHealth_EndToEnd(t *testing.T) {
 	defer pool.Close()
 
 	store := watchlist.NewService(sqlc.New(pool))
-	srv := httpserver.New(pool, store, nil, logger)
+	eventsStore := events.NewService(sqlc.New(pool))
+	srv := httpserver.New(pool, store, eventsStore, nil, logger)
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 

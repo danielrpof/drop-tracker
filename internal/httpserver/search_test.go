@@ -71,7 +71,7 @@ func TestSearch_Success(t *testing.T) {
 	src := stubSearchSource{name: "musicbrainz", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
 		return []httpserver.SearchArtist{{Source: "musicbrainz", ID: "9fff2f8a-21e6-47de-a2b8-7f449929d43f", Name: "Drake"}}, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{src}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{src}, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -112,7 +112,7 @@ func TestSearch_SourceErrorReturns200WithErrorStatus(t *testing.T) {
 	src := stubSearchSource{name: "musicbrainz", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
 		return nil, errors.New(rawErr)
 	}}
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{src}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{src}, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -164,7 +164,7 @@ func TestSearch_MissingOrBlankQReturns400(t *testing.T) {
 				called = true
 				return nil, nil
 			}}
-			srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{src}, discardLogger())
+			srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{src}, discardLogger())
 			ts := httptest.NewServer(srv.Router())
 			defer ts.Close()
 
@@ -195,7 +195,7 @@ func TestSearch_QOverLongReturns400(t *testing.T) {
 	over := strings.Repeat("a", 513)
 
 	src := stubSearchSource{name: "musicbrainz"}
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{src}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{src}, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -223,7 +223,7 @@ func TestSearch_QExactly512RunesReturns200(t *testing.T) {
 	src := stubSearchSource{name: "musicbrainz", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
 		return nil, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{src}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{src}, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -242,7 +242,7 @@ func TestSearch_ZeroArtistsReturnsEmptyArrayNeverNull(t *testing.T) {
 	src := stubSearchSource{name: "musicbrainz", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
 		return nil, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{src}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{src}, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -284,7 +284,7 @@ func TestSearch_FanOutIsConcurrent(t *testing.T) {
 	}
 
 	sources := []httpserver.SearchSource{makeSrc("musicbrainz"), makeSrc("deezer")}
-	srv := httpserver.New(noopPinger{}, stubStore{}, sources, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, sources, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -325,7 +325,7 @@ func TestSearch_PartialFailure_OneSourceDownAnotherHealthy(t *testing.T) {
 		return []httpserver.SearchArtist{{Source: "deezer", ID: "246791", Name: "Drake"}}, nil
 	}}
 
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{failing, healthy}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{failing, healthy}, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -393,7 +393,7 @@ func TestSearch_CancelledInboundRequestWritesNoPartialBody(t *testing.T) {
 			return nil, nil
 		}
 	}}
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{src}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{src}, discardLogger())
 
 	req := httptest.NewRequest(http.MethodGet, "/search?q=drake", nil)
 	ctx, cancel := context.WithCancel(req.Context())
@@ -487,7 +487,7 @@ func TestSearch_BothSourcesOK(t *testing.T) {
 	dz := stubSearchSource{name: "deezer", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
 		return []httpserver.SearchArtist{{Source: "deezer", ID: "246791", Name: "Drake"}}, nil
 	}}
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{mb, dz}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{mb, dz}, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -539,7 +539,7 @@ func TestSearch_DeezerOnlyFailure(t *testing.T) {
 	failing := stubSearchSource{name: "deezer", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
 		return nil, errors.New(rawErr)
 	}}
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{healthy, failing}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{healthy, failing}, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
@@ -596,7 +596,7 @@ func TestSearch_BothSourcesFailed(t *testing.T) {
 	dz := stubSearchSource{name: "deezer", searchFunc: func(context.Context, string, int) ([]httpserver.SearchArtist, error) {
 		return nil, errors.New("deezer down")
 	}}
-	srv := httpserver.New(noopPinger{}, stubStore{}, []httpserver.SearchSource{mb, dz}, discardLogger())
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{mb, dz}, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
