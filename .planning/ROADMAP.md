@@ -187,7 +187,7 @@ Plans:
   2. User can view and manage (remove, set preferences on) their watchlist via the web UI
   3. User can browse a feed/history of detected release events per artist via the web UI, including what changed
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 **UI hint**: yes
 
 Plans:
@@ -202,7 +202,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 06-04-PLAN.md — Artist search at the top of the Watchlist tab: debounced two-column source results, one-click add, client-side "Already watching", plus the phase-closing manual UAT gate
+- [x] 06-04-PLAN.md — Artist search at the top of the Watchlist tab: debounced two-column source results, one-click add, client-side "Already watching", plus the phase-closing manual UAT gate
 
 ### Phase 7: Containerization & CI/CD Pipeline
 
@@ -232,7 +232,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. External Clients & Search | 4/4 | Complete    | 2026-08-07 |
 | 4. Detection Engine | 4/4 | Complete    | 2026-08-08 |
 | 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
-| 6. Frontend & Release History | 3/4 | In Progress|  |
+| 6. Frontend & Release History | 4/4 | In Progress|  |
 | 7. Containerization & CI/CD Pipeline | 0/TBD | Not started | - |
 
 ## Backlog
@@ -246,4 +246,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 Context (captured during Phase 6 UAT, 06-04): MusicBrainz's search API doesn't rank by popularity, and its `disambiguation` field is community-sourced and often blank for lesser-known same-named artists. The Watchlist search UI already renders `disambiguation` when present (`SearchResultsColumns.tsx`) — the gap is upstream ranking, not the UI. Likely needs a popularity signal (Deezer search results carry fan-count data not currently captured by `internal/deezer`) and/or better MusicBrainz result ranking in `internal/httpserver/search.go`.
 
 Plans:
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
