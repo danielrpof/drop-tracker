@@ -1,10 +1,11 @@
 ---
 phase: 06
 slug: frontend-release-history
-status: draft
+status: approved
 shadcn_initialized: false
 preset: bdKQpIA4
 created: 2026-08-10
+reviewed_at: 2026-08-10
 ---
 
 # Phase 06 — UI Design Contract
@@ -164,11 +165,11 @@ No third-party registries declared. Registry vetting gate not applicable — eve
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved — 2026-08-10
