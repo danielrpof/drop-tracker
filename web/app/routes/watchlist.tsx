@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react"
+import { toast } from "sonner"
 
 import { EmptyState } from "~/components/common/EmptyState"
 import { Button } from "~/components/ui/button"
 import { Skeleton } from "~/components/ui/skeleton"
 import { WatchlistRow } from "~/components/watchlist/WatchlistRow"
-import { type WatchlistEntry, listWatchlist } from "~/lib/api"
+import { type WatchlistEntry, addWatchlist, listWatchlist, removeWatchlist } from "~/lib/api"
 
 // Watchlist renders the UI-02 management surface: fetches listWatchlist()
 // on mount and renders the entries in exactly the order the server
@@ -33,6 +34,57 @@ export default function Watchlist() {
     refresh()
   }, [refresh])
 
+  // handleEntryChange is passed down to PreferenceToggles (via
+  // WatchlistRow) so its optimistic-update-then-rollback logic writes
+  // straight into this route's own entries state -- the single source of
+  // truth every row renders from.
+  function handleEntryChange(updated: WatchlistEntry) {
+    setEntries((rows) => (rows ? rows.map((r) => (r.id === updated.id ? updated : r)) : rows))
+  }
+
+  // handleRemove implements the UI-SPEC's destructive-confirmation policy:
+  // no blocking dialog, the DELETE fires on click and the row disappears
+  // immediately. On success, a toast with a 5s-auto-dismissing Undo action
+  // re-adds the artist via addWatchlist -- honestly labelled as restoring
+  // *default* preferences, not the row's prior custom release-type/mute
+  // settings, since the DELETE is a real hard delete and nothing is cached
+  // client-side across the toast window. On failure, refresh() re-fetches
+  // so the list reflects the row's true server state rather than the
+  // optimistic removal.
+  async function handleRemove(entry: WatchlistEntry) {
+    setEntries((rows) => (rows ? rows.filter((r) => r.id !== entry.id) : rows))
+
+    try {
+      await removeWatchlist(entry.id)
+    } catch {
+      toast.error(`Couldn't remove ${entry.name} — it may already be gone.`)
+      refresh()
+      return
+    }
+
+    toast.success(`Removed ${entry.name} from your watchlist.`, {
+      description:
+        "Undo re-adds this artist with default preferences -- its previous release-type and mute settings are not restored.",
+      duration: 5000,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          addWatchlist({
+            mbid: entry.mbid,
+            name: entry.name,
+            deezerId: entry.deezer_id ?? undefined,
+            disambiguation: entry.disambiguation ?? undefined,
+            imageUrl: entry.image_url ?? undefined,
+          })
+            .then(refresh)
+            .catch(() => {
+              toast.error(`Couldn't restore ${entry.name}. Try adding it again.`)
+            })
+        },
+      },
+    })
+  }
+
   return (
     <div className="flex flex-col gap-6 p-8">
       <h1 className="text-display font-semibold text-foreground">Watchlist</h1>
@@ -60,7 +112,12 @@ export default function Watchlist() {
       {!error && entries !== null && entries.length > 0 && (
         <ul className="flex flex-col gap-4">
           {entries.map((entry) => (
-            <WatchlistRow key={entry.id} entry={entry} />
+            <WatchlistRow
+              key={entry.id}
+              entry={entry}
+              onEntryChange={handleEntryChange}
+              onRemove={handleRemove}
+            />
           ))}
         </ul>
       )}
