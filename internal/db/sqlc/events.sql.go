@@ -118,6 +118,100 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const listEvents = `-- name: ListEvents :many
+SELECT id, artist_id, source, event_type, external_id, release_group_mbid,
+       title, artist_name, release_date, cover_art_url, track_count,
+       previous_track_count, release_type, notified_at, created_at
+FROM events
+WHERE ($1::bigint IS NULL OR artist_id = $1::bigint)
+  AND ($2::text IS NULL OR event_type = $2::text)
+  AND ($3::bigint IS NULL OR id < $3::bigint)
+ORDER BY id DESC
+LIMIT $4
+`
+
+type ListEventsParams struct {
+	ArtistID  *int64  `json:"artist_id"`
+	EventType *string `json:"event_type"`
+	Cursor    *int64  `json:"cursor"`
+	PageSize  int32   `json:"page_size"`
+}
+
+type ListEventsRow struct {
+	ID                 int64              `json:"id"`
+	ArtistID           int64              `json:"artist_id"`
+	Source             string             `json:"source"`
+	EventType          string             `json:"event_type"`
+	ExternalID         string             `json:"external_id"`
+	ReleaseGroupMbid   *string            `json:"release_group_mbid"`
+	Title              string             `json:"title"`
+	ArtistName         string             `json:"artist_name"`
+	ReleaseDate        *string            `json:"release_date"`
+	CoverArtUrl        *string            `json:"cover_art_url"`
+	TrackCount         *int32             `json:"track_count"`
+	PreviousTrackCount *int32             `json:"previous_track_count"`
+	ReleaseType        *string            `json:"release_type"`
+	NotifiedAt         pgtype.Timestamptz `json:"notified_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+// Phase 6's HIST-01 history feed backing query (D-05): one global
+// chronological read across all watched artists, newest first -- not a
+// per-artist drill-down. Ordered and keyset-paginated on id DESC, not
+// created_at: this file's own ListUnnotified comment already documents why
+// created_at alone is not a unique order -- a seed cycle inserts many rows
+// sharing one created_at timestamp, so ordering by it alone would make page
+// boundaries non-deterministic across a "load more" click (06-RESEARCH.md
+// Pattern 2, Pitfall 2). id (BIGSERIAL) is already unique and monotonic and
+// needs no secondary tiebreak column.
+//
+// artist_id, event_type and cursor are all optional sqlc.narg filters, each
+// cast on both sides of its "IS NULL OR" predicate so sqlc's type inference
+// has no ambiguity. "IS NULL OR" keeps one static SQL string sqlc can
+// type-check, instead of building WHERE clauses in Go (06-RESEARCH.md
+// Anti-Patterns). cursor is absent on the first page and set to the previous
+// page's last row's id on subsequent pages.
+func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListEventsRow, error) {
+	rows, err := q.db.Query(ctx, listEvents,
+		arg.ArtistID,
+		arg.EventType,
+		arg.Cursor,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventsRow
+	for rows.Next() {
+		var i ListEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ArtistID,
+			&i.Source,
+			&i.EventType,
+			&i.ExternalID,
+			&i.ReleaseGroupMbid,
+			&i.Title,
+			&i.ArtistName,
+			&i.ReleaseDate,
+			&i.CoverArtUrl,
+			&i.TrackCount,
+			&i.PreviousTrackCount,
+			&i.ReleaseType,
+			&i.NotifiedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExternalIDs = `-- name: ListExternalIDs :many
 SELECT external_id FROM events WHERE artist_id = $1 AND source = $2 AND event_type = $3
 `

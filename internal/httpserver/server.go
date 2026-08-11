@@ -11,7 +11,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
 
+	"github.com/danielrpof/drop-tracker/internal/events"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
+	"github.com/danielrpof/drop-tracker/internal/webassets"
 )
 
 // Pinger is the minimal surface Server needs from a database handle.
@@ -27,29 +29,38 @@ type Pinger interface {
 type Server struct {
 	db        Pinger
 	watchlist watchlist.Store
+	events    events.Store
 	sources   []SearchSource
 	router    http.Handler
 }
 
-// New builds a Server backed by db, store, sources and logging through
-// logger. The chi middleware stack runs in this order: middleware.RequestID
-// first so the correlation ID exists in context for everything downstream,
-// then echoRequestID so the client can see the same ID via the
-// X-Request-Id response header, then httplog.RequestLogger so every
-// request/response emits a structured JSON log line carrying that ID (via
-// LogExtraAttrs, since httplog's own schema has no built-in request-ID
-// field), then middleware.Recoverer so a panic in a handler is converted
-// into a 500 instead of crashing the process.
+// New builds a Server backed by db, store, eventsStore, sources and logging
+// through logger. The chi middleware stack runs in this order:
+// middleware.RequestID first so the correlation ID exists in context for
+// everything downstream, then echoRequestID so the client can see the same
+// ID via the X-Request-Id response header, then httplog.RequestLogger so
+// every request/response emits a structured JSON log line carrying that ID
+// (via LogExtraAttrs, since httplog's own schema has no built-in
+// request-ID field), then middleware.Recoverer so a panic in a handler is
+// converted into a 500 instead of crashing the process.
 //
 // store is a second, separate dependency rather than a widened Pinger --
 // widening Pinger's method set would break stubPinger, which today only
-// implements Ping (health_test.go).
+// implements Ping (health_test.go). eventsStore mirrors store's own
+// narrow-Store-interface shape (Phase 6, HIST-01).
 //
 // sources is a slice rather than one parameter per source (D-01, D-02) so
 // adding a source -- plan 03-02's Deezer -- is an append at the call site
 // instead of a signature change across every test.
-func New(db Pinger, store watchlist.Store, sources []SearchSource, logger *slog.Logger) *Server {
-	s := &Server{db: db, watchlist: store, sources: sources}
+//
+// Every explicit route below is registered before r.NotFound(webassets.
+// Handler()): chi matches an explicitly registered route before falling
+// through to NotFound, so registering the embedded SPA fallback last
+// creates no ordering conflict with the API routes above it
+// (06-RESEARCH.md Pattern 3, T-06-05) -- /health, /search, /watchlist and
+// /events always reach their own handlers, never the SPA fallback.
+func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []SearchSource, logger *slog.Logger) *Server {
+	s := &Server{db: db, watchlist: store, events: eventsStore, sources: sources}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -73,6 +84,8 @@ func New(db Pinger, store watchlist.Store, sources []SearchSource, logger *slog.
 	r.Get("/watchlist", s.handleListWatchlist)
 	r.Patch("/watchlist/{id}", s.handleUpdateWatchlist)
 	r.Delete("/watchlist/{id}", s.handleRemoveWatchlist)
+	r.Get("/events", s.handleListEvents)
+	r.NotFound(webassets.Handler().ServeHTTP)
 
 	s.router = r
 	return s

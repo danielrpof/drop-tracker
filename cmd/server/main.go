@@ -20,6 +20,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/detection"
+	"github.com/danielrpof/drop-tracker/internal/events"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
@@ -93,6 +94,11 @@ func run() error {
 
 	store := watchlist.NewService(sqlc.New(pool))
 
+	// eventsStore backs GET /events (Phase 6, HIST-01) -- a fourth
+	// sqlc.New(pool) instance, matching store/detector/notif's own pattern:
+	// sqlc.Queries is a stateless wrapper over the shared pool.
+	eventsStore := events.NewService(sqlc.New(pool))
+
 	// Exactly one *musicbrainz.Client and one rate.Limiter for the whole
 	// process (D-07) -- plan 03-04's poller reuses this same instance, so
 	// total outbound MusicBrainz rate stays bounded across search traffic
@@ -126,7 +132,7 @@ func run() error {
 	dzLimiter := rate.NewLimiter(rate.Limit(float64(cfg.DeezerRateLimitPer5s)/5.0), cfg.DeezerRateLimitPer5s)
 	dzClient := deezer.NewClient(dzLimiter, nil)
 
-	srv := httpserver.New(pool, store, []httpserver.SearchSource{
+	srv := httpserver.New(pool, store, eventsStore, []httpserver.SearchSource{
 		httpserver.NewMusicBrainzSource(mbClient),
 		httpserver.NewDeezerSource(dzClient),
 	}, logger)

@@ -14,6 +14,8 @@ go.work.sum
 # Frontend build output (React + Vite, embedded via go:embed per CLAUDE.md)
 node_modules/
 dist/
+web/build/
+web/.react-router/
 
 # Environment / secrets (CLAUDE.md: all secrets via env vars only, never committed)
 .env
