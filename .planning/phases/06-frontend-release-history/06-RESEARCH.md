@@ -460,14 +460,14 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 
 **If this table is empty:** N/A — see entries above.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does the shadcn `react-router` preset (`bdKQpIA4`) already configure SPA Mode, or is this phase's plan the first place `ssr: false` gets added?**
+1. **Does the shadcn `react-router` preset (`bdKQpIA4`) already configure SPA Mode, or is this phase's plan the first place `ssr: false` gets added?** — Resolved by planning: 06-01-T2 inspects the generated `react-router.config.ts` after scaffolding and adds `ssr: false` if not already present, then verifies `build/client` exists and `build/server` does not.
    - What we know: The generic `create-react-router` scaffold defaults to framework mode with SSR; `06-UI-SPEC.md` does not mention SPA Mode or `ssr: false` anywhere, and its own "Execution note" only says `components.json does not yet exist... must be run as the first task."
    - What's unclear: Whether the specific preset `bdKQpIA4` (opaque preset ID, not inspectable without running the CLI) bundles a non-default `react-router.config.ts`.
    - Recommendation: The plan's first task should be "run the init command, then immediately inspect (not assume) the generated `react-router.config.ts` and add `ssr: false` if not already present" — a cheap, always-correct verification step regardless of the preset's actual default.
 
-2. **Should the events response envelope include a `has_more` boolean in addition to `next_cursor`, or is `next_cursor: null` sufficient as the "no more pages" signal?**
+2. **Should the events response envelope include a `has_more` boolean in addition to `next_cursor`, or is `next_cursor: null` sufficient as the "no more pages" signal?** — Resolved by planning: `next_cursor: null` alone drives "hide Load more" in 06-02; no `has_more` field was added.
    - What we know: D-07 requires "Load more" to stop being clickable/visible once the feed is exhausted; UI-SPEC's Copywriting Contract doesn't specify a distinct "end of feed" message (only per-item empty states).
    - What's unclear: Whether `next_cursor: null` alone is unambiguous enough (it is, functionally — a null cursor means "don't request another page") or whether the UI wants an explicit `has_more` field for clarity.
    - Recommendation: `next_cursor: null` is sufficient and requires no `has_more` field; the plan can note in the design that "no next_cursor" == "hide Load more" without needing a Claude's-Discretion checkpoint on this.
