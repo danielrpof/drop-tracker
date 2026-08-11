@@ -4,8 +4,18 @@ import { toast } from "sonner"
 import { EmptyState } from "~/components/common/EmptyState"
 import { Button } from "~/components/ui/button"
 import { Skeleton } from "~/components/ui/skeleton"
+import { SearchBox } from "~/components/watchlist/SearchBox"
+import { SearchResultsColumns } from "~/components/watchlist/SearchResultsColumns"
 import { WatchlistRow } from "~/components/watchlist/WatchlistRow"
-import { type WatchlistEntry, addWatchlist, listWatchlist, removeWatchlist } from "~/lib/api"
+import {
+  ApiError,
+  type SearchArtist,
+  type SearchResponse,
+  type WatchlistEntry,
+  addWatchlist,
+  listWatchlist,
+  removeWatchlist,
+} from "~/lib/api"
 
 // Watchlist renders the UI-02 management surface: fetches listWatchlist()
 // on mount and renders the entries in exactly the order the server
@@ -22,6 +32,9 @@ import { type WatchlistEntry, addWatchlist, listWatchlist, removeWatchlist } fro
 export default function Watchlist() {
   const [entries, setEntries] = useState<WatchlistEntry[] | null>(null)
   const [error, setError] = useState(false)
+  const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(
+    null,
+  )
 
   const refresh = useCallback(() => {
     setError(false)
@@ -40,6 +53,39 @@ export default function Watchlist() {
   // truth every row renders from.
   function handleEntryChange(updated: WatchlistEntry) {
     setEntries((rows) => (rows ? rows.map((r) => (r.id === updated.id ? updated : r)) : rows))
+  }
+
+  // handleAddSearchResult wires SearchResultsColumns' "Add to Watchlist"
+  // click into addWatchlist, sending neither preference axis so the API
+  // applies its own D-08 defaults (release-type/mute preferences are edited
+  // afterward via each row's inline PreferenceToggles, not at add time).
+  // On success it refreshes the loaded entries so the new artist appears
+  // below and the "Already watching" cross-reference (D-11) picks it up in
+  // the same pass. 06-RESEARCH.md Pitfall 3: a fast click can beat this
+  // route's own initial GET /watchlist fetch, so the cross-reference has
+  // not yet caught this result as already-added -- the resulting 409 in
+  // that narrow window means this artist is genuinely being tracked, so it
+  // is treated as success (refresh) rather than an error toast. Any other
+  // failure shows the generic add-failure toast; SearchResultsColumns'
+  // per-row pending state returns the result to an addable state on its
+  // own once this promise settles.
+  async function handleAddSearchResult(sourceName: string, result: SearchArtist) {
+    try {
+      await addWatchlist({
+        mbid: result.id,
+        name: result.name,
+        imageUrl: result.image_url ?? undefined,
+        disambiguation: result.disambiguation ?? undefined,
+        deezerId: sourceName === "deezer" ? result.id : undefined,
+      })
+      refresh()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        refresh()
+        return
+      }
+      toast.error("Couldn't add this artist. Try again in a moment.")
+    }
   }
 
   // handleRemove implements the UI-SPEC's destructive-confirmation policy:
@@ -88,6 +134,17 @@ export default function Watchlist() {
   return (
     <div className="flex flex-col gap-6 p-8">
       <h1 className="text-display font-semibold text-foreground">Watchlist</h1>
+
+      <div className="flex flex-col gap-6">
+        <SearchBox onResults={setSearchResponse} />
+        {searchResponse && (
+          <SearchResultsColumns
+            response={searchResponse}
+            watchlistEntries={entries}
+            onAdd={handleAddSearchResult}
+          />
+        )}
+      </div>
 
       {error && (
         <EmptyState
