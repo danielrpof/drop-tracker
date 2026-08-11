@@ -49,7 +49,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Frontend
 
-- [ ] **UI-01**: User can search for and add an artist to the watchlist via the web UI
+- [x] **UI-01**: User can search for and add an artist to the watchlist via the web UI
 - [x] **UI-02**: User can view and manage (remove, set preferences) their watchlist via the web UI
 - [x] **UI-03**: User can browse a feed/history of detected release events via the web UI
 
@@ -124,7 +124,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NTFY-02 | Phase 5 | Complete |
 | NTFY-03 | Phase 5 | Complete |
 | NTFY-04 | Phase 5 | Complete |
-| UI-01 | Phase 6 | Pending |
+| UI-01 | Phase 6 | Complete |
 | UI-02 | Phase 6 | Complete |
 | UI-03 | Phase 6 | Complete |
 | HIST-01 | Phase 6 | Complete |
