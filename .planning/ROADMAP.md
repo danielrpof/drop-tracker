@@ -187,8 +187,22 @@ Plans:
   2. User can view and manage (remove, set preferences on) their watchlist via the web UI
   3. User can browse a feed/history of detected release events per artist via the web UI, including what changed
 
-**Plans**: TBD
+**Plans**: 4 plans
 **UI hint**: yes
+
+Plans:
+**Wave 1**
+
+- [ ] 06-01-PLAN.md — Tracer: `GET /events` end-to-end — `ListEvents` keyset query, `internal/events` Store seam, the embedded React Router SPA served by the Go binary via `go:embed`, and a History route rendering real rows
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 06-02-PLAN.md — History feed completeness: validated/clamped `artist_id`/`event_type`/`cursor`/`limit` params, and type-specific art-forward event cards with filters, load-more and every empty/loading/error state
+- [ ] 06-03-PLAN.md — Watchlist tab: the artist list with all its states, inline preference toggles with optimistic rollback, and one-click remove with an honestly-labelled Undo
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 06-04-PLAN.md — Artist search at the top of the Watchlist tab: debounced two-column source results, one-click add, client-side "Already watching", plus the phase-closing manual UAT gate
 
 ### Phase 7: Containerization & CI/CD Pipeline
 
@@ -218,5 +232,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. External Clients & Search | 4/4 | Complete    | 2026-08-07 |
 | 4. Detection Engine | 4/4 | Complete    | 2026-08-08 |
 | 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
-| 6. Frontend & Release History | 0/TBD | Not started | - |
+| 6. Frontend & Release History | 0/4 | Planned     | - |
 | 7. Containerization & CI/CD Pipeline | 0/TBD | Not started | - |
