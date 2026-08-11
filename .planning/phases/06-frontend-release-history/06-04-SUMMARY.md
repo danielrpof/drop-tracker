@@ -238,6 +238,14 @@ Phase 6 (frontend-release-history) is complete: all four phase requirements (UI-
 
 One backlog item was captured during this phase's UAT and is tracked separately, not blocking: Phase 999.1 (search result popularity sorting and same-name disambiguation).
 
+## Self-Check: PASSED
+
+- FOUND: `web/app/components/watchlist/SearchBox.tsx`
+- FOUND: `web/app/components/watchlist/SearchResultsColumns.tsx`
+- FOUND: `.planning/phases/06-frontend-release-history/06-04-SUMMARY.md`
+- FOUND: commit `74c9129` (Task 1)
+- FOUND: commit `961afb6` (plan metadata)
+
 ---
 *Phase: 06-frontend-release-history*
 *Completed: 2026-08-11*
