@@ -47,12 +47,16 @@ function tabLinkClassName({ isActive }: { isActive: boolean }) {
   ].join(" ")
 }
 
-// App is the root layout: D-01's tab bar (currently just the History tab --
-// plan 06-03 adds Watchlist alongside it) above the routed page content.
+// App is the root layout: D-01's two-tab bar (Watchlist, History) above the
+// routed page content. The two tabs stay fully decoupled per D-03/D-04 --
+// neither route's component references the other's data.
 export default function App() {
   return (
     <div className="flex min-h-screen flex-col">
       <nav className="flex border-b border-border px-8">
+        <NavLink to="/watchlist" className={tabLinkClassName}>
+          Watchlist
+        </NavLink>
         <NavLink to="/history" className={tabLinkClassName}>
           History
         </NavLink>
