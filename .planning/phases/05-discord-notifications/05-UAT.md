@@ -1,32 +1,14 @@
 ---
-status: testing
+status: complete
 phase: 05-discord-notifications
 source: [05-VERIFICATION.md]
 started: 2026-08-08T22:02:40Z
-updated: 2026-08-08T22:02:40Z
+updated: 2026-08-11T20:45:00Z
 ---
 
 ## Current Test
 
-number: 1
-name: Live Discord rendering and mention-suppression check
-expected: |
-  Point DISCORD_WEBHOOK_URL at a real Discord channel, seed one of each event type
-  (new_release, guest_feature, deluxe_change -- including an artist name containing
-  @everyone if feasible in a throwaway test channel), and let a poll cycle or manual
-  NotifyPending trigger deliver them.
-
-  Three visually distinct messages render correctly:
-  - new_release: green sidebar, new-release emoji title prefix, Artist/Release Date/Type
-    fields, cover-art thumbnail, clickable release-group/album link
-  - guest_feature: yellow sidebar, distinct emoji prefix, Artist field, clickable
-    recording link
-  - deluxe_change: fuchsia sidebar, distinct emoji prefix, Tracks field showing the
-    count delta, clickable release link
-
-  No mention token (@everyone, @here, role/user mention) pings anyone, even if present
-  in a community-edited artist name.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -37,7 +19,17 @@ expected: |
   tests prove the correct JSON payload is sent (including "allowed_mentions":{"parse":[]}),
   but only a real Discord client can confirm the message actually renders and behaves
   as intended.
-result: [pending]
+result: pass
+note: |
+  Delivery initially hung indefinitely ("skipping notify pass: already in progress"
+  forever) -- root-caused via /gsd-debug to two AND-gated causes: (1) the dev DB
+  connection collided with another agent worktree's Postgres container squatting on
+  host port 5432, so seeded UAT rows never reached the database the app actually
+  queried; (2) no timeout existed anywhere in the DB call path, so a dead socket wedged
+  the notifier's CAS guard forever. Fixed (docker-compose.yml remapped to 5433 +
+  bounded pgxpool/query timeouts in internal/db/pool.go and internal/notifier/notifier.go,
+  commit 479c781) and reconfirmed working end-to-end after the fix. See
+  .planning/debug/resolved/notify-pass-hangs-forever.md for full investigation.
 
 ### 2. Backstop-tier truncation boundary and total-budget checks
 expected: |
@@ -48,14 +40,19 @@ expected: |
   ~6000-char ceiling. Both truths are marked `verification: backstop` in
   05-02-PLAN.md's frontmatter -- no automated test asserts either boundary case
   directly (only over-limit truncation, at 300 runes, is tested).
-result: [pending]
+result: pass
+note: |
+  Verified via existing automated tests in internal/notifier/format_test.go rather than
+  a live Discord round-trip: TestFormatEmbed_TitleExactly256Runes_RoundTripsUnchanged and
+  TestFormatEmbed_WorstCaseFullyPopulatedEmbed_StaysUnderDiscordTotalBudget both cover
+  these exact boundary cases and both pass (confirmed 2026-08-11).
 
 ## Summary
 
 total: 2
-passed: 0
+passed: 2
 issues: 0
-pending: 2
+pending: 0
 skipped: 0
 blocked: 0
 
