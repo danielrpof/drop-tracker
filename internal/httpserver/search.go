@@ -170,6 +170,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sources := make(map[string]sourceResult, len(s.sources))
+	sourceErrs := make(map[string]string, len(s.sources))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -181,8 +182,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			artists, err := src.SearchArtists(r.Context(), q, searchResultLimit)
 
 			var result sourceResult
+			var errText string
 			if err != nil {
-				httplog.SetAttrs(r.Context(), slog.String(src.Name()+"_search_error", err.Error()))
+				errText = err.Error()
 				result = sourceResult{Status: "error", Error: "source unavailable", Artists: []SearchArtist{}}
 			} else {
 				if artists == nil {
@@ -193,10 +195,22 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 			mu.Lock()
 			sources[src.Name()] = result
+			if errText != "" {
+				sourceErrs[src.Name()] = errText
+			}
 			mu.Unlock()
 		}(src)
 	}
 	wg.Wait()
+
+	// httplog.SetAttrs mutates state keyed off r.Context() with no internal
+	// synchronization -- it must only ever be called from a single goroutine.
+	// Calling it from each fan-out goroutine above raced (found by CI's -race
+	// run, phase 07 Task 3 PR verification); logging every source's error
+	// here, after wg.Wait() rejoins to this one goroutine, is race-free.
+	for name, errText := range sourceErrs {
+		httplog.SetAttrs(r.Context(), slog.String(name+"_search_error", errText))
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
