@@ -3,6 +3,7 @@ created: 2026-08-11T16:58:10.631Z
 title: Fix flaky tests under parallel `go test ./...` (shared-DB contention + notifier timing)
 area: testing
 severity: minor
+resolves_phase: 9
 files:
   - internal/notifier/notifier_test.go
   - internal/poller/poller_test.go
