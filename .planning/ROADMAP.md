@@ -358,3 +358,15 @@ Context (captured during Phase 6 UAT, 06-04): MusicBrainz's search API doesn't r
 Plans:
 
 - [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.2: Deezer artist-art backfill for MusicBrainz-only artists (BACKLOG)
+
+**Goal:** [Captured for future planning] — Homepage artist cards render hero-sized artist art, but MusicBrainz carries no artist images; any watchlisted artist added without a confident Deezer match at add-time has `image_url = NULL` forever and renders with no art, which stands out badly at hero size.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Context (captured 2026-08-12, brainstorming session): `artists.deezer_id`/`artists.image_url` already exist and get populated by `UpsertArtist` when a Deezer match was available at add-time (Phase 2) — the gap is a one-time/on-demand backfill for artists that never got a match, not new schema. Proposed approach: Deezer artist-name search (`internal/deezer`) filtered to close name equality as the primary signal; a shared album/release title used only as a tie-breaker when multiple same-named Deezer artists come back, never as the sole match signal (album titles collide across unrelated artists and MB/Deezer titles diverge in casing/edition tags); fail closed to "no art" on low confidence rather than risk attaching the wrong artist's photo. Note: PROJECT.md's Out of Scope explicitly rejects full "dual-source (MusicBrainz + Deezer) reconciliation" as too complex for the payoff — this is a narrower, one-directional, art-only slice (no event/detection logic touched), but sits in the same territory and should be scoped deliberately, not assumed in by default. Intended to be structured into v1.2 alongside Phase 999.1.
+
+Plans:
+
+- [ ] TBD (promote with /gsd-review-backlog when ready)
