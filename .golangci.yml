@@ -16,3 +16,21 @@ run:
 
 linters:
   default: standard
+  # gosec on top of the standard set (07-REVIEW.md WR-02): this codebase has
+  # several places where static security analysis has direct value -- DSN
+  # handling/redaction (internal/db/migrate.go), webhook URL handling that
+  # must never be logged (internal/discord/client.go), and user-supplied
+  # query strings escaped into Lucene syntax (internal/musicbrainz/search.go).
+  # errcheck/staticcheck/unused catch correctness bugs, not misuse patterns.
+  enable:
+    - gosec
+  exclusions:
+    rules:
+      # Test files legitimately construct credential-shaped fixture strings
+      # (G101) and open test-authored file paths (G304) -- neither is a real
+      # secret or a real path-traversal surface. Excluding gosec from _test.go
+      # avoids per-line #nosec comments on every test fixture without
+      # weakening the check on production code.
+      - path: '_test\.go$'
+        linters:
+          - gosec

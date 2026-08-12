@@ -19,7 +19,7 @@
 # (T-07-01).
 
 # ---- Stage 1: build the SPA ----
-FROM node:26-alpine3.24 AS web-build
+FROM node:26-alpine3.24@sha256:aadf416b2cdce311a8811ba3f0608a61b77dbf997500e2eafe781b51f6a0b019 AS web-build
 WORKDIR /src/web
 
 # Node 26 no longer bundles corepack (removed starting with Node 25) —
@@ -38,7 +38,7 @@ COPY web/ ./
 RUN pnpm run build
 
 # ---- Stage 2: build the Go binary ----
-FROM golang:1.26.5-alpine3.24 AS go-build
+FROM golang:1.26.5-alpine3.24@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS go-build
 WORKDIR /src
 
 # Copy module files first so `go mod download` caches independently of
@@ -61,7 +61,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" \
     -o /out/server ./cmd/server
 
 # ---- Stage 3: minimal non-root runtime ----
-FROM alpine:3.24
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
 # Mandatory, not optional: the CGO_ENABLED=0 binary reads the system
 # certificate pool, and plain alpine ships none. Without this, every

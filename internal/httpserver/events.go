@@ -58,7 +58,7 @@ func parseOptionalPageSize(r *http.Request) (int32, bool) {
 	if err != nil || v < 1 {
 		return 0, false
 	}
-	return int32(v), true
+	return int32(v), true //nolint:gosec // int32 wraparound from a huge v is harmless here: every reachable output is either <=0 or >MaxPageSize (caught by events.Service.List's clamp, see comment above) or lands directly in the already-valid [1,MaxPageSize] range
 }
 
 // handleListEvents implements GET /events (HIST-01, UI-03): reads four

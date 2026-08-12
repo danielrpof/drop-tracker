@@ -136,7 +136,7 @@ func (d *Detector) groupBaseline(ctx context.Context, groupMBID string) (baselin
 // InsertEvent's ON CONFLICT DO NOTHING per D-20; no snapshot column is ever
 // touched by this call.
 func (d *Detector) setGroupBaseline(ctx context.Context, groupMBID string, count int) error {
-	trackCount := int32(count)
+	trackCount := int32(count) //nolint:gosec // count is a real-world album/release track count (always well under int32 range)
 	if _, err := d.q.SetGroupTrackCountBaseline(ctx, sqlc.SetGroupTrackCountBaselineParams{
 		ExternalID: groupMBID,
 		TrackCount: &trackCount,

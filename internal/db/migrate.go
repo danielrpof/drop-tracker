@@ -103,7 +103,7 @@ func backoffDelay(cfg retryConfig, attempt int) time.Duration {
 	if shift > maxBackoffShift {
 		shift = maxBackoffShift
 	}
-	delay := cfg.baseDelay * time.Duration(uint64(1)<<uint(shift))
+	delay := cfg.baseDelay * time.Duration(uint64(1)<<uint(shift)) //nolint:gosec // shift is capped at maxBackoffShift=32 above; 1<<32 fits well within int64's range
 	if delay <= 0 || delay > cfg.maxDelay {
 		delay = cfg.maxDelay
 	}

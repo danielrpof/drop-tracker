@@ -344,12 +344,12 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 		case maxCount > baseline:
 			groupMBID := g.MBID
 			coverArt := coverArtURLForReleaseGroup(groupMBID)
-			trackCount := int32(maxCount)
+			trackCount := int32(maxCount) //nolint:gosec // maxCount sums MusicBrainz media.TrackCount fields; a real release is always orders of magnitude under int32 range (worst case on a malformed upstream value is a wrong stored number, not a security defect)
 			// D-04: capture the pre-update baseline now, before
 			// setGroupBaseline below overwrites the group's track_count with
 			// the new maximum -- the old count exists nowhere else once that
 			// call lands.
-			previousTrackCount := int32(baseline)
+			previousTrackCount := int32(baseline) //nolint:gosec // baseline is read back from our own previously-stored int32 column (see groupBaseline/setGroupBaseline), never a fresh unbounded external value
 			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
 				ArtistID:           entry.ArtistID,
 				Source:             sourceMusicBrainz,
