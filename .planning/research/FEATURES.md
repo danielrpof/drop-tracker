@@ -1,212 +1,174 @@
 # Feature Research
 
-**Domain:** Personal/self-hosted music release tracker (hip-hop / reggaeton / R&B focus) — artist watchlist + new-release/guest-feature/deluxe-reissue notifier
-**Researched:** 2026-08-04
-**Confidence:** MEDIUM (data-model claims cross-checked against MusicBrainz official docs and multiple independent client implementations; comparable-tool feature claims are LOW-confidence web search but corroborated across 6+ independent products)
+**Domain:** Software-engineering-practice hardening for an existing Go+React CI/CD portfolio project (drop-tracker v1.1) — NOT product/domain features. Scope: frontend test suite, CI coverage gating, events retention, bounded concurrent polling.
+**Researched:** 2026-08-12
+**Confidence:** MEDIUM (web-search-derived, cross-checked across 3+ independent sources per topic; no single authoritative "one true answer" exists for any of these four — they are engineering judgment calls with well-established typical ranges, not hard specs)
+
+This file reinterprets the standard Feature Research categories for an engineering-practice milestone:
+
+- **Table Stakes** = what a well-run Go+React project is expected to have for each capability — the credible minimum a reviewer/interviewer would look for.
+- **Differentiators** = polish beyond the minimum that's genuinely worth the (small) extra effort for a portfolio piece, without materially growing scope.
+- **Anti-Features** = practices that are legitimate at larger scale/org size but would be overkill here — flagged so the roadmap doesn't over-build.
+
+All four capabilities are **modifications to existing, already-built systems**, not new subsystems — dependencies on the current codebase are called out explicitly per section, since that's what makes some "typical" practices inappropriate here and others mandatory.
 
 ## Feature Landscape
 
-### Table Stakes (Users Expect These)
+### Table Stakes (Expected Minimum Practice)
 
-Features users assume exist. Missing these = the tool doesn't do its one job. All of these are already captured as Active requirements in PROJECT.md — this table validates and details them.
+| Capability | What's Expected | Complexity | Notes |
+|---|---|---|---|
+| Frontend test suite: presentational + interactive component coverage | Test the app's actual interaction surface: `routes/watchlist.tsx` (list render, empty/loading/error states — `EmptyState` already exists as a component to exercise), `WatchlistRow` (per-row actions), `PreferenceToggles` (toggle → correct API call/handler invoked), `SearchBox` + `SearchResultsColumns` (debounce/typing → results render, no-results state), `history.tsx` + `EventCard` + `HistoryFilters` (filter interaction → list updates) | MEDIUM | ~8 components/routes already exist under `web/app/components` and `web/app/routes` (confirmed via repo scan) — this is a fixed, enumerable surface, not open-ended. RTL's guidance (query by role/label, assert on rendered output and callback calls, not internal state) is the accepted default. |
+| Test against the app's existing API abstraction, not raw `fetch`/network | `web/app/lib/api.ts` already centralizes all backend calls — table stakes here is `vi.mock('~/lib/api')` (or equivalent module mock) per test, asserting the component calls the right api.ts function with the right args and renders correctly for success/error/loading responses | LOW | Because the codebase already isolated API calls behind one module (a good existing pattern), tests don't need to intercept HTTP at the network layer to be "properly tested" — mocking the module boundary is the natural, minimal-effort match for this architecture. |
+| Vitest + React Testing Library as the toolchain | Exactly what PROJECT.md already locked | LOW | Frontend has zero test tooling installed today (`web/package.json` has no `vitest`/`@testing-library/*` — confirmed) — this is greenfield setup: `vitest`, `@testing-library/react`, `@testing-library/jest-dom`, `@testing-library/user-event`, `jsdom` (or `happy-dom`) as the environment. React 19 + Vite 8 + React Router 7 (framework/SPA mode) are all current-generation and Vitest-compatible. |
+| CI coverage: fail-the-build, not warn-only | Non-zero exit on threshold miss is the norm — "warn and let it merge anyway" defeats the purpose of a gate | LOW | Matches PROJECT.md's already-decided approach. Backend: `go test -coverprofile=coverage.out ./...` + a threshold check (script or `go-test-coverage` action) wired into the existing `full-pipeline.yml`. Frontend: `vitest run --coverage` with `coverage.thresholds` in `vite.config.ts` — Vitest's v8 coverage provider fails the process natively on a miss, no extra tooling required. |
+| CI coverage: single whole-repo aggregate threshold | One number per side (backend, frontend), not per-package/per-file tiers | LOW | Per-package thresholds are an org-scale pattern (see Anti-Features) — a single-module Go backend and single React app both get one aggregate number each. 70% (PROJECT.md's chosen value) sits squarely inside the commonly-cited 60–85% range across both ecosystems' tooling defaults and community guidance — validated as reasonable, not a wildcard choice. |
+| Events retention: scheduled deletion job, reusing existing scheduler | A cron-driven job that deletes `events` rows older than the retention window | LOW-MEDIUM | The project already runs `robfig/cron` in-process for polling (`internal/poller`) — adding a third cron entry (or a lightweight ticker) that calls a new sqlc query (`DELETE FROM events WHERE created_at < now() - interval '90 days'`) is the natural fit. No new infrastructure (e.g. Postgres `pg_cron` extension) is needed or typical for a project already embedding a Go-side scheduler. |
+| Events retention: hard delete for a non-compliance operational table | Straight `DELETE`, not soft-delete-then-purge | LOW | Soft-delete (`deleted_at`/`is_deleted` + a later purge) is the norm when recovery/undo or an audit/compliance trail is a real requirement. `events` here is operational/display data (release history) with no such requirement — hard delete is both the simpler and the typical choice for this table's actual purpose. Matches PROJECT.md's already-decided approach. |
+| Events retention: 90-day window is a reasonable, industry-typical default | Not something that needs re-litigating | LOW | 90 days is the *default* audit/event retention period across multiple major platforms independently (Oracle Cloud audit logs, Microsoft 365 audit logs, ManageEngine EventLog Analyzer) and satisfies PCI-DSS's "3 months immediately available" floor. Cross-checked across 3+ independent sources — MEDIUM confidence this is a safe, unremarkable choice for a personal-scale app. |
+| Bounded concurrent polling: fan-out-and-wait per poll cycle, not a persistent worker pool | Replace the current sequential `for _, entry := range entries { ... }` loop in `RunMusicBrainzCycle`/`RunDeezerCycle` (`internal/poller/poller.go`) with a bounded-concurrency fan-out over that same per-cycle artist list | LOW-MEDIUM | This is one poll cycle processing a bounded, known-size list (the watchlist), not a continuous stream — `golang.org/x/sync/errgroup` with `g.SetLimit(n)` is the idiomatic, minimal-dependency match (a fixed-goroutine-plus-jobs-channel "worker pool" library is built for long-lived streaming consumers, a different shape of problem). `golang.org/x/sync` is **already an indirect dependency** in `go.mod` — promoting it to direct via `errgroup` adds zero new external dependencies. |
+| Bounded concurrent polling: per-source concurrency limit, not one shared/global limit | MusicBrainz's pool and Deezer's pool are sized and limited independently | LOW | The codebase already treats the two sources as fully independent at the cron/overlap-guard level (`mbRunning`/`dzRunning` as separate `atomic.Bool`s, explicitly "never one shared mutex... a shared guard would reintroduce exactly the cross-source coupling D-08 rejects"). A shared global concurrency cap across both sources would reintroduce that exact coupling one level up — the existing per-source separation principle extends directly to worker-pool/errgroup sizing. |
+| Bounded concurrent polling: concurrency cap composes with, doesn't replace, the existing per-source rate limiters | `golang.org/x/time/rate.Limiter` (already in place per source, per STACK.md) keeps pacing requests; the new concurrency cap (env-configurable, default 3-5 per PROJECT.md) bounds how many goroutines/DB connections/in-flight HTTP requests exist at once | LOW | These are complementary controls, not redundant ones: the limiter paces *rate*, the cap bounds *concurrency* (memory, connection-pool pressure, file descriptors). Removing either changes behavior; keeping both is the documented norm. |
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Search-to-add artist (live catalog search proxy) | Every comparable tool (MusicHarbor, MusicButler, crabhands, BEEPR, deemon) lets you type an artist name and pick the right catalog entry rather than typing a raw ID | LOW-MEDIUM | Proxy MusicBrainz `artist` search + Deezer `/search/artist`; return enough disambiguation (name, disambiguation comment, image/country) to avoid adding the wrong "Bad Bunny" |
-| Watchlist CRUD (add/remove/list artist) | Baseline for any "track these things" tool; PROJECT.md already locks this in | LOW | Standard REST CRUD over Postgres; dedupe by external catalog ID, not by name string (name collisions are common — reggaeton has many same-named acts) |
-| Scheduled polling of watched artists | The core mechanic — without polling nothing gets detected | LOW-MEDIUM | robfig/cron per PROJECT.md; needs per-source (MB vs Deezer) rate-limit awareness — MusicBrainz enforces ~1 req/sec |
-| New-release detection (own artist's new album/single) | This is the product's core promise | MEDIUM | See "Diffing Data Model" section below — key off release-group-id (MB) / album-id (Deezer), not release-id |
-| Guest-feature detection (artist appears on someone else's track) | **Critical differentiator for this genre** — hip-hop/reggaeton/R&B fans track features as heavily as an artist's own drops (e.g. a Bad Bunny verse on someone else's single) | MEDIUM-HIGH | Requires parsing artist-credit (MB) or `contributors` (Deezer) on tracks that are NOT the watched artist's own release — a fundamentally different query pattern than "new release by artist X" |
-| Deluxe/tracklist-change detection | Deluxe reissues ("Album (Deluxe)", "Complete Edition") are extremely common release patterns in this genre and are a real, wanted signal — not just noise to filter | MEDIUM-HIGH | Must distinguish "new tracks added to an existing release-group" from "cosmetic remaster/reissue" — see false-positive section |
-| Discord webhook notification | Locked in PROJECT.md as the notification sink | LOW | Simple POST to webhook URL; batch multiple detections per poll cycle into one message to avoid spam |
-| Idempotent "seen" store / no duplicate alerts | Any polling-based notifier that re-alerts on the same release destroys user trust immediately | LOW-MEDIUM | Diff engine must be safe to run repeatedly against the same source data (poll failures, retries) without re-notifying |
-| `/health` liveness/readiness endpoint | Standard operational expectation, also explicit PROJECT.md requirement | LOW | Trivial handler; check DB connectivity |
-| Release metadata on alert (title, artist, cover art, release date, type) | A bare "new release detected" message with no context is useless — user needs to know *what* dropped | LOW | Already implied by diff engine output; just needs to be carried through to the Discord embed |
+### Differentiators (Worth the Small Extra Effort)
 
-### Differentiators (Competitive Advantage)
+| Capability | Value Proposition | Complexity | Notes |
+|---|---|---|---|
+| MSW (Mock Service Worker) for a handful of integration-style tests | Realistic network-boundary testing (request/response shape, not just "was the mock called") is a widely-recognized RTL-ecosystem best practice and a nice CI/DevOps-practice demo point | LOW-MEDIUM | Not needed for every test — reserve for 1-2 higher-value flows (e.g. the search-to-add flow end-to-end at the component boundary) while the bulk of tests use the simpler `vi.mock('~/lib/api')` approach (table stakes). Adding MSW wholesale for every test would be disproportionate setup for this app's size. |
+| PR coverage-diff/report comments (`davelosert/vitest-coverage-report-action` for FE; an equivalent Go coverage-comment action for BE) | Visible, reviewable coverage feedback directly on PRs — a genuine CI/CD-maturity showcase point, consistent with the project's existing "Full Pipeline" polish (SBOM, Trivy, gitleaks already produce visible CI artifacts/gates) | LOW | Additive to the coverage gate, not a replacement — the gate (fail-the-build) is table stakes; the report/comment is presentation polish on top of it. |
+| Structured log line on each retention run (rows deleted, duration) | Cheap observability win, consistent with the project's existing `log/slog` structured-logging discipline (every other subsystem already logs cycle results this way) | LOW | One `logger.Info("events retention run", slog.Int64("rows_deleted", n), ...)` call — trivial to add, meaningfully improves operability for zero real cost. |
+| Idempotent, safe-to-rerun retention job | Matches the project's existing idempotency ethos (the `events` table's own dedup key, `ON CONFLICT DO NOTHING` pattern) | LOW | A `DELETE ... WHERE created_at < cutoff` is naturally idempotent (re-running it after a crash mid-run just deletes fewer or zero additional rows) — worth stating explicitly as a design property, not extra code. |
+| Per-cycle fan-out timing/goroutine-count in poll-cycle logs | Cheap observability differentiator, consistent with the project's per-cycle structured logging (`cycle_id`, `item_count`, etc. already logged today) | LOW | e.g. log total cycle duration and configured pool size alongside the existing per-cycle summary log line — demonstrates the concurrency change actually changed cycle throughput, useful evidence for a portfolio writeup. |
+| Documenting the concurrency-sizing heuristic in code comments / README | The codebase already has a strong convention of explaining *why* (see extensive doc comments in `poller.go`, `detector.go`) — stating "pool size is bounded by the external API's rate limit, not CPU count" continues that pattern | LOW | Zero implementation cost, meaningfully improves the code's self-documentation for a reviewer/interviewer reading it later. |
 
-Features that set the product apart within this specific niche. Should map to Core Value (reliable detection + CI/CD showcase), not scope creep.
+### Anti-Features (Typical at Larger Scale, Overkill Here)
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| Feature-alert as a distinct alert type from own-release alert | Most comparable tools (MusicHarbor, MusicButler, crabhands, BEEPR) only track an artist's *own* catalog additions — none surface "artist X appeared as a guest on artist Y's new track" as a first-class alert. This is the single most genre-relevant gap to fill for hip-hop/reggaeton/R&B, where guest verses are a primary consumption driver | MEDIUM-HIGH | Depends on guest-feature detection (table stakes) being solid; the differentiator is *surfacing it distinctly* in the notification (e.g. "🎤 Feature Alert" vs "💿 New Release") |
-| Release-type filtering per watchlist entry (album/single/EP/deluxe/compilation) | Lidarr proves this pattern works well (default "studio albums only" profile); lets a user watch an artist for albums only and skip singles-spam, or vice versa | LOW-MEDIUM | Requires MusicBrainz `primary-type`/`secondary-type` (album, single, EP + secondary: compilation, remix, live) on release-groups; Deezer has a coarser `record_type` field |
-| Per-artist notification preferences (mute deluxe noise, alert only on genuinely new tracks) | Reduces alert fatigue from reissue/remaster churn without losing signal on genuine deluxe track additions | MEDIUM | Enhancement on top of watchlist CRUD — add a preferences column/table; enhances but doesn't replace the deluxe-detection diff logic |
-| Dual-source reconciliation (MusicBrainz + Deezer cross-check) | MusicBrainz community-edited data can lag on same-day major-label hip-hop/reggaeton drops; Deezer's commercial catalog is often faster/more current for these genres, but lacks a release-group concept. Cross-checking reduces both false negatives (MB hasn't caught up) and false positives (Deezer flat-album churn) | HIGH | Real complexity add — good "differentiator" but also the best candidate to defer past v1 (see MVP section) |
-| Per-artist audit/history view of what was detected and why | Nobody in the comparable-tool landscape exposes *why* something was flagged (which field changed, which release-group). For a CI/CD/DevOps portfolio piece this is also a great demo of the diff engine's correctness/observability | LOW-MEDIUM | Natural extension of the "seen" store — just needs a read view over stored diff events, no new detection logic |
-| Configurable poll interval per source | MusicBrainz and Deezer have different rate limits and different data freshness characteristics; letting Deezer poll faster than MusicBrainz (or vice versa) is a legitimate operational feature | LOW | robfig/cron already supports this; just needs to be per-source config rather than one global interval |
-
-### Anti-Features (Commonly Requested, Often Problematic)
-
-Features that seem good but would balloon scope well past a v1 CI/CD portfolio piece. Every comparable real-world tool researched (deemon, Lidarr, Releasarr) eventually grows toward at least one of these — deliberately not building them here keeps the project's actual point (pipeline maturity) intact.
-
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|------------------|-------------|
-| Recommendation engine ("you might also like") | Feels like a natural extension of "tracking music you like" | Recommendation is a genuinely hard, orthogonal ML/data problem; adds a whole new domain of complexity with zero relevance to the CI/CD practice goal | Stick to explicit watchlist — user decides who to track, tool never guesses |
-| Auto-download / acquisition (deemix/*arr-stack style, as deemon and Releasarr both do) | "Since we already detect new releases, why not grab them" | Legal gray area, pulls in an entirely separate download/indexer subsystem (SABnzbd, indexers, file management), massively expands attack surface and scope | Notification-only; user acts on the Discord alert manually via their own streaming service |
-| Multi-user auth / accounts / SSO | Feels like a "real product" needs logins | PROJECT.md scopes this as a single deployable service for one operator (personal/portfolio use); OAuth/session management/RBAC is a large, orthogonal complexity spike that doesn't showcase CI/CD skills | Single shared instance, no per-user accounts; if isolation is ever needed, a simple API key is sufficient — not full auth |
-| In-app music playback / streaming integration | "Why alert me and make me open Spotify separately" | Requires licensed streaming SDKs, playback state, DRM concerns — an entirely different product category | Alert links out to the source (Deezer/MusicBrainz page); playback stays in the user's existing streaming app |
-| Mobile push notifications / native app | Comparable tools (BEEPR, MusicHarbor) lead with push notifications | Requires APNs/FCM infrastructure, device token management, a mobile client — none of which exercises the DevOps pipeline this project exists to practice | Discord webhook is the notification sink per PROJECT.md; Discord already has a mobile app that receives it |
-| Full historical backfill / mirroring an artist's entire discography | Feels complete/thorough | Turns the tool into a metadata warehouse instead of a forward-looking watcher; massively increases initial poll volume and storage for zero notification value | Seed the "seen" store with current state on first poll (baseline), only alert on changes going forward |
-| Audio fingerprinting / ISRC-based dedupe for false-positive reduction | Seems like the "correct" rigorous way to distinguish a true remaster from a genuinely new recording | High implementation cost (needs audio analysis or a third-party fingerprinting API) for a problem that release-group-id-based diffing already handles well enough for a v1 portfolio tool | Key diffing off MusicBrainz release-group-id + track-list-shape; accept some irreducible noise as a known, documented limitation |
-| Producer/label tracking as a first-class watchlist entity | Natural extension of "watch things related to music I like" | Already explicitly deferred in PROJECT.md's Out of Scope; adding it now would require a different data model per entity type | Stays as documented future work, not v1 |
-
-## Diffing Data Model: What "New Release" Actually Requires
-
-This directly determines the diff engine's schema and query shape.
-
-**MusicBrainz** separates two levels that must both be understood:
-- **release-group** — the abstract "album" concept with a stable ID and a `primary-type`/`secondary-type` (Album, Single, EP, + secondary types like Compilation, Remix, Live). This is the correct unit to diff against for "is this a new release" — a new release-group ID appearing for a watched artist is a genuine new-release signal.
-- **release** — a specific edition (country, format, deluxe/bonus-disc, remaster) that belongs to a release-group. Deluxe editions with bonus tracks are their own release, but MusicBrainz deliberately keeps them **inside the same release-group** as the standard edition — as do plain reissues and remasters. This means: a new *release* inside an *existing* release-group is the deluxe/tracklist-change signal, not a new-release signal.
-- Guest features are represented via **artist-credit** with a `joinphrase` (e.g. `" feat. "`) attached at the release-group, release, and recording (track) level. Detecting "artist X guested on someone else's track" means querying/browsing recordings where X appears in the artist-credit list but is not the primary/first credited artist — a different query shape than "browse release-groups by artist."
-
-**Deezer** has a flatter model: `/album` and `/track` endpoints, no release-group equivalent. Track objects carry `contributors` (feature credits) when detail fields are requested, and album objects carry `release_date` and cover art. Because there's no grouping concept, a deluxe reissue on Deezer typically shows up as a **new album ID** with an overlapping-but-larger tracklist rather than being linked back to the original album. This is the main reason MusicBrainz's release-group model is the better backbone for the diff engine's "is this genuinely new" decision, with Deezer used as a secondary/faster-updating signal source.
-
-**Recommended diff keys:**
-1. New release-group ID for a watched artist (MB) → **new release** alert.
-2. New release ID inside an *existing* release-group, with a track-list superset of what's stored → **deluxe/tracklist-change** alert.
-3. New recording where the watched artist appears in artist-credit but is not the primary artist, and the release/release-group is not already attributed to them → **guest-feature** alert.
-4. Deezer album ID new for the artist, tracklist not previously seen (title/duration fuzzy match against MB) → secondary confirmation signal / fallback when MB is slow to update.
-
-## False-Positive / False-Negative Risk in Diffing
-
-No authoritative "how real tools solve this" documentation was found (LOW confidence on this specific sub-question) — but the underlying data-model facts (MEDIUM confidence, MusicBrainz official docs) plus how Lidarr is documented to behave give a reasonably solid basis for the following:
-
-- **"Remaster" is an unreliable label.** It's effectively a marketing term with no consistent metadata backing — some remasters change little, some non-remaster reissues change audio. Do not use free-text title matching ("contains 'remaster'") as a filter; it will both over- and under-trigger.
-- **Reissues/remasters reuse the same release-group by design** (per MusicBrainz style guides), which is precisely why keying off release-group-id rather than release-id is the correct false-positive mitigation — a remaster or regional reissue does not create a new release-group, so it will not fire a "new release" alert if the diff engine only watches release-group IDs.
-- **Deluxe reissues are the genuinely ambiguous case**, because they legitimately add new content (bonus tracks) while staying in the same release-group. The mitigation is to diff at the **track-list level within a release-group** (new track titles/recording IDs appearing) rather than at the release-group level alone — this is what distinguishes "cosmetic reissue, no new tracks" (suppress) from "deluxe added 4 new songs" (alert, and label it as a deluxe/tracklist-change rather than a plain new-release).
-- **Deezer-only false positives**: because Deezer albums are flat (no release-group), a Deezer-sourced "new album" signal for a reissue with no MusicBrainz correlate is a real false-positive risk. Mitigate by treating Deezer detections as provisional and cross-checking against MusicBrainz's release-group grouping when available, only auto-confirming Deezer-only detections after a short debounce window (e.g. still present on next poll) to filter transient/duplicate catalog entries.
-- **Realistic residual risk to document, not solve**: some irreducible noise will remain (a real new song with a title change between polls, a mis-tagged deluxe that MusicBrainz editors haven't yet folded into the right release-group). Given the portfolio/CI-CD framing, the correct engineering response is to log and surface these as known diff-engine limitations (and write tests around the specific scenarios above) rather than chase perfect precision with audio fingerprinting or ISRC reconciliation (see Anti-Features).
+| Practice | Why It's Commonly Seen | Why It's Overkill for This Project | Alternative |
+|---|---|---|---|
+| Full E2E test suite (Playwright/Cypress) | Standard at larger orgs; catches integration issues unit/component tests miss | PROJECT.md's Active requirement is explicitly "Vitest + RTL unit/component test suite," not E2E — adding a second, heavier test framework and browser-automation CI job is real added CI runtime/complexity for a milestone scoped as a coverage gap, not a new testing tier | Component tests at the RTL level cover the enumerated surface; defer E2E to a future milestone if ever needed |
+| Chasing 100% coverage | Feels rigorous | Every source consulted explicitly warns against this — coverage percentage is gameable (trivial assertion-free tests inflate it) and 100% typically means testing getters/boilerplate, not real behavior | Target the 70% aggregate threshold already chosen; prioritize meaningful assertions on the enumerated component surface over chasing the last few percent |
+| Per-package/per-file coverage threshold tiers | Common in large, multi-service orgs with clearly distinct high-risk vs low-risk modules | This is a single small Go module and a single small React app — there's no clearly distinct "critical vs low-risk" module split yet that would justify differentiated thresholds; added CI-config complexity with no corresponding benefit at this size | One aggregate threshold per side (backend, frontend) |
+| Diff/patch coverage gating (new/changed lines must hit a higher bar than the aggregate) | A genuinely good practice at scale — catches regressions on new code even when legacy code drags the aggregate down | Requires base-branch diff tooling and more CI-config surface than a whole-repo aggregate threshold; disproportionate for a project with no large legacy low-coverage codebase to work around | A single aggregate threshold is sufficient — there's no legacy coverage debt this project needs to route around |
+| Mutation testing (`go-mutesting`, Stryker for the FE side) | Genuinely more rigorous than line coverage at large scale | Meaningfully increases CI runtime and tooling surface for marginal signal at this project's size; not what "properly tested" means for a portfolio-scale coverage milestone | Line/branch/function coverage thresholds are the accepted level of rigor here |
+| Table partitioning (e.g. monthly range partitions) for retention via cheap partition-drop | The textbook "right" pattern once an events/log table reaches large volume — dropping a partition is a metadata-only operation vs row-by-row `DELETE` | `events` here is a personal watchlist's release history — realistic row volume is small (a handful of artists × a few releases/month); partitioning adds migration complexity (partition-aware schema, new-partition-creation job) with no measurable performance benefit at this scale | A single unbatched (or lightly batched) `DELETE ... WHERE created_at < cutoff` run daily/weekly is more than sufficient |
+| Soft-delete + separate purge job (two-phase retention) | Standard where an undo window or audit trail is a real requirement | No such requirement exists for this table (see Table Stakes) — soft-delete adds a `deleted_at` filter to every existing query plus a second scheduled job, pure added complexity with no compensating benefit here | Straight hard delete on the retention cutoff |
+| `pg_cron` (Postgres extension) for retention scheduling | Common when the deletion logic should live DB-side, independent of the application process | Requires extension installation/superuser privileges, which many managed Postgres providers restrict or gate behind extra setup — the project already has an in-process Go scheduler (`robfig/cron`) doing exactly this job for polling; reusing it for retention needs zero new infrastructure | A third `robfig/cron` entry (or a simple ticker) in the existing Go process, calling a sqlc-generated delete query |
+| A general-purpose worker-pool library (`gammazero/workerpool`, `pond`, etc.) with a persistent jobs channel | Fits long-lived, continuously-arriving-work scenarios (queue consumers, streaming ingestion) | Each poll cycle is a bounded, one-shot fan-out over a known-size list (the watchlist at that moment), then the cycle ends — this is exactly the shape `errgroup.SetLimit` (stdlib-adjacent, already an indirect dependency) is built for; a persistent pool/jobs-channel abstraction adds a new dependency and a lifecycle-management concern (start/stop the pool) for no benefit over the simpler per-cycle fan-out | `golang.org/x/sync/errgroup` with `SetLimit(n)`, one `errgroup.Group` created fresh per poll cycle |
+| Dynamic/adaptive concurrency (auto-tune pool size from observed latency/429 responses) | Legitimate at scale, where traffic patterns and API behavior justify the engineering investment | A personal watchlist of a handful of artists against two well-documented, low-traffic external APIs doesn't produce the kind of variable load that adaptive tuning is built to handle; the effort is disproportionate to any realistic benefit | A single env-configurable static pool size (default 3-5, per PROJECT.md) is sufficient and simpler to reason about/test |
+| Distributed rate limiting / cross-instance worker coordination (e.g. Redis-backed limiter) | Necessary once a service runs as multiple horizontally-scaled instances | PROJECT.md explicitly locks a single Go binary/service architecture with no horizontal scaling in scope — the existing in-process `rate.Limiter` and the new in-process concurrency cap are correct and sufficient for a single-instance deployment | In-process limiter + in-process concurrency cap (both already the plan) |
 
 ## Feature Dependencies
 
 ```
-[MusicBrainz/Deezer HTTP clients]
-    └──requires──> [Search-to-add proxy]
-    └──requires──> [Diff engine (all detection types)]
+[Existing React components: WatchlistRow, PreferenceToggles, SearchBox,
+ SearchResultsColumns, EventCard, HistoryFilters, EmptyState, CoverArt,
+ routes/watchlist.tsx, routes/history.tsx]  (built Phase 06)
+    └──requires (as test subjects)──> [Vitest + RTL toolchain setup]
+    └──requires (as mock boundary)──> [web/app/lib/api.ts]  (already exists — the mockable seam)
 
-[Watchlist CRUD]
-    └──requires──> [DB schema / migrations]
+[Frontend test suite]
+    └──enables──> [Frontend CI coverage gate]  (no coverage number to gate on without tests existing first)
 
-[Diff engine: new-release detection]
-    └──requires──> [Watchlist CRUD]  (source of artists to poll)
-    └──requires──> ["Seen" store schema keyed on release-group-id / album-id]
-    └──requires──> [MusicBrainz/Deezer HTTP clients]
+[Existing Go unit tests (httptest.Server-mocked, built Phases 01-07)]
+    └──enables──> [Backend CI coverage gate]  (coverage measurement wires into tests that already exist)
 
-[Diff engine: guest-feature detection]
-    └──requires──> [Diff engine: new-release detection]  (same client/scheduler plumbing)
-    └──requires──> [artist-credit / contributors parsing]  (harder query shape, higher complexity)
+[Frontend CI coverage gate] + [Backend CI coverage gate]
+    └──requires──> [Existing "Full Pipeline" GitHub Actions workflow]  (Phase 07 — new gate steps slot into it, not a new workflow)
 
-[Diff engine: deluxe/tracklist-change detection]
-    └──requires──> [Diff engine: new-release detection]
-    └──requires──> [Track-list-level diffing within an existing release-group]
+[events table]  (built Phase 04 — doubles as the seen/dedup store AND the
+                 frontend release-history data source, per
+                 internal/db/migrations/000003_events.up.sql)
+    └──requires (for retention)──> [Existing robfig/cron scheduler]  (internal/poller — reused, not duplicated)
+    └──requires (for retention)──> [New sqlc delete query]
 
-[Discord notifier]
-    └──requires──> [Diff engine output (any detection type)]
-
-[Per-artist notification preferences] ──enhances──> [Watchlist CRUD]
-[Release-type filtering] ──enhances──> [Watchlist CRUD] and [Diff engine: new-release detection]
-[Dual-source reconciliation (MB+Deezer)] ──enhances──> [Diff engine: new-release detection]
-    └──conflicts with──> [v1 simplicity — real complexity add, best deferred]
-
-[Audit/history view] ──requires──> ["Seen" store] + [Diff engine event logging]
+[Bounded concurrent polling]
+    └──requires──> [Existing sequential per-artist loop]  (internal/poller/poller.go — RunMusicBrainzCycle/RunDeezerCycle, the code being refactored)
+    └──requires──> [Existing per-source rate.Limiter]  (internal/musicbrainz, internal/deezer — must remain intact, not replaced)
+    └──requires──> [Existing per-source overlap guard]  (mbRunning/dzRunning atomic.Bool — concurrency happens *within* one cycle, guard still prevents overlapping *cycles*)
+    └──enables──> [Faster poll cycles, same rate-limit compliance]
 ```
 
 ### Dependency Notes
 
-- **New-release detection requires Watchlist CRUD + "seen" store schema:** the diff engine has nothing to poll without a watchlist, and nothing to compare against without a persisted prior-state store — both must land before any detection logic is written.
-- **Guest-feature and deluxe/tracklist detection both build on new-release detection's plumbing** (same HTTP clients, same scheduler, same "seen" store) but require materially harder query/diff logic (artist-credit parsing; track-list-level diffing within a release-group) — plan these as follow-on phases, not bundled with the first pass at new-release detection.
-- **Per-artist notification preferences and release-type filtering are enhancements, not blockers** — they can land after the core diff engine works, as small additive schema changes.
-- **Dual-source reconciliation conflicts with v1 simplicity** — it's a genuine differentiator but adds enough complexity (cross-source entity matching, confidence scoring) that it should be explicitly deferred rather than attempted alongside the core detection logic.
+- **Frontend tests must exist before the frontend coverage gate is meaningful** — there is currently zero frontend test tooling in `web/package.json`, so this is greenfield setup, not incremental addition. Sequence: install Vitest/RTL → write tests for the enumerated component surface → wire `coverage.thresholds` → gate in CI. Skipping straight to a coverage gate with no tests would either fail immediately (correct) or require a 0%-permissive threshold that defeats the purpose.
+- **Backend coverage gate has no equivalent bootstrap problem** — Phase 01-07 already built a substantial `httptest.Server`-mocked test suite; this capability is "measure and gate what already exists," not "write tests from scratch."
+- **Events retention has a real interaction with the events table's dual role as seen-store, not just history log** — `internal/db/migrations/000003_events.up.sql` and `internal/detection/detector.go` (`isSeedMode`, `HasAnyEvent`, `groupBaseline`) show the `events` table is simultaneously: (a) the frontend's release-history display data, (b) the dedup key (`UNIQUE (event_type, source, external_id)`, `ON CONFLICT DO NOTHING`) that makes idempotent detection work, and (c) the per-release-group `track_count` baseline used to detect deluxe/tracklist changes. **A naive hard-delete of rows older than 90 days can re-trigger detection for a still-catalogued release**: if a purged row's `external_id` is still returned by MusicBrainz/Deezer on a later poll (which it always will be — catalog data doesn't disappear) and that artist has *other*, newer event rows for the same source (so `isSeedMode` returns false), the diff engine has no record of having seen it before and will insert it as genuinely new — triggering a real Discord notification for a 90+-day-old release. This is a concrete, code-grounded edge case (not a generic "be careful with deletes" caveat) that the phase implementing retention needs to explicitly accept, mitigate (e.g. exclude a release-group's most-recent event per artist+source from the retention sweep, or scope retention to `notified_at`-populated rows only), or document as a known/waived limitation — the project already has precedent for documenting an accepted limitation this way (the MusicBrainz TLS/WSL2 issue in PROJECT.md's Context section). This finding belongs in this milestone's pitfalls/planning research, not just this file, but it directly affects what "table stakes" retention implementation actually requires beyond "just add a DELETE statement."
+- **Bounded concurrent polling must preserve, not replace, two existing safety mechanisms**: the per-source `rate.Limiter` (paces request rate) and the per-source overlap guard (`mbRunning`/`dzRunning`, prevents two overlapping *cycles* of the same source). The new concurrency bound operates *within* a single cycle (how many of that cycle's artists are fetched at once), which is an orthogonal axis to both — none of the three should be removed or merged into one.
+- **Per-source separation is a pattern already established at the cron/overlap-guard layer** (two independent cron entries, two independent atomic guards, explicitly documented as intentional to prevent MusicBrainz's slower pace from blocking Deezer) — extending that same per-source independence to concurrency-pool sizing is following the codebase's existing convention, not introducing a new one.
 
 ## MVP Definition
 
-### Launch With (v1)
+### Launch With (this milestone, v1.1)
 
-Minimum viable product — matches PROJECT.md's Active requirements exactly; this is what validates the concept and is the CI/CD pipeline's actual payload.
+Exactly PROJECT.md's Active requirements — no more, no less.
 
-- [ ] Search-to-add artist (MusicBrainz + Deezer search proxy) — without it the watchlist can only be built by hand-entering opaque IDs
-- [ ] Watchlist CRUD (add/remove/list) — the whole tool's reason to exist
-- [ ] Scheduled polling (robfig/cron) — the mechanism that makes detection possible at all
-- [ ] New-release detection keyed on release-group-id (MB) — the core, highest-value detection type; ship this before the harder guest/deluxe cases
-- [ ] Discord webhook notification with release metadata (title, artist, cover, date, type) — closes the loop; without it detection is invisible
-- [ ] `/health` endpoint — required for the CI/CD deploy story, not just a feature nicety
+- [ ] Vitest + RTL test suite covering the enumerated component/route surface (`WatchlistRow`, `PreferenceToggles`, `SearchBox`, `SearchResultsColumns`, `EventCard`, `HistoryFilters`, `routes/watchlist.tsx`, `routes/history.tsx`), mocking through `web/app/lib/api.ts`
+- [ ] CI coverage gates (70% threshold, fail-the-build) for both backend (`go test -coverprofile` + threshold check) and frontend (`vitest run --coverage` + `coverage.thresholds`), wired into the existing "Full Pipeline" workflow
+- [ ] Events table retention: scheduled hard-delete of rows older than 90 days, via a new `robfig/cron`-scheduled job reusing the existing in-process scheduler — **with the seen-store/dedup interaction above explicitly considered during planning, not silently ignored**
+- [ ] Bounded worker-pool concurrent per-artist polling in `RunMusicBrainzCycle`/`RunDeezerCycle`, via `golang.org/x/sync/errgroup` + `SetLimit(n)`, env-configurable pool size (default 3-5), per-source (not global), still respecting the existing per-source `rate.Limiter`
 
-### Add After Validation (v1.x)
+### Add After Validation (not this milestone, only if the pattern proves valuable)
 
-Add once the core new-release path is proven reliable in practice (no duplicate alerts, no missed obvious releases).
+- [ ] PR coverage-diff/report comment action (FE and/or BE) — trigger: once the coverage gate itself is proven stable and not flaky, this is pure presentation polish worth adding opportunistically
+- [ ] Retention-run structured logging (rows deleted, duration) — trigger: near-zero cost, reasonable to fold directly into the retention job's initial implementation rather than defer, but listed here in case it's cut for time
 
-- [ ] Guest-feature detection as a distinct alert type — trigger: core new-release detection is stable and the genre-specific value proposition needs to be demonstrated
-- [ ] Deluxe/tracklist-change detection — trigger: once track-list-level diffing within a release-group is needed anyway for feature detection, extend it to deluxe reissues
-- [ ] Per-artist notification preferences / release-type filtering — trigger: once real polling data shows enough alert volume/noise to justify filtering controls
-- [ ] Audit/history view of diff events — trigger: useful once there's enough detection history to make a timeline meaningful, and doubles as a demo of pipeline observability
+### Future Consideration (explicitly out of scope for this milestone)
 
-### Future Consideration (v2+)
-
-Defer until the core tool has proven itself and the CI/CD pipeline goals are already met.
-
-- [ ] Dual-source (MusicBrainz + Deezer) reconciliation — defer: real complexity (entity matching across sources) with a narrower payoff than getting core detection right first
-- [ ] Producer tracking as a watchlist entity — defer: already explicitly out-of-scope in PROJECT.md, different data model per entity type
+- [ ] E2E test suite (Playwright/Cypress) — defer: different testing tier than what this milestone scopes ("unit/component"); revisit only if a future milestone specifically calls for integration/E2E coverage
+- [ ] Table partitioning for events retention — defer: no realistic data volume at this project's scale justifies it; revisit only if the events table ever grows by orders of magnitude
+- [ ] Adaptive/dynamic concurrency tuning — defer: static env-configured pool size is correct for this project's traffic profile; revisit only if polling ever needs to scale to many more watched artists
 
 ## Feature Prioritization Matrix
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|----------------------|----------|
-| Search-to-add proxy | HIGH | LOW | P1 |
-| Watchlist CRUD | HIGH | LOW | P1 |
-| Scheduled polling | HIGH | LOW | P1 |
-| New-release detection (release-group-id) | HIGH | MEDIUM | P1 |
-| Discord notification | HIGH | LOW | P1 |
-| `/health` endpoint | MEDIUM (high for CI/CD story) | LOW | P1 |
-| Guest-feature detection | HIGH (genre-specific) | MEDIUM-HIGH | P2 |
-| Deluxe/tracklist-change detection | MEDIUM-HIGH | MEDIUM-HIGH | P2 |
-| Per-artist notification preferences | MEDIUM | MEDIUM | P2 |
-| Release-type filtering | MEDIUM | LOW-MEDIUM | P2 |
-| Audit/history view | MEDIUM | LOW-MEDIUM | P2 |
-| Dual-source (MB+Deezer) reconciliation | MEDIUM | HIGH | P3 |
-| Recommendation engine | LOW (out of project's core value) | HIGH | Anti-feature |
-| Auto-download/acquisition | LOW (out of project's core value) | HIGH | Anti-feature |
-| Multi-user auth/SSO | LOW (not scoped by PROJECT.md) | MEDIUM-HIGH | Anti-feature |
+| Capability | Value (to milestone goal) | Implementation Cost | Priority |
+|---|---|---|---|
+| Frontend test suite (Vitest + RTL, enumerated surface) | HIGH | MEDIUM | P1 |
+| Backend + frontend CI coverage gates (70%, fail-the-build) | HIGH | LOW-MEDIUM | P1 |
+| Events retention (90-day hard delete) | HIGH | LOW-MEDIUM (given the seen-store interaction to design around) | P1 |
+| Bounded concurrent polling (errgroup + SetLimit, per-source) | HIGH | LOW-MEDIUM | P1 |
+| MSW for 1-2 higher-value integration-style FE tests | LOW-MEDIUM | LOW | P2 |
+| PR coverage-diff/report comment action | LOW-MEDIUM | LOW | P2 |
+| Retention-run structured logging | LOW (but nearly free) | LOW | P2 |
+| Per-cycle concurrency/timing metrics in poll logs | LOW (but nearly free) | LOW | P2 |
+| E2E test suite | LOW (out of this milestone's scope) | HIGH | Anti-feature (this milestone) |
+| Table partitioning for retention | LOW (no scale justification) | MEDIUM-HIGH | Anti-feature |
+| Diff/patch coverage gating | LOW (no legacy-debt problem to solve) | MEDIUM | Anti-feature |
+| Mutation testing | LOW (disproportionate rigor for scale) | HIGH | Anti-feature |
+| `pg_cron` extension for retention | LOW (existing in-process scheduler already covers it) | MEDIUM (infra dependency) | Anti-feature |
+| Adaptive/dynamic concurrency tuning | LOW (no traffic profile that needs it) | HIGH | Anti-feature |
 
 **Priority key:**
-- P1: Must have for launch (matches PROJECT.md Active requirements)
-- P2: Should have, add once P1 is proven reliable
-- P3: Nice to have, defer past v1
-
-## Competitor / Comparable-Tool Feature Analysis
-
-| Feature | MusicHarbor / MusicButler / crabhands / BEEPR (consumer alert apps) | deemon (Deezer CLI monitor) / Lidarr (MB-backed *arr stack) | Our Approach |
-|---------|------------------------------------------------------------------|---------------------------------------------------------------|--------------|
-| Add artist | Search-based, source-catalog-backed | deemon: name/ID/URL; Lidarr: MusicBrainz search | Search-proxy against MusicBrainz + Deezer (matches Lidarr/deemon pattern, not a local-only list) |
-| Detection unit | Not documented at data-model level (proprietary) | Lidarr: MusicBrainz release-group = "Album" | Same as Lidarr — release-group-id as the new-release key |
-| Guest features | Not supported by any researched consumer app | Not supported | **Differentiator** — first-class guest-feature alert type |
-| Deluxe/reissue handling | Not documented | Lidarr: filters by Metadata Profile (e.g. studio-only), doesn't specifically flag deluxe additions | Track-list-level diff within release-group, surfaced as its own alert type |
-| Notification channel | Push (mobile), email | deemon: email; Releasarr: unclear | Discord webhook only (matches PROJECT.md scope) |
-| Auto-download | No (consumer apps) | Yes (deemon via deemix, Releasarr via SABnzbd/indexers) | **Explicitly not built** (anti-feature) |
-| Release-type filtering | Some (MusicHarbor Pro: label following, advanced filters) | Lidarr: yes, per-artist Metadata Profile | v1.x addition, per-artist |
-| Self-hosted / open | No (consumer apps are proprietary) | Yes (deemon, Lidarr, Releasarr all self-hosted OSS) | Self-hosted, single Go binary (matches the OSS self-hosted category, not the consumer-app category) |
+- P1: Matches PROJECT.md's four Active requirements for this milestone exactly
+- P2: Cheap, additive polish worth doing if time allows, not required for milestone completion
+- Anti-feature: Legitimate practice at larger scale, disproportionate for this project's size/goals
 
 ## Sources
 
-- [MusicBrainz — Release](https://musicbrainz.org/doc/Release)
-- [MusicBrainz — Release Group](https://musicbrainz.org/doc/Release_Group)
-- [MusicBrainz — Release Group / Type](https://musicbrainz.org/doc/Release_Group/Type)
-- [MusicBrainz — Artist Credits](https://musicbrainz.org/doc/Artist_Credits)
-- [MusicBrainz API docs](https://musicbrainz.org/doc/MusicBrainz_API)
-- [browniebroke/deezer-python — contributor parsing commit](https://github.com/browniebroke/deezer-python/commit/bd02ec41c20ddbff2cc399f496f64b8f095c4854)
-- [PublicAPI — Deezer API overview](https://publicapi.dev/deezer-api)
-- [MusicHarbor overview](https://mwm.ai/apps/musicharbor-track-new-music/1440405750)
-- [MusicButler](https://www.musicbutler.io/)
-- [crabhands](https://www.crabhands.com/)
-- [BEEPR](https://beeprapp.com/)
-- [FriendsTapes](https://www.friendstapes.com/)
-- [deemon (PyPI)](https://pypi.org/project/deemon/)
-- [deemon (GitHub)](https://github.com/digitalec/deemon)
-- [Releasarr (GitHub)](https://github.com/Makario1337/Releasarr)
-- [Lidarr — Concepts (Servarr Wiki)](https://wiki.servarr.com/lidarr/concepts)
-- [Lidarr — FAQ (Servarr Wiki)](https://wiki.servarr.com/lidarr/faq)
-- [Lidarr — Don't automatically monitor old albums (GitHub issue #2031)](https://github.com/Lidarr/Lidarr/issues/2031)
+- [Unit Testing a React Application with Vitest — Medium](https://medium.com/@mtandimartin/unit-testing-a-react-application-with-vitest-5d63f7d75507)
+- [Component Testing — Vitest official guide](https://vitest.dev/guide/browser/component-testing)
+- [How to Unit Test React Components with Vitest and React Testing Library](https://oneuptime.com/blog/post/2026-01-15-unit-test-react-vitest-testing-library/view)
+- [How to set up a Test Coverage threshold in Go and Github — Medium/Synechron](https://medium.com/synechron/how-to-set-up-a-test-coverage-threshold-in-go-and-github-167f69b940dc)
+- [go-test-coverage (GitHub Action)](https://github.com/marketplace/actions/go-test-coverage)
+- [go-coverage-threshold (GitHub)](https://github.com/jokeyrhyme/go-coverage-threshold)
+- [Vitest Coverage Thresholds: Fail CI on Low Coverage — Nerd Level Tech](https://nerdleveltech.com/vitest-coverage-thresholds-fail-ci-tutorial)
+- [davelosert/vitest-coverage-report-action (GitHub)](https://github.com/davelosert/vitest-coverage-report-action)
+- [ci(coverage): add coverage thresholds to frontend vitest configuration — microsoft/edge-ai#140](https://github.com/microsoft/edge-ai/issues/140)
+- [Code Coverage: Benchmarks, Targets & Best Practices](https://www.em-tools.io/engineering-metrics/code-coverage)
+- [How much code coverage is enough? — Graphite](https://graphite.com/guides/code-coverage-best-practices)
+- [Time-based retention strategies in Postgres — Sequin blog](https://blog.sequinstream.com/time-based-retention-strategies-in-postgres/)
+- [Automatic deletion of older records in Postgres — Nicola Iarocci](https://nicolaiarocci.com/automatic-deletion-of-older-records-in-postgres/)
+- [PostgreSQL soft-delete strategies — DEV Community](https://dev.to/oddcoder/postgresql-soft-delete-strategies-balancing-data-retention-50lo)
+- [pg_ttl_index — PGXN](https://pgxn.org/dist/pg_ttl_index/)
+- [Manage audit log retention policies — Microsoft Learn](https://learn.microsoft.com/en-us/purview/audit-log-retention-policies)
+- [Audit Log Retention Period — Oracle Cloud docs](https://docs.cloud.oracle.com/en-us/Content/Audit/Tasks/settingretentionperiod.htm)
+- [Retention Settings — EventLog Analyzer](https://www.manageengine.com/products/eventlog/help/StandaloneManagedServer-UserGuide/AdminSettings/db-storage-settings.html)
+- [Go Concurrency Control: Worker Pools vs Semaphores — Medium](https://phu09032000.medium.com/go-concurrency-control-worker-pools-vs-semaphores-069e90bc3a03)
+- [Bounded Concurrency in Go: Worker Pools, Semaphores, errgroup, and the Pitfalls — levelup.gitconnected](https://levelup.gitconnected.com/bounded-concurrency-in-go-worker-pools-semaphores-errgroup-and-the-pitfalls-that-hurt-in-5192eff95e86)
+- [Goroutine Pool Patterns in Go: errgroup & Backpressure](https://tanhdev.com/posts/golang-goroutine-pool-errgroup-worker/)
+- [Goroutine Worker Pools — Go Optimization Guide](https://goperf.dev/01-common-patterns/worker-pool/)
+- [Worker Pool — Go Patterns](https://go-patterns.dev/parallel-computing/worker-pool)
+- Repo scan: `web/app/components/`, `web/app/routes/`, `web/package.json`, `internal/poller/poller.go`, `internal/detection/detector.go`, `internal/db/migrations/000003_events.up.sql`, `go.mod` (confirmed component surface, existing tooling gaps, existing scheduler/rate-limiter/dedup implementation directly from source — HIGH confidence, primary source)
 
 ---
-*Feature research for: Music release tracker (hip-hop/reggaeton/R&B), drop-tracker portfolio project*
-*Researched: 2026-08-04*
+*Feature research for: Hardening milestone (frontend tests, CI coverage gates, events retention, bounded concurrent polling) — drop-tracker v1.1*
+*Researched: 2026-08-12*

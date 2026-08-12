@@ -1,474 +1,209 @@
-# Architecture Research
+# Architecture Research: v1.1 Hardening & Scale Readiness
 
-**Domain:** Single-binary Go service — HTTP API + cron poller + Discord notifier + embedded React SPA, backed by Postgres
-**Researched:** 2026-08-04
-**Confidence:** MEDIUM (community-consensus patterns from web research; no single canonical spec exists for this exact combination, but each sub-pattern — Go project layout, go:embed+Vite, chi routing, robfig/cron+HTTP coexistence, sqlc layout, multi-stage Docker, GitHub Actions supply-chain pipelines — is well-established and cross-corroborated across multiple independent sources)
+**Domain:** Integration architecture for 4 hardening features into an existing single-binary Go + React Router SPA release tracker
+**Researched:** 2026-08-12
+**Confidence:** HIGH (all 4 findings verified directly against the current repo source, not general framework docs alone)
 
-## Standard Architecture
+This is **not** greenfield ecosystem research — it is integration analysis. Each section below maps a target feature onto the exact existing files/patterns it touches, calls out what's genuinely new vs. what's a small extension of an existing pattern, and flags the concurrency/data-integrity risks specific to this codebase (not generic risks).
 
-### System Overview
-
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│                         cmd/dropctl (main.go)                          │
-│   thin entrypoint: load config → build deps → wire → run → shutdown    │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                 │ constructs & starts
-        ┌────────────────────────┼─────────────────────────┐
-        ▼                        ▼                         ▼
-┌───────────────┐      ┌──────────────────┐      ┌──────────────────────┐
-│  HTTP Server    │      │  Cron Scheduler   │      │  (shared) Service     │
-│  (chi.Mux)      │      │  (robfig/cron)     │      │  / Domain Layer       │
-│                 │      │                    │      │                       │
-│ - /api/watchlist│      │ - poll job(s) per  │      │ - WatchlistService    │
-│   CRUD          │      │   source/interval  │      │ - PollService         │
-│ - /api/search   │◄────▶│ - triggers         │◄────▶│ - DiffEngine          │
-│   (MB/Deezer     │  uses │   PollService      │ uses │ - NotifierService     │
-│   proxy)         │      │   for each watched │      │                       │
-│ - /health        │      │   entry            │      │  all depend on        │
-│ - embedded SPA    │      └──────────────────┘      │  interfaces, not      │
-│   fileserver      │                                  │  concrete clients     │
-└────────┬────────┘                                  └──────────┬────────────┘
-         │                                                       │
-         │ serves                                                │ calls (via interfaces)
-         ▼                                                       ▼
-┌────────────────┐                              ┌──────────────────────────────┐
-│ embed.FS         │                              │  Adapters / Infra layer       │
-│ (Vite dist/)      │                              │                               │
-│ React SPA assets  │                              │ - MusicBrainzClient (http)    │
-└────────────────┘                              │ - DeezerClient (http)          │
-                                                    │ - DiscordNotifier (webhook)   │
-                                                    │ - sqlc Queries (Postgres)     │
-                                                    └───────────────┬──────────────┘
-                                                                    ▼
-                                                          ┌───────────────────┐
-                                                          │ Postgres            │
-                                                          │ (watchlist, seen    │
-                                                          │  releases, etc.)    │
-                                                          └───────────────────┘
-```
-
-### Component Responsibilities
-
-| Component | Responsibility | Typical Implementation |
-|-----------|----------------|------------------------|
-| `cmd/dropctl` (main) | Load config, construct all dependencies, wire HTTP server + cron scheduler on a shared context, run, handle graceful shutdown | Minimal `main.go`; no business logic |
-| HTTP layer (chi) | Route registration, request/response marshaling, auth/middleware, delegates to service layer | `internal/api` or `internal/http`: `server.go`, `routes.go`, `handlers/*.go` |
-| Cron scheduler (robfig/cron) | Ticks on a configured interval per source (MusicBrainz/Deezer), invokes the poll service for each watchlist entry | `internal/scheduler` or `internal/poller`: registers cron jobs, each job is a thin call into `PollService` |
-| Service/domain layer | Business logic: watchlist CRUD rules, poll orchestration, diffing, notification triggering — owns no HTTP or cron concerns | `internal/service` or `internal/domain`: `watchlist.go`, `poll.go`, `diff.go`, `notify.go` — pure Go, interface-driven |
-| External API clients | Real HTTP clients for MusicBrainz and Deezer, isolated behind interfaces so they can be swapped for `httptest.Server` fakes in tests | `internal/musicbrainz`, `internal/deezer` (or `internal/clients/{musicbrainz,deezer}`) |
-| Notifier | Formats and posts Discord webhook messages | `internal/notify/discord.go` implementing a `Notifier` interface |
-| Data store (sqlc) | Type-safe generated queries against Postgres; "seen" store and watchlist tables | `internal/db` or `internal/store`: generated `db.go`/`models.go`/`*.sql.go`, hand-written `.sql` query files in `db/queries/`, migrations in `db/migrations/` (golang-migrate) |
-| Embedded frontend | React (Vite) SPA served as static assets from the same binary via `go:embed` | `web/` or `ui/` dir: Vite source + `dist/` build output + `embed.go` |
-| Config | Env-var driven configuration (poll intervals, DB DSN, Discord webhook URL, port) | `internal/config`: struct + loader (envconfig/viper), validated at startup |
-
-## Recommended Project Structure
+## System Overview (current, pre-milestone)
 
 ```
-drop-tracker/
-├── cmd/
-│   └── dropctl/                 # single binary entrypoint
-│       └── main.go              # load config, wire deps, run, graceful shutdown
-├── internal/
-│   ├── config/                  # env-driven config struct + loader
-│   ├── api/                     # HTTP layer (chi)
-│   │   ├── server.go            # chi.Mux construction, middleware stack
-│   │   ├── routes.go            # route registration/groups
-│   │   ├── handlers/            # per-resource handlers (watchlist, search, health)
-│   │   └── middleware/          # request logging, recover, etc. (or use chi/middleware)
-│   ├── scheduler/                # robfig/cron wiring — registers poll jobs, owns Start/Stop
-│   ├── service/                  # domain/business logic — the shared core
-│   │   ├── watchlist.go          # watchlist CRUD rules
-│   │   ├── poll.go               # orchestrates one poll cycle for one entry
-│   │   ├── diff.go               # diff engine: compare fetched vs seen store
-│   │   └── notify.go             # decides what to notify, calls Notifier interface
-│   ├── musicbrainz/               # real HTTP client + interface, MusicBrainz-specific types
-│   ├── deezer/                    # real HTTP client + interface, Deezer-specific types
-│   ├── notify/
-│   │   └── discord.go             # Discord webhook client implementing Notifier
-│   ├── store/                     # sqlc-generated + hand-written repository glue
-│   │   ├── sqlc/                  # GENERATED — db.go, models.go, *.sql.go (do not hand-edit)
-│   │   └── repository.go          # thin wrapper exposing domain-shaped methods (optional)
-│   └── logging/                    # slog setup helpers
-├── db/
-│   ├── migrations/                 # golang-migrate .up.sql/.down.sql files
-│   └── queries/                    # .sql files sqlc compiles from
-├── web/                             # React + Vite frontend source
-│   ├── src/
-│   ├── public/
-│   ├── dist/                       # Vite build output (gitignored, generated at build time)
-│   ├── embed.go                    # //go:embed dist  -> exposes embed.FS
-│   ├── package.json
-│   └── vite.config.ts
-├── sqlc.yaml                        # sqlc config: queries + migrations in, store/sqlc out
-├── Dockerfile                       # multi-stage: node build -> go build -> distroless/alpine runtime
-├── docker-compose.yml                # app + Postgres for local dev
-├── .github/workflows/pipeline.yml    # Full Pipeline CI/CD
-├── .env.example
-└── go.mod
+┌──────────────────────────────────────────────────────────────────────┐
+│                     cmd/server/main.go (single process)               │
+├───────────────────────────┬───────────────────────────┬──────────────┤
+│   internal/httpserver      │    internal/poller          │ (embedded)   │
+│   chi router, /health      │    robfig/cron, 2 entries:  │ internal/    │
+│   /watchlist, /search,     │    mbRunning/dzRunning      │ webassets    │
+│   /events (SPA fallback)   │    atomic.Bool CAS guards   │ (React SPA   │
+│                             │    sequential per-artist    │ build/client │
+│                             │    loop, one source at a    │ via go:embed)│
+│                             │    time                     │              │
+├───────────────────────────┴───────────────┬───────────────┴──────────┤
+│         internal/detection (Detector)      │   internal/notifier      │
+│   DetectMusicBrainz / DetectDeezer         │   drains ListUnnotified  │
+│   per-artist seed-mode + seen-set,         │   → Discord webhook      │
+│   captured once per artist per call        │                          │
+├─────────────────────────────────────────────────────────────────────┤
+│              internal/db/sqlc over pgx/v5 pool (Postgres)              │
+│   watchlist, artists, events (seen-store + baseline column)           │
+└─────────────────────────────────────────────────────────────────────┘
+                    ▲                                    ▲
+                    │ rate.Limiter (shared, per-source)   │
+        internal/musicbrainz/client.go        internal/deezer/client.go
 ```
 
-### Structure Rationale
-
-- **`cmd/dropctl/` (single cmd, not multiple):** Because this is explicitly one process/one binary (API + scheduler + notifier together), there is only one `cmd/` entrypoint — unlike a split-services layout that would have `cmd/api`, `cmd/worker`, etc. Keep `main.go` to wiring only; if it grows past ~100 lines of actual logic, that logic belongs in `internal/`.
-- **`internal/service/` as the shared core:** This is the load-bearing boundary. Both `internal/api/handlers` (triggered by HTTP requests) and `internal/scheduler` (triggered by cron ticks) call into `internal/service` — neither the HTTP layer nor the scheduler contain business logic themselves. This is what makes poll/diff/notify independently testable without spinning up chi or cron.
-- **`internal/musicbrainz/`, `internal/deezer/`, `internal/notify/` as adapters:** Each external integration lives in its own package behind a small interface (e.g., `type ReleaseSource interface { FetchArtist(ctx, mbid string) (Artist, error) }`). The service layer depends on the interface; production wiring in `main.go` supplies the real HTTP client, tests supply an `httptest.Server`-backed fake or a hand-rolled stub.
-- **`internal/store/sqlc/` isolated from hand-written code:** sqlc output is regenerated wholesale on every `sqlc generate` run — keeping it in its own subpackage (vs. mixing into `internal/service`) makes "never hand-edit this" obvious and keeps diffs from codegen clean and reviewable in CI.
-- **`db/migrations/` and `db/queries/` at repo root, not under `internal/`:** golang-migrate and sqlc both operate on plain `.sql` files that are naturally not Go packages; keeping them at the top level (sibling to `internal/`, `web/`) matches common sqlc+migrate project layouts and keeps the CI steps that invoke `sqlc generate` / `migrate` simple path-wise.
-- **`web/` at repo root, not under `internal/`:** The frontend is a separate toolchain (Node/Vite) with its own `package.json`, so it should not live inside a Go `internal/` tree. `web/dist/` is the single hand-off point between the two toolchains — Vite writes to it, `web/embed.go` embeds it, and the Dockerfile's Go build stage depends on that directory being populated first.
-- **`internal/config/`:** Small but worth its own package since every other component (API, scheduler, DB pool, Discord client) reads from it — centralizing env parsing/validation here means `main.go` does one `config.Load()` call and passes typed values down, rather than each component reading `os.Getenv` ad hoc.
-
-## Architectural Patterns
-
-### Pattern 1: Shared Service Layer (Handler/Scheduler → Service → Adapter)
-
-**What:** A single `internal/service` package contains the domain logic (watchlist rules, poll orchestration, diffing, notify decisions). It is the *only* thing that both the HTTP handlers and the cron jobs call into. Handlers and cron jobs are both thin — they translate their respective triggers (HTTP request / cron tick) into a service call and translate the result back (HTTP response / log line).
-
-**When to use:** Any time the same business operation can be triggered from more than one entry point — here, a poll cycle is triggered by cron on a schedule, but the same `PollService.PollOne(ctx, watchlistEntry)` should be callable directly from a test, and potentially later from a manual "poll now" API endpoint without duplicating logic.
-
-**Trade-offs:** Slightly more boilerplate upfront (defining interfaces for `ReleaseSource`, `Notifier`, `Repository`) versus just wiring cron jobs directly against concrete clients. Pays off immediately in testability — `PollService` can be unit tested with `httptest.Server` fakes and an in-memory or test-DB repository, with zero dependency on chi or robfig/cron actually running.
-
-**Example:**
-```go
-// internal/service/poll.go
-type ReleaseSource interface {
-    FetchArtist(ctx context.Context, externalID string) (Release, error)
-}
-
-type Notifier interface {
-    NotifyNewRelease(ctx context.Context, r Release) error
-}
-
-type PollService struct {
-    sources  map[string]ReleaseSource // "musicbrainz", "deezer"
-    store    store.Repository
-    notifier Notifier
-    logger   *slog.Logger
-}
-
-func (p *PollService) PollOne(ctx context.Context, entry WatchlistEntry) error {
-    fetched, err := p.sources[entry.Source].FetchArtist(ctx, entry.ExternalID)
-    if err != nil {
-        return fmt.Errorf("fetch %s: %w", entry.Source, err)
-    }
-    changes, err := p.store.Diff(ctx, entry.ID, fetched)
-    if err != nil {
-        return fmt.Errorf("diff: %w", err)
-    }
-    for _, c := range changes {
-        if err := p.notifier.NotifyNewRelease(ctx, c); err != nil {
-            p.logger.Error("notify failed", "err", err, "release", c.ID)
-            continue // don't let one failed notification abort recording as seen
-        }
-    }
-    return p.store.RecordSeen(ctx, entry.ID, fetched)
-}
+```
+                     web/ (Vite, React Router v7, ssr:false)
+web/app/
+├── root.tsx, routes.ts            # route config (not fs-based routing)
+├── routes/{watchlist,history}.tsx # route components
+├── components/{watchlist,history,common,ui}/
+└── lib/{api.ts,utils.ts}
+                 │  `pnpm run build` → web/build/client
+                 ▼
+     internal/webassets/build/client (committed, go:embed all:build/client)
 ```
 
-```go
-// internal/scheduler/scheduler.go — thin: cron just calls the service
-c := cron.New()
-c.AddFunc(cfg.PollInterval, func() {
-    ctx := context.Background()
-    for _, entry := range watchlist.All(ctx) {
-        if err := pollService.PollOne(ctx, entry); err != nil {
-            logger.Error("poll failed", "entry", entry.ID, "err", err)
-        }
-    }
-})
-```
+No test runner, no coverage tooling, and no CI coverage gate exist yet on either side. `web/package.json` has zero `vitest`/`@testing-library/*` deps today.
 
-### Pattern 2: Interface-Boundary External Clients (Real HTTP Client + httptest.Server Fakes)
+## Feature 1 — Vitest + React Testing Library suite
 
-**What:** MusicBrainz and Deezer clients are real `net/http`-based clients implementing a shared `ReleaseSource`-style interface, living in their own packages (`internal/musicbrainz`, `internal/deezer`). Tests use `httptest.Server` to stand up a fake HTTP endpoint returning canned JSON, then point the real client at that test server's URL — exercising the actual HTTP/JSON-marshaling code path, not a hand-rolled mock.
+### Where it lives
 
-**When to use:** Always, for any external API integration in this project — it's explicitly required by the project constraints (real clients, `httptest.Server` mocking, no live calls in CI).
-
-**Trade-offs:** Slightly more test setup than a pure interface mock (need to construct a test server, register handlers per test case), but catches real bugs in URL building, header setting, JSON decoding, and error-status handling that a hand-rolled fake would hide.
-
-**Example:**
-```go
-func TestMusicBrainzClient_FetchArtist(t *testing.T) {
-    ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        json.NewEncoder(w).Encode(mbArtistResponse{ /* canned fixture */ })
-    }))
-    defer ts.Close()
-
-    client := musicbrainz.NewClient(musicbrainz.WithBaseURL(ts.URL))
-    release, err := client.FetchArtist(context.Background(), "some-mbid")
-    // assert...
-}
-```
-
-### Pattern 3: Dual-Mode Frontend Serving (embed.FS in prod, Vite proxy in dev)
-
-**What:** The HTTP server serves the frontend in one of two modes, chosen at startup by an env var or build tag: (a) **production** — serve the embedded `web/dist` via `embed.FS` + `http.FileServer`, with an SPA fallback that serves `index.html` for any unmatched non-API, non-file route; (b) **development** — reverse-proxy all non-`/api/*` requests to the Vite dev server (`localhost:5173`), which handles hot module reload.
-
-**When to use:** Needed as soon as you want a fast local frontend dev loop without rebuilding the Go binary on every UI change, while still shipping a single self-contained binary in production/CI.
-
-**Trade-offs:** Adds a small amount of conditional logic in server setup (dev vs prod branch), and requires running two processes locally (`go run ./cmd/dropctl` + `npm run dev`, likely via `docker-compose` or a `Makefile`/`air` combo) instead of one. Worth it — the alternative (rebuild+restart Go binary on every CSS/JSX change) is a much worse dev loop.
-
-**Example:**
-```go
-// internal/api/server.go
-if cfg.Env == "dev" {
-    proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "localhost:5173"})
-    r.NotFound(func(w http.ResponseWriter, req *http.Request) {
-        if strings.HasPrefix(req.URL.Path, "/api/") {
-            http.NotFound(w, req)
-            return
-        }
-        proxy.ServeHTTP(w, req)
-    })
-} else {
-    distFS, _ := fs.Sub(web.DistFS, "dist") // web.DistFS is the //go:embed dist var
-    fileServer := http.FileServer(http.FS(distFS))
-    r.NotFound(spaFallbackHandler(distFS, fileServer))
-}
-```
-
-## Data Flow
-
-### Poll → Diff → Notify → Record Cycle
+Co-locate `*.test.tsx` files next to the component/route they test, inside `web/app/`, mirroring the Go side's own `_test.go`-beside-source convention already used throughout `internal/` (e.g. `internal/poller/poller_test.go` next to `poller.go`). Do **not** introduce a parallel `web/__tests__/` or `web/tests/` tree — that would be the one place this project's test-file convention diverges between Go and TS for no reason.
 
 ```
-[robfig/cron tick, per configured interval]
-    ↓
-[Scheduler] iterates watchlist entries (from Postgres via sqlc)
-    ↓
-For each entry:
-[PollService.PollOne(entry)]
-    ↓
-[ReleaseSource.FetchArtist()] → real HTTP call to MusicBrainz or Deezer
-    ↓ (Release data: current tracklist/releases/features as of now)
-[DiffEngine] compares fetched data against "seen" store rows for this entry
-    ↓
-    ├─ no delta → [Repository.RecordSeen()] (update last-checked timestamp only) → done
-    └─ delta found (new release / new feature / tracklist change)
-         ↓
-    [NotifierService] formats a Discord message per change
-         ↓
-    [DiscordNotifier.NotifyNewRelease()] → POST to Discord webhook URL
-         ↓ (on success OR after logging failure — do not block recording)
-    [Repository.RecordSeen()] persists the new state as "seen" so next cycle diffs against it
+web/app/
+├── lib/
+│   ├── api.ts
+│   └── api.test.ts                       # new
+├── components/watchlist/
+│   ├── WatchlistRow.tsx
+│   └── WatchlistRow.test.tsx             # new
+├── components/history/
+│   ├── EventCard.tsx
+│   └── EventCard.test.tsx                # new
+├── routes/
+│   ├── watchlist.tsx
+│   └── watchlist.test.tsx                # new
+└── test/
+    └── setup.ts                          # new — jest-dom matchers, cleanup
 ```
 
-**Key design point — record-seen ordering:** Recording as "seen" should happen *after* the notify attempt, but a notify failure (Discord webhook down, rate-limited) should not prevent recording as seen — otherwise a persistently-failing notifier would cause the same change to be re-detected and re-attempted every cycle, and (worse) could cause the diff to compound if the external data itself changes again before the failure is resolved. Log notify failures loudly (structured `slog` fields with entry/release IDs) but let `RecordSeen` proceed. Consider a `notified_at` nullable column on the seen/change record if failed notifications need to be retried explicitly later — not required for v1, but avoid designs that make it hard to add later (i.e., write changes to a table row rather than only firing a side effect).
+`web/app/test/setup.ts` is the one genuinely new top-level thing: it registers `@testing-library/jest-dom`'s matchers and calls `cleanup()` after each test (Vitest doesn't do this automatically the way `@testing-library/react`'s Jest integration historically did).
 
-### HTTP Request Flow (CRUD / Search-Proxy)
+### Vite config changes — this is the one real gotcha (HIGH confidence, verified against Remix/RR docs directly)
 
-```
-[Browser: React SPA] → fetch('/api/watchlist') / fetch('/api/search?q=...')
-    ↓
-[chi router] → middleware chain (logging, recover) → route match
-    ↓
-[Handler] (internal/api/handlers/watchlist.go or search.go)
-    ↓ decodes request, calls...
-[WatchlistService] / direct call to [ReleaseSource.Search()] for search-proxy endpoints
-    ↓
-[Repository (sqlc Queries)] ←→ [Postgres]   (for CRUD)
-    or
-[MusicBrainzClient/DeezerClient] ←→ [external API]   (for search-proxy — live lookup, not DB-backed)
-    ↓
-[Handler] encodes JSON response
-    ↓
-[Browser]
-```
+**Do not add a `test:` block to the existing `web/vite.config.ts`.** `@react-router/dev/vite`'s `reactRouter()` plugin is explicitly documented as being for the dev server and production build only — it is not designed to coexist with Vitest (or Storybook), which also read `vite.config.ts` by default. Loading it under Vitest produces the well-known "React Router Vite plugin can't detect preamble" / virtual-module-resolution failures other RR7 projects hit.
 
-Note the search-proxy endpoints are a **different data flow** from CRUD: they call external APIs live (not the DB) so the UI can look up artists to add to the watchlist. They should reuse the *same* `MusicBrainzClient`/`DeezerClient` the poller uses (one client implementation, two callers: scheduler for polling, HTTP handler for search) — this is another instance of the shared-adapter pattern, not a separate integration.
+Concretely:
+1. Add a **new, separate `web/vitest.config.ts`** (not a merge into `vite.config.ts`) that only carries `resolve: { tsconfigPaths: true }` (needed for the `~/` import alias already used across `web/app/`) plus `@vitejs/plugin-react` (a new devDependency — `reactRouter()` bundles React fast-refresh but Vitest needs the plain React plugin for JSX transform, since `reactRouter()` itself is excluded) and the `test` block (`environment: "jsdom"`, `setupFiles: ["./app/test/setup.ts"]`, `css: true` — several existing components pull in `app.css`/Tailwind classes, and `css: true` avoids import-time failures on those).
+2. New devDependencies: `vitest`, `@testing-library/react`, `@testing-library/jest-dom`, `@testing-library/user-event`, `jsdom`, `@vitejs/plugin-react`.
+3. `web/package.json` gets a `"test": "vitest run"` script (and optionally `"test:watch": "vitest"`), matching the existing `build`/`dev`/`typecheck` script naming.
+4. `routes.ts`'s config-based routing (not filesystem-based) means route components under test still import real loaders/actions from `~/lib/api.ts` — for route-level tests that need to avoid hitting the network, mock `~/lib/api.ts`'s exported functions with `vi.mock`, not a router-level fixture; there is no `createRoutesStub()` need here since routes.ts doesn't use loaders/actions today (a plain fetch-in-`useEffect`/handler pattern per `lib/api.ts`).
 
-### Key Data Flows
+**New vs. modified:** everything under "Where it lives" is new. `web/vite.config.ts` is untouched. `web/package.json` gets new deps + one new script (modified, additive only).
 
-1. **Poll cycle (background, cron-driven):** External API → Diff against Postgres seen-store → Discord notify → Record seen in Postgres. Runs unattended on a schedule; no user interaction.
-2. **Watchlist management (foreground, HTTP-driven):** Browser SPA → chi API → Postgres CRUD. Standard REST-ish request/response.
-3. **Search-proxy (foreground, HTTP-driven, no DB):** Browser SPA → chi API → live external API call → JSON response (results not persisted unless the user then adds one via the watchlist CRUD flow).
-4. **Frontend asset serving (foreground, static):** Browser → chi API (or dev proxy) → embedded SPA assets (or Vite dev server in local dev).
+## Feature 2 — CI coverage gating
 
-## Scaling Considerations
+### Where it slots into `full-pipeline.yml`
 
-This is a portfolio/single-user-to-small-group project; the honest scaling ceiling is "one Postgres instance, one small VPS, low request volume." Do not over-design for scale beyond that — the value here is in pipeline maturity, not horizontal scalability.
+The existing job graph is: `vet`, `lint`, `test` (Go), `gitleaks`, `trivy-fs` run in parallel → `build-scan` (`needs: [vet, lint, test, gitleaks, trivy-fs]`) → `release`. Coverage gating is a **correctness gate**, same tier as `test`, not a security/supply-chain gate — it belongs alongside `test`, feeding into the same `build-scan` `needs:` array, not before or after it as a separate serial stage.
 
-| Scale | Architecture Adjustments |
-|-------|--------------------------|
-| Personal use / few users (v1 target) | Single binary, single Postgres instance, docker-compose locally then single VPS container. Cron poll interval (e.g. every 15–60 min) is the only real "load" concern, and it's tiny (a handful of watchlist entries × 2 external APIs). |
-| Dozens of users / larger watchlist | Watch MusicBrainz/Deezer rate limits before anything else — add per-source request throttling/backoff in the client layer (already isolated behind the adapter interfaces, so this is a localized change). Add a DB connection pool size cap and index the seen-store on (watchlist_entry_id, checked_at). |
-| Hundreds+ users / high poll frequency | This is well past this project's stated scope (single binary, no microservices, no k8s per PROJECT.md). If ever needed, the service-layer boundary already established makes it possible to peel the scheduler into its own process later (same `internal/service` code, new `cmd/worker` entrypoint) without a rewrite — but that is explicitly deferred/out of scope here. |
+Two options, and the right one is **extend the existing `test` job, don't add new jobs**:
 
-### Scaling Priorities
-
-1. **First real constraint: external API rate limits, not compute.** MusicBrainz in particular has a documented ~1 req/sec courtesy limit. The `ReleaseSource` adapter interface is exactly where to add rate limiting/backoff (e.g. `golang.org/x/time/rate`) without touching the service or scheduler layers.
-2. **Second: Postgres connection/query load.** Negligible at this project's scale; standard `pgxpool`/`database/sql` pooling with sane `MaxOpenConns` is more than sufficient. Not a near-term concern.
-
-## Anti-Patterns
-
-### Anti-Pattern 1: Business logic inside cron job closures or HTTP handlers
-
-**What people do:** Write the fetch → diff → notify → record sequence directly inside the `cron.AddFunc` closure (or, symmetrically, inline complex logic directly inside an HTTP handler function).
-
-**Why it's wrong:** Makes the poll logic untestable without actually running cron, and makes it impossible to trigger the same logic from a future "poll now" API endpoint without copy-pasting. It also tends to accumulate error handling and logging concerns tangled with business logic.
-
-**Do this instead:** Cron jobs and HTTP handlers are both *callers* of `internal/service`. They translate their trigger into a service call and translate the result back into their respective output (log line vs HTTP response). Keep them under ~20 lines each.
-
-### Anti-Pattern 2: sqlc-generated code imported directly by handlers/scheduler, bypassing the service layer
-
-**What people do:** Call `store.Queries.GetWatchlistEntry(ctx, id)` directly from an HTTP handler or cron job, skipping the service layer "because it's just a getter."
-
-**Why it's wrong:** Once a few of these creep in, business rules (validation, authorization-if-added-later, diff logic) end up split between handlers and services inconsistently, and it becomes hard to unit-test business rules without a real DB connection.
-
-**Do this instead:** Handlers and the scheduler only ever call into `internal/service`; only `internal/service` (and its repository/store dependency) imports the sqlc package directly. This keeps one clear place to mock/fake for tests (fake the `Repository` interface, not the sqlc `Queries` struct).
-
-### Anti-Pattern 3: Treating a failed Discord notification as a poll-cycle failure
-
-**What people do:** Return an error from the poll job (and skip recording as "seen") whenever the Discord webhook call fails, on the theory that "the user should be notified so we shouldn't mark it done."
-
-**Why it's wrong:** This causes the *same* detected change to be re-diffed and re-attempted every single poll cycle until Discord happens to succeed — and if the external API data shifts again in the meantime, the diff can produce confusing duplicate or compounding "changes." It conflates "did we detect the change" (a data-store concern) with "did we successfully alert about it" (a delivery concern).
-
-**Do this instead:** Log notify failures with full context (`slog` structured fields) and optionally track notify success/failure per change row, but always record the underlying fetched state as seen once diffed, regardless of notify outcome. If retry-on-notify-failure matters later, build it as an explicit retry queue over the "seen" table's changes, not by refusing to advance the "seen" watermark.
-
-### Anti-Pattern 4: Embedding `web/dist` without a `.gitignore` + gating the Go build on it existing
-
-**What people do:** Commit the built `dist/` output to the repo, or (worse) let `go build`/`go run` silently succeed with a stale or empty `embed.FS` when the frontend hasn't been built yet, producing a binary that serves a blank page with no clear error.
-
-**Why it's wrong:** Committed build output causes merge noise and drifts from source; a silently-stale embed makes local dev and CI failures confusing ("why is the UI blank?").
-
-**Do this instead:** `.gitignore` `web/dist/`; add a placeholder/check (e.g., a `//go:build !embed_placeholder` guard, or simply a Makefile target `make build` that always runs `npm run build` before `go build`) so the Go build step fails loudly or is always preceded by a real frontend build, both locally and in the Dockerfile/CI.
-
-## Integration Points
-
-### External Services
-
-| Service | Integration Pattern | Notes |
-|---------|---------------------|-------|
-| MusicBrainz API | Real HTTP client behind a `ReleaseSource`-style interface in `internal/musicbrainz`; used by both the poller (scheduled fetch) and the search-proxy handler (live lookup) | Has documented courtesy rate limits (~1 req/sec) and requires a descriptive `User-Agent` header — bake this into the client, not caller code. Mock via `httptest.Server` in tests. |
-| Deezer API | Same pattern as MusicBrainz, separate package `internal/deezer`, own interface implementation | Different response shape/pagination than MusicBrainz — keep types package-local, don't force a shared DTO across both until the service layer's own domain type (`Release`) is what unifies them. |
-| Discord Webhook | Simple outbound HTTP POST via `internal/notify/discord.go` implementing a `Notifier` interface | No auth beyond the webhook URL itself (treat as a secret, env-var only per project constraints); keep message formatting logic here, not in the service layer, so notification format can change independently of diff logic. |
-| Postgres | sqlc-generated queries + `pgx` (or `database/sql` + `pgx` stdlib driver) connection pool | Migrations via golang-migrate, run as a startup step or separate CI/deploy step — decide explicitly whether `main.go` auto-migrates on boot (convenient for a single-binary/VPS deploy) or migrations are a separate explicit step (safer for anything beyond solo use). For this project's scale, auto-migrate-on-boot behind a `--migrate` flag or startup check is reasonable. |
-
-### Internal Boundaries
-
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| `internal/api` (handlers) ↔ `internal/service` | Direct Go function calls (in-process) | Handlers depend on service interfaces, not concrete structs, so handler tests can fake the service layer if needed (though given the service layer itself is well-tested, handler tests can also just use the real service with a fake repository/client). |
-| `internal/scheduler` ↔ `internal/service` | Direct Go function calls (in-process) | Same service dependency as the HTTP layer — this is the crux boundary that keeps poll logic decoupled from *how* it's triggered. |
-| `internal/service` ↔ `internal/musicbrainz` / `internal/deezer` / `internal/notify` | Interface-typed dependency, injected at construction time in `main.go` | Production wiring supplies real clients; tests supply `httptest.Server`-backed clients or lightweight stubs implementing the same interface. |
-| `internal/service` ↔ `internal/store` (sqlc) | Interface-typed `Repository` dependency (recommend wrapping raw sqlc `Queries` in a small repository type exposing domain-shaped methods, e.g. `Diff`, `RecordSeen`, `ListWatchlist`) | Keeps sqlc's generated, DB-shaped types from leaking directly into service/domain logic; makes it easier to fake the repository in service-layer unit tests without a real Postgres connection. |
-| `internal/api` (static file serving) ↔ `web/dist` (embed.FS) | Compile-time embed (`//go:embed dist`) in prod; HTTP reverse proxy to Vite dev server in dev | The only place the frontend and backend "touch" at build time — see Pattern 3. |
-| CI pipeline ↔ container registry | `docker/build-push-action` + `docker/login-action` against `ghcr.io`, using `GITHUB_TOKEN` (no extra registry secret) | See CI/CD job structure below. |
-
-## CI/CD Job Structure ("Full Pipeline")
-
-The "Full Pipeline" requirement (lint, test, Trivy scan, gitleaks, SBOM, semantic-release, ghcr.io push) maps naturally onto a **multi-job workflow with a fan-out/fan-in dependency graph**, not a single monolithic job — this gives parallelism (faster feedback on PRs) and lets each concern show up as its own PR status check.
+- **Backend:** `test` job's `make test-integration` step already runs `go test ./... -race -count=1 -p 1`. Add `-coverprofile=coverage.out -covermode=atomic` to that invocation (atomic mode is required, not `count` or `set`, because `-race` is already on and atomic is the only mode safe under the race detector's instrumentation). Follow with a `go tool cover -func=coverage.out` step that parses the `total:` line and fails (`exit 1`) below the 70% threshold. This is a **new step inside the existing `test` job**, not a new job — `test-integration` already requires the `db-up` Postgres service container, and duplicating that setup in a second job just to compute coverage is wasted CI minutes for zero benefit.
+- **Frontend:** needs a **new job**, e.g. `test-web`, added to the top-level parallel tier (alongside `vet`/`lint`/`test`/`gitleaks`/`trivy-fs`) and added to `build-scan`'s `needs:` array. It runs `pnpm install --frozen-lockfile` (mirrors the `Makefile web:` target's flag) then `pnpm run test -- --coverage` with `vitest.config.ts`'s `coverage.thresholds` block set to 70 for lines/statements/functions/branches — Vitest's own threshold enforcement (`vitest run --coverage`, provider `v8`) exits non-zero on breach, so this CI step needs no separate coverage-parsing logic the way the Go side does; the gate is enforced by Vitest itself, the CI step just has to not swallow its exit code.
 
 ```
-┌─────────┐   ┌─────────┐   ┌──────────┐
-│  lint    │   │  test    │   │ gitleaks  │     (parallel, no dependencies —
-│ (golangci│   │ (go test │   │ (secret   │      run on every push/PR)
-│ -lint,   │   │  + go    │   │  scan)    │
-│ go vet)  │   │  vet)    │   │           │
-└────┬────┘   └────┬────┘   └────┬─────┘
-     └─────────────┼──────────────┘
-                    ▼
-          ┌───────────────────┐
-          │  build-and-scan     │   (needs: lint, test, gitleaks)
-          │  - docker build      │   builds the image once
-          │  - Trivy image scan   │   (SARIF → code scanning)
-          │  - SBOM generation     │   (Trivy/anchore, format github)
-          └──────────┬────────┘
-                      ▼
-          ┌───────────────────┐
-          │  release             │   (needs: build-and-scan;
-          │  - semantic-release   │    only on push to main/tags)
-          │  - compute next version,
-          │    tag, GitHub release
-          │  - retag + push image
-          │    to ghcr.io (semver,
-          │    major, latest tags)
-          └───────────────────┘
+vet ─┐
+lint ─┤
+test (Go, now also gates 70% coverage) ─┤
+test-web (NEW: pnpm test --coverage, gates 70%) ─┤→ build-scan → release
+gitleaks ─┤
+trivy-fs ─┘
 ```
 
-**Rationale for this shape:**
-- **lint / test / gitleaks as parallel, independent jobs:** They have no dependency on each other or on Docker, so running them concurrently minimizes PR feedback latency and lets each appear as its own required status check in branch protection rules.
-- **Single `docker build` in `build-and-scan`, reused for scan and (conditionally) release:** Building the image once and scanning *that* artifact (rather than rebuilding in the release job) avoids scan/release drift — what gets scanned is exactly what gets pushed. Pass the image as a workflow artifact (`docker save`/`load`, or push to a job-scoped tag first) between jobs, or simply keep build+scan+push all in one job if avoiding the added complexity of image-artifact-passing is preferred at this project's scale (a fine simplification for a solo/portfolio project — the guidance above is the "textbook" separation; collapsing `build-and-scan` and `release` into one job is a reasonable pragmatic choice here).
-- **`release` gated to `main`/tags only, and after scan passes:** Prevents pushing a version tag or an image to `ghcr.io` for a build that failed its security scan — semantic-release should not run (and thus no version/tag/release should be created) if `build-and-scan` failed.
-- **semantic-release needs a Node runtime step even in a Go-only app:** semantic-release itself is a Node CLI; the release job needs a `setup-node` step regardless of the app's language. This is a good reason to also generate the SBOM/scan steps as their own job rather than interleaving Node setup into the Go build job.
-- **Caching:** `actions/setup-go@v5` with `cache: true` (keyed on `go.sum`) covers the Go module cache for lint/test/build jobs; `actions/setup-node@v4` with `cache: 'npm'` (keyed on `web/package-lock.json`) covers the frontend's npm cache for the Docker build's Node stage if the frontend is also built directly in a CI job (e.g. for a separate frontend lint/test step) — inside the Dockerfile's own Node build stage, Docker layer caching (BuildKit cache mounts or `docker/build-push-action`'s `cache-from`/`cache-to`) is the relevant mechanism, not `actions/setup-node`, since that stage runs inside the Docker build, not the workflow's own Node environment. Do not cache `node_modules` directly — cache the npm/Vite/Go module *download* caches, which survive across dependency-version bumps more reliably.
+**New vs. modified:**
+- `test` job: modified (one new coverage-check step appended after the existing test run).
+- `test-web` job: entirely new, added to the parallel tier and to `build-scan`'s `needs:`.
+- No change to `build-scan` or `release` job bodies — only their implicit dependency surface widens by one job (`test-web`).
 
-## Build Order / Dependency Graph for Phased Delivery
+**Sequencing dependency on Feature 1:** `test-web`'s coverage step is meaningless (0% or a hard failure with no test files) until Feature 1's Vitest suite exists with real assertions. Land Feature 1 first, then Feature 2's frontend half; the backend half of Feature 2 has no such dependency and can land independently/first since `go test` already exists.
 
-Given the project's phased-delivery intent (per PROJECT.md), the natural build order — driven by what each component needs to exist and be testable before the next layer can be meaningfully built — is:
+## Feature 3 — Events retention (90-day hard delete)
+
+### Placement: a third robfig/cron entry inside the existing in-process scheduler — not pg_cron, not a separate process
+
+`internal/poller.Poller` already owns exactly one `*cron.Cron` instance with two `AddFunc` entries (MusicBrainz, Deezer), both wired through `poller.New` and started/stopped by `cmd/server/main.go`'s existing `pollr.Start(ctx)` / deferred `pollr.Stop(drainCtx)` lifecycle. Retention is architecturally identical in shape to those two entries — a periodic, idempotent, single-purpose job that needs the same graceful-shutdown draining `Stop` already provides — so it should be:
+
+- **A third `cron.AddFunc` entry**, registered either directly in `poller.New` (simplest: same file, same `cron` instance, same lifecycle) or in a small new `internal/retention` package with its own `Register(cron *cron.Cron, ...)` exposed to `poller.New`, mirroring how `detection.EventRecorder` and `notifier.Notifier` are already narrow seams the poller depends on rather than owns. **Prefer the new-package option** — retention has nothing to do with polling an external API, and folding it into `poller` blurs a package whose doc comment already scopes it tightly to "runs the scheduled polling cycles." A new `internal/retention` package (own `Service`, own `DeleteEventsOlderThan` sqlc query call, own logger correlation id like `cycleID` does) keeps the same architectural shape (own CAS guard is unnecessary here — an `execrows`-affecting `DELETE ... WHERE created_at < now() - interval` is naturally idempotent/re-entrant even if two ticks somehow overlapped, unlike the poll cycles which must not overlap because they hold a live rate-limited HTTP conversation) while staying a separate concern.
+- Interval: a new `RETENTION_INTERVAL` config field (e.g. default `24h`, run once a day) is independent of `POLL_INTERVAL` — reuse the `@every <duration>` cron spec pattern `poller.New` already uses, and a new `RetentionDays` config field (default `90`) rather than hardcoding the threshold, following `config.go`'s existing "every knob is a `caarlos0/env` struct field with an `envDefault`" convention.
+- **Rejected: pg_cron.** This project has no existing pg_cron/extension-management story (`db/migrations` are plain golang-migrate SQL, no `CREATE EXTENSION pg_cron`), it would require enabling and trusting a Postgres extension not available on every managed Postgres offering, and it moves scheduling authority outside the single-binary architecture PROJECT.md explicitly locks ("API, scheduler, notifier all in one process"). A cron entry inside the already-running `*cron.Cron` instance is strictly less new surface area than standing up a second scheduling mechanism.
+- **Rejected: separate process/sidecar.** Directly contradicts the locked single-binary constraint for zero benefit — retention is a lightweight periodic `DELETE`, not a workload that needs isolation.
+
+### The real risk: retention interacts destructively with the detection engine's baseline/seen-store logic — this is not a hypothetical, it's structural
+
+Verified directly against `internal/detection/detector.go` and `musicbrainz.go`: the events table is simultaneously (1) the seen-store, (2) the deluxe-change baseline store, and (3) the seed-mode signal — a naive `DELETE FROM events WHERE created_at < now() - interval '90 days'` breaks all three:
+
+1. **Seed-mode reset (`isSeedMode` / `HasAnyEvent`).** `HasAnyEvent(artist_id, source)` returning `false` means "seed mode" (D-14): every currently-fetched item for that artist+source is inserted silently with a shared `notified_at`, **not surfaced as a new Discord notification** (`seedNotifiedAt`). If retention deletes *every* event row for a long-tracked, low-release-frequency artist (all their events older than 90 days, none newer), the artist silently flips back into seed mode. The next poll cycle then re-inserts their entire back catalogue as "seen" with no notification — this specific failure mode is silent (no error, no alert) and only observable as "this artist's history disappeared from the UI and no one got notified about it."
+2. **Seen-set collapse (`ListExternalIDs` / `seenExternalIDs`).** A deleted `new_release` row's dedup key (`event_type, source, external_id`) unique constraint no longer exists in the table — the next poll cycle's `InsertEvent` for that same release will succeed as "newly detected" (since `ON CONFLICT DO NOTHING` has nothing to conflict with), re-firing a Discord notification for a release that already fired one 91+ days ago. **This is the most user-visible bug retention could introduce if built naively: duplicate re-notification of old releases.**
+3. **Baseline loss (`GroupTrackCountBaseline` / `SetGroupTrackCountBaseline`).** The deluxe-change baseline (`track_count`) lives on the group's own `new_release` event row (04-01's "option-a" decision, not a separate table). Deleting that row deletes the baseline. The next cycle's `detectDeluxeChanges` sees `hasBaseline = false` and silently re-establishes the baseline at whatever the *current* track count is (`baselineEstablishedCount++`, no event fired) — a real deluxe expansion that happened between the deletion and the next poll is swallowed instead of alerted.
+
+**Prevention (architectural, to design into the retention job, not just note as a caveat):**
+- The safest correct behavior given the current schema is to **exclude each artist+source's most recent `new_release` row per release-group from hard-delete**, or more simply: **retention should delete by `created_at` age only from a narrower, explicitly-eligible subset** — e.g. never delete a `new_release` row that is the *only* row (or the newest row) for its `(artist_id, source)` pair, and never delete a `new_release` row whose `track_count` is non-NULL (i.e., it's currently serving as an active deluxe baseline) unless a newer `new_release` row for a different release-group already exists for that artist+source (proving seed-mode can't be re-triggered).
+- Simpler and more honest given time constraints: **retention should target `guest_feature` events only for the 90-day window in v1**, since those have no baseline/seed-mode load-bearing role beyond their own seen-set entry, or **retention should be presented to the user as a display-only concern (soft-delete / hide-from-`ListEvents`-after-90-days) rather than a hard `DELETE`**, keeping the row (and its dedup key, seed-mode signal, and baseline) intact while satisfying the "90-day retention" UX goal via a `WHERE created_at > now() - interval '90 days'` filter on `ListEvents` instead of row removal. **This is the recommended approach** — it fully satisfies "events older than 90 days don't show in the UI" without touching detection correctness at all, and is a strictly smaller, safer change (`ListEvents` query filter, no new destructive cron job, no baseline-migration logic needed).
+- If a genuine hard-delete is required (e.g. for storage/compliance reasons rather than UX), it must ship together with a **baseline-migration step**: before deleting a `new_release` row that currently holds a group's `track_count` baseline, that baseline value must be relocated (e.g. a dedicated `release_group_baselines` table, decoupled from any individual event row's lifecycle) — this is real new schema, not a cron-job-only change, and should be scoped and estimated separately from "add a delete job."
+
+**New vs. modified:**
+- New: `internal/retention` package (or a function inside `internal/poller`), a `RetentionDays`/`RetentionInterval` config fields, a new sqlc query (`DeleteEventsOlderThan` or, if the soft-delete/filter approach is taken instead, a `created_at` bound added to the existing `ListEvents` query).
+- Modified (if hard-delete path chosen): `internal/db/sqlc/events.sql.go`-generating `.sql` query file, `cmd/server/main.go` wiring, `poller.New`'s cron registration (or the new package's own `Register`).
+- **This feature has the highest design risk of the four** — the roadmap should treat "decide soft-filter vs. hard-delete-with-baseline-migration" as its own upfront decision, not an implementation detail discovered mid-build.
+
+## Feature 4 — Bounded worker-pool concurrent polling
+
+### What changes, precisely
+
+`poller.RunMusicBrainzCycle` / `RunDeezerCycle` each do: `entries, _ := p.store.List(ctx)` once, then a `for _, entry := range entries` loop, sequentially calling the source client, then `p.events.DetectMusicBrainz(...)`, per artist. The worker-pool conversion replaces that `for` loop's body with N concurrent workers pulling from `entries`, bounded by a new `POLL_WORKER_POOL_SIZE` config field (default 3-5 per PROJECT.md).
+
+**Recommended primitive: `golang.org/x/sync/errgroup` with `SetLimit(n)`**, not a hand-rolled channel+`sync.WaitGroup` pool. `errgroup.WithContext(ctx)` + `g.SetLimit(n)` + `g.Go(func() error {...})` per entry is the idiomatic bounded-concurrency pattern for "N independent items, cap concurrency at K" in current Go, and it's a single new dependency-free-of-new-dependencies choice since `golang.org/x/sync` is already an indirect dependency of this module graph (pulled in by `golang.org/x/time` and/or Go's own toolchain modules) or a trivial one-line `go get` if not.
+
+**Critical correctness note specific to this codebase — errgroup's default error semantics must be neutralized:** `errgroup.Group`'s contract is: the *first* non-nil error returned by any `g.Go` closure cancels the shared context and is what `g.Wait()` returns. The current sequential loop's contract is the opposite — a per-artist fetch/detection error is **logged and the loop continues to the next artist** (`RunMusicBrainzCycle`'s existing comment: "one unreachable or misbehaving artist must not cost the rest of the cycle"). If each worker's closure is written to `return err` on a fetch/detection failure the way it's tempting to translate 1:1, converting to `errgroup` would silently change behavior: the *first* artist to fail cancels every other in-flight worker's context, turning "log and skip" into "abort the whole cycle." **Every worker closure must keep swallowing per-artist errors internally (log, then `return nil`) exactly as the sequential version does** — `errgroup`'s error-return path should be reserved solely for `ctx.Err()` (the existing `if err := ctx.Err(); err != nil { return err }` check, which today aborts the *whole* sequential cycle on shutdown and should still do so under the pool).
+
+**Interaction with `rate.Limiter` (no change needed, by design).** `mbLimiter`/`dzLimiter` are already shared, package-level `*rate.Limiter` instances passed into `musicbrainz.Client`/`deezer.Client` and reused across search traffic and poll traffic (D-07, verified in `cmd/server/main.go`). `rate.Limiter.Wait(ctx)` (called internally by each client before every outbound request) is already goroutine-safe — a `rate.Limiter` is explicitly designed for concurrent callers contending on the same token bucket. Going from 1 to N concurrent callers against the *same* limiter instance does not change the enforced rate; it only changes how many goroutines are simultaneously *blocked waiting* for a token when the pool outpaces the configured rate. **No rate-limiter code changes are required** — this is the one piece of the existing architecture that was already built assuming eventual concurrent callers.
+
+**Interaction with `mbRunning`/`dzRunning` CAS guards (no change needed, by design).** These guard *whole-cycle* overlap (a new tick arriving while the previous cycle, sequential or pooled, is still draining) — they say nothing about intra-cycle concurrency. The CAS-and-defer-release pattern around the entire `RunMusicBrainzCycle`/`RunDeezerCycle` body is orthogonal to what happens inside the loop; converting the loop body to a worker pool changes nothing about when `mbRunning`/`dzRunning` flip. One thing does change and must be re-verified: today, a single hung artist blocks the whole sequential cycle proportionally to 1 slow artist; under a pool of size N, up to N artists can be concurrently slow before the cycle-completion time is affected — this makes the cycle *faster to drain* on `Stop`'s `pollDrainTimeout`, not slower, so no timeout tuning is implied.
+
+**Interaction with the detection engine's per-artist state capture — this is the real new risk, not the limiter or CAS guard.** Verified in `internal/detection/musicbrainz.go`: `isSeedMode` and `preCycleSeenGroups` are captured **once per artist, per `DetectMusicBrainz` call** (not once for the whole cycle across all artists) — so running `DetectMusicBrainz` concurrently for two *different* artists is safe with respect to seed-mode and the new_release seen-set, since both are scoped by `artist_id` (`HasAnyEvent(artist_id, source)`, `ListExternalIDs(artist_id, source, event_type)`). **The one place this scoping breaks down is `GroupTrackCountBaseline`/`SetGroupTrackCountBaseline`, which are scoped only by `release_group_mbid` (verified in `querier.go` — no `artist_id` parameter on either query).** If two different watched artists are both credited on the same collaborative release-group (a real, if uncommon, case in this domain — a feature-heavy reggaeton/hip-hop collab album), and the worker pool processes both artists' `detectDeluxeChanges` concurrently, there is a genuine **read-then-write race on that shared baseline row**: both workers can read the same pre-update baseline, both compute "count increased," both call `SetGroupTrackCountBaseline` and `insertEvent` — the `events_dedup_key` unique constraint (`event_type, source, external_id`) prevents a literal duplicate row (the second `InsertEvent` no-ops via `ON CONFLICT DO NOTHING`), but the two `SetGroupTrackCountBaseline` calls can still interleave in a way that isn't strictly worse than sequential (last-write-wins on the same final value, since both computed the same `maxCount` from the same upstream data) — **this is a narrow, low-probability, self-correcting race** (not implicated in a real user-visible bug: worst case is one duplicate-suppressed insert attempt) — but it is worth a one-line mitigation: wrap `groupBaseline` + `setGroupBaseline`'s read-then-write in a single `UPDATE events SET track_count = GREATEST(track_count, $new) WHERE external_id = $group_mbid AND ... RETURNING track_count` style atomic compare-and-set at the SQL level instead of the current Go-level read-then-write, removing the race entirely rather than merely bounding its blast radius. This is a small, contained fix scoped to `internal/detection`, not the poller.
+
+**New vs. modified:**
+- Modified: `internal/poller/poller.go`'s `RunMusicBrainzCycle`/`RunDeezerCycle` loop bodies (sequential `for` → `errgroup`-bounded `g.Go` per entry); `internal/config/config.go` gets one new `PollWorkerPoolSize int` field (`envDefault:"4"`, mid-range of PROJECT.md's stated 3-5 default).
+- New dependency: `golang.org/x/sync/errgroup` (likely already present transitively; confirm via `go.sum` before assuming a new direct dependency line is needed).
+- Recommended companion fix (not strictly required for the milestone's stated scope, but the analysis above surfaces it as the one real correctness gap the conversion exposes): an atomic SQL-level `UPDATE ... RETURNING` for the baseline compare-and-set in `internal/detection/detector.go`, replacing the current `groupBaseline` read + `setGroupBaseline` write pair used inside `detectDeluxeChanges`.
+- **Test impact:** `internal/poller/poller_test.go`'s existing fakes (`ReleaseGroupSource`/`AlbumSource`/`EventRecorder` stubs) must become concurrency-safe (guard any shared call-count/recorded-args state with a mutex) once the loop under test dispatches calls from multiple goroutines — this is a near-certain source of new flaky-test failures if the existing test doubles assume single-goroutine call ordering, and should be budgeted as part of this feature's own work, not discovered as CI flakiness after Feature 2's coverage gate is already in place.
+
+## Build Order — dependencies across the 4 features
 
 ```
-1. Postgres schema + migrations (golang-migrate) + sqlc config
-        ↓ generates
-2. sqlc-generated store layer (internal/store/sqlc)
-        ↓ wrapped by
-3. Repository layer (internal/store) — domain-shaped methods over sqlc
-        ↓ used by
-4. Service/domain layer (internal/service) — Watchlist CRUD logic first
-   (can be fully unit-tested against repository fakes/real Postgres before HTTP exists)
-        ↓ exposed via
-5. HTTP API layer (chi) — Watchlist CRUD endpoints, /health
-   (thin handlers calling into already-tested service layer)
-        ↓ in parallel with 6/7 —
-6. MusicBrainz + Deezer clients (internal/musicbrainz, internal/deezer)
-   (independently buildable/testable with httptest.Server from day one;
-    no dependency on 1-5)
-        ↓ enables
-7. Search-proxy HTTP endpoints (reuse clients from step 6, thin handlers)
-        ↓ once 4 (service) + 6 (clients) both exist —
-8. Diff engine + PollService (internal/service/poll.go, diff.go)
-   (needs: repository from step 3, clients from step 6)
-        ↓ enables
-9. Discord notifier (internal/notify/discord.go) — small, independently
-   buildable in parallel with 6-8, wired into PollService once both exist
-        ↓ once 8 + 9 exist —
-10. Cron scheduler (internal/scheduler) — thin wiring of PollService on a timer
-        ↓ in parallel with 1-10, frontend track —
-11. React (Vite) SPA — can start as early as step 5 exists (needs Watchlist
-    CRUD + search-proxy API contracts to build against); local dev via Vite
-    dev server + API proxy, independent of go:embed until near the end
-        ↓ once 5 (or 5+7) and 11 are both reasonably stable —
-12. go:embed wiring + dual-mode serving (Pattern 3) — ties frontend into
-    the Go binary for the first time
-        ↓ once the whole app runs end-to-end locally —
-13. Multi-stage Dockerfile + docker-compose (packages 1-12 into one image)
-        ↓
-14. CI/CD "Full Pipeline" (lint/test/scan/gitleaks/SBOM/semantic-release/
-    ghcr.io push) — wraps the whole repo; individual jobs (lint, unit test)
-    can actually be scaffolded very early (even before step 4) since they
-    only need *some* Go code to exist, but the full build-and-scan/release
-    jobs depend on the Dockerfile from step 13 being real.
+Feature 2 (backend half)     Feature 1 (Vitest+RTL suite)
+   [independent, land           │
+    anytime — go test           ▼
+    already exists]        Feature 2 (frontend half)
+                            [needs Feature 1's test files
+                             to exist for coverage % to
+                             mean anything]
+
+Feature 3 (retention)        Feature 4 (worker pool)
+[independent of 1/2/4;       [independent of 1/2/3, but
+ land the soft-filter         highest concurrency-correctness
+ design before any hard-      risk of the four — land LAST,
+ delete implementation]       after Features 1-2's coverage
+                               gates exist, so the pool-
+                               conversion's own test changes
+                               are caught by a working CI
+                               coverage/test harness rather
+                               than being the harness's own
+                               first real workout]
 ```
 
-**Key implications for roadmap phase structure:**
-- **Data layer (1-3) is the true foundation** — nothing else can be meaningfully tested end-to-end without it, though the external API clients (6) and lint/CI scaffolding (14, partial) can be built in parallel since they have no dependency on Postgres.
-- **The service layer (4) should exist and be tested *before* the HTTP layer (5)** is built out in full, since handlers are meant to be thin wrappers — building HTTP-first tends to pull business logic into handlers by default (Anti-Pattern 1/2).
-- **Poll/diff/notify (8-10) meaningfully depends on both the service+repository foundation (1-4) and the external clients (6)** — it is a natural "phase 2" once watchlist CRUD (the simpler, more foundational vertical slice) is working, matching a sensible MVP-first roadmap: ship CRUD + search first, then layer in the poller/diff/notify pipeline, then wire the frontend, then containerize/embed, then harden CI/CD.
-- **go:embed integration (12) is deliberately late** — dev-mode (Vite dev server + API proxy) means the frontend can be built and iterated on well before the embed/dual-mode-serving code is written, so this shouldn't block frontend feature work.
-- **CI/CD depth (14) can be introduced incrementally**: lint + unit test jobs can be scaffolded from the very first commit (cheap, high value, catches regressions immediately); Trivy/gitleaks/SBOM/semantic-release/ghcr.io push naturally arrive once there's a real Dockerfile (step 13) to build and scan — trying to stand up the full pipeline before there's an image to scan/push is not productive.
+**Recommended sequencing:**
+1. **Feature 2, backend half** (trivial, zero dependencies — one flag on an existing `go test` invocation plus a threshold-check step).
+2. **Feature 1** (Vitest + RTL suite) — must exist before Feature 2's frontend half is meaningful.
+3. **Feature 2, frontend half** (depends on #2).
+4. **Feature 3** (retention) — independent of 1/2/4, but its own internal decision (soft-filter vs. hard-delete-with-baseline-migration) should be resolved as a design checkpoint before implementation starts, given the correctness risk documented above.
+5. **Feature 4** (worker pool) — land last: it's the highest-risk change (concurrency correctness in `internal/detection`'s baseline path), and having Features 1-2's coverage/test infrastructure already in place means its own test-double concurrency-safety fixes and any regression are caught by CI rather than discovered manually.
+
+Features 1+2 and 3 have no interdependency and can run as parallel workstreams; Feature 4 should not start until at least the backend coverage gate (step 1) exists, since it is the change most likely to introduce a subtle regression the existing `-race` flag (already in `make test-integration`) is specifically positioned to catch.
 
 ## Sources
 
-- [golang-standards/project-layout](https://github.com/golang-standards/project-layout) — community-reference Go project layout (cmd/internal/pkg/web/api conventions) — MEDIUM confidence (community consensus repo, not an official Go team spec, but widely adopted)
-- [Go Project Structure: Practices & Patterns (Rost Glukhov)](https://www.glukhov.org/app-architecture/code-architecture/go-project-structure/) — MEDIUM confidence
-- [Embed Vite app in a Go Binary (Tushar Choudhari)](https://www.tushar.ch/writing/embed-vite-app-in-go-binary) — MEDIUM confidence
-- [Embed Vite React in Golang Binary with Live Reload (dev.to)](https://dev.to/danhawkins/embed-vite-react-in-golang-binary-with-live-reload-1k4d) — MEDIUM confidence, cross-checked against the above
-- [go:embed draft design doc (Go team)](https://go.googlesource.com/proposal/+/master/design/draft-embed.md) — HIGH confidence (official Go proposal)
-- [go-chi/chi](https://github.com/go-chi/chi) — HIGH confidence (official repo/docs)
-- [HTTP routing in Go services with chi (Stack Harbor)](https://stackharbor.com/en/knowledge-base/golang-chi-router-pattern/) — MEDIUM confidence
-- [Developing and Running Cron Jobs with robfig/cron (Sling Academy)](https://www.slingacademy.com/article/developing-and-running-cron-jobs-with-robfig-cron-in-go/) — MEDIUM confidence
-- [Creating a Job Scheduler in Golang with Cron, Graceful Shutdown, and SOLID Principles (Medium)](https://medium.com/@abbasmomeny1994/creating-a-job-scheduler-in-golang-with-cron-graceful-shutdown-and-solid-principles-2a2820078efb) — MEDIUM confidence
-- [Using SQLC for ORM alternative in Golang, ft. Go-Migrate & PGX (Gravel Engineering)](https://medium.com/gravel-engineering/using-sqlc-for-orm-alternative-in-golang-ft-go-migrate-pgx-b9e35ec623b2) — MEDIUM confidence
-- [sqlc: Type-Safe Querying in Go (dev.to)](https://dev.to/leapcell/sqlc-type-safe-querying-in-go-4a47) — MEDIUM confidence
-- [How to implement Clean Architecture in Go / Three Dots Labs](https://threedots.tech/post/introducing-clean-architecture/) — MEDIUM confidence, corroborates service/handler/repository layering
-- [Multi-Stage Docker Builds for Fullstack React + Node Apps (dev.to)](https://dev.to/devforgedev/multi-stage-docker-builds-for-fullstack-react-node-apps-1m02) — MEDIUM confidence
-- [Docker Build Process — icereed/paperless-gpt (DeepWiki)](https://deepwiki.com/icereed/paperless-gpt/4.1-docker-build-process) — MEDIUM confidence, concrete example of a Node-build-stage → Go-embed pattern
-- [aquasecurity/trivy-action](https://github.com/aquasecurity/trivy-action) — HIGH confidence (official Trivy GitHub Action)
-- [Automating Docker Image Versioning, Build, Push, and Scanning Using GitHub Actions (dev.to)](https://dev.to/msrabon/automating-docker-image-versioning-build-push-and-scanning-using-github-actions-388n) — MEDIUM confidence
-- [Semantic release to npm and/or ghcr without any tooling (dev.to / OpenSauced)](https://dev.to/opensauced/semantic-release-to-npm-andor-ghcr-without-any-tooling-5730) — MEDIUM confidence
-- [Dependency caching reference (GitHub Docs)](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching) — HIGH confidence (official GitHub documentation)
-- [Better GitHub Actions caching for Go (Dan Peterson)](https://danp.net/posts/github-actions-go-cache/) — MEDIUM confidence
+- Direct repo inspection (HIGH confidence — primary source, not third-party docs): `cmd/server/main.go`, `internal/poller/poller.go`, `internal/detection/detector.go`, `internal/detection/musicbrainz.go`, `internal/db/sqlc/querier.go`, `internal/db/migrations/000003_events.up.sql`, `internal/events/service.go`, `internal/config/config.go`, `Makefile`, `.github/workflows/full-pipeline.yml`, `web/package.json`, `web/vite.config.ts`
+- `vitest.dev/config/coverage` — Vitest coverage provider/threshold configuration shape — confidence MEDIUM (web search corroborated, not directly fetched)
+- Remix/React Router v7 community discussions (`remix-run/react-router` GitHub Discussions #12655, #13353; multiple independent 2026-dated setup guides) — "the React Router Vite plugin is not designed for use with Vitest/Storybook, use a separate config" — confidence MEDIUM-HIGH (corroborated across multiple independent sources, matches the exact symptom class documented for other RR7 projects)
+- `pkg.go.dev/golang.org/x/sync/errgroup` — `SetLimit` bounded-concurrency semantics, first-error cancels shared context — confidence HIGH (official godoc)
+- `pkg.go.dev/golang.org/x/time/rate` (referenced, not re-fetched this pass — already verified in-repo usage at `internal/musicbrainz/client.go`/`internal/deezer/client.go`) — `rate.Limiter` is safe for concurrent use by multiple goroutines — confidence HIGH (well-established stdlib-adjacent package behavior, consistent with the package's documented design intent)
 
 ---
-*Architecture research for: Go single-binary service (chi API + robfig/cron poller + Discord notifier + embedded React/Vite SPA + Postgres/sqlc)*
-*Researched: 2026-08-04*
+*Architecture research for: drop-tracker v1.1 Hardening & Scale Readiness milestone*
+*Researched: 2026-08-12*
