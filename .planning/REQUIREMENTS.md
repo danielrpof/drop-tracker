@@ -59,9 +59,9 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **CICD-02**: Every push runs gitleaks to scan for committed secrets, blocking the pipeline on detection
 - [x] **CICD-03**: The pipeline builds a multi-stage Docker image (slim base, non-root user) containing the API, scheduler, notifier, and embedded frontend
 - [x] **CICD-04**: The pipeline scans the built image with Trivy and blocks publishing on critical vulnerabilities
-- [ ] **CICD-05**: The pipeline generates an SBOM for the built image
-- [ ] **CICD-06**: The pipeline computes a semantic version and tags a release automatically on merge to main
-- [ ] **CICD-07**: The pipeline pushes the built, scanned image to GitHub Container Registry (ghcr.io) tagged with the semantic version
+- [x] **CICD-05**: The pipeline generates an SBOM for the built image
+- [x] **CICD-06**: The pipeline computes a semantic version and tags a release automatically on merge to main
+- [x] **CICD-07**: The pipeline pushes the built, scanned image to GitHub Container Registry (ghcr.io) tagged with the semantic version
 - [x] **CICD-08**: Third-party GitHub Actions used for security-sensitive steps are pinned to commit SHAs, not tags
 - [x] **CICD-09**: `docker-compose` brings up the app and a local Postgres instance for local development
 - [ ] **CICD-10**: A pre-commit configuration runs golangci-lint and gitleaks locally before commit (gitleaks half done in quick task 260806-hfn; golangci-lint half deferred to Phase 07)
@@ -132,9 +132,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CICD-02 | Phase 7 | Complete |
 | CICD-03 | Phase 7 | Complete |
 | CICD-04 | Phase 7 | Complete |
-| CICD-05 | Phase 7 | Pending |
-| CICD-06 | Phase 7 | Pending |
-| CICD-07 | Phase 7 | Pending |
+| CICD-05 | Phase 7 | Complete |
+| CICD-06 | Phase 7 | Complete |
+| CICD-07 | Phase 7 | Complete |
 | CICD-08 | Phase 7 | Complete |
 | CICD-09 | Phase 7 | Complete |
 | CICD-10 | Phase 7 | Partial (gitleaks half done in quick/260806-hfn; golangci-lint half pending) |
