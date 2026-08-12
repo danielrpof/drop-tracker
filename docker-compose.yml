@@ -6,7 +6,15 @@ services:
       POSTGRES_PASSWORD: drop_tracker
       POSTGRES_DB: drop_tracker
     ports:
-      - "5432:5432"
+      # Published on 5433 rather than Postgres's default 5432 deliberately.
+      # Binding 5432 on a dev box that already has any other Postgres on it
+      # does not fail in a way anyone notices: compose refuses to start this
+      # container, the app connects to whichever instance owns the port, its
+      # migrations create a schema that looks correct, and every query then
+      # runs against the wrong database. That cost a full debug session --
+      # see .planning/debug/resolved/notify-pass-hangs-forever.md.
+      # Keep in lockstep with Makefile's TEST_DATABASE_URL and .env.example.
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U drop_tracker"]
       interval: 2s

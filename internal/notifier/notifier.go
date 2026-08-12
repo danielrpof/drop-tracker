@@ -30,6 +30,31 @@ import (
 // decision's band rather than at its lower (safer) end.
 const defaultSpacing = 400 * time.Millisecond
 
+// dbOpTimeout bounds each individual database call inside NotifyPending.
+//
+// The ctx NotifyPending receives is the poll cycle's own context, derived
+// from signal.NotifyContext -- it carries no deadline and is not Done until
+// the process is shutting down. pgx's only cancellation mechanism is a
+// context watcher that sets a socket deadline once ctx becomes Done, so
+// against a socket that is TCP-ESTABLISHED but never answers, an
+// unbounded ctx means the query below blocks for the lifetime of the
+// process. That is not a hypothetical: it is exactly what wedged this
+// function in production, and because the notifying CAS guard is held for
+// the whole call, one such block silently stopped every future notify pass
+// (.planning/debug/resolved/notify-pass-hangs-forever.md).
+//
+// The bound is applied per database call rather than to the pass as a whole
+// on purpose: a large backlog legitimately takes len(events)*spacing to
+// drain, so a whole-pass deadline would abort healthy work. Wrapping the
+// sqlc call itself is safe precisely because the generated ListUnnotified
+// fully drains and closes its rows before returning -- the deadline can
+// never be cancelled out from under an in-flight row iteration.
+//
+// Declared as a var, not a const, so notifier_test.go can shrink it and
+// keep the regression test fast, mirroring discord.maxRetryAfter's own
+// rationale.
+var dbOpTimeout = 10 * time.Second
+
 // Sender is the narrow seam NotifyPending depends on for outbound delivery,
 // declared here in the consumer (mirroring detection.RecordingSource) so a
 // test can substitute a fake with no real HTTP client.
@@ -93,6 +118,28 @@ func Select(webhookURL string, q sqlc.Querier, httpClient *http.Client, logger *
 	return New(q, discord.NewClient(webhookURL, httpClient), defaultSpacing)
 }
 
+// listUnnotified calls q.ListUnnotified under a dbOpTimeout deadline derived
+// from ctx, so a wedged connection surfaces as an ordinary error instead of
+// parking this goroutine forever. Deriving from ctx (rather than from
+// context.Background()) keeps shutdown cancellation propagating: whichever
+// of the two fires first wins.
+func listUnnotified(ctx context.Context, q sqlc.Querier) ([]sqlc.Event, error) {
+	opCtx, cancel := context.WithTimeout(ctx, dbOpTimeout)
+	defer cancel()
+	return q.ListUnnotified(opCtx)
+}
+
+// markNotified calls q.MarkNotified under the same bound as listUnnotified.
+// A timeout here lands on NotifyPending's existing WR-03 path: Discord has
+// already accepted the send, so the row stays pending and the next pass
+// re-sends it -- a visible duplicate, which is the documented and preferred
+// outcome versus a process that never notifies again.
+func markNotified(ctx context.Context, q sqlc.Querier, id int64) (int64, error) {
+	opCtx, cancel := context.WithTimeout(ctx, dbOpTimeout)
+	defer cancel()
+	return q.MarkNotified(opCtx, id)
+}
+
 // NotifyPending drains every currently-pending events row (notified_at IS
 // NULL), in ListUnnotified's deterministic order, sending each as one
 // Discord message and marking it notified on success.
@@ -122,7 +169,7 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 	}
 	defer n.notifying.Store(false)
 
-	events, err := n.q.ListUnnotified(ctx)
+	events, err := listUnnotified(ctx, n.q)
 	if err != nil {
 		return fmt.Errorf("notifier: list unnotified: %w", err)
 	}
@@ -135,7 +182,7 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 				slog.String("event_type", ev.EventType),
 				slog.String("error", err.Error()),
 			)
-		} else if _, err := n.q.MarkNotified(ctx, ev.ID); err != nil {
+		} else if _, err := markNotified(ctx, n.q, ev.ID); err != nil {
 			// WR-03: Discord has already durably accepted this send, but
 			// this process failed to acknowledge it in the DB -- the next
 			// pass will re-select and re-send this row, producing a

@@ -1,6 +1,11 @@
 .PHONY: build run test test-short test-integration sqlc sqlc-check sqlc-version-check db-up db-down hooks web
 
-TEST_DATABASE_URL ?= postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable
+# Port 5433, not Postgres's default 5432, and it must stay in lockstep with
+# docker-compose.yml's published port -- see the comment there. Pointing this
+# at 5432 on a machine where another project already holds that port does not
+# fail loudly; it silently runs migrations and writes test rows into that
+# other project's database.
+TEST_DATABASE_URL ?= postgres://drop_tracker:drop_tracker@localhost:5433/drop_tracker?sslmode=disable
 
 # Override on boxes where the interpreter is `python3` instead of `python`.
 PYTHON ?= python
@@ -25,8 +30,14 @@ run:
 test-short:
 	go test ./... -short -race -count=1
 
+# -p 1 runs one package binary at a time. Every DB-backed package shares the
+# single database above, and internal/db's migration tests deliberately
+# `DROP SCHEMA public CASCADE` to prove migrations apply from scratch -- run in
+# parallel (Go's default) that drop lands underneath whichever other package is
+# mid-test, surfacing as unrelated-looking failures such as `relation "artists"
+# does not exist`.
 test-integration: db-up
-	TEST_DATABASE_URL=$(TEST_DATABASE_URL) go test ./... -race -count=1
+	TEST_DATABASE_URL=$(TEST_DATABASE_URL) go test ./... -race -count=1 -p 1
 
 test: test-integration
 
