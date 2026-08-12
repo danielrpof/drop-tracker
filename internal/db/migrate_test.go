@@ -139,7 +139,7 @@ func TestRunMigrations_AppliesFromScratch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	if _, err := sqlDB.ExecContext(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
 		t.Fatalf("reset public schema: %v", err)
 	}

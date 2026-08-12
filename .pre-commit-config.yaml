@@ -1,9 +1,21 @@
-# Local secret scanning (CICD-10, gitleaks half). Mirrors the Phase 07 CI gitleaks job
-# (CICD-02) so a secret is caught here, before it ever becomes a commit object, and again
-# in CI as a non-bypassable backstop. The golangci-lint hook (the other half of CICD-10)
-# is intentionally deferred to Phase 07 — its absence here is not an oversight.
+# Two local gates before a commit exists, each mirroring its own CI backstop job
+# in .github/workflows/full-pipeline.yml (plan 07-03):
+#   - gitleaks (CICD-02/CICD-10): secret scanning.
+#   - golangci-lint (CICD-01/CICD-10): Go linting, reading the repo-root
+#     .golangci.yml so local and CI verdicts share one source of truth.
+# Both are caught here, before a commit object exists, and again in CI as a
+# non-bypassable backstop -- `--no-verify` can skip this file, but not CI.
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:
       - id: gitleaks
+  # Upstream's `golangci-lint` hook id lints changed files only
+  # (--new-from-rev HEAD --fix), matching the gitleaks hook's staged-diff-only
+  # scope above. `--fix` rewrites source in place -- any auto-applied change
+  # lands in the working tree for the developer to see and re-stage, never
+  # silently committed (T-07-07).
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.12.2
+    hooks:
+      - id: golangci-lint

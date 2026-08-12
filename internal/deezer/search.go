@@ -62,7 +62,7 @@ func (c *Client) SearchArtists(ctx context.Context, query string, limit int) ([]
 	if err != nil {
 		return nil, fmt.Errorf("deezer: search artists: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		// Never echo the response body -- only the status code (mirrors

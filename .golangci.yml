@@ -1,0 +1,18 @@
+version: "2"
+
+# Read by two consumers:
+#   - The CI lint job in .github/workflows/full-pipeline.yml (plan 07-03),
+#     via golangci-lint-action pinned to the same v2.12.2 CLI version.
+#   - The local golangci-lint pre-commit hook (.pre-commit-config.yaml),
+#     pinned to the identical v2.12.2 rev so a commit that passes locally
+#     is never rejected by a different linter version in CI.
+#
+# v2 schema (not v1) -- golangci-lint v2.12.2 will not read a v1-era
+# `linters-settings:`-style config correctly. See CLAUDE.md's
+# "What NOT to Use" row on this exact point.
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard

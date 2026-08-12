@@ -189,7 +189,7 @@ func envExampleKeys(t *testing.T) map[string]bool {
 	if err != nil {
 		t.Fatalf("open .env.example: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	keys := map[string]bool{}
 	scanner := bufio.NewScanner(f)
@@ -274,7 +274,7 @@ func TestDotEnvIsNotTracked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open .gitignore: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	found := false
 	scanner := bufio.NewScanner(f)

@@ -65,7 +65,7 @@ func TestHandleListEvents_HappyPathReturns200WithEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /events: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -101,7 +101,7 @@ func TestHandleListEvents_EmptyReturnsEmptyArrayAndNullCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /events: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestHandleListEvents_NilEventsSliceStillEncodesAsEmptyArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /events: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -157,7 +157,7 @@ func TestHandleListEvents_StoreErrorReturns500WithFixedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /events: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
@@ -234,7 +234,7 @@ func TestHandleListEvents_Validation(t *testing.T) {
 				if err != nil {
 					t.Fatalf("GET /events?%s: %v", tc.query, err)
 				}
-				defer resp.Body.Close()
+				defer func() { _ = resp.Body.Close() }()
 
 				if resp.StatusCode != http.StatusBadRequest {
 					t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -277,7 +277,7 @@ func TestHandleListEvents_Validation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /events?artist_id=: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 		}
@@ -300,7 +300,7 @@ func TestHandleListEvents_Validation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /events: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 		}
@@ -323,7 +323,7 @@ func TestHandleListEvents_Validation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /events?limit=100000: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)

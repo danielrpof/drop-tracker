@@ -79,7 +79,7 @@ func TestSearch_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -120,7 +120,7 @@ func TestSearch_SourceErrorReturns200WithErrorStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d (a degraded source must never fail the whole request)", resp.StatusCode, http.StatusOK)
@@ -172,7 +172,7 @@ func TestSearch_MissingOrBlankQReturns400(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GET %s: %v", p, err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -203,7 +203,7 @@ func TestSearch_QOverLongReturns400(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -231,7 +231,7 @@ func TestSearch_QExactly512RunesReturns200(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -250,7 +250,7 @@ func TestSearch_ZeroArtistsReturnsEmptyArrayNeverNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -292,7 +292,7 @@ func TestSearch_FanOutIsConcurrent(t *testing.T) {
 	go func() {
 		resp, err := http.Get(ts.URL + "/search?q=drake")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		close(done)
 	}()
@@ -333,7 +333,7 @@ func TestSearch_PartialFailure_OneSourceDownAnotherHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -495,7 +495,7 @@ func TestSearch_BothSourcesOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -547,7 +547,7 @@ func TestSearch_DeezerOnlyFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -604,7 +604,7 @@ func TestSearch_BothSourcesFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d (both sources failing must never produce a 5xx)", resp.StatusCode, http.StatusOK)
