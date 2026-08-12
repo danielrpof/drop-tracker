@@ -221,9 +221,17 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 07-01-PLAN.md — Multi-stage non-root image + docker-compose `app:` service (CICD-03, CICD-09)
 - [ ] 07-02-PLAN.md — golangci-lint v2 config + pre-commit hook (CICD-01, CICD-10)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 07-03-PLAN.md — Full Pipeline workflow: lint/vet/test/gitleaks/PR-title gates + Trivy-blocked image build (CICD-01, CICD-02, CICD-04, CICD-08)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 07-04-PLAN.md — Release path: svu semver, ghcr.io push, SBOM, seeded v0.1.0 tag (CICD-05, CICD-06, CICD-07)
 
 ## Progress
