@@ -1,5 +1,5 @@
-# golangci-lint v2 configuration (CICD-01, CICD-10).
-#
+version: "2"
+
 # Read by two consumers:
 #   - The CI lint job in .github/workflows/full-pipeline.yml (plan 07-03),
 #     via golangci-lint-action pinned to the same v2.12.2 CLI version.
@@ -10,7 +10,6 @@
 # v2 schema (not v1) -- golangci-lint v2.12.2 will not read a v1-era
 # `linters-settings:`-style config correctly. See CLAUDE.md's
 # "What NOT to Use" row on this exact point.
-version: "2"
 
 run:
   timeout: 5m
