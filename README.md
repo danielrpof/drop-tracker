@@ -12,3 +12,5 @@ make hooks
 This installs a pre-commit hook that scans staged changes for secrets with
 [gitleaks](https://github.com/gitleaks/gitleaks) before a commit can land. The pinned
 version lives in `.pre-commit-config.yaml`.
+
+<!-- CI verification: exercising the Full Pipeline workflow gates and release job (phase 07). -->

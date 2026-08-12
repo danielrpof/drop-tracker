@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,17 +35,12 @@ func blackHoleAddr(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
 
 	held := make(chan net.Conn, 16)
-	t.Cleanup(func() {
-		close(held)
-		for c := range held {
-			_ = c.Close()
-		}
-	})
-
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
@@ -59,6 +55,20 @@ func blackHoleAddr(t *testing.T) string {
 			}
 		}
 	}()
+
+	// A single Cleanup, ordered so ln.Close() unblocks Accept and wg.Wait()
+	// proves the goroutine has returned *before* held is touched -- closing
+	// held first (or concurrently) raced against the goroutine's still-live
+	// `held <- conn` send (found by CI's -race run, phase 07 Task 3 PR
+	// verification).
+	t.Cleanup(func() {
+		_ = ln.Close()
+		wg.Wait()
+		close(held)
+		for c := range held {
+			_ = c.Close()
+		}
+	})
 
 	return ln.Addr().String()
 }
