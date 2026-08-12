@@ -6,9 +6,9 @@ current_phase: 7
 current_phase_name: Containerization & CI/CD Pipeline
 status: planning
 stopped_at: Phase 06 complete, ready to plan Phase 7
-last_updated: "2026-08-11T21:30:00.000Z"
+last_updated: "2026-08-12T01:45:00.000Z"
 last_activity: 2026-08-11
-last_activity_desc: Phase 06 complete, transitioned to Phase 7
+last_activity_desc: Closed deferred Phase 5 UAT gap (Discord live-delivery bug found and fixed via /gsd-debug); ready to plan Phase 7
 progress:
   total_phases: 6
   completed_phases: 6
@@ -153,6 +153,7 @@ Recent decisions affecting current work:
 - [Phase 06-04]: Search-as-you-type debounced ~300ms with `AbortController` supersession cancellation, backed by the existing per-source `rate.Limiter` and a fixed `searchResultLimit` of 10 -- bounds outbound MusicBrainz/Deezer traffic regardless of client behavior.
 - [Phase 06 Security]: `/gsd-secure-phase 06` closed all 23 registered threats across the phase's 4 plans (19 mitigated, 4 accepted with documented rationale) via L1 grep-depth verification against the implementation -- ASVS level 1, no deeper auditor pass required. See 06-SECURITY.md.
 - [Phase 06 UAT]: Search-result popularity ranking / same-name disambiguation accepted as a valid, out-of-scope enhancement rather than a defect; captured as backlog Phase 999.1 in ROADMAP.md.
+- [Phase 05 UAT, closed 2026-08-11]: Retroactively closed the last deferred Phase 5 verification gap (Live Discord rendering + mention-suppression check). First run exposed a real bug -- diagnosed via `/gsd-debug` to two AND-gated causes: (1) local dev DB collided with an unrelated agent worktree's Postgres container squatting on host port 5432, so seeded UAT rows never reached the database the app actually queried; (2) no timeout existed anywhere in the notifier's DB call path, so a dead socket wedged the notify pass forever. Fixed via bounded pgxpool/query timeouts (`internal/db/pool.go`, `internal/notifier/notifier.go`, commit `479c781`) and remapping `docker-compose.yml`'s Postgres port to 5433 to stop colliding with other worktrees. Both 05-UAT.md tests now pass; 05-VERIFICATION.md status set to `passed`. Full investigation: `.planning/debug/resolved/notify-pass-hangs-forever.md`.
 
 ### Pending Todos
 
@@ -161,7 +162,6 @@ None yet.
 ### Blockers/Concerns
 
 - ⚠️ [Phase 03] musicbrainz.org's TLS handshake fails from this developer's WSL2 network path (confirmed environmental via plain curl, not app code) -- Deezer unaffected. If future live testing on this machine needs real MusicBrainz data, expect the same failure; see PROJECT.md Context and Broken Windows Ledger entry #3 (waived).
-- ⚠️ [Phase 05] Live Discord rendering + mention-suppression check remains open -- requires a real `DISCORD_WEBHOOK_URL` and a human looking at an actual Discord channel; cannot be automated. See 05-VERIFICATION.md Human Verification Required #1.
 
 ### Quick Tasks Completed
 

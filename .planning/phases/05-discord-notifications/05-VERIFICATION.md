@@ -1,14 +1,16 @@
 ---
 phase: 05-discord-notifications
 verified: 2026-08-08T22:15:00Z
-status: human_needed
+status: passed
 score: 26/28 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 human_verification:
+
   - test: "Point DISCORD_WEBHOOK_URL at a real Discord channel, seed a new_release, a guest_feature, and a deluxe_change event, and let one live poll cycle (or a manual NotifyPending trigger) deliver all three"
     expected: "Three visually distinct messages appear in the Discord channel: new_release (green sidebar, 🆕 title prefix, Artist/Release Date/Type fields, cover-art thumbnail, clickable release-group/album link), guest_feature (yellow sidebar, 🎤 prefix, Artist field, clickable recording link), deluxe_change (fuchsia sidebar, 💿 prefix, Tracks field showing the count delta, clickable release link) -- and no @mention in any community-edited artist name actually pings anyone"
     why_human: "Discord's actual rendering of embed color/emoji/thumbnail/link and its mention-suppression behavior can only be confirmed by looking at a real message in a real Discord client; httptest.Server-backed tests prove the correct HTTP payload is sent but cannot prove Discord renders it as intended"
+
   - test: "Construct or capture an embed title that is exactly 256 runes (including multi-byte characters) and confirm it is sent unmodified rather than truncated to 255 or rejected by Discord as oversized; separately confirm a fully-populated new_release/deluxe_change embed (title at 256 runes plus all optional fields at 1024 runes each) stays under Discord's ~6000-character total embed budget"
     expected: "A 256-rune title round-trips unchanged through truncateRunes (code's `<=` comparison implies this, but no test asserts the exact-256 boundary) and Discord accepts the request; a worst-case fully-populated embed (title + Artist + Release Date + Type, or title + Tracks, each at their field limit) stays within the ~6000-character total embed budget Discord documents"
     why_human: "These two must-haves are explicitly marked `verification: backstop` in 05-02-PLAN.md's frontmatter -- no automated test in format_test.go asserts the exact-256-rune boundary case or sums a worst-case embed's total character budget against Discord's ~6000 limit; truncateRunes's `<=` comparison and per-field truncation make both plausible by code inspection, but per the verifier's non-inferable-truth policy this cannot be self-certified as VERIFIED without explicit test evidence"
