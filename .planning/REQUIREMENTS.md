@@ -178,6 +178,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CICD-08 | Phase 7 | Complete |
 | CICD-09 | Phase 7 | Complete |
 | CICD-10 | Phase 7 | Complete |
+| TEST-01 | Phase 8 | Pending |
+| TEST-02 | Phase 8 | Pending |
+| CICD-11 | Phase 9 | Pending |
+| CICD-12 | Phase 9 | Pending |
+| DATA-01 | Phase 10 | Pending |
+| DATA-02 | Phase 10 | Pending |
+| PERF-01 | Phase 11 | Pending |
+| PERF-02 | Phase 11 | Pending |
+| PERF-03 | Phase 11 | Pending |
+| PERF-04 | Phase 11 | Pending |
 
 **Coverage:**
 
@@ -185,6 +195,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 - Mapped to phases: 35
 - Unmapped: 0 ✓
 
+- v1.1 requirements: 10 total
+- Mapped to phases: 10
+- Unmapped: 0 ✓
+
 ---
 *Requirements defined: 2026-08-04*
-*Last updated: 2026-08-04 after roadmap creation (7 phases, full coverage)*
+*Last updated: 2026-08-12 after v1.1 roadmap creation (Phases 8-11, full coverage)*

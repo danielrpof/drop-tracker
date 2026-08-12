@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening & Scale Readiness
-status: planning
-last_updated: "2026-08-12T19:37:27.147Z"
+status: roadmap_complete
+last_updated: "2026-08-12T21:00:00.000Z"
 last_activity: 2026-08-12
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,14 +20,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-11)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 07 — containerization-ci-cd-pipeline
+**Current focus:** Phase 08 — frontend-test-suite (first phase of milestone v1.1)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 08 — Frontend Test Suite (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-08-12 — Milestone v1.1 started
+Status: Roadmap complete — ready to plan Phase 08
+Last activity: 2026-08-12 — v1.1 roadmap created (4 phases, 10/10 requirements mapped)
+
+**v1.1 phases:**
+
+| Phase | Name | Requirements |
+|-------|------|--------------|
+| 08 | Frontend Test Suite | TEST-01, TEST-02 |
+| 09 | CI Coverage Gates | CICD-11, CICD-12 |
+| 10 | Event Retention Window | DATA-01, DATA-02 |
+| 11 | Bounded Concurrent Polling | PERF-01, PERF-02, PERF-03, PERF-04 |
 
 ## Performance Metrics
 
@@ -150,6 +159,11 @@ Recent decisions affecting current work:
 - [Phase 06 Security]: `/gsd-secure-phase 06` closed all 23 registered threats across the phase's 4 plans (19 mitigated, 4 accepted with documented rationale) via L1 grep-depth verification against the implementation -- ASVS level 1, no deeper auditor pass required. See 06-SECURITY.md.
 - [Phase 06 UAT]: Search-result popularity ranking / same-name disambiguation accepted as a valid, out-of-scope enhancement rather than a defect; captured as backlog Phase 999.1 in ROADMAP.md.
 - [Phase 05 UAT, closed 2026-08-11]: Retroactively closed the last deferred Phase 5 verification gap (Live Discord rendering + mention-suppression check). First run exposed a real bug -- diagnosed via `/gsd-debug` to two AND-gated causes: (1) local dev DB collided with an unrelated agent worktree's Postgres container squatting on host port 5432, so seeded UAT rows never reached the database the app actually queried; (2) no timeout existed anywhere in the notifier's DB call path, so a dead socket wedged the notify pass forever. Fixed via bounded pgxpool/query timeouts (`internal/db/pool.go`, `internal/notifier/notifier.go`, commit `479c781`) and remapping `docker-compose.yml`'s Postgres port to 5433 to stop colliding with other worktrees. Both 05-UAT.md tests now pass; 05-VERIFICATION.md status set to `passed`. Full investigation: `.planning/debug/resolved/notify-pass-hangs-forever.md`.
+- [v1.1 Roadmap]: 4 phases derived from the 10 v1.1 requirements — Frontend Test Suite, CI Coverage Gates, Event Retention Window, Bounded Concurrent Polling.
+- [v1.1 Roadmap]: Research proposed 5 phases with the two coverage gates split (backend gate first, frontend gate third). Merged into one Phase 09 instead — both gates edit the same `.github/workflows/full-pipeline.yml`, and splitting them left two single-requirement phases. Ordering constraint research cared about is preserved: the frontend suite (Phase 08) still lands before any gate measures it.
+- [v1.1 Roadmap]: Event retention is soft-delete/filter, locked — never hard delete. Rows past the window are hidden from History/API but stay in the table so dedup keys, `events.track_count` deluxe baselines, and per-source seed-mode state survive. The `release_group_baselines` migration that hard delete would have required is rejected. Phase 10's success criteria 3-5 exist to prove each of the three regressions hard delete would have reintroduced.
+- [v1.1 Roadmap]: Coverage thresholds are 80% backend / 70% frontend per REQUIREMENTS.md (CICD-11/12), not the flat 70%/70% research assumed. If a measured baseline lands under its threshold, Phase 09 closes the gap with real tests rather than lowering the number.
+- [v1.1 Roadmap]: Bounded concurrent polling (Phase 11) lands last — highest correctness risk of the milestone, and it benefits from executing behind working coverage gates.
 
 ### Pending Todos
 
@@ -176,6 +190,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-12T04:22:04.794Z
-Stopped at: Phase 07 context gathered
-Resume file: .planning/phases/07-containerization-ci-cd-pipeline/07-CONTEXT.md
+Last session: 2026-08-12
+Stopped at: v1.1 roadmap created — Phases 08-11 defined, awaiting phase planning
+Resume file: .planning/ROADMAP.md

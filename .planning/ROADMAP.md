@@ -4,6 +4,8 @@
 
 drop-tracker starts from an empty repo and builds outward from the data layer: a Postgres schema, config, and health-checked service skeleton first, then a fully tested watchlist CRUD API, then rate-limited MusicBrainz/Deezer clients with live search, then the detection engine that diffs poll results into new-release/guest-feature/deluxe events, then Discord notifications for those events, then the React UI that ties watchlist management and release history together, and finally the single-image containerization and full GitHub Actions CI/CD pipeline (lint, test, security scan, SBOM, semantic versioning, ghcr.io publish) that is the actual point of the project. Each phase produces something a user (or operator) can directly observe working before the next phase builds on it.
 
+**v1.1 Hardening & Scale Readiness** picks up from a shipped, working v1.0 and closes four peer-reviewed gaps without changing what the app does for its user: the React frontend gets the component test suite it never had, the Full Pipeline starts enforcing coverage floors on both languages instead of merely running tests, the events table gets a retention window that hides stale history from display while leaving every detection-critical row in place, and the poller stops walking the watchlist one artist at a time. Ordering is deliberate: tests before the gate that measures them, and the concurrency rewrite last, once a working coverage harness exists to catch what it breaks.
+
 ## Phases
 
 **Phase Numbering:**
@@ -13,6 +15,8 @@ drop-tracker starts from an empty repo and builds outward from the data layer: a
 
 Decimal phases appear between their surrounding integers in numeric order.
 
+**v1.0 MVP — shipped 2026-08-12**
+
 - [x] **Phase 1: Foundation — Data Layer, Config & Health** - Postgres schema/migrations, sqlc, env-based config, structured logging, and a `/health` endpoint the rest of the app is built on (completed 2026-08-05)
 - [x] **Phase 2: Watchlist Core** - Users can add, remove, list, and configure per-artist alert preferences through a tested watchlist API (completed 2026-08-06)
 - [x] **Phase 3: External Clients & Search** - Rate-limited MusicBrainz/Deezer clients power a live search-proxy and scheduled polling (completed 2026-08-07)
@@ -20,6 +24,13 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Discord Notifications** - Detected events are posted to Discord with distinct formatting per event type, honoring mute preferences (completed 2026-08-08)
 - [x] **Phase 6: Frontend & Release History** - Users manage their watchlist and browse detected release history entirely through a web UI (completed 2026-08-11)
 - [x] **Phase 7: Containerization & CI/CD Pipeline** - The app ships as a single scanned, versioned, non-root Docker image via an automated GitHub Actions pipeline, with docker-compose for local dev (completed 2026-08-12)
+
+**v1.1 Hardening & Scale Readiness — in progress**
+
+- [ ] **Phase 8: Frontend Test Suite** - The watchlist, search, and history React surfaces get a Vitest + React Testing Library suite that mocks the app's own API boundary
+- [ ] **Phase 9: CI Coverage Gates** - The Full Pipeline blocks the build when Go coverage drops below 80% or frontend coverage drops below 70%
+- [ ] **Phase 10: Event Retention Window** - History and API hide events older than a configurable window (default 90 days) while every row and all detection state stay intact
+- [ ] **Phase 11: Bounded Concurrent Polling** - Each source polls several artists at a time through a bounded worker pool, without breaking rate limits, overlap guards, or baseline correctness
 
 ## Phase Details
 
@@ -234,10 +245,91 @@ Plans:
 
 - [x] 07-04-PLAN.md — Release path: svu semver, ghcr.io push, SBOM, seeded v0.1.0 tag (CICD-05, CICD-06, CICD-07)
 
+### Phase 8: Frontend Test Suite
+
+**Goal**: The React frontend's watchlist, search, and history surfaces are covered by a real component test suite, so a regression in the UI is caught by a test run instead of by hand-clicking the app.
+**Depends on**: Phase 7 (v1.0 complete)
+**Requirements**: TEST-01, TEST-02
+**Success Criteria** (what must be TRUE):
+
+  1. A single command runs the frontend suite (Vitest + React Testing Library, jsdom) locally and in CI, and exits non-zero when a component regresses
+  2. The watchlist list/row, preference-toggle, search, and history/event-filter surfaces each have at least one passing test asserting user-visible behavior — e.g. the watchlist row's remove control triggers the remove API call, and a preference toggle rolls back its optimistic state when the call fails
+  3. Tests mock the app's API boundary (`web/app/lib/api.ts`), not raw `fetch` — no test issues a real network request, and the whole suite passes with no server running
+  4. Components needing router context render through one shared helper (React Router's `createRoutesStub`), established once and reused, rather than each test reinventing router wrapping
+
+**Plans**: TBD
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 8 to break down)
+
+Notes: Vitest cannot reuse `web/vite.config.ts` — React Router's Vite plugin is incompatible, so this phase adds a separate `vitest.config.ts`. Test files co-locate beside source (`*.test.tsx`), mirroring Go's `_test.go` convention already used in this repo.
+
+### Phase 9: CI Coverage Gates
+
+**Goal**: The Full Pipeline stops merely running tests and starts enforcing them — a drop in coverage on either language blocks the build before anything is packaged or published.
+**Depends on**: Phase 8 (a frontend coverage number is meaningless until a frontend suite exists)
+**Requirements**: CICD-11, CICD-12
+**Success Criteria** (what must be TRUE):
+
+  1. The backend job produces a Go coverage profile and fails the pipeline when aggregate coverage is below 80%
+  2. The frontend job runs Vitest with coverage and fails the pipeline when aggregate coverage is below 70%
+  3. A coverage failure on either side blocks the downstream build/scan/release jobs — no image is built, scanned, or pushed to ghcr.io when a gate trips
+  4. Both starting baselines are measured and recorded before enforcement, and the thresholds committed to CI are the required 80%/70% — not a number quietly lowered to fit whatever the baseline turned out to be
+
+**Plans**: TBD
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 9 to break down)
+
+Notes: Both gates edit the same file (`.github/workflows/full-pipeline.yml`), which is why they are one phase rather than two. If a measured baseline lands under its threshold, closing that gap with real tests is in scope for this phase; lowering the requirement is not. Backend extends the existing `test` job; frontend is a new job added to the parallel tier and to `build-scan`'s `needs:`.
+
+### Phase 10: Event Retention Window
+
+**Goal**: Users see recent release history instead of an ever-growing scroll, while the system keeps every row it needs to stay correct — nothing is ever deleted.
+**Depends on**: Nothing new in v1.1 (builds on Phase 4 detection and Phase 6 history; independent of Phases 8-9)
+**Requirements**: DATA-01, DATA-02
+**Success Criteria** (what must be TRUE):
+
+  1. An operator can set the retention window with an environment variable, and with it unset the window is 90 days
+  2. The History UI and the events API return no event older than the retention window, consistently across every display path (feed, filters, pagination)
+  3. No event row is deleted — an event aged past the window is still in the database, and the release it recorded still does not re-notify (dedup key intact)
+  4. An artist whose entire visible history has aged out does not fall back into seed mode and does not re-announce its back catalogue on the next poll cycle
+  5. A deluxe/tracklist-change baseline recorded before the window still fires a deluxe alert when that release group's tracklist later expands
+
+**Plans**: TBD
+
+**Design decision (locked, do not revisit during planning)**: soft-delete/filter, not hard delete. Retention is a read-side filter on display/API queries; rows stay in the table permanently so dedup keys, deluxe-change baselines (`events.track_count`), and the per-source seed-mode signal all survive. The hard-delete variants explored in research — including the `release_group_baselines` migration needed to make hard delete safe — are rejected. Success criteria 3, 4, and 5 exist specifically to prove the three failure modes hard delete would have reintroduced (dedup-key loss, seed-mode reset, baseline loss).
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 10 to break down)
+
+### Phase 11: Bounded Concurrent Polling
+
+**Goal**: A poll cycle works through the watchlist several artists at a time instead of one at a time, without breaking the rate limits, overlap guards, or detection correctness that v1.0 established.
+**Depends on**: Phase 9 (land last, behind working coverage gates, so this milestone's highest-risk change is the one most protected against regression)
+**Requirements**: PERF-01, PERF-02, PERF-03, PERF-04
+**Success Criteria** (what must be TRUE):
+
+  1. An operator can set the per-source worker-pool size via an environment variable (default in the 3-5 range), and a cycle over a multi-artist watchlist finishes measurably faster than the sequential baseline it replaces
+  2. Concurrent polling stays inside each source's existing rate limit — no burst above the configured per-second ceiling — and each source's cycle-overlap guard still skips a new cycle while the prior one for that source is running
+  3. A single artist's polling failure is logged and skipped: the rest of that cycle's artists are still polled and their events still recorded, and the cycle does not abort
+  4. Two artists sharing a release group cannot lose a deluxe-change baseline update — a test that races them asserts the final stored baseline is correct, and the suite passes under `go test -race`
+
+**Plans**: TBD
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 11 to break down)
+
+Notes: Criterion 4 requires replacing today's check-then-act baseline read/write with a database-level compare-and-set; `-race` alone will not catch this logical race, so the test must assert final-state correctness. Criterion 1's speedup must be measured during verification, not assumed — confirm the DB pool has not become the new bottleneck. Existing poller test doubles must become concurrency-safe.
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -248,6 +340,10 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
 | 6. Frontend & Release History | 4/4 | Complete    | 2026-08-11 |
 | 7. Containerization & CI/CD Pipeline | 4/4 | Complete    | 2026-08-12 |
+| 8. Frontend Test Suite | 0/TBD | Not started | - |
+| 9. CI Coverage Gates | 0/TBD | Not started | - |
+| 10. Event Retention Window | 0/TBD | Not started | - |
+| 11. Bounded Concurrent Polling | 0/TBD | Not started | - |
 
 ## Backlog
 
