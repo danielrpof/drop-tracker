@@ -20,3 +20,20 @@ services:
       interval: 2s
       timeout: 5s
       retries: 10
+
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # .env's DATABASE_URL points at localhost:5433 (the host-mapped port
+      # `go run` uses locally, per Makefile's TEST_DATABASE_URL comment).
+      # Inside the compose network the app must reach postgres by service
+      # name on the internal, unmapped port 5432, not localhost:5433 -- this
+      # override on top of env_file is intentional. Do NOT "fix" this to
+      # match .env; see .env.example and the port-remap comment above.
+      DATABASE_URL: postgres://drop_tracker:drop_tracker@postgres:5432/drop_tracker?sslmode=disable
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
