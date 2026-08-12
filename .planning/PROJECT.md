@@ -22,13 +22,13 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - ✓ Diff engine compares poll results against the Postgres "seen" store to detect: new releases, new guest features, deluxe/tracklist changes — Phase 04
 - ✓ Notifier posts detected changes to a Discord webhook — Phase 05
 - ✓ React (Vite) SPA UI for browsing/managing the watchlist, built and embedded into the Go binary via `go:embed` — single deployable image — Phase 06
+- ✓ Multi-stage Dockerfile: slim (Alpine) base image, non-root user, single final image containing API+scheduler+notifier+UI — Phase 07
+- ✓ docker-compose for local dev (app + Postgres) — Phase 07
+- ✓ pre-commit hooks: golangci-lint, gitleaks — Phase 07
+- ✓ GitHub Actions "Full Pipeline": golangci-lint (with gosec) + go vet + unit tests (httptest.Server-mocked MusicBrainz/Deezer) → Trivy fs + image scan → gitleaks secret scan → SBOM generation → svu semantic versioning/tagging → push image to GitHub Container Registry (ghcr.io) — Phase 07
 
 ### Active
 
-- [ ] Multi-stage Dockerfile: slim base image, non-root user, single final image containing API+UI
-- [ ] docker-compose for local dev (app + Postgres) — partial: Postgres service exists (Phase 01), app service not yet added
-- [ ] pre-commit hooks: golangci-lint, gitleaks
-- [ ] GitHub Actions "Full Pipeline": golangci-lint + go vet + unit tests (httptest.Server-mocked MusicBrainz/Deezer) → Trivy image/dependency scan → gitleaks secret scan → SBOM generation → semantic-release versioning/tagging → push image to GitHub Container Registry (ghcr.io)
 - [ ] VPS SSH-based deploy step (added once the app is feature-stable — not part of initial phases)
 
 ### Out of Scope
@@ -71,12 +71,12 @@ A single Go binary that reliably detects and notifies on new releases for watche
 | golang-migrate for migrations | Widely used, plain SQL up/down files, simple CI integration | Validated Phase 01 — embedded (`go:embed`) migrations run at boot with a bounded retry loop and context-cancellation support |
 | robfig/cron for scheduling | Closest equivalent to APScheduler; configurable per-source poll intervals | Validated Phase 03 — two independent cron entries (MusicBrainz/Deezer), each behind its own CAS overlap guard so one source's pace never blocks the other |
 | React (Vite) SPA embedded via go:embed | Keeps deployable to a single Go binary/image while still using a real frontend stack | Validated Phase 06 — React Router SPA Mode (`ssr: false`), `internal/webassets` embeds `build/client` via `//go:embed all:build/client`, chi `NotFound` fallback serves `index.html` for client-side routes while explicit API routes still resolve first |
-| Single Go binary/service architecture | Simpler CI/CD to start; still exercises full pipeline without microservice complexity | — Pending |
+| Single Go binary/service architecture | Simpler CI/CD to start; still exercises full pipeline without microservice complexity | Validated Phase 07 — single multi-stage Dockerfile (Node SPA build → Go static build → Alpine runtime) is the sole deployable artifact; docker-compose runs it alongside Postgres for local dev |
 | DB-backed watchlist with CRUD API | More realistic surface, more to test/lint/scan than a static config file | Validated Phase 02 — add/remove/list/update-preferences all live behind `internal/watchlist.Store`, the reusable domain surface later phases (search-proxy, poller) build on |
 | Live search-proxy endpoints | Lets the UI look up artists/albums against MusicBrainz/Deezer directly, not just local DB | Validated Phase 03 — `GET /search` fans out concurrently to both sources, source-tagged, D-03 partial-failure contract (one source down never fails the whole request) |
 | httptest.Server for HTTP mocking in tests | Stdlib-only, no extra test dependency | Validated Phase 03 — `internal/musicbrainz`/`internal/deezer` clients tested exclusively against `httptest.Server` fixtures per CLAUDE.md's no-live-calls-in-CI constraint |
-| "Full Pipeline" CI/CD depth (lint+test+scan+SBOM+semantic-release+push) | Matches the project's primary goal of practicing real DevOps pipelines | — Pending |
-| ghcr.io as image registry | Free, zero extra secrets, tightly integrated with GitHub Actions | — Pending |
+| "Full Pipeline" CI/CD depth (lint+test+scan+SBOM+semantic-release+push) | Matches the project's primary goal of practicing real DevOps pipelines | Validated Phase 07 — single `full-pipeline.yml` workflow: vet/lint(gosec)/test/gitleaks/trivy-fs gates → build-scan (Trivy image scan, blocking) → release (svu version, ghcr.io push, SBOM, git tag), verified end-to-end via a real PR + merge (v0.2.1 published) |
+| ghcr.io as image registry | Free, zero extra secrets, tightly integrated with GitHub Actions | Validated Phase 07 — `release` job pushes via the ambient `GITHUB_TOKEN`, package confirmed public and pullable without auth |
 | Structured logging only for v1 (no Prometheus/Grafana yet) | Keeps initial scope tight; metrics can be layered on later | Validated Phase 01 — `log/slog` JSON logging via `go-chi/httplog`, wired with a secret-redaction pattern for the DB DSN |
 | Phased deploy: local-only now, VPS SSH deploy later | Avoids committing to live infra before the app is feature-stable | — Pending |
 | DSN/secret redaction on every error path that could reach logs or stderr | Connection-failure errors routinely embed the raw DSN with its password; Phase 01's security review (T-01-01) required scrubbing it before it reaches `slog` or a returned error | Validated Phase 01 — `redactDSN`/`redactError` helpers in `internal/db/migrate.go`, asserted by `TestRunMigrations_NeverLogsDSN` |
@@ -100,4 +100,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-11 after Phase 06 (frontend-release-history)*
+*Last updated: 2026-08-12 after Phase 07 (containerization-ci-cd-pipeline)*
