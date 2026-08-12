@@ -66,6 +66,32 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **CICD-09**: `docker-compose` brings up the app and a local Postgres instance for local development
 - [x] **CICD-10**: A pre-commit configuration runs golangci-lint and gitleaks locally before commit (gitleaks half done in quick task 260806-hfn; golangci-lint half added in Phase 07 plan 07-02)
 
+## v1.1 Requirements
+
+Requirements for the "Hardening & Scale Readiness" milestone — closing four peer-reviewed gaps from v1.0. Each maps to roadmap phases.
+
+### Frontend Testing
+
+- [ ] **TEST-01**: Frontend has a Vitest + React Testing Library test suite covering the watchlist list/row, preference-toggle, search, and history/event-filter component and route surface
+- [ ] **TEST-02**: Frontend tests mock the app's API boundary (`web/app/lib/api.ts`) rather than intercepting raw fetch/network calls
+
+### CI/CD Pipeline
+
+- [ ] **CICD-11**: CI fails the build if backend Go test coverage falls below 80%
+- [ ] **CICD-12**: CI fails the build if frontend test coverage falls below 70%
+
+### Data Retention
+
+- [ ] **DATA-01**: Event-retention window is configurable via environment variable, defaulting to 90 days
+- [ ] **DATA-02**: History and API queries exclude events older than the retention window, while the underlying rows and detection state (dedup keys, deluxe-change baselines, seed-mode signal) are left untouched
+
+### Polling Performance
+
+- [ ] **PERF-01**: Per-source polling (MusicBrainz, Deezer) uses a bounded, env-configurable concurrent worker pool (default 3-5 workers) instead of strictly sequential per-artist iteration
+- [ ] **PERF-02**: Concurrent polling preserves the existing per-source rate limiter and per-source cycle-overlap guard
+- [ ] **PERF-03**: A single artist's polling error does not abort the rest of that cycle's batch (errors are logged and skipped, not fatal)
+- [ ] **PERF-04**: Concurrent updates to a shared release-group's deluxe-change baseline cannot lose an update (baseline compare-and-set is atomic at the database level)
+
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
@@ -77,6 +103,14 @@ Deferred to future release. Tracked but not in current roadmap.
 ### Watchlist
 
 - **WLST-07**: User can add producers as a watchlist entity type (in addition to artists)
+
+### CI/CD Pipeline
+
+- **CICD-13**: CI posts a PR coverage-diff/report comment (backend and/or frontend) once the v1.1 coverage gates are proven stable
+
+### Frontend Testing
+
+- **TEST-03**: E2E test suite (Playwright) covering critical user flows, if a future milestone specifically calls for integration/E2E coverage
 
 ## Out of Scope
 
@@ -96,6 +130,12 @@ Explicitly excluded. Documented to prevent scope creep.
 | Kubernetes/Helm deployment | VPS SSH deploy is the current deployment ceiling; revisit only if more DevOps surface is wanted later |
 | Prometheus/Grafana observability stack | Structured logging only for v1; metrics endpoint can be layered on later without a redesign |
 | Terraform/IaC-provisioned infra | Deferred past the "Full Pipeline" CI/CD tier; VPS SSH deploy doesn't require infra provisioning |
+| Full E2E test suite (Playwright/Cypress) this milestone | Different testing tier than the "unit/component" scope of TEST-01/02; deferred to v2 as TEST-03 if a future milestone calls for it |
+| Table partitioning for events retention | No realistic data volume at this project's scale justifies it; revisit only if the events table grows by orders of magnitude |
+| Adaptive/dynamic concurrency tuning for polling | Static env-configured pool size (PERF-01) is correct for this project's traffic profile; revisit only if polling needs to scale to many more watched artists |
+| `pg_cron` extension for retention scheduling | Requires Postgres extension/superuser setup; the existing in-process `robfig/cron` scheduler already covers this need with zero new infrastructure |
+| Per-package/diff coverage gating | Single aggregate threshold per side (CICD-11/12) is sufficient; no legacy coverage debt exists to route around |
+| Mutation testing | Disproportionate CI runtime/tooling surface for this project's size; line/branch coverage thresholds are the accepted rigor level |
 
 ## Traceability
 

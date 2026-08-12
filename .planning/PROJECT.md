@@ -14,8 +14,8 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 **Target features:**
 - Vitest + React Testing Library unit/component test suite for the frontend
-- CI coverage gates (70% threshold) for backend and frontend
-- Events table retention: scheduled hard-delete of events older than 90 days
+- CI coverage gates: 80% threshold for backend (Go), 70% threshold for frontend (Vitest)
+- Events table retention: soft-delete/filter — rows older than 90 days hidden from display/API, detection state (dedup keys, deluxe-change baselines, seed-mode) left intact
 - Bounded worker-pool concurrent per-artist polling (env-configurable pool size, default 3-5), replacing sequential polling, still respecting existing rate limiters
 
 ## Requirements
@@ -41,8 +41,8 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 - [ ] VPS SSH-based deploy step (added once the app is feature-stable — not part of initial phases)
 - [ ] Vitest + React Testing Library frontend test suite
-- [ ] CI coverage gate (70% threshold) for backend and frontend
-- [ ] Events table retention — scheduled hard-delete of rows older than 90 days
+- [ ] CI coverage gate — 80% threshold for backend (Go), 70% threshold for frontend (Vitest)
+- [ ] Events table retention — soft-delete/filter (hide rows older than 90 days from display/API without touching detection state)
 - [ ] Bounded worker-pool concurrent per-artist polling (env-configurable size, default 3-5)
 
 ### Out of Scope
