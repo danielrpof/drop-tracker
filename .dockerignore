@@ -1,0 +1,53 @@
+# Version control — never needed inside a build context, and .git/ can be
+# large; excluding it keeps the context small and prevents any historical
+# blob (including anything scrubbed from the working tree but still present
+# in history) from ever entering an image layer.
+.git/
+.gitignore
+
+# Environment / secrets (CLAUDE.md: all secrets via env vars only, never
+# committed, never baked into an image layer). A secret must never enter a
+# Docker build context — internal/config/config.go documents the process
+# environment as the single source of truth at runtime, and copying .env
+# into the context would risk it landing in a committed/pushed image layer.
+.env
+.env.*
+
+# Go build artifacts (rebuilt inside the go-build stage; a stale host
+# binary must never be trusted over what the stage compiles itself)
+/bin/
+/server
+*.exe
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go workspace files (local multi-module dev only; not a build input)
+go.work
+go.work.sum
+
+# Frontend build output and dependency caches (rebuilt inside the
+# web-build stage; trusting a host-built tree here would defeat the
+# whole point of the Node stage building the SPA itself — see Dockerfile)
+node_modules/
+web/node_modules/
+web/build/
+web/.react-router/
+
+# Committed webassets tree — deliberately excluded. The image builds the
+# SPA itself (D-10), so excluding this makes a broken Node/Go build stage
+# fail loudly at `go build` (missing go:embed source) rather than silently
+# falling back to whatever was last committed here.
+internal/webassets/build/client/
+
+# GSD planning tool state — not a build input
+.planning/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
