@@ -8,6 +8,16 @@ A Go-based release tracker for hip-hop, reggaeton, and R&B: users maintain a wat
 
 A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice (lint, test, security scan, SBOM, versioned image publish, and eventually automated deploy).
 
+## Current Milestone: v1.1 Hardening & Scale Readiness
+
+**Goal:** Close four peer-reviewed gaps from v1.0 — frontend test coverage, CI coverage enforcement, events data retention, and concurrent polling — without changing user-facing behavior.
+
+**Target features:**
+- Vitest + React Testing Library unit/component test suite for the frontend
+- CI coverage gates (70% threshold) for backend and frontend
+- Events table retention: scheduled hard-delete of events older than 90 days
+- Bounded worker-pool concurrent per-artist polling (env-configurable pool size, default 3-5), replacing sequential polling, still respecting existing rate limiters
+
 ## Requirements
 
 ### Validated
@@ -30,6 +40,10 @@ A single Go binary that reliably detects and notifies on new releases for watche
 ### Active
 
 - [ ] VPS SSH-based deploy step (added once the app is feature-stable — not part of initial phases)
+- [ ] Vitest + React Testing Library frontend test suite
+- [ ] CI coverage gate (70% threshold) for backend and frontend
+- [ ] Events table retention — scheduled hard-delete of rows older than 90 days
+- [ ] Bounded worker-pool concurrent per-artist polling (env-configurable size, default 3-5)
 
 ### Out of Scope
 
@@ -100,4 +114,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-12 after Phase 07 (containerization-ci-cd-pipeline)*
+*Last updated: 2026-08-12 after starting milestone v1.1 (Hardening & Scale Readiness)*
