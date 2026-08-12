@@ -64,7 +64,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **CICD-07**: The pipeline pushes the built, scanned image to GitHub Container Registry (ghcr.io) tagged with the semantic version
 - [x] **CICD-08**: Third-party GitHub Actions used for security-sensitive steps are pinned to commit SHAs, not tags
 - [x] **CICD-09**: `docker-compose` brings up the app and a local Postgres instance for local development
-- [ ] **CICD-10**: A pre-commit configuration runs golangci-lint and gitleaks locally before commit (gitleaks half done in quick task 260806-hfn; golangci-lint half deferred to Phase 07)
+- [x] **CICD-10**: A pre-commit configuration runs golangci-lint and gitleaks locally before commit (gitleaks half done in quick task 260806-hfn; golangci-lint half added in Phase 07 plan 07-02)
 
 ## v2 Requirements
 
@@ -137,7 +137,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CICD-07 | Phase 7 | Complete |
 | CICD-08 | Phase 7 | Complete |
 | CICD-09 | Phase 7 | Complete |
-| CICD-10 | Phase 7 | Partial (gitleaks half done in quick/260806-hfn; golangci-lint half pending) |
+| CICD-10 | Phase 7 | Complete |
 
 **Coverage:**
 

@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Detection Engine** - Poll results are diffed against a "seen" store to reliably detect new releases, guest features, and deluxe/tracklist changes without duplicates or overlapping runs (completed 2026-08-08)
 - [x] **Phase 5: Discord Notifications** - Detected events are posted to Discord with distinct formatting per event type, honoring mute preferences (completed 2026-08-08)
 - [x] **Phase 6: Frontend & Release History** - Users manage their watchlist and browse detected release history entirely through a web UI (completed 2026-08-11)
-- [ ] **Phase 7: Containerization & CI/CD Pipeline** - The app ships as a single scanned, versioned, non-root Docker image via an automated GitHub Actions pipeline, with docker-compose for local dev
+- [x] **Phase 7: Containerization & CI/CD Pipeline** - The app ships as a single scanned, versioned, non-root Docker image via an automated GitHub Actions pipeline, with docker-compose for local dev (completed 2026-08-12)
 
 ## Phase Details
 
@@ -247,7 +247,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Detection Engine | 4/4 | Complete    | 2026-08-08 |
 | 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
 | 6. Frontend & Release History | 4/4 | Complete    | 2026-08-11 |
-| 7. Containerization & CI/CD Pipeline | 4/4 | In Progress|  |
+| 7. Containerization & CI/CD Pipeline | 4/4 | Complete    | 2026-08-12 |
 
 ## Backlog
 
