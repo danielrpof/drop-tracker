@@ -218,7 +218,13 @@ Plans:
   4. The full application (API + scheduler + notifier + embedded SPA) runs as a single non-root multi-stage Docker image, reproducible locally via `docker-compose up` alongside Postgres
   5. All security-sensitive third-party GitHub Actions are pinned to commit SHAs, and a pre-commit hook runs golangci-lint and gitleaks locally before any commit reaches the pipeline
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Multi-stage non-root image + docker-compose `app:` service (CICD-03, CICD-09)
+- [ ] 07-02-PLAN.md — golangci-lint v2 config + pre-commit hook (CICD-01, CICD-10)
+- [ ] 07-03-PLAN.md — Full Pipeline workflow: lint/vet/test/gitleaks/PR-title gates + Trivy-blocked image build (CICD-01, CICD-02, CICD-04, CICD-08)
+- [ ] 07-04-PLAN.md — Release path: svu semver, ghcr.io push, SBOM, seeded v0.1.0 tag (CICD-05, CICD-06, CICD-07)
 
 ## Progress
 
@@ -233,7 +239,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Detection Engine | 4/4 | Complete    | 2026-08-08 |
 | 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
 | 6. Frontend & Release History | 4/4 | Complete    | 2026-08-11 |
-| 7. Containerization & CI/CD Pipeline | 0/TBD | Not started | - |
+| 7. Containerization & CI/CD Pipeline | 0/4 | Not started | - |
 
 ## Backlog
 
