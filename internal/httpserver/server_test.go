@@ -93,7 +93,7 @@ func TestRequestID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /health: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	id := resp.Header.Get("X-Request-Id")
 	if id == "" {
@@ -127,7 +127,7 @@ func TestRequestID_HonoursInboundHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if got := resp.Header.Get("X-Request-Id"); got != inboundID {
 		t.Fatalf("X-Request-Id = %q, want echoed inbound id %q", got, inboundID)
@@ -154,7 +154,7 @@ func TestRequestID_DistinctPerConcurrentRequest(t *testing.T) {
 				t.Errorf("request %d: %v", idx, err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			ids[idx] = resp.Header.Get("X-Request-Id")
 		}(i)
 	}
@@ -208,7 +208,7 @@ func TestNoDSNInLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /health: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	logOutput := buf.String()
 	for _, leak := range []string{"tracker_user:Sup3rSecretPass!", "postgres://"} {

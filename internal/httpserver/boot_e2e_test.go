@@ -60,7 +60,7 @@ func TestBootToHealth_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("http.Get /health: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)

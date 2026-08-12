@@ -265,7 +265,7 @@ func runMigrationsOnce(ctx context.Context, dsn string, src source.Driver) error
 	if err != nil {
 		return fmt.Errorf("open database/sql handle: %w", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	if err := sqlDB.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping database: %w", err)

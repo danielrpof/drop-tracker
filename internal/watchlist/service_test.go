@@ -1113,7 +1113,7 @@ func TestService_UpdatePreferences_ConcurrentAxisWriteIsNotLost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	if _, err := tx.Exec(ctx, "UPDATE watchlist SET muted_event_types = ARRAY['deluxe_change']::text[] WHERE id = $1", entry.ID); err != nil {
 		t.Fatalf("held-lock update: %v", err)
@@ -1187,7 +1187,7 @@ func TestService_UpdatePreferences_RowDeletedMidWriteReturnsErrNotFound(t *testi
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	if _, err := tx.Exec(ctx, "DELETE FROM watchlist WHERE id = $1", entry.ID); err != nil {
 		t.Fatalf("held-lock delete: %v", err)
