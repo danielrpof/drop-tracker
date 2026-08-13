@@ -129,3 +129,59 @@ Do not treat `app/lib/api.ts`'s 0% as closeable by relaxing TEST-02's mocking ru
 tests — the correct fix is a dedicated test file for `api.ts` itself, tested against a real HTTP
 mock (e.g. `fetch` intercepted at the network boundary), not the `~/lib/api` module mock every
 other test uses.
+
+## Closing measurement (plan 09-04)
+
+Measured after committing the 70% threshold and the gap-closing tests below. Command run:
+`pnpm --dir web test` (twice back to back, both exits 0, confirming no flakiness).
+
+```
+=============================== Coverage summary ===============================
+Statements   : 78.06% ( 210/269 )
+Branches     : 71.57% ( 136/190 )
+Functions    : 75.75% ( 75/99 )
+Lines        : 79.75% ( 197/247 )
+================================================================================
+```
+
+| Axis | Starting baseline | Closing figure | Delta |
+|------|--------------------|-----------------|-------|
+| Statements | 39.77% (107/269) | 78.06% (210/269) | +38.29 points |
+| Branches | 25.26% (48/190) | 71.57% (136/190) | +46.31 points |
+| Functions | 38.38% (38/99) | 75.75% (75/99) | +37.37 points |
+| Lines | 41.29% (102/247) | 79.75% (197/247) | +38.38 points |
+
+All four axes clear the 70% threshold committed in `web/vitest.config.ts`. Branches was the
+binding constraint throughout (lowest starting figure, lowest closing figure) and is now the
+lowest of the four closing figures at 71.57% -- a 1.57-point margin above the gate, the tightest
+of the four axes.
+
+Raising all four threshold axes to 100 (temporarily, during Task 3) reproduced a non-zero exit
+with all four axes reported as unmet against the raised bar, then restoring to 70 reproduced a
+clean exit -- direct proof the gate mechanism fires rather than being configured-but-ignored.
+
+### Test files this plan added or extended
+
+- `web/app/routes/history.test.tsx` (new) -- error/retry, load-more append-with-dedupe, filtered
+  vs unfiltered empty state. Took `history.tsx` from 0% to 94.23/88.37/95/97.77.
+- `web/app/lib/api.test.ts` (new) -- the shared fetch path's typed-error, status-text fallback,
+  no-content, and OK branches, plus `listEvents`' query-string construction. Took `api.ts` from 0%
+  to 82.75/92.85/50/80.76.
+- `web/app/root.test.tsx` (new) -- `ErrorBoundary`'s 404/non-404/status-text-fallback/unknown-error
+  branches, and `App`'s active-tab nav logic. Took `root.tsx` from 0% to 75/88.23/75/75. `Layout`
+  (the SSR document shell -- `<html>`/`<head>`/`<Scripts>`) was deliberately left untested: it is
+  static markup with no branch/error logic, the lowest-value target in the file per D-09, and
+  exercising `<Meta>`/`<Links>`/`<Scripts>` meaningfully would need a much heavier SSR test harness
+  for no behavioral payoff.
+- `web/app/routes/watchlist.test.tsx` (extended, 1 existing case + 3 new) -- failed-initial-fetch
+  error state with retry, the empty state, and the remove-failure-refreshes-the-true-state path.
+  Took `watchlist.tsx` from 48.64/37.83/56.25/47.05 to 59.45/40.54/62.5/58.82.
+- `web/app/components/watchlist/SearchResultsColumns.test.tsx` (new) -- per-source error message,
+  no-matches message, the three trailing-control states (already-watching, Deezer-only-hint,
+  addable), and the pending/aria-busy state around a click. Took `SearchResultsColumns.tsx` from
+  6.25% to 100/90.9/100/100.
+
+`app/components/watchlist/PreferenceToggles.tsx` (43.75/25/25/46.66) and
+`app/components/watchlist/SearchBox.tsx` (78.37/57.14/88.88/84.37) still carry uncovered branches
+per the D-09 priority list above, but the aggregate cleared 70% on all four axes without needing
+them -- left as the next targets if a future phase raises the threshold further.

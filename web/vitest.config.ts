@@ -47,6 +47,18 @@ export default defineConfig({
         "app/lib/test/**", // test-only helpers (routeStub.tsx)
         "**/*.test.{ts,tsx}", // the test files themselves
       ],
+      // CICD-12: enforced by vitest run itself -- exits non-zero when any
+      // axis falls under 70, so no separate check script exists and the
+      // frontend-test CI step stays the single unchanged `pnpm test`
+      // invocation (D-08). All four axes are named explicitly because
+      // Vitest evaluates them independently -- pinning only one would
+      // leave the other three ungated.
+      thresholds: {
+        statements: 70,
+        branches: 70,
+        functions: 70,
+        lines: 70,
+      },
     },
   },
 })
