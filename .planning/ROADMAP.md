@@ -283,13 +283,24 @@ Notes: Vitest cannot reuse `web/vite.config.ts` — React Router's Vite plugin i
   3. A coverage failure on either side blocks the downstream build/scan/release jobs — no image is built, scanned, or pushed to ghcr.io when a gate trips
   4. Both starting baselines are measured and recorded before enforcement, and the thresholds committed to CI are the required 80%/70% — not a number quietly lowered to fit whatever the baseline turned out to be
 
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
+**Wave 1**
 
-- [ ] TBD (run /gsd-plan-phase 9 to break down)
+- [ ] 09-01-PLAN.md — Backend coverage instrumentation, hand-rolled gate target at 80%, and recorded backend baseline (tracer)
+- [ ] 09-02-PLAN.md — Vitest v8 coverage provider, explicit first-party denominator, and recorded frontend baseline
 
-Notes: Both gates edit the same file (`.github/workflows/full-pipeline.yml`), which is why they are one phase rather than two. If a measured baseline lands under its threshold, closing that gap with real tests is in scope for this phase; lowering the requirement is not. Backend extends the existing `test` job; frontend is a new job added to the parallel tier and to `build-scan`'s `needs:`.
+**Wave 2**
+
+- [ ] 09-03-PLAN.md — Backend gap-closing tests (boot path, logger, embedded SPA handler) until the 80% gate passes
+- [ ] 09-04-PLAN.md — Frontend gap-closing tests (history route, API fetch path) and the committed 70% threshold
+
+**Wave 3**
+
+- [ ] 09-05-PLAN.md — Wire the backend gate into the `test` job and make both gates block build/scan/release
+
+Notes: Both gates edit the same file (`.github/workflows/full-pipeline.yml`), which is why they are one phase rather than two. If a measured baseline lands under its threshold, closing that gap with real tests is in scope for this phase; lowering the requirement is not. Backend extends the existing `test` job; the `frontend-test` job already exists from Phase 8 as report-only, so this phase only adds it to `build-scan`'s `needs:` (09-CONTEXT.md D-11).
 
 ### Phase 10: Event Retention Window
 
