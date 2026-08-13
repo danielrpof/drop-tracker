@@ -315,7 +315,7 @@ Notes: Both gates edit the same file (`.github/workflows/full-pipeline.yml`), wh
   4. An artist whose entire visible history has aged out does not fall back into seed mode and does not re-announce its back catalogue on the next poll cycle
   5. A deluxe/tracklist-change baseline recorded before the window still fires a deluxe alert when that release group's tracklist later expands
 
-**Plans**: 1/2 plans executed
+**Plans**: 2/2 plans executed
 
 **Design decision (locked, do not revisit during planning)**: soft-delete/filter, not hard delete. Retention is a read-side filter on display/API queries; rows stay in the table permanently so dedup keys, deluxe-change baselines (`events.track_count`), and the per-source seed-mode signal all survive. The hard-delete variants explored in research — including the `release_group_baselines` migration needed to make hard delete safe — are rejected. Success criteria 3, 4, and 5 exist specifically to prove the three failure modes hard delete would have reintroduced (dedup-key loss, seed-mode reset, baseline loss).
 
@@ -327,7 +327,7 @@ Plans:
 
 **Wave 2**
 
-- [ ] 10-02-PLAN.md — `has_older_events` signal from SQL through the `/events` envelope, and the third History empty state
+- [x] 10-02-PLAN.md — `has_older_events` signal from SQL through the `/events` envelope, and the third History empty state
 
 ### Phase 11: Bounded Concurrent Polling
 
@@ -365,7 +365,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Containerization & CI/CD Pipeline | 4/4 | Complete    | 2026-08-12 |
 | 8. Frontend Test Suite | 5/5 | Complete    | 2026-08-12 |
 | 9. CI Coverage Gates | 5/5 | Complete    | 2026-08-13 |
-| 10. Event Retention Window | 1/2 | In Progress|  |
+| 10. Event Retention Window | 2/2 | In Progress|  |
 | 11. Bounded Concurrent Polling | 0/TBD | Not started | - |
 
 ## Backlog
