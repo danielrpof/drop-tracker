@@ -27,7 +27,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **v1.1 Hardening & Scale Readiness — in progress**
 
-- [ ] **Phase 8: Frontend Test Suite** - The watchlist, search, and history React surfaces get a Vitest + React Testing Library suite that mocks the app's own API boundary
+- [x] **Phase 8: Frontend Test Suite** - The watchlist, search, and history React surfaces get a Vitest + React Testing Library suite that mocks the app's own API boundary (completed 2026-08-12)
 - [ ] **Phase 9: CI Coverage Gates** - The Full Pipeline blocks the build when Go coverage drops below 80% or frontend coverage drops below 70%
 - [ ] **Phase 10: Event Retention Window** - History and API hide events older than a configurable window (default 90 days) while every row and all detection state stay intact
 - [ ] **Phase 11: Bounded Concurrent Polling** - Each source polls several artists at a time through a bounded worker pool, without breaking rate limits, overlap guards, or baseline correctness
@@ -346,7 +346,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
 | 6. Frontend & Release History | 4/4 | Complete    | 2026-08-11 |
 | 7. Containerization & CI/CD Pipeline | 4/4 | Complete    | 2026-08-12 |
-| 8. Frontend Test Suite | 5/5 | In Progress|  |
+| 8. Frontend Test Suite | 5/5 | Complete    | 2026-08-12 |
 | 9. CI Coverage Gates | 0/TBD | Not started | - |
 | 10. Event Retention Window | 0/TBD | Not started | - |
 | 11. Bounded Concurrent Polling | 0/TBD | Not started | - |
