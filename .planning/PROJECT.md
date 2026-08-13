@@ -37,11 +37,11 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - ✓ pre-commit hooks: golangci-lint, gitleaks — Phase 07
 - ✓ GitHub Actions "Full Pipeline": golangci-lint (with gosec) + go vet + unit tests (httptest.Server-mocked MusicBrainz/Deezer) → Trivy fs + image scan → gitleaks secret scan → SBOM generation → svu semantic versioning/tagging → push image to GitHub Container Registry (ghcr.io) — Phase 07
 - ✓ Vitest + React Testing Library frontend test suite — watchlist, preference-toggle, search, and history/event-card surfaces each covered, API boundary (`web/app/lib/api.ts`) mocked (no real network calls), shared `createRoutesStub` router-context helper — Phase 08
+- ✓ CI coverage gate — 80% threshold for backend (Go), 70% threshold for frontend (Vitest); a coverage drop on either language blocks `build-scan`/`release` via `full-pipeline.yml`'s `needs:` graph — Phase 09
 
 ### Active
 
 - [ ] VPS SSH-based deploy step (added once the app is feature-stable — not part of initial phases)
-- [ ] CI coverage gate — 80% threshold for backend (Go), 70% threshold for frontend (Vitest)
 - [ ] Events table retention — soft-delete/filter (hide rows older than 90 days from display/API without touching detection state)
 - [ ] Bounded worker-pool concurrent per-artist polling (env-configurable size, default 3-5)
 
@@ -96,6 +96,7 @@ A single Go binary that reliably detects and notifies on new releases for watche
 | DSN/secret redaction on every error path that could reach logs or stderr | Connection-failure errors routinely embed the raw DSN with its password; Phase 01's security review (T-01-01) required scrubbing it before it reaches `slog` or a returned error | Validated Phase 01 — `redactDSN`/`redactError` helpers in `internal/db/migrate.go`, asserted by `TestRunMigrations_NeverLogsDSN` |
 | Graceful shutdown via `signal.NotifyContext` + bounded `httpSrv.Shutdown` timeout | A container orchestrator stops the process with SIGTERM; without this, in-flight requests and the deferred `pool.Close()` are skipped | Validated Phase 01 — confirmed end-to-end under a real SIGTERM in WSL2 (UAT test 1) |
 | Vitest + React Testing Library for frontend tests, jsdom environment | Matches the existing Vite toolchain; RTL steers toward user-visible-behavior assertions over implementation detail | Validated Phase 08 — 5 test files / 16 tests, `mockReset: true`, no `passWithNoTests` escape; the `frontend-test` CI job runs in `full-pipeline.yml`'s parallel tier but is deliberately not yet wired into `build-scan`'s `needs:` — that blocking wiring is Phase 09's job (CI Coverage Gates), which edits the same file |
+| Hand-rolled Makefile coverage gate (backend) + Vitest `coverage.thresholds` (frontend), no third-party coverage-gating action | Both languages already have a coverage-producing invocation from Phase 07/08; a single greppable threshold literal per side is simpler to audit than a new GitHub Action | Validated Phase 09 — `Makefile`'s `coverage-gate` recipe fails closed on missing/empty/unparseable profiles; `web/vitest.config.ts` thresholds fail `pnpm test` non-zero below 70% on any of 4 axes; `build-scan.needs` extended to include `test`+`frontend-test`, confirmed live on a real GitHub Actions run (backend-red, frontend-red, and full-green cases all directly observed, `build-scan` correctly reported `skipped` on both red cases) |
 
 ## Evolution
 
@@ -115,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-12 after Phase 08 (Frontend Test Suite) completion*
+*Last updated: 2026-08-13 after Phase 09 (CI Coverage Gates) completion*

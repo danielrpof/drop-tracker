@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening & Scale Readiness
-current_phase: 09
-current_phase_name: ci-coverage-gates
-status: executing
+current_phase: 10
+current_phase_name: Event Retention Window
+status: planning
 stopped_at: Phase 09 context gathered
-last_updated: "2026-08-13T14:33:10.107Z"
+last_updated: "2026-08-13T17:24:58.904Z"
 last_activity: 2026-08-13
-last_activity_desc: Phase 09 execution started
+last_activity_desc: Phase 09 complete, transitioned to Phase 10
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 10
-  completed_plans: 5
+  completed_plans: 10
 ---
 
 # Project State
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-11)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 09 — ci-coverage-gates
+**Current focus:** Phase 10 — Event Retention Window
 
 ## Current Position
 
-Phase: 09 (ci-coverage-gates) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 09
-Last activity: 2026-08-13 — Phase 09 execution started
+Phase: 10 — Event Retention Window
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-13 — Phase 09 complete, transitioned to Phase 10
 
 **v1.1 phases:**
 
@@ -45,7 +45,7 @@ Last activity: 2026-08-13 — Phase 09 execution started
 
 **Velocity:**
 
-- Total plans completed: 34
+- Total plans completed: 39
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -60,6 +60,7 @@ Last activity: 2026-08-13 — Phase 09 execution started
 | 06 | 4 | - | - |
 | 07 | 4 | - | - |
 | 08 | 5 | - | - |
+| 09 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -168,6 +169,8 @@ Recent decisions affecting current work:
 - [v1.1 Roadmap]: Event retention is soft-delete/filter, locked — never hard delete. Rows past the window are hidden from History/API but stay in the table so dedup keys, `events.track_count` deluxe baselines, and per-source seed-mode state survive. The `release_group_baselines` migration that hard delete would have required is rejected. Phase 10's success criteria 3-5 exist to prove each of the three regressions hard delete would have reintroduced.
 - [v1.1 Roadmap]: Coverage thresholds are 80% backend / 70% frontend per REQUIREMENTS.md (CICD-11/12), not the flat 70%/70% research assumed. If a measured baseline lands under its threshold, Phase 09 closes the gap with real tests rather than lowering the number.
 - [v1.1 Roadmap]: Bounded concurrent polling (Phase 11) lands last — highest correctness risk of the milestone, and it benefits from executing behind working coverage gates.
+- [Phase 09 UAT, closed 2026-08-13]: Closed the phase's backstop-tier human-verification truth (real GitHub Actions run proving the coverage gate fires and `build-scan` is skipped) live on scratch branch `test/coverage-gate-ci-check` — never `main`. All three cases directly observed: backend threshold raised past measured 87.1% → `test` red, `build-scan`/`release` skipped (run 31724487315); frontend thresholds raised past measured 78/72/76/80% → `frontend-test` red, same skip (run 31724744670); both restored to 80/70 → full pipeline green through `build-scan` (run 31724954534). Branch deleted after (local + remote).
+- [Phase 09 Security]: `/gsd-secure-phase 09` closed all 25 registered threats (22 mitigated, 3 accepted) via L1 grep-depth verification plus the live CI runs above as direct evidence for the two highest-severity threats (T-09-19 `needs` graph, T-09-24 scratch-branch discipline). See 09-SECURITY.md.
 
 ### Pending Todos
 
@@ -194,6 +197,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-13T04:54:02.466Z
-Stopped at: Phase 09 context gathered
-Resume file: .planning/phases/09-ci-coverage-gates/09-CONTEXT.md
+Last session: 2026-08-13
+Stopped at: Phase 09 complete, ready to plan Phase 10
+Resume file: None
