@@ -1,7 +1,7 @@
 ---
 phase: 10
 slug: event-retention-window
-status: draft
+status: approved
 shadcn_initialized: true
 preset: base-maia
 created: 2026-08-13
@@ -104,13 +104,20 @@ No action/CTA on the new retention empty state — there is nothing the user can
 
 ## UI Considerations
 
-Applicable state considerations resolved: 1 covered, 0 backstop, 0 unresolved. (Full History-feed inventory — loading, error, populated, partial, overflow, zero-one-many, long-text — was already resolved in `06-UI-SPEC.md` and is unchanged by this phase; only the `empty` category gains a new sub-branch, listed below.)
+Probed against the History feed (list-collection) element via the UI-consideration engine: 8 applicable categories. 1 covered (this phase's new work), 7 dismissed (pre-existing behavior, unchanged, already resolved in `06-UI-SPEC.md`), 0 unresolved.
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
 | empty | History feed (list-collection) | ✅ covered | Zero-events case now branches three ways instead of two: retention-hidden (`hasOlderEvents === true`, new — see Copywriting Contract) takes priority over the existing filtered/unfiltered branch, which is otherwise unchanged |
+| loading | History feed (list-collection, media) | ➖ dismissed | Unchanged by this phase — already resolved in `06-UI-SPEC.md` (🧪 backstop: skeleton cards render on initial load and on "Load more" append) |
+| error | History feed (list-collection) | ➖ dismissed | Unchanged by this phase — already resolved in `06-UI-SPEC.md` (✅ covered: "Couldn't load release history." + Retry button) |
+| populated | History feed (list-collection, media) | ➖ dismissed | Unchanged by this phase — already resolved in `06-UI-SPEC.md` (✅ covered: type-specific cards per D-08) |
+| partial | History event card (list-collection, media) | ➖ dismissed | Unchanged by this phase — already resolved in `06-UI-SPEC.md` (✅ covered: null `cover_art_url`/`release_date` fallbacks) |
+| overflow | History feed (list-collection) | ➖ dismissed | Unchanged by this phase — already resolved in `06-UI-SPEC.md` (✅ covered: "Load more" per D-07, 24-event page size) |
+| zero-one-many | History feed (list-collection) | ➖ dismissed | Unchanged by this phase — already resolved in `06-UI-SPEC.md` (✅ covered: 0 → empty state, 1 → single card, many → infinite scroll) |
+| long-text | History event card title (static-content) | ➖ dismissed | Unchanged by this phase — already resolved in `06-UI-SPEC.md` (🧪 backstop: titles truncate with ellipsis, full title via hover tooltip) |
 
-No other category is affected: this phase adds zero new components, zero new loading/error paths, and does not change how a populated feed, a partial row, overflow, or long text render. See `06-UI-SPEC.md`'s UI Considerations table for the complete pre-existing inventory of the History feed and the rest of the app.
+This phase adds zero new components, zero new loading/error paths, and does not change how a populated feed, a partial row, overflow, or long text render — only the `empty` category gains a new sub-branch (the retention-hidden state). See `06-UI-SPEC.md`'s UI Considerations table for the complete pre-existing inventory of the History feed and the rest of the app.
 
 ---
 
@@ -126,11 +133,11 @@ No third-party registries declared. No new component is pulled from any registry
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved
