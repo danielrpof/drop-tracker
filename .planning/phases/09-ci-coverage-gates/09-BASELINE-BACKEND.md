@@ -155,3 +155,76 @@ this machine, the coverage mechanism (measurement scope, gate pass/fail/missing-
 proven correct using the identical flags minus `-race`; the aggregate percentage and zero-coverage
 function map above are not expected to shift meaningfully once `-race` runs successfully in CI,
 since `-race` changes execution timing/scheduling, not which statements execute.
+
+---
+
+## Closing Measurement (Plan 09-03)
+
+**Measured:** 2026-08-13
+**Command used** (identical scope/flags to the starting baseline above, `-race` omitted for the
+same pre-existing local-toolchain reason):
+
+```
+go test ./... -count=1 -p 1 -coverprofile=coverage.out -coverpkg=$(go list ./... | grep -v '/internal/db/sqlc' | paste -sd, -)
+```
+
+### Closing Aggregate
+
+Verbatim `total:` line from `go tool cover -func=coverage.out`:
+
+```
+total:										(statements)			87.1%
+```
+
+**Delta from starting baseline: 83.5% -> 87.1%, +3.6 points.**
+
+### Gate Verdict
+
+```
+$ make coverage-gate
+Backend coverage: 87.1% (required: 80%)
+PASS
+```
+
+The starting baseline already cleared the 80% floor (+3.5 points); Tasks 1 and 2 of this plan
+closed the gap-closing work anyway, per D-09's own framing: the aggregate passing does not make an
+untested boot path or an untested handler branch acceptable when they are the codebase's most
+meaningful uncovered behavior. No threshold or measured-set change was made (`Makefile` is
+unmodified by this plan) -- every point of the +3.6 delta came from the three test files below.
+
+### Test Files Added By This Plan
+
+- `cmd/server/main_test.go` -- boot-path tests for `run(ctx)`'s config-load early return and its
+  boot-then-graceful-shutdown branch, against a real Postgres instance via
+  `testutil.RequirePostgresDSN`. Required a behavior-preserving seam refactor first (`run` now
+  takes its cancellation context from its caller; `main` owns `signal.NotifyContext`).
+- `internal/logging/logging_test.go` -- `parseLevel`'s four named branches plus its
+  unrecognized-value fallback to Info, handler selection by format (text vs JSON), the service
+  attribute, and end-to-end level filtering.
+- `internal/webassets/embed_test.go` -- the embedded SPA handler's static-file branch (requesting a
+  real hashed asset and asserting its JavaScript content type), plus the root path, an unregistered
+  path, and a missing-but-asset-shaped path, all falling back correctly to `index.html`.
+
+### Refreshed Zero-Coverage Function Map
+
+Produced via the same `awk '$3 == "0.0%"'` extraction as the starting baseline, against the
+post-gap-closing `coverage.out`:
+
+```
+      2 github.com/danielrpof/drop-tracker/internal/httpserver/search.go
+      1 github.com/danielrpof/drop-tracker/internal/db/pool.go
+      1 github.com/danielrpof/drop-tracker/cmd/server/main.go
+```
+
+`cmd/server/main.go` dropped from 2 zero-coverage functions (`main`, `run`) to 1 (`main` only) --
+`run` is now exercised at 81.8% by the two new boot-path tests. `main` itself stays at 0.0%: it is
+now just the signal-registration-then-delegate-to-`run` shim (WR-03), which this plan's seam
+refactor deliberately kept thin rather than adding a test-only wrapper or build tag to reach it
+(the plan's own action text forbids both). `internal/httpserver/search.go` incidentally dropped
+from 3 zero-coverage functions to 2: the boot-path test's real call into `httpserver.New(...)`
+exercises `NewMusicBrainzSource` as a side effect of constructing the real search-source slice,
+though `Name`/`SearchArtists` on that source remain untested (pre-existing, out of this plan's
+three named targets, and already ranked #2 in the starting baseline's own prioritization note for
+a future plan). `internal/db/pool.go`'s `redactedTarget` also remains untested, ranked #3 in the
+same prioritization note -- neither was in scope for this plan's three named packages, and the
+gate already passes comfortably above the 80% floor without them.
