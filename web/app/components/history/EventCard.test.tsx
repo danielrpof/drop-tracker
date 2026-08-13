@@ -32,6 +32,12 @@ function buildEvent(overrides: Partial<EventItem> = {}): EventItem {
   }
 }
 
+// Shared across the two encoding tests below: one id carrying a space, a
+// forward slash and a hash exercises three different escapes at once.
+// Expected URLs are pinned as complete literal strings rather than built
+// with encodeURIComponent, so the test cannot drift with the implementation.
+const GUEST_FEATURE_ID_WITH_SPECIAL_CHARS = "abc def/g#h"
+
 describe("EventCard", () => {
   it("renders the title and 'New release' badge for a new_release event", () => {
     const event = buildEvent({ event_type: "new_release", title: "Fresh Drop" })
@@ -80,5 +86,60 @@ describe("EventCard", () => {
 
     expect(screen.getByText("Unknown")).toBeInTheDocument()
     expect(screen.getByText("Mystery Row")).toBeInTheDocument()
+  })
+
+  it("percent-encodes an external_id containing space, slash and hash in the musicbrainz href", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Special Chars Track",
+      source: "musicbrainz",
+      external_id: GUEST_FEATURE_ID_WITH_SPECIAL_CHARS,
+    })
+
+    render(<EventCard event={event} />)
+
+    // toHaveAttribute reads the literal href attribute the component wrote.
+    // The href *property* would have jsdom resolve it to an absolute URL and
+    // percent-encode the space on its own, passing even against unfixed
+    // source and proving nothing.
+    expect(
+      screen.getByRole("link", { name: "Special Chars Track" }),
+    ).toHaveAttribute(
+      "href",
+      "https://musicbrainz.org/recording/abc%20def%2Fg%23h",
+    )
+  })
+
+  it("percent-encodes an external_id containing space, slash and hash in the deezer href", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Special Chars Track",
+      source: "deezer",
+      external_id: GUEST_FEATURE_ID_WITH_SPECIAL_CHARS,
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(
+      screen.getByRole("link", { name: "Special Chars Track" }),
+    ).toHaveAttribute("href", "https://www.deezer.com/track/abc%20def%2Fg%23h")
+  })
+
+  it("leaves an ordinary UUID-shaped external_id's href unchanged", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Ordinary Track",
+      source: "musicbrainz",
+      external_id: "123e4567-e89b-12d3-a456-426614174000",
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(
+      screen.getByRole("link", { name: "Ordinary Track" }),
+    ).toHaveAttribute(
+      "href",
+      "https://musicbrainz.org/recording/123e4567-e89b-12d3-a456-426614174000",
+    )
   })
 })
