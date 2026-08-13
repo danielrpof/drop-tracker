@@ -5,6 +5,7 @@
 package config
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/caarlos0/env/v11"
@@ -32,6 +33,15 @@ type Config struct {
 	MusicBrainzUserAgent       string  `env:"MUSICBRAINZ_USER_AGENT" envDefault:"drop-tracker/0.1.0 (+https://github.com/danielrpof/drop-tracker)"`
 	MusicBrainzRateLimitPerSec float64 `env:"MUSICBRAINZ_RATE_LIMIT_PER_SEC" envDefault:"1"`
 	DeezerRateLimitPer5s       int     `env:"DEEZER_RATE_LIMIT_PER_5S" envDefault:"50"`
+
+	// Phase 10 — how many days of events history GET /events shows (DATA-01,
+	// D-01/D-04). A plain int day-count, deliberately not the time.Duration
+	// shape PollInterval above uses: DATA-01's own requirement text says
+	// "defaulting to 90 days," and an integer day-count is the most
+	// operator-friendly unit for this specific setting. This is a per-field
+	// judgment call, not a project-wide "durations must be time.Duration"
+	// rule -- do not generalize it.
+	EventRetentionDays int `env:"EVENT_RETENTION_DAYS" envDefault:"90"`
 }
 
 // Load parses Config from the process environment. On failure it returns
@@ -41,6 +51,15 @@ func Load() (*Config, error) {
 	cfg := &Config{}
 	if err := env.Parse(cfg); err != nil {
 		return nil, err
+	}
+	// caarlos0/env/v11 has no numeric-minimum struct tag, so a non-positive
+	// EVENT_RETENTION_DAYS (D-03) is checked manually here, after
+	// env.Parse's own aggregate-error return -- placing it after preserves
+	// TestLoad_AggregatesAllMissing's existing aggregate-error behavior. A
+	// non-positive value must fail fast at boot rather than be silently
+	// reinterpreted as "show everything" or "hide everything".
+	if cfg.EventRetentionDays <= 0 {
+		return nil, fmt.Errorf("EVENT_RETENTION_DAYS must be a positive integer, got %d", cfg.EventRetentionDays)
 	}
 	return cfg, nil
 }

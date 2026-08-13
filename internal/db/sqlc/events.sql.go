@@ -126,15 +126,17 @@ FROM events
 WHERE ($1::bigint IS NULL OR artist_id = $1::bigint)
   AND ($2::text IS NULL OR event_type = $2::text)
   AND ($3::bigint IS NULL OR id < $3::bigint)
+  AND created_at >= $4::timestamptz
 ORDER BY id DESC
-LIMIT $4
+LIMIT $5
 `
 
 type ListEventsParams struct {
-	ArtistID  *int64  `json:"artist_id"`
-	EventType *string `json:"event_type"`
-	Cursor    *int64  `json:"cursor"`
-	PageSize  int32   `json:"page_size"`
+	ArtistID  *int64             `json:"artist_id"`
+	EventType *string            `json:"event_type"`
+	Cursor    *int64             `json:"cursor"`
+	Cutoff    pgtype.Timestamptz `json:"cutoff"`
+	PageSize  int32              `json:"page_size"`
 }
 
 type ListEventsRow struct {
@@ -171,11 +173,25 @@ type ListEventsRow struct {
 // type-check, instead of building WHERE clauses in Go (06-RESEARCH.md
 // Anti-Patterns). cursor is absent on the first page and set to the previous
 // page's last row's id on subsequent pages.
+//
+// Phase 10 (DATA-02, D-01/D-04): this is the ONLY query in this file that
+// ever gets a retention cutoff. cutoff is sqlc.arg, not sqlc.narg -- it is
+// never caller-optional, so there is no code path where a caller passes a
+// null cutoff and gets back unfiltered, out-of-window rows (T-10-03). The
+// comparison is >=, not >: an event exactly at the boundary stays visible
+// (D-04). This is a read-side filter only, nothing is deleted -- an
+// aged-out row stays fully present and fully visible to every query below
+// that intentionally has no cutoff: ListExternalIDs (dedup keys),
+// HasAnyEvent (seed-mode), GroupTrackCountBaseline (deluxe baselines), and
+// ListUnnotified (pending notifications). Adding this predicate to any of
+// those four is the exact regression Phase 10's success criteria 3-5 exist
+// to catch -- do not "fix" them to also filter by retention.
 func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListEventsRow, error) {
 	rows, err := q.db.Query(ctx, listEvents,
 		arg.ArtistID,
 		arg.EventType,
 		arg.Cursor,
+		arg.Cutoff,
 		arg.PageSize,
 	)
 	if err != nil {

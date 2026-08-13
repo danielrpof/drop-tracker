@@ -10,11 +10,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -314,7 +316,7 @@ func TestHandleListEvents_Validation(t *testing.T) {
 
 	t.Run("limit above the maximum is clamped, not rejected", func(t *testing.T) {
 		rq := &recordingQuerier{}
-		svc := events.NewService(rq)
+		svc := events.NewService(rq, 90)
 		srv := httpserver.New(noopPinger{}, stubStore{}, svc, nil, discardLogger())
 		ts := httptest.NewServer(srv.Router())
 		defer ts.Close()
@@ -364,6 +366,24 @@ func insertTestArtist(t *testing.T, pool *pgxpool.Pool, mbid string) int64 {
 	return id
 }
 
+// insertTestEventAt mirrors insertTestEvent but takes an explicit createdAt,
+// which insertTestEvent cannot do -- it relies on the events table's
+// DEFAULT now() and has no created_at column in its INSERT list. Phase 10's
+// retention tests (DATA-02) need to seed rows at specific ages relative to
+// now, so this helper sets created_at explicitly instead.
+func insertTestEventAt(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID string, createdAt time.Time) int64 {
+	t.Helper()
+	var id int64
+	row := pool.QueryRow(context.Background(), `
+		INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, created_at)
+		VALUES ($1, 'musicbrainz', 'new_release', $2, 'Title', 'Artist', $3)
+		RETURNING id`, artistID, externalID, createdAt)
+	if err := row.Scan(&id); err != nil {
+		t.Fatalf("insert test event at %v: %v", createdAt, err)
+	}
+	return id
+}
+
 func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	mbid := testMBID(t)
@@ -380,7 +400,7 @@ func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
 		ids = append(ids, insertTestEvent(t, pool, artistID, mbid+"-ext-"+string(rune('a'+i))))
 	}
 
-	svc := events.NewService(sqlc.New(pool))
+	svc := events.NewService(sqlc.New(pool), 90)
 
 	// Page 1: page size 2, no cursor -- expect the two highest ids, newest
 	// first, and a non-nil next_cursor (the page came back full).
@@ -428,6 +448,67 @@ func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
 	}
 	if page3.NextCursor != nil {
 		t.Fatalf("page3 next_cursor = %v, want nil (partial page)", page3.NextCursor)
+	}
+}
+
+// TestListEvents_RetentionExcludesAgedOutRows is this plan's tracer test
+// (Task 1, DATA-02): it proves the whole retention path end-to-end -- from
+// the events table, through Service.List's cutoff computation, through
+// GET /events's JSON response -- before any edge case is layered on top.
+func TestListEvents_RetentionExcludesAgedOutRows(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	now := time.Now()
+	agedOutID := insertTestEventAt(t, pool, artistID, mbid+"-old", now.AddDate(0, 0, -120))
+	recentID := insertTestEventAt(t, pool, artistID, mbid+"-new", now.AddDate(0, 0, -1))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(pool, stubStore{}, svc, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(fmt.Sprintf("%s/events?artist_id=%d", ts.URL, artistID))
+	if err != nil {
+		t.Fatalf("GET /events: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body eventsResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if len(body.Events) != 1 || body.Events[0].ID != recentID {
+		t.Fatalf("events = %+v, want exactly one event with id %d (the 1-day-old row)", body.Events, recentID)
+	}
+	for _, e := range body.Events {
+		if e.ID == agedOutID {
+			t.Fatalf("events = %+v, want the 120-day-old event (id %d) excluded by the retention window", body.Events, agedOutID)
+		}
+	}
+
+	// The filter is read-side only -- both rows must still be physically
+	// present in the table after the request (DATA-02, roadmap "nothing is
+	// ever deleted").
+	var count int
+	row := pool.QueryRow(context.Background(), "SELECT count(*) FROM events WHERE artist_id = $1", artistID)
+	if err := row.Scan(&count); err != nil {
+		t.Fatalf("count events for artist: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("events row count = %d, want 2 (retention must never delete rows)", count)
 	}
 }
 
@@ -481,7 +562,7 @@ func TestListEvents_Filters(t *testing.T) {
 		}
 	}
 
-	svc := events.NewService(sqlc.New(pool))
+	svc := events.NewService(sqlc.New(pool), 90)
 
 	t.Run("artist_id filter applies independently", func(t *testing.T) {
 		page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistA})
@@ -579,7 +660,7 @@ func TestListEvents_Filters(t *testing.T) {
 
 func TestListEvents_NoMatchingRowsReturnsNonNilEmptySlice(t *testing.T) {
 	pool := testutil.NewTestPool(t)
-	svc := events.NewService(sqlc.New(pool))
+	svc := events.NewService(sqlc.New(pool), 90)
 
 	missing := int64(-1)
 	page, err := svc.List(context.Background(), events.ListParams{ArtistID: &missing})

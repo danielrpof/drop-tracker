@@ -89,6 +89,19 @@ UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL;
 -- type-check, instead of building WHERE clauses in Go (06-RESEARCH.md
 -- Anti-Patterns). cursor is absent on the first page and set to the previous
 -- page's last row's id on subsequent pages.
+--
+-- Phase 10 (DATA-02, D-01/D-04): this is the ONLY query in this file that
+-- ever gets a retention cutoff. cutoff is sqlc.arg, not sqlc.narg -- it is
+-- never caller-optional, so there is no code path where a caller passes a
+-- null cutoff and gets back unfiltered, out-of-window rows (T-10-03). The
+-- comparison is >=, not >: an event exactly at the boundary stays visible
+-- (D-04). This is a read-side filter only, nothing is deleted -- an
+-- aged-out row stays fully present and fully visible to every query below
+-- that intentionally has no cutoff: ListExternalIDs (dedup keys),
+-- HasAnyEvent (seed-mode), GroupTrackCountBaseline (deluxe baselines), and
+-- ListUnnotified (pending notifications). Adding this predicate to any of
+-- those four is the exact regression Phase 10's success criteria 3-5 exist
+-- to catch -- do not "fix" them to also filter by retention.
 SELECT id, artist_id, source, event_type, external_id, release_group_mbid,
        title, artist_name, release_date, cover_art_url, track_count,
        previous_track_count, release_type, notified_at, created_at
@@ -96,5 +109,6 @@ FROM events
 WHERE (sqlc.narg('artist_id')::bigint IS NULL OR artist_id = sqlc.narg('artist_id')::bigint)
   AND (sqlc.narg('event_type')::text IS NULL OR event_type = sqlc.narg('event_type')::text)
   AND (sqlc.narg('cursor')::bigint IS NULL OR id < sqlc.narg('cursor')::bigint)
+  AND created_at >= sqlc.arg('cutoff')::timestamptz
 ORDER BY id DESC
 LIMIT sqlc.arg('page_size');
