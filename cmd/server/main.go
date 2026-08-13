@@ -54,11 +54,11 @@ const (
 )
 
 func main() {
-	// WR-03: derive ctx from signal.NotifyContext so a SIGTERM/SIGINT (the
-	// normal way a container orchestrator stops this process) is observable
-	// throughout run() -- by the migration retry loop (WR-01), and by the
-	// select run() uses to trigger httpSrv.Shutdown -- rather than killing
-	// the process immediately and skipping the deferred pool.Close() and the
+	// WR-03: derive ctx below so a SIGTERM/SIGINT (the normal way a
+	// container orchestrator stops this process) is observable throughout
+	// run() -- by the migration retry loop (WR-01), and by the select run()
+	// uses to trigger httpSrv.Shutdown -- rather than killing the process
+	// immediately and skipping the deferred pool.Close() and the
 	// in-flight-request drain entirely. stop is called before deciding
 	// whether to exit non-zero rather than deferred, since a deferred call
 	// would never run before os.Exit.
