@@ -61,10 +61,15 @@ type ListParams struct {
 // Page is one page of the history feed: Events is always non-nil (D-05).
 // NextCursor is set to the last returned row's id only when the page came
 // back completely full -- the client's unambiguous "no more pages" signal
-// when it is nil.
+// when it is nil. HasOlderEvents (DATA-02, D-06) answers a question the page
+// itself cannot: whether this request's artist/event-type scope has any
+// event older than the retention window, so the frontend can distinguish
+// "no events ever" from "events exist but every one aged out" -- both cases
+// look identical from Events alone.
 type Page struct {
-	Events     []Event
-	NextCursor *int64
+	Events         []Event
+	NextCursor     *int64
+	HasOlderEvents bool
 }
 
 // Store is the minimal surface internal/httpserver needs for the events
@@ -117,15 +122,31 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 	// empty feed for every request instead of erroring (T-10-02).
 	cutoff := time.Now().AddDate(0, 0, -s.retentionDays)
 
+	cutoffParam := pgtype.Timestamptz{Time: cutoff, Valid: true}
+
 	rows, err := s.q.ListEvents(ctx, sqlc.ListEventsParams{
 		ArtistID:  p.ArtistID,
 		EventType: p.EventType,
 		Cursor:    p.Cursor,
-		Cutoff:    pgtype.Timestamptz{Time: cutoff, Valid: true},
+		Cutoff:    cutoffParam,
 		PageSize:  pageSize,
 	})
 	if err != nil {
 		return Page{}, fmt.Errorf("list events: %w", err)
+	}
+
+	// Computed unconditionally on every call, not only when the page is
+	// empty (D-06): one obvious code path beats a conditional optimization,
+	// and the underlying query is a short-circuiting EXISTS. Reuses the same
+	// cutoff variable as ListEvents above so both queries in one request
+	// describe the same instant.
+	hasOlderEvents, err := s.q.HasOlderEvents(ctx, sqlc.HasOlderEventsParams{
+		ArtistID:  p.ArtistID,
+		EventType: p.EventType,
+		Cutoff:    cutoffParam,
+	})
+	if err != nil {
+		return Page{}, fmt.Errorf("has older events: %w", err)
 	}
 
 	out := make([]Event, 0, len(rows))
@@ -139,7 +160,7 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 		nextCursor = &last
 	}
 
-	return Page{Events: out, NextCursor: nextCursor}, nil
+	return Page{Events: out, NextCursor: nextCursor, HasOlderEvents: hasOlderEvents}, nil
 }
 
 // toEvent converts one sqlc-generated ListEventsRow into the API-facing

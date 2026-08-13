@@ -72,7 +72,11 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
   })
 
   it("resolves an OK response to the parsed body", async () => {
-    const page: EventsPage = { events: [], next_cursor: null }
+    const page: EventsPage = {
+      events: [],
+      next_cursor: null,
+      has_older_events: false,
+    }
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify(page), {
         status: 200,
@@ -86,10 +90,13 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
   describe("listEvents query-string construction", () => {
     beforeEach(() => {
       fetchMock.mockResolvedValue(
-        new Response(JSON.stringify({ events: [], next_cursor: null }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ events: [], next_cursor: null, has_older_events: false }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       )
     })
 

@@ -18,10 +18,14 @@ import (
 // events is always a JSON array, never null (Service.List's non-nil-slice
 // guarantee, reinforced by the defensive backstop below); next_cursor is
 // null once the feed is exhausted -- the client's unambiguous "hide Load
-// more" signal.
+// more" signal. has_older_events (DATA-02, D-06) is a JSON boolean, never a
+// day count or the raw EVENT_RETENTION_DAYS value -- it tells the frontend
+// whether this scope has any event hidden by the retention window, without
+// exposing the window's configured length.
 type eventsResponse struct {
-	Events     []events.Event `json:"events"`
-	NextCursor *int64         `json:"next_cursor"`
+	Events         []events.Event `json:"events"`
+	NextCursor     *int64         `json:"next_cursor"`
+	HasOlderEvents bool           `json:"has_older_events"`
 }
 
 // parseOptionalPositiveInt64 reads the named query param from r: an absent
@@ -116,5 +120,5 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(eventsResponse{Events: evs, NextCursor: page.NextCursor})
+	_ = json.NewEncoder(w).Encode(eventsResponse{Events: evs, NextCursor: page.NextCursor, HasOlderEvents: page.HasOlderEvents})
 }

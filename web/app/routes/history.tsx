@@ -30,6 +30,32 @@ function EventCardSkeleton() {
 
 const SKELETON_COUNT = 3
 
+// emptyStateCopy selects the correct one of the three empty-state messages
+// (D-05, D-06). Order is locked by 10-UI-SPEC.md's Trigger condition and
+// supersedes 10-PATTERNS.md's opposite ordering: hasOlderEvents is checked
+// FIRST, ahead of isFiltered, because a filtered-and-retention-hidden view
+// is better explained by retention than by "no matching events." The
+// retention branch never names EVENT_RETENTION_DAYS or a day count -- the
+// API exposes only a boolean, so no configured window length reaches here.
+function emptyStateCopy(hasOlderEvents: boolean, isFiltered: boolean) {
+  if (hasOlderEvents) {
+    return {
+      heading: "Older than your retention window",
+      body: "There's release history for this view — it's just outside your retention window. Nothing was deleted.",
+    }
+  }
+  if (isFiltered) {
+    return {
+      heading: "No matching events",
+      body: "Try a different artist or event type.",
+    }
+  }
+  return {
+    heading: "No release activity yet",
+    body: "Add an artist to your watchlist to start tracking new releases, features, and deluxe editions.",
+  }
+}
+
 // fetchHistoryPage calls listEvents() with the active filters and an
 // optional cursor -- the one place history.tsx talks to the API, so both
 // the initial-fetch effect and "Load more" share identical param-building.
@@ -52,6 +78,12 @@ export default function History() {
   })
   const [events, setEvents] = useState<EventItem[]>([])
   const [nextCursor, setNextCursor] = useState<number | null>(null)
+  // hasOlderEvents (DATA-02, D-06) distinguishes "no release activity ever"
+  // from "release activity exists but every event is outside the retention
+  // window" -- only the initial-fetch value drives the empty state, but
+  // handleLoadMore's fetch also sets it to keep both fetch paths symmetric
+  // with how nextCursor is already threaded.
+  const [hasOlderEvents, setHasOlderEvents] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
   const [appendLoading, setAppendLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,12 +102,14 @@ export default function History() {
     setAppendError(null)
     setEvents([])
     setNextCursor(null)
+    setHasOlderEvents(false)
 
     fetchHistoryPage(filters, null)
       .then((page) => {
         if (cancelled) return
         setEvents(page.events)
         setNextCursor(page.next_cursor)
+        setHasOlderEvents(page.has_older_events)
       })
       .catch(() => {
         if (!cancelled) setError("Couldn't load release history.")
@@ -106,6 +140,7 @@ export default function History() {
           return [...prev, ...fresh]
         })
         setNextCursor(page.next_cursor)
+        setHasOlderEvents(page.has_older_events)
       })
       .catch(() => {
         setAppendError("Couldn't load release history.")
@@ -147,16 +182,13 @@ export default function History() {
         </div>
       )}
 
-      {!error && !initialLoading && events.length === 0 && (
-        <EmptyState
-          heading={isFiltered ? "No matching events" : "No release activity yet"}
-          body={
-            isFiltered
-              ? "Try a different artist or event type."
-              : "Add an artist to your watchlist to start tracking new releases, features, and deluxe editions."
-          }
-        />
-      )}
+      {!error &&
+        !initialLoading &&
+        events.length === 0 &&
+        (() => {
+          const { heading, body } = emptyStateCopy(hasOlderEvents, isFiltered)
+          return <EmptyState heading={heading} body={body} />
+        })()}
 
       {!error && !initialLoading && events.length > 0 && (
         <div className="flex flex-col gap-4">

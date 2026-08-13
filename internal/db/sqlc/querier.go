@@ -31,6 +31,22 @@ type Querier interface {
 	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
 	// existing event rows for this artist+source means seed mode.
 	HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool, error)
+	// Phase 10 (DATA-02, D-06): answers a question ListEvents' own result page
+	// cannot -- whether this request's artist_id/event_type scope has ANY event
+	// older than the retention cutoff, so the frontend can distinguish "no
+	// events ever" from "events exist but every one of them aged out" (the
+	// History empty state cannot tell those apart from an empty page alone).
+	// Mirrors ListEvents' two optional filters exactly (same sqlc.narg casts on
+	// both sides), but deliberately omits ListEvents' pagination-position
+	// parameter: this answers a property of the whole filtered scope, not of
+	// the current page, so a "Load more" click must not change the answer.
+	// Uses EXISTS with no LIMIT inside it, following HasAnyEvent's existing
+	// idiom in this file --
+	// EXISTS already short-circuits on the first matching row. created_at <
+	// cutoff (strict less-than) is the exact complement of ListEvents' >=, so a
+	// row exactly at the boundary is never double-counted as both visible and
+	// older (D-04 stays consistent across both queries).
+	HasOlderEvents(ctx context.Context, arg HasOlderEventsParams) (bool, error)
 	// 0 rows affected means the dedup key (event_type, source, external_id)
 	// already existed (D-20) -- the caller does not treat this as an error,
 	// only as "not newly detected." Deliberately not the

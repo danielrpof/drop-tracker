@@ -59,6 +59,43 @@ func (q *Queries) HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool,
 	return has_any, err
 }
 
+const hasOlderEvents = `-- name: HasOlderEvents :one
+SELECT EXISTS(
+    SELECT 1 FROM events
+    WHERE ($1::bigint IS NULL OR artist_id = $1::bigint)
+      AND ($2::text IS NULL OR event_type = $2::text)
+      AND created_at < $3::timestamptz
+) AS has_older
+`
+
+type HasOlderEventsParams struct {
+	ArtistID  *int64             `json:"artist_id"`
+	EventType *string            `json:"event_type"`
+	Cutoff    pgtype.Timestamptz `json:"cutoff"`
+}
+
+// Phase 10 (DATA-02, D-06): answers a question ListEvents' own result page
+// cannot -- whether this request's artist_id/event_type scope has ANY event
+// older than the retention cutoff, so the frontend can distinguish "no
+// events ever" from "events exist but every one of them aged out" (the
+// History empty state cannot tell those apart from an empty page alone).
+// Mirrors ListEvents' two optional filters exactly (same sqlc.narg casts on
+// both sides), but deliberately omits ListEvents' pagination-position
+// parameter: this answers a property of the whole filtered scope, not of
+// the current page, so a "Load more" click must not change the answer.
+// Uses EXISTS with no LIMIT inside it, following HasAnyEvent's existing
+// idiom in this file --
+// EXISTS already short-circuits on the first matching row. created_at <
+// cutoff (strict less-than) is the exact complement of ListEvents' >=, so a
+// row exactly at the boundary is never double-counted as both visible and
+// older (D-04 stays consistent across both queries).
+func (q *Queries) HasOlderEvents(ctx context.Context, arg HasOlderEventsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOlderEvents, arg.ArtistID, arg.EventType, arg.Cutoff)
+	var has_older bool
+	err := row.Scan(&has_older)
+	return has_older, err
+}
+
 const insertEvent = `-- name: InsertEvent :execrows
 INSERT INTO events (
     artist_id, source, event_type, external_id, release_group_mbid,
