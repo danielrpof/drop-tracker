@@ -117,13 +117,16 @@ function NewReleaseBody({ event }: { event: EventItem }) {
 // guestFeatureHref builds a link from the event's own identifier fields
 // (source + external_id) rather than passing a stored URL string straight
 // into an anchor -- this endpoint never stores a raw URL for guest_feature
-// rows, only the source-specific external id.
+// rows, only the source-specific external id. external_id is escaped with
+// encodeURIComponent before interpolation: it is an unvalidated third-party
+// string typed only as `string`, so today's UUID-shaped values are a fact
+// about the current upstreams, not a guarantee the code can rely on.
 function guestFeatureHref(event: EventItem): string | null {
   if (event.source === "musicbrainz") {
-    return `https://musicbrainz.org/recording/${event.external_id}`
+    return `https://musicbrainz.org/recording/${encodeURIComponent(event.external_id)}`
   }
   if (event.source === "deezer") {
-    return `https://www.deezer.com/track/${event.external_id}`
+    return `https://www.deezer.com/track/${encodeURIComponent(event.external_id)}`
   }
   return null
 }
