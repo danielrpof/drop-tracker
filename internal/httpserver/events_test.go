@@ -10,12 +10,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
@@ -314,7 +317,7 @@ func TestHandleListEvents_Validation(t *testing.T) {
 
 	t.Run("limit above the maximum is clamped, not rejected", func(t *testing.T) {
 		rq := &recordingQuerier{}
-		svc := events.NewService(rq)
+		svc := events.NewService(rq, 90)
 		srv := httpserver.New(noopPinger{}, stubStore{}, svc, nil, discardLogger())
 		ts := httptest.NewServer(srv.Router())
 		defer ts.Close()
@@ -364,6 +367,24 @@ func insertTestArtist(t *testing.T, pool *pgxpool.Pool, mbid string) int64 {
 	return id
 }
 
+// insertTestEventAt mirrors insertTestEvent but takes an explicit createdAt,
+// which insertTestEvent cannot do -- it relies on the events table's
+// DEFAULT now() and has no created_at column in its INSERT list. Phase 10's
+// retention tests (DATA-02) need to seed rows at specific ages relative to
+// now, so this helper sets created_at explicitly instead.
+func insertTestEventAt(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID string, createdAt time.Time) int64 {
+	t.Helper()
+	var id int64
+	row := pool.QueryRow(context.Background(), `
+		INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, created_at)
+		VALUES ($1, 'musicbrainz', 'new_release', $2, 'Title', 'Artist', $3)
+		RETURNING id`, artistID, externalID, createdAt)
+	if err := row.Scan(&id); err != nil {
+		t.Fatalf("insert test event at %v: %v", createdAt, err)
+	}
+	return id
+}
+
 func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	mbid := testMBID(t)
@@ -380,7 +401,7 @@ func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
 		ids = append(ids, insertTestEvent(t, pool, artistID, mbid+"-ext-"+string(rune('a'+i))))
 	}
 
-	svc := events.NewService(sqlc.New(pool))
+	svc := events.NewService(sqlc.New(pool), 90)
 
 	// Page 1: page size 2, no cursor -- expect the two highest ids, newest
 	// first, and a non-nil next_cursor (the page came back full).
@@ -428,6 +449,186 @@ func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
 	}
 	if page3.NextCursor != nil {
 		t.Fatalf("page3 next_cursor = %v, want nil (partial page)", page3.NextCursor)
+	}
+}
+
+// TestListEvents_RetentionExcludesAgedOutRows is this plan's tracer test
+// (Task 1, DATA-02): it proves the whole retention path end-to-end -- from
+// the events table, through Service.List's cutoff computation, through
+// GET /events's JSON response -- before any edge case is layered on top.
+func TestListEvents_RetentionExcludesAgedOutRows(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	now := time.Now()
+	agedOutID := insertTestEventAt(t, pool, artistID, mbid+"-old", now.AddDate(0, 0, -120))
+	recentID := insertTestEventAt(t, pool, artistID, mbid+"-new", now.AddDate(0, 0, -1))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(pool, stubStore{}, svc, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(fmt.Sprintf("%s/events?artist_id=%d", ts.URL, artistID))
+	if err != nil {
+		t.Fatalf("GET /events: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body eventsResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if len(body.Events) != 1 || body.Events[0].ID != recentID {
+		t.Fatalf("events = %+v, want exactly one event with id %d (the 1-day-old row)", body.Events, recentID)
+	}
+	for _, e := range body.Events {
+		if e.ID == agedOutID {
+			t.Fatalf("events = %+v, want the 120-day-old event (id %d) excluded by the retention window", body.Events, agedOutID)
+		}
+	}
+
+	// The filter is read-side only -- both rows must still be physically
+	// present in the table after the request (DATA-02, roadmap "nothing is
+	// ever deleted").
+	var count int
+	row := pool.QueryRow(context.Background(), "SELECT count(*) FROM events WHERE artist_id = $1", artistID)
+	if err := row.Scan(&count); err != nil {
+		t.Fatalf("count events for artist: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("events row count = %d, want 2 (retention must never delete rows)", count)
+	}
+}
+
+// TestListEvents_RetentionBoundaryIsInclusive pins D-04: an event exactly at
+// the retention cutoff must remain visible -- the comparison is >=, never >.
+// The intuitive ">" reading is the wrong one here; this test is what pins
+// ">=" in place.
+//
+// This calls sqlc.Queries.ListEvents directly with an explicit, fixed
+// Cutoff, rather than going through events.Service.List with a
+// wall-clock-derived retention window. Service.List always recomputes
+// time.Now() internally (it is not injectable), so a boundary row timed
+// relative to *this test's* clock would race the *service's own*, slightly
+// later time.Now() read -- and any margin wide enough to reliably avoid
+// that race is also wide enough to satisfy a strict ">" just as well as
+// ">=", which would make this test unable to actually distinguish the two
+// operators (silently passing even if D-04 regressed). Fixing Cutoff to a
+// literal value the test controls removes the race and tests exactly what
+// D-04 locks: the SQL predicate's own boundary inclusivity.
+func TestListEvents_RetentionBoundaryIsInclusive(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	cutoff := time.Now().AddDate(0, 0, -90)
+	atCutoff := cutoff // exactly equal to the cutoff -- ">=" must include, ">" must exclude
+	beforeCutoff := cutoff.Add(-1 * time.Minute)
+
+	atCutoffID := insertTestEventAt(t, pool, artistID, mbid+"-at-cutoff", atCutoff)
+	beforeCutoffID := insertTestEventAt(t, pool, artistID, mbid+"-before-cutoff", beforeCutoff)
+
+	q := sqlc.New(pool)
+	rows, err := q.ListEvents(context.Background(), sqlc.ListEventsParams{
+		ArtistID: &artistID,
+		Cutoff:   pgtype.Timestamptz{Time: cutoff, Valid: true},
+		PageSize: events.MaxPageSize,
+	})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+
+	seen := make(map[int64]bool, len(rows))
+	for _, r := range rows {
+		seen[r.ID] = true
+	}
+	if !seen[atCutoffID] {
+		t.Fatalf("rows = %+v, want the exactly-at-cutoff event (id %d) included -- D-04 requires >=, not >", rows, atCutoffID)
+	}
+	if seen[beforeCutoffID] {
+		t.Fatalf("rows = %+v, want the before-cutoff event (id %d) excluded", rows, beforeCutoffID)
+	}
+}
+
+// TestListEvents_RetentionPagesNeverRepeatAnID resolves DATA-02's
+// concurrency edge probe: each page recomputes its own cutoff from
+// time.Now(), and because the cutoff only ever advances forward while
+// pagination walks id DESC from newest to oldest, a later page can only
+// exclude more old rows -- it can never resurrect an already-excluded one
+// or re-serve a row the previous page returned.
+func TestListEvents_RetentionPagesNeverRepeatAnID(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	now := time.Now()
+	var inWindowIDs []int64
+	for i := 0; i < 5; i++ {
+		id := insertTestEventAt(t, pool, artistID, mbid+"-in-"+string(rune('a'+i)), now.AddDate(0, 0, -i))
+		inWindowIDs = append(inWindowIDs, id)
+	}
+	agedOutA := insertTestEventAt(t, pool, artistID, mbid+"-aged-a", now.AddDate(0, 0, -120))
+	agedOutB := insertTestEventAt(t, pool, artistID, mbid+"-aged-b", now.AddDate(0, 0, -200))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+
+	seen := make(map[int64]bool)
+	var cursor *int64
+	for i := 0; i < len(inWindowIDs)+2; i++ { // extra iterations guard against an infinite loop if pagination breaks
+		page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistID, PageSize: 2, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("List (page %d): %v", i, err)
+		}
+		if len(page.Events) == 0 {
+			break
+		}
+		for _, e := range page.Events {
+			if seen[e.ID] {
+				t.Fatalf("event id %d appeared on two pages", e.ID)
+			}
+			seen[e.ID] = true
+		}
+		cursor = page.NextCursor
+		if cursor == nil {
+			break
+		}
+	}
+
+	if len(seen) != len(inWindowIDs) {
+		t.Fatalf("total distinct events paged through = %d, want %d (only the in-window rows)", len(seen), len(inWindowIDs))
+	}
+	for _, id := range inWindowIDs {
+		if !seen[id] {
+			t.Fatalf("in-window event id %d never appeared across any page", id)
+		}
+	}
+	if seen[agedOutA] || seen[agedOutB] {
+		t.Fatalf("an aged-out event id leaked into a page: seen = %+v", seen)
 	}
 }
 
@@ -481,7 +682,7 @@ func TestListEvents_Filters(t *testing.T) {
 		}
 	}
 
-	svc := events.NewService(sqlc.New(pool))
+	svc := events.NewService(sqlc.New(pool), 90)
 
 	t.Run("artist_id filter applies independently", func(t *testing.T) {
 		page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistA})
@@ -579,7 +780,7 @@ func TestListEvents_Filters(t *testing.T) {
 
 func TestListEvents_NoMatchingRowsReturnsNonNilEmptySlice(t *testing.T) {
 	pool := testutil.NewTestPool(t)
-	svc := events.NewService(sqlc.New(pool))
+	svc := events.NewService(sqlc.New(pool), 90)
 
 	missing := int64(-1)
 	page, err := svc.List(context.Background(), events.ListParams{ArtistID: &missing})
@@ -595,4 +796,121 @@ func TestListEvents_NoMatchingRowsReturnsNonNilEmptySlice(t *testing.T) {
 	if page.NextCursor != nil {
 		t.Fatalf("NextCursor = %v, want nil", page.NextCursor)
 	}
+}
+
+// TestRetention_DetectionStateQueriesStayUnfiltered is this phase's single
+// most load-bearing test (Task 3, DATA-02): the automated proof of the
+// roadmap's success criteria 3-5, and the guardrail against a future
+// "consistency" pass adding the retention predicate to a query that must
+// never have it. Adding a retention predicate to ListExternalIDs,
+// HasAnyEvent, GroupTrackCountBaseline, or ListUnnotified is the exact
+// regression this test exists to catch: (1) dedup-key loss -- the detector
+// would treat an already-recorded release as fresh and re-notify it; (2)
+// seed-mode reset -- the artist would fall back into seed mode and
+// re-announce its entire back catalogue on the next poll cycle; (3) deluxe
+// baseline loss -- a later tracklist expansion would either false-positive
+// or silently miss the change entirely.
+func TestRetention_DetectionStateQueriesStayUnfiltered(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	// One musicbrainz new_release event, 200 days old -- well outside any
+	// plausible retention window -- with a populated release_group_mbid, a
+	// non-zero track_count, and notified_at left NULL (pending).
+	const externalID = "aged-out-release"
+	releaseGroupMbid := mbid + "-group"
+	trackCount := int32(12)
+	createdAt := time.Now().AddDate(0, 0, -200)
+
+	var eventID int64
+	row := pool.QueryRow(context.Background(), `
+		INSERT INTO events (artist_id, source, event_type, external_id, release_group_mbid, title, artist_name, track_count, created_at)
+		VALUES ($1, 'musicbrainz', 'new_release', $2, $3, 'Title', 'Artist', $4, $5)
+		RETURNING id`, artistID, externalID, releaseGroupMbid, trackCount, createdAt)
+	if err := row.Scan(&eventID); err != nil {
+		t.Fatalf("insert aged-out event: %v", err)
+	}
+
+	q := sqlc.New(pool)
+	ctx := context.Background()
+
+	t.Run("dedup key intact (criterion 3)", func(t *testing.T) {
+		ids, err := q.ListExternalIDs(ctx, sqlc.ListExternalIDsParams{ArtistID: artistID, Source: "musicbrainz", EventType: "new_release"})
+		if err != nil {
+			t.Fatalf("ListExternalIDs: %v", err)
+		}
+		found := false
+		for _, id := range ids {
+			if id == externalID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("ListExternalIDs = %v, want %q present -- an aged-out dedup key must never disappear, or the detector would re-notify an already-recorded release", ids, externalID)
+		}
+	})
+
+	t.Run("seed mode not reset (criterion 4)", func(t *testing.T) {
+		hasAny, err := q.HasAnyEvent(ctx, sqlc.HasAnyEventParams{ArtistID: artistID, Source: "musicbrainz"})
+		if err != nil {
+			t.Fatalf("HasAnyEvent: %v", err)
+		}
+		if !hasAny {
+			t.Fatal("HasAnyEvent = false, want true -- an aged-out row must still count, or the artist would fall back into seed mode and re-announce its entire back catalogue")
+		}
+	})
+
+	t.Run("deluxe baseline survives (criterion 5)", func(t *testing.T) {
+		baseline, err := q.GroupTrackCountBaseline(ctx, &releaseGroupMbid)
+		if err != nil {
+			t.Fatalf("GroupTrackCountBaseline: %v", err)
+		}
+		if !baseline.HasBaseline {
+			t.Fatal("HasBaseline = false, want true -- an aged-out row must still supply the deluxe-change baseline")
+		}
+		if baseline.Baseline != trackCount {
+			t.Fatalf("Baseline = %d, want %d", baseline.Baseline, trackCount)
+		}
+	})
+
+	t.Run("pending notification still visible", func(t *testing.T) {
+		rows, err := q.ListUnnotified(ctx)
+		if err != nil {
+			t.Fatalf("ListUnnotified: %v", err)
+		}
+		found := false
+		for _, r := range rows {
+			if r.ID == eventID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("ListUnnotified did not include the aged-out row (id %d) while notified_at is NULL", eventID)
+		}
+	})
+
+	// Without this contrast, the four assertions above would also pass on a
+	// build where the retention filter was never wired into ListEvents at
+	// all -- this is what makes them meaningful.
+	t.Run("contrast: the same row is absent from Service.List with a 90-day window", func(t *testing.T) {
+		svc := events.NewService(q, 90)
+		page, err := svc.List(ctx, events.ListParams{ArtistID: &artistID})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		for _, e := range page.Events {
+			if e.ID == eventID {
+				t.Fatalf("events = %+v, want the 200-day-old event (id %d) excluded from the history feed", page.Events, eventID)
+			}
+		}
+	})
 }

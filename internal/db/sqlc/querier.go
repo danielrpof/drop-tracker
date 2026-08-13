@@ -58,6 +58,19 @@ type Querier interface {
 	// type-check, instead of building WHERE clauses in Go (06-RESEARCH.md
 	// Anti-Patterns). cursor is absent on the first page and set to the previous
 	// page's last row's id on subsequent pages.
+	//
+	// Phase 10 (DATA-02, D-01/D-04): this is the ONLY query in this file that
+	// ever gets a retention cutoff. cutoff is sqlc.arg, not sqlc.narg -- it is
+	// never caller-optional, so there is no code path where a caller passes a
+	// null cutoff and gets back unfiltered, out-of-window rows (T-10-03). The
+	// comparison is >=, not >: an event exactly at the boundary stays visible
+	// (D-04). This is a read-side filter only, nothing is deleted -- an
+	// aged-out row stays fully present and fully visible to every query below
+	// that intentionally has no cutoff: ListExternalIDs (dedup keys),
+	// HasAnyEvent (seed-mode), GroupTrackCountBaseline (deluxe baselines), and
+	// ListUnnotified (pending notifications). Adding this predicate to any of
+	// those four is the exact regression Phase 10's success criteria 3-5 exist
+	// to catch -- do not "fix" them to also filter by retention.
 	ListEvents(ctx context.Context, arg ListEventsParams) ([]ListEventsRow, error)
 	// Feeds the fresh-vs-seen diff (D-10): a Detector builds a
 	// map[string]struct{} from this result and skips any externally-fetched

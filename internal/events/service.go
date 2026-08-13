@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 )
 
@@ -75,12 +77,18 @@ type Store interface {
 
 // Service is the sqlc-backed implementation of Store.
 type Service struct {
-	q sqlc.Querier
+	q             sqlc.Querier
+	retentionDays int
 }
 
-// NewService builds a Service backed by q.
-func NewService(q sqlc.Querier) *Service {
-	return &Service{q: q}
+// NewService builds a Service backed by q, applying a retention window of
+// retentionDays to every List call (DATA-02, D-01) -- the cutoff is computed
+// here, in this domain service, not at the HTTP boundary and not as a
+// SQL-side now() expression, matching this file's own "clamped here, not at
+// the HTTP boundary" convention already established by the PageSize clamp
+// below.
+func NewService(q sqlc.Querier, retentionDays int) *Service {
+	return &Service{q: q, retentionDays: retentionDays}
 }
 
 var _ Store = (*Service)(nil)
@@ -101,10 +109,19 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 		pageSize = MaxPageSize
 	}
 
+	// The retention cutoff (DATA-02, D-01/D-04): events created before this
+	// instant are hidden from the feed, but Valid is always explicitly true
+	// -- following seedNotifiedAt's precedent (internal/detection/detector.go)
+	// -- because a zero-value pgtype.Timestamptz marshals as SQL NULL, and
+	// "created_at >= NULL" is never true, which would silently return an
+	// empty feed for every request instead of erroring (T-10-02).
+	cutoff := time.Now().AddDate(0, 0, -s.retentionDays)
+
 	rows, err := s.q.ListEvents(ctx, sqlc.ListEventsParams{
 		ArtistID:  p.ArtistID,
 		EventType: p.EventType,
 		Cursor:    p.Cursor,
+		Cutoff:    pgtype.Timestamptz{Time: cutoff, Valid: true},
 		PageSize:  pageSize,
 	})
 	if err != nil {

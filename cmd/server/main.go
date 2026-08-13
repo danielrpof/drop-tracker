@@ -101,7 +101,10 @@ func run(ctx context.Context) error {
 	// eventsStore backs GET /events (Phase 6, HIST-01) -- a fourth
 	// sqlc.New(pool) instance, matching store/detector/notif's own pattern:
 	// sqlc.Queries is a stateless wrapper over the shared pool.
-	eventsStore := events.NewService(sqlc.New(pool))
+	// cfg.EventRetentionDays (Phase 10, DATA-01) is threaded straight from
+	// boot-time config so the retention window an operator sets is what
+	// every List call actually applies.
+	eventsStore := events.NewService(sqlc.New(pool), cfg.EventRetentionDays)
 
 	// Exactly one *musicbrainz.Client and one rate.Limiter for the whole
 	// process (D-07) -- plan 03-04's poller reuses this same instance, so
