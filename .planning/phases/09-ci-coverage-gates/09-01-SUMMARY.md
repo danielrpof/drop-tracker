@@ -115,6 +115,15 @@ None - no external service configuration required.
 - 09-03's gap-closing work has a concrete, D-09-ordered target list from `09-BASELINE-BACKEND.md`: `cmd/server` boot/shutdown (`run`/`main`), the MusicBrainz search-source wrapper (`internal/httpserver/search.go`), and the DSN-redaction helper (`internal/db/pool.go` `redactedTarget`).
 - No blockers. The folded flake todo's re-check found no reproduction under this phase's instrumentation at `-p 1`; no new blocker surfaced for future work.
 
+## Self-Check: PASSED
+
+- FOUND: Makefile
+- FOUND: .planning/phases/09-ci-coverage-gates/09-BASELINE-BACKEND.md
+- FOUND: .planning/phases/09-ci-coverage-gates/09-01-SUMMARY.md
+- FOUND commit: 997120f
+- FOUND commit: 1294524
+- FOUND commit: 0bd0e23
+
 ---
 *Phase: 09-ci-coverage-gates*
 *Completed: 2026-08-13*
