@@ -4,15 +4,15 @@ milestone: v1.1
 milestone_name: Hardening & Scale Readiness
 current_phase: 10
 current_phase_name: Event Retention Window
-status: planning
-stopped_at: Phase 10 context gathered
-last_updated: "2026-08-13T19:08:48.853Z"
+status: executing
+stopped_at: Phase 10 UI-SPEC approved
+last_updated: "2026-08-13T21:20:52.529Z"
 last_activity: 2026-08-13
 last_activity_desc: Phase 09 complete, transitioned to Phase 10
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 10
+  total_plans: 12
   completed_plans: 10
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-08-11)
 
 Phase: 10 — Event Retention Window
 Plan: Not started
-Status: Ready to plan
+Status: Ready to execute
 Last activity: 2026-08-13 — Phase 09 complete, transitioned to Phase 10
 
 **v1.1 phases:**
@@ -197,6 +197,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-13T19:08:48.815Z
-Stopped at: Phase 10 context gathered
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/10-event-retention-window/10-CONTEXT.md
+Last session: 2026-08-13T20:25:19.214Z
+Stopped at: Phase 10 UI-SPEC approved
+Resume file: C:/CodeProjects/drop-tracker/.planning/phases/10-event-retention-window/10-UI-SPEC.md
