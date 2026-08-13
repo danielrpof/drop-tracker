@@ -52,4 +52,46 @@ describe("SearchBox", () => {
 
     await vi.waitFor(() => expect(onResults).toHaveBeenCalledWith(searchResponse))
   })
+
+  // The two tests below prove SearchBox's own doc-comment claim -- "a fresh
+  // AbortController is created per debounced search and the prior one is
+  // aborted before the new one starts" -- is true at the request level, not
+  // only at the discard-the-stale-result callback level. Both fail against
+  // current source: runSearch calls searchArtists(query) with one argument,
+  // so no signal ever reaches the request (see the folded todo).
+  it("passes an AbortSignal as the second argument to searchArtists", async () => {
+    mockSearchArtists.mockResolvedValue(searchResponse)
+    const onResults = vi.fn()
+
+    render(<SearchBox onResults={onResults} />)
+    await userEvent.type(getSearchInput(), "dra")
+
+    await vi.waitFor(() =>
+      expect(mockSearchArtists).toHaveBeenCalledWith(
+        "dra",
+        expect.any(AbortSignal),
+      ),
+    )
+  })
+
+  it("aborts the superseded search's signal when a newer keystroke supersedes it", async () => {
+    mockSearchArtists.mockResolvedValue(searchResponse)
+    const onResults = vi.fn()
+
+    render(<SearchBox onResults={onResults} />)
+    await userEvent.type(getSearchInput(), "dra")
+    await vi.waitFor(() => expect(mockSearchArtists).toHaveBeenCalledTimes(1))
+
+    // Cast through unknown[]: searchArtists' current signature is
+    // single-argument, so TS doesn't yet know about a second element --
+    // Task 3 widens the signature and this cast stays valid either way.
+    const firstCall = mockSearchArtists.mock.calls[0] as unknown as unknown[]
+    const firstSignal = firstCall[1] as AbortSignal | undefined
+
+    // The next keystroke supersedes the in-flight search -- SearchBox
+    // aborts the prior controller on the very next change event.
+    await userEvent.type(getSearchInput(), "k")
+
+    await vi.waitFor(() => expect(firstSignal?.aborted).toBe(true))
+  })
 })
