@@ -78,7 +78,7 @@ Requirements for the "Hardening & Scale Readiness" milestone — closing four pe
 ### CI/CD Pipeline
 
 - [ ] **CICD-11**: CI fails the build if backend Go test coverage falls below 80%
-- [ ] **CICD-12**: CI fails the build if frontend test coverage falls below 70%
+- [x] **CICD-12**: CI fails the build if frontend test coverage falls below 70%
 
 ### Data Retention
 
@@ -181,7 +181,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-01 | Phase 8 | Complete |
 | TEST-02 | Phase 8 | Complete |
 | CICD-11 | Phase 9 | Pending |
-| CICD-12 | Phase 9 | Pending |
+| CICD-12 | Phase 9 | Complete |
 | DATA-01 | Phase 10 | Pending |
 | DATA-02 | Phase 10 | Pending |
 | PERF-01 | Phase 11 | Pending |

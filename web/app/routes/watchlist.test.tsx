@@ -43,4 +43,54 @@ describe("Watchlist route", () => {
 
     expect(mockRemoveWatchlist).toHaveBeenCalledWith(42)
   })
+
+  it("renders the error state with a retry control after a failed initial fetch, and retry re-issues the request", async () => {
+    mockListWatchlist.mockRejectedValueOnce(new Error("network down"))
+
+    renderRoute(Watchlist, "/watchlist")
+
+    await screen.findByRole("heading", {
+      name: "Couldn't load your watchlist.",
+    })
+    const retryButton = screen.getByRole("button", { name: "Retry" })
+
+    mockListWatchlist.mockResolvedValueOnce([])
+
+    await userEvent.click(retryButton)
+
+    await screen.findByRole("heading", { name: "No artists yet" })
+
+    expect(mockListWatchlist).toHaveBeenCalledTimes(2)
+  })
+
+  it("shows the empty state when the watchlist has no entries", async () => {
+    mockListWatchlist.mockResolvedValue([])
+
+    renderRoute(Watchlist, "/watchlist")
+
+    await screen.findByRole("heading", { name: "No artists yet" })
+    expect(screen.getByText("Search above to add one.")).toBeInTheDocument()
+  })
+
+  it("re-fetches the true server state when removeWatchlist fails, so the row reappears", async () => {
+    mockListWatchlist.mockResolvedValueOnce([entry])
+    mockRemoveWatchlist.mockRejectedValueOnce(new Error("network down"))
+
+    renderRoute(Watchlist, "/watchlist")
+
+    await screen.findByText("Drake")
+
+    mockListWatchlist.mockResolvedValueOnce([entry])
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Drake from watchlist" }),
+    )
+
+    // The optimistic removal happens immediately, then the failed DELETE's
+    // catch branch calls refresh() -- the row reappears because the server
+    // never actually deleted it, rather than staying gone.
+    await screen.findByText("Drake")
+
+    expect(mockListWatchlist).toHaveBeenCalledTimes(2)
+  })
 })
