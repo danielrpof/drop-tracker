@@ -112,3 +112,26 @@ WHERE (sqlc.narg('artist_id')::bigint IS NULL OR artist_id = sqlc.narg('artist_i
   AND created_at >= sqlc.arg('cutoff')::timestamptz
 ORDER BY id DESC
 LIMIT sqlc.arg('page_size');
+
+-- name: HasOlderEvents :one
+-- Phase 10 (DATA-02, D-06): answers a question ListEvents' own result page
+-- cannot -- whether this request's artist_id/event_type scope has ANY event
+-- older than the retention cutoff, so the frontend can distinguish "no
+-- events ever" from "events exist but every one of them aged out" (the
+-- History empty state cannot tell those apart from an empty page alone).
+-- Mirrors ListEvents' two optional filters exactly (same sqlc.narg casts on
+-- both sides), but deliberately omits ListEvents' pagination-position
+-- parameter: this answers a property of the whole filtered scope, not of
+-- the current page, so a "Load more" click must not change the answer.
+-- Uses EXISTS with no LIMIT inside it, following HasAnyEvent's existing
+-- idiom in this file --
+-- EXISTS already short-circuits on the first matching row. created_at <
+-- cutoff (strict less-than) is the exact complement of ListEvents' >=, so a
+-- row exactly at the boundary is never double-counted as both visible and
+-- older (D-04 stays consistent across both queries).
+SELECT EXISTS(
+    SELECT 1 FROM events
+    WHERE (sqlc.narg('artist_id')::bigint IS NULL OR artist_id = sqlc.narg('artist_id')::bigint)
+      AND (sqlc.narg('event_type')::text IS NULL OR event_type = sqlc.narg('event_type')::text)
+      AND created_at < sqlc.arg('cutoff')::timestamptz
+) AS has_older;

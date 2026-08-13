@@ -47,10 +47,11 @@ func (s stubEventsStore) List(ctx context.Context, p events.ListParams) (events.
 var _ events.Store = stubEventsStore{}
 
 // eventsResponseBody mirrors the GET /events response envelope by field
-// name (HIST-01).
+// name (HIST-01, DATA-02).
 type eventsResponseBody struct {
-	Events     []events.Event `json:"events"`
-	NextCursor *int64         `json:"next_cursor"`
+	Events         []events.Event `json:"events"`
+	NextCursor     *int64         `json:"next_cursor"`
+	HasOlderEvents bool           `json:"has_older_events"`
 }
 
 func TestHandleListEvents_HappyPathReturns200WithEnvelope(t *testing.T) {
@@ -197,6 +198,16 @@ type recordingQuerier struct {
 func (q *recordingQuerier) ListEvents(_ context.Context, arg sqlc.ListEventsParams) ([]sqlc.ListEventsRow, error) {
 	q.gotParams = arg
 	return nil, nil
+}
+
+// HasOlderEvents is an explicit stub, not left to resolve through the
+// embedded nil sqlc.Querier: Service.List now calls HasOlderEvents on every
+// List (Phase 10, DATA-02), and the nil embed would compile fine but
+// nil-panic at runtime the moment it's called through -- go build cannot
+// catch this, only a test run can (see this file's header comment and
+// 10-02-PLAN.md's corrections-carried-forward note).
+func (q *recordingQuerier) HasOlderEvents(_ context.Context, _ sqlc.HasOlderEventsParams) (bool, error) {
+	return false, nil
 }
 
 var _ sqlc.Querier = (*recordingQuerier)(nil)
@@ -913,4 +924,115 @@ func TestRetention_DetectionStateQueriesStayUnfiltered(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestHandleListEvents_HasOlderEventsSignal proves D-06's three named states
+// through a real httptest server and a decoded envelope (Task 2 of
+// 10-02-PLAN.md): an empty table, a table with only in-window events, and a
+// table with at least one aged-out event.
+func TestHandleListEvents_HasOlderEventsSignal(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+	svc := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(pool, stubStore{}, svc, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	get := func(t *testing.T) eventsResponseBody {
+		t.Helper()
+		resp, err := http.Get(fmt.Sprintf("%s/events?artist_id=%d", ts.URL, artistID))
+		if err != nil {
+			t.Fatalf("GET /events: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		var body eventsResponseBody
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode response body: %v", err)
+		}
+		return body
+	}
+
+	t.Run("empty table returns false", func(t *testing.T) {
+		body := get(t)
+		if body.HasOlderEvents {
+			t.Fatal("has_older_events = true, want false for an artist with no events at all")
+		}
+	})
+
+	t.Run("only in-window events returns false", func(t *testing.T) {
+		insertTestEventAt(t, pool, artistID, mbid+"-recent", time.Now().AddDate(0, 0, -1))
+		body := get(t)
+		if body.HasOlderEvents {
+			t.Fatal("has_older_events = true, want false when every event is within the retention window")
+		}
+	})
+
+	t.Run("at least one aged-out event returns true", func(t *testing.T) {
+		insertTestEventAt(t, pool, artistID, mbid+"-aged", time.Now().AddDate(0, 0, -120))
+		body := get(t)
+		if !body.HasOlderEvents {
+			t.Fatal("has_older_events = false, want true once an aged-out event exists")
+		}
+	})
+}
+
+// TestListEvents_HasOlderEventsRespectsFilters proves the flag is scoped by
+// the request's own artist_id filter (D-06), not answering a table-wide
+// question: artist A has an aged-out event, artist B has only in-window
+// events, and the artist_id=B case must be the assertion that actually
+// distinguishes "the query applies its filters" from "the query always
+// answers true once anything anywhere is aged out."
+func TestListEvents_HasOlderEventsRespectsFilters(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	base := testMBID(t)
+	mbidA := base + "-a"
+	mbidB := base + "-b"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = ANY($1)", []string{mbidA, mbidB}); err != nil {
+			t.Fatalf("cleanup: delete artists rows: %v", err)
+		}
+	})
+
+	artistA := insertTestArtist(t, pool, mbidA)
+	artistB := insertTestArtist(t, pool, mbidB)
+
+	now := time.Now()
+	insertTestEventAt(t, pool, artistA, mbidA+"-aged", now.AddDate(0, 0, -120))
+	insertTestEventAt(t, pool, artistB, mbidB+"-recent", now.AddDate(0, 0, -1))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+
+	unfiltered, err := svc.List(context.Background(), events.ListParams{})
+	if err != nil {
+		t.Fatalf("List (unfiltered): %v", err)
+	}
+	if !unfiltered.HasOlderEvents {
+		t.Fatal("HasOlderEvents = false, want true for the unfiltered scope (artist A's aged-out row is in scope)")
+	}
+
+	pageA, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistA})
+	if err != nil {
+		t.Fatalf("List (artist_id=A): %v", err)
+	}
+	if !pageA.HasOlderEvents {
+		t.Fatal("HasOlderEvents = false, want true for artist_id=A, who has an aged-out event")
+	}
+
+	pageB, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistB})
+	if err != nil {
+		t.Fatalf("List (artist_id=B): %v", err)
+	}
+	if pageB.HasOlderEvents {
+		t.Fatal("HasOlderEvents = true, want false for artist_id=B, who has only in-window events -- the query must apply its own artist_id filter, not answer a table-wide question")
+	}
 }
