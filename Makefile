@@ -1,4 +1,4 @@
-.PHONY: build run test test-short test-integration sqlc sqlc-check sqlc-version-check db-up db-down hooks web
+.PHONY: build run test test-short test-integration coverage-gate sqlc sqlc-check sqlc-version-check db-up db-down hooks web
 
 # Port 5433, not Postgres's default 5432, and it must stay in lockstep with
 # docker-compose.yml's published port -- see the comment there. Pointing this
@@ -14,6 +14,22 @@ PYTHON ?= python
 # Legitimacy Audit (T-01-13) -- a silent sqlc upgrade must fail generation
 # rather than regenerate committed code with an unaudited toolchain version.
 SQLC_VERSION := v1.31.1
+
+# The generated sqlc package is filtered out because `sqlc-check` (below)
+# already proves it matches the schema -- testing it directly would only
+# re-test sqlc itself, not this codebase (09-CONTEXT.md D-04). Every other
+# package stays in, including cmd/server, which has no test files of its own
+# and would silently never enter the coverage profile under Go's default
+# self-package-only instrumentation (09-CONTEXT.md D-05). Deferred assignment
+# (`=`, not `:=`) so the `go list` subprocess only runs when a target that
+# actually references this variable is built.
+COVER_PKGS = $(shell go list ./... | grep -v '/internal/db/sqlc' | paste -sd, -)
+
+# CICD-11: 80% is the required floor for aggregate backend coverage, not a
+# tunable -- `?=` only exists so this can be overridden on the command line
+# for pass/fail smoke-testing (e.g. `make coverage-gate
+# COVERAGE_THRESHOLD_BACKEND=0`), never to permanently lower it in this file.
+COVERAGE_THRESHOLD_BACKEND ?= 80
 
 db-up:
 	docker compose up -d --wait postgres
@@ -37,9 +53,32 @@ test-short:
 # mid-test, surfacing as unrelated-looking failures such as `relation "artists"
 # does not exist`.
 test-integration: db-up
-	TEST_DATABASE_URL=$(TEST_DATABASE_URL) go test ./... -race -count=1 -p 1
+	TEST_DATABASE_URL=$(TEST_DATABASE_URL) go test ./... -race -count=1 -p 1 \
+		-coverprofile=coverage.out -coverpkg=$(COVER_PKGS)
 
 test: test-integration
+
+# Hand-rolled coverage gate (09-CONTEXT.md D-01) -- no prerequisites, so CI
+# and a developer can run it immediately after test-integration without
+# re-running the suite. Log-only (D-03): the two echoes below are the entire
+# report surface, no HTML report and no artifact upload.
+coverage-gate:
+	@if [ ! -s coverage.out ]; then \
+		echo "coverage.out not found or empty -- run 'make test-integration' first" >&2; \
+		exit 1; \
+	fi
+	@coverage=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{v=$$3; print substr(v, 1, length(v)-1)}'); \
+	if [ -z "$$coverage" ]; then \
+		echo "failed to parse aggregate coverage total from coverage.out" >&2; \
+		exit 1; \
+	fi; \
+	echo "Backend coverage: $${coverage}% (required: $(COVERAGE_THRESHOLD_BACKEND)%)"; \
+	if awk -v cov="$$coverage" -v thresh="$(COVERAGE_THRESHOLD_BACKEND)" 'BEGIN { exit !(cov + 0 >= thresh + 0) }'; then \
+		echo "PASS"; \
+	else \
+		echo "FAIL: $${coverage}% is below the required $(COVERAGE_THRESHOLD_BACKEND)% threshold" >&2; \
+		exit 1; \
+	fi
 
 sqlc-version-check:
 	@actual=$$(sqlc version); \
