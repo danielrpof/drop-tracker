@@ -52,6 +52,12 @@ jobs:
           go-version-file: go.mod
       - name: Run integration tests
         run: make test-integration
+      # Extends this job rather than adding a new one (09-CONTEXT.md D-11). The
+      # profile read here (coverage.out) is produced by the integration-test
+      # step above, so this step does not re-run the suite -- it only gates on
+      # the already-written profile.
+      - name: Backend coverage gate (80)
+        run: make coverage-gate
 
   gitleaks:
     runs-on: ubuntu-latest
