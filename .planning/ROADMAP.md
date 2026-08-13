@@ -283,7 +283,7 @@ Notes: Vitest cannot reuse `web/vite.config.ts` — React Router's Vite plugin i
   3. A coverage failure on either side blocks the downstream build/scan/release jobs — no image is built, scanned, or pushed to ghcr.io when a gate trips
   4. Both starting baselines are measured and recorded before enforcement, and the thresholds committed to CI are the required 80%/70% — not a number quietly lowered to fit whatever the baseline turned out to be
 
-**Plans**: 2/5 plans executed
+**Plans**: 4/5 plans executed
 
 Plans:
 **Wave 1**
@@ -293,8 +293,8 @@ Plans:
 
 **Wave 2**
 
-- [ ] 09-03-PLAN.md — Backend gap-closing tests (boot path, logger, embedded SPA handler) until the 80% gate passes
-- [ ] 09-04-PLAN.md — Frontend gap-closing tests (history route, API fetch path) and the committed 70% threshold
+- [x] 09-03-PLAN.md — Backend gap-closing tests (boot path, logger, embedded SPA handler) until the 80% gate passes
+- [x] 09-04-PLAN.md — Frontend gap-closing tests (history route, API fetch path) and the committed 70% threshold
 
 **Wave 3**
 
@@ -358,7 +358,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 6. Frontend & Release History | 4/4 | Complete    | 2026-08-11 |
 | 7. Containerization & CI/CD Pipeline | 4/4 | Complete    | 2026-08-12 |
 | 8. Frontend Test Suite | 5/5 | Complete    | 2026-08-12 |
-| 9. CI Coverage Gates | 2/5 | In Progress|  |
+| 9. CI Coverage Gates | 4/5 | In Progress|  |
 | 10. Event Retention Window | 0/TBD | Not started | - |
 | 11. Bounded Concurrent Polling | 0/TBD | Not started | - |
 
