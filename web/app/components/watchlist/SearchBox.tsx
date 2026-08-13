@@ -47,7 +47,7 @@ export function SearchBox({ onResults }: SearchBoxProps) {
     abortRef.current = controller
 
     setLoading(true)
-    searchArtists(query)
+    searchArtists(query, controller.signal)
       .then((response) => {
         if (controller.signal.aborted) return
         onResults(response)

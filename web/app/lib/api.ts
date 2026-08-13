@@ -196,8 +196,14 @@ export async function removeWatchlist(id: number): Promise<void> {
 
 // searchArtists fans out to every configured source (WLST-01, D-01, D-02,
 // D-03): the response's sources map is returned as-is, one entry per
-// source, never merged.
-export async function searchArtists(query: string): Promise<SearchResponse> {
+// source, never merged. An optional signal lets a caller (SearchBox) cancel
+// a superseded search at the request level rather than only discarding its
+// resolved value -- apiFetch already forwards its whole init object to
+// fetch, so placing the signal in init here is sufficient.
+export async function searchArtists(
+  query: string,
+  signal?: AbortSignal,
+): Promise<SearchResponse> {
   const qs = new URLSearchParams({ q: query })
-  return apiFetch<SearchResponse>(`/search?${qs.toString()}`)
+  return apiFetch<SearchResponse>(`/search?${qs.toString()}`, { signal })
 }
