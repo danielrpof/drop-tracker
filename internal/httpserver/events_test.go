@@ -797,3 +797,120 @@ func TestListEvents_NoMatchingRowsReturnsNonNilEmptySlice(t *testing.T) {
 		t.Fatalf("NextCursor = %v, want nil", page.NextCursor)
 	}
 }
+
+// TestRetention_DetectionStateQueriesStayUnfiltered is this phase's single
+// most load-bearing test (Task 3, DATA-02): the automated proof of the
+// roadmap's success criteria 3-5, and the guardrail against a future
+// "consistency" pass adding the retention predicate to a query that must
+// never have it. Adding a retention predicate to ListExternalIDs,
+// HasAnyEvent, GroupTrackCountBaseline, or ListUnnotified is the exact
+// regression this test exists to catch: (1) dedup-key loss -- the detector
+// would treat an already-recorded release as fresh and re-notify it; (2)
+// seed-mode reset -- the artist would fall back into seed mode and
+// re-announce its entire back catalogue on the next poll cycle; (3) deluxe
+// baseline loss -- a later tracklist expansion would either false-positive
+// or silently miss the change entirely.
+func TestRetention_DetectionStateQueriesStayUnfiltered(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	// One musicbrainz new_release event, 200 days old -- well outside any
+	// plausible retention window -- with a populated release_group_mbid, a
+	// non-zero track_count, and notified_at left NULL (pending).
+	const externalID = "aged-out-release"
+	releaseGroupMbid := mbid + "-group"
+	trackCount := int32(12)
+	createdAt := time.Now().AddDate(0, 0, -200)
+
+	var eventID int64
+	row := pool.QueryRow(context.Background(), `
+		INSERT INTO events (artist_id, source, event_type, external_id, release_group_mbid, title, artist_name, track_count, created_at)
+		VALUES ($1, 'musicbrainz', 'new_release', $2, $3, 'Title', 'Artist', $4, $5)
+		RETURNING id`, artistID, externalID, releaseGroupMbid, trackCount, createdAt)
+	if err := row.Scan(&eventID); err != nil {
+		t.Fatalf("insert aged-out event: %v", err)
+	}
+
+	q := sqlc.New(pool)
+	ctx := context.Background()
+
+	t.Run("dedup key intact (criterion 3)", func(t *testing.T) {
+		ids, err := q.ListExternalIDs(ctx, sqlc.ListExternalIDsParams{ArtistID: artistID, Source: "musicbrainz", EventType: "new_release"})
+		if err != nil {
+			t.Fatalf("ListExternalIDs: %v", err)
+		}
+		found := false
+		for _, id := range ids {
+			if id == externalID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("ListExternalIDs = %v, want %q present -- an aged-out dedup key must never disappear, or the detector would re-notify an already-recorded release", ids, externalID)
+		}
+	})
+
+	t.Run("seed mode not reset (criterion 4)", func(t *testing.T) {
+		hasAny, err := q.HasAnyEvent(ctx, sqlc.HasAnyEventParams{ArtistID: artistID, Source: "musicbrainz"})
+		if err != nil {
+			t.Fatalf("HasAnyEvent: %v", err)
+		}
+		if !hasAny {
+			t.Fatal("HasAnyEvent = false, want true -- an aged-out row must still count, or the artist would fall back into seed mode and re-announce its entire back catalogue")
+		}
+	})
+
+	t.Run("deluxe baseline survives (criterion 5)", func(t *testing.T) {
+		baseline, err := q.GroupTrackCountBaseline(ctx, &releaseGroupMbid)
+		if err != nil {
+			t.Fatalf("GroupTrackCountBaseline: %v", err)
+		}
+		if !baseline.HasBaseline {
+			t.Fatal("HasBaseline = false, want true -- an aged-out row must still supply the deluxe-change baseline")
+		}
+		if baseline.Baseline != trackCount {
+			t.Fatalf("Baseline = %d, want %d", baseline.Baseline, trackCount)
+		}
+	})
+
+	t.Run("pending notification still visible", func(t *testing.T) {
+		rows, err := q.ListUnnotified(ctx)
+		if err != nil {
+			t.Fatalf("ListUnnotified: %v", err)
+		}
+		found := false
+		for _, r := range rows {
+			if r.ID == eventID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("ListUnnotified did not include the aged-out row (id %d) while notified_at is NULL", eventID)
+		}
+	})
+
+	// Without this contrast, the four assertions above would also pass on a
+	// build where the retention filter was never wired into ListEvents at
+	// all -- this is what makes them meaningful.
+	t.Run("contrast: the same row is absent from Service.List with a 90-day window", func(t *testing.T) {
+		svc := events.NewService(q, 90)
+		page, err := svc.List(ctx, events.ListParams{ArtistID: &artistID})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		for _, e := range page.Events {
+			if e.ID == eventID {
+				t.Fatalf("events = %+v, want the 200-day-old event (id %d) excluded from the history feed", page.Events, eventID)
+			}
+		}
+	})
+}
