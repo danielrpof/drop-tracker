@@ -35,8 +35,21 @@ const EVENT_BADGE: Record<
   },
 }
 
+// UNKNOWN_EVENT_BADGE covers an event_type value outside EVENT_BADGE's keys.
+// GET /events returns the event type unvalidated, so the Record type above
+// is a compile-time claim the network boundary does not enforce -- one
+// unrecognized row must not be able to take the whole History route down
+// through the top-level error boundary.
+const UNKNOWN_EVENT_BADGE = {
+  label: "Unknown",
+  emoji: "❔",
+  color: "var(--color-muted-foreground)",
+}
+
 export function EventCard({ event }: EventCardProps) {
-  const badge = EVENT_BADGE[event.event_type]
+  // Same rationale as UNKNOWN_EVENT_BADGE above: the lookup falls back
+  // rather than dereferencing undefined for an out-of-union event_type.
+  const badge = EVENT_BADGE[event.event_type] ?? UNKNOWN_EVENT_BADGE
 
   return (
     <div className="flex gap-4 rounded-2xl bg-card p-4 ring-1 ring-foreground/10">
