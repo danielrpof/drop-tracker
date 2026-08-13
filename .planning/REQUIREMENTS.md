@@ -82,8 +82,8 @@ Requirements for the "Hardening & Scale Readiness" milestone — closing four pe
 
 ### Data Retention
 
-- [ ] **DATA-01**: Event-retention window is configurable via environment variable, defaulting to 90 days
-- [ ] **DATA-02**: History and API queries exclude events older than the retention window, while the underlying rows and detection state (dedup keys, deluxe-change baselines, seed-mode signal) are left untouched
+- [x] **DATA-01**: Event-retention window is configurable via environment variable, defaulting to 90 days
+- [x] **DATA-02**: History and API queries exclude events older than the retention window, while the underlying rows and detection state (dedup keys, deluxe-change baselines, seed-mode signal) are left untouched
 
 ### Polling Performance
 
@@ -182,8 +182,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-02 | Phase 8 | Complete |
 | CICD-11 | Phase 9 | Complete |
 | CICD-12 | Phase 9 | Complete |
-| DATA-01 | Phase 10 | Pending |
-| DATA-02 | Phase 10 | Pending |
+| DATA-01 | Phase 10 | Complete |
+| DATA-02 | Phase 10 | Complete |
 | PERF-01 | Phase 11 | Pending |
 | PERF-02 | Phase 11 | Pending |
 | PERF-03 | Phase 11 | Pending |
