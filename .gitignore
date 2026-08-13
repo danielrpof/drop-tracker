@@ -16,6 +16,7 @@ node_modules/
 dist/
 web/build/
 web/.react-router/
+web/coverage/
 
 # Environment / secrets (CLAUDE.md: all secrets via env vars only, never committed)
 .env
