@@ -54,7 +54,18 @@ const (
 )
 
 func main() {
-	if err := run(); err != nil {
+	// WR-03: derive ctx below so a SIGTERM/SIGINT (the normal way a
+	// container orchestrator stops this process) is observable throughout
+	// run() -- by the migration retry loop (WR-01), and by the select run()
+	// uses to trigger httpSrv.Shutdown -- rather than killing the process
+	// immediately and skipping the deferred pool.Close() and the
+	// in-flight-request drain entirely. stop is called before deciding
+	// whether to exit non-zero rather than deferred, since a deferred call
+	// would never run before os.Exit.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -64,23 +75,16 @@ func main() {
 // the connection pool, then the HTTP server. Migrations complete before the
 // listener starts (D-09). Any failure before listening returns a non-nil
 // error so main exits non-zero — the service never reaches a
-// running-but-broken state.
-func run() error {
+// running-but-broken state. The caller owns signal handling and passes the
+// resulting context in, so the shutdown branch is directly testable without
+// signalling the test process.
+func run(ctx context.Context) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
 	logger := logging.New(cfg)
-
-	// WR-03: derive ctx from signal.NotifyContext so a SIGTERM/SIGINT (the
-	// normal way a container orchestrator stops this process) is observable
-	// throughout run() -- by the migration retry loop (WR-01), and by the
-	// select below that triggers httpSrv.Shutdown -- rather than killing the
-	// process immediately and skipping the deferred pool.Close() and the
-	// in-flight-request drain entirely.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	if err := db.RunMigrations(ctx, cfg.DatabaseURL, logger); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
