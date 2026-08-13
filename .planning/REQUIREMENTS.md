@@ -72,8 +72,8 @@ Requirements for the "Hardening & Scale Readiness" milestone — closing four pe
 
 ### Frontend Testing
 
-- [ ] **TEST-01**: Frontend has a Vitest + React Testing Library test suite covering the watchlist list/row, preference-toggle, search, and history/event-filter component and route surface
-- [ ] **TEST-02**: Frontend tests mock the app's API boundary (`web/app/lib/api.ts`) rather than intercepting raw fetch/network calls
+- [x] **TEST-01**: Frontend has a Vitest + React Testing Library test suite covering the watchlist list/row, preference-toggle, search, and history/event-filter component and route surface
+- [x] **TEST-02**: Frontend tests mock the app's API boundary (`web/app/lib/api.ts`) rather than intercepting raw fetch/network calls
 
 ### CI/CD Pipeline
 
@@ -178,8 +178,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CICD-08 | Phase 7 | Complete |
 | CICD-09 | Phase 7 | Complete |
 | CICD-10 | Phase 7 | Complete |
-| TEST-01 | Phase 8 | Pending |
-| TEST-02 | Phase 8 | Pending |
+| TEST-01 | Phase 8 | Complete |
+| TEST-02 | Phase 8 | Complete |
 | CICD-11 | Phase 9 | Pending |
 | CICD-12 | Phase 9 | Pending |
 | DATA-01 | Phase 10 | Pending |
