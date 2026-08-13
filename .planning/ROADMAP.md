@@ -257,7 +257,7 @@ Plans:
   3. Tests mock the app's API boundary (`web/app/lib/api.ts`), not raw `fetch` — no test issues a real network request, and the whole suite passes with no server running
   4. Components needing router context render through one shared helper (React Router's `createRoutesStub`), established once and reused, rather than each test reinventing router wrapping
 
-**Plans**: 4/5 plans executed
+**Plans**: 5/5 plans executed
 
 Plans:
 
@@ -265,7 +265,7 @@ Plans:
 - [x] 08-02-PLAN.md
 - [x] 08-03-PLAN.md
 - [x] 08-04-PLAN.md
-- [ ] 08-05-PLAN.md
+- [x] 08-05-PLAN.md
 
 - [ ] TBD (run /gsd-plan-phase 8 to break down)
 
@@ -346,7 +346,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
 | 6. Frontend & Release History | 4/4 | Complete    | 2026-08-11 |
 | 7. Containerization & CI/CD Pipeline | 4/4 | Complete    | 2026-08-12 |
-| 8. Frontend Test Suite | 4/5 | In Progress|  |
+| 8. Frontend Test Suite | 5/5 | In Progress|  |
 | 9. CI Coverage Gates | 0/TBD | Not started | - |
 | 10. Event Retention Window | 0/TBD | Not started | - |
 | 11. Bounded Concurrent Polling | 0/TBD | Not started | - |
