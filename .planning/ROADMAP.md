@@ -315,13 +315,19 @@ Notes: Both gates edit the same file (`.github/workflows/full-pipeline.yml`), wh
   4. An artist whose entire visible history has aged out does not fall back into seed mode and does not re-announce its back catalogue on the next poll cycle
   5. A deluxe/tracklist-change baseline recorded before the window still fires a deluxe alert when that release group's tracklist later expands
 
-**Plans**: TBD
+**Plans**: 2 plans
 
 **Design decision (locked, do not revisit during planning)**: soft-delete/filter, not hard delete. Retention is a read-side filter on display/API queries; rows stay in the table permanently so dedup keys, deluxe-change baselines (`events.track_count`), and the per-source seed-mode signal all survive. The hard-delete variants explored in research — including the `release_group_baselines` migration needed to make hard delete safe — are rejected. Success criteria 3, 4, and 5 exist specifically to prove the three failure modes hard delete would have reintroduced (dedup-key loss, seed-mode reset, baseline loss).
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 10 to break down)
+**Wave 1**
+
+- [ ] 10-01-PLAN.md — `EVENT_RETENTION_DAYS` config + fail-fast validation, the always-applied `created_at` cutoff on `ListEvents`, and integration proof that the four detection-state queries stay unfiltered
+
+**Wave 2**
+
+- [ ] 10-02-PLAN.md — `has_older_events` signal from SQL through the `/events` envelope, and the third History empty state
 
 ### Phase 11: Bounded Concurrent Polling
 
