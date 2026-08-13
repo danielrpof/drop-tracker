@@ -252,6 +252,56 @@ func TestLoad_TypeErrorNeverEchoesSecretFields(t *testing.T) {
 	}
 }
 
+// TestLoad_EventRetentionDaysDefaultsTo90 pins DATA-01's default: with
+// EVENT_RETENTION_DAYS unset, Load() must yield 90.
+func TestLoad_EventRetentionDaysDefaultsTo90(t *testing.T) {
+	setRequired(t)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.EventRetentionDays != 90 {
+		t.Errorf("EventRetentionDays = %d, want 90", cfg.EventRetentionDays)
+	}
+}
+
+// TestLoad_EventRetentionDaysOverride proves the default is not hardcoded
+// past the env read -- an explicit value must flow through.
+func TestLoad_EventRetentionDaysOverride(t *testing.T) {
+	setRequired(t)
+	t.Setenv("EVENT_RETENTION_DAYS", "30")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.EventRetentionDays != 30 {
+		t.Errorf("EventRetentionDays = %d, want 30", cfg.EventRetentionDays)
+	}
+}
+
+// TestLoad_EventRetentionDaysRejectsNonPositive pins D-03's fail-fast
+// posture: an invalid retention window must abort boot, never be silently
+// reinterpreted as "show everything" or "hide everything".
+func TestLoad_EventRetentionDaysRejectsNonPositive(t *testing.T) {
+	cases := []string{"0", "-1", "-90"}
+	for _, v := range cases {
+		t.Run(v, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("EVENT_RETENTION_DAYS", v)
+
+			_, err := config.Load()
+			if err == nil {
+				t.Fatalf("Load() with EVENT_RETENTION_DAYS=%s returned nil error, want an error naming EVENT_RETENTION_DAYS", v)
+			}
+			if !strings.Contains(err.Error(), "EVENT_RETENTION_DAYS") {
+				t.Errorf("error = %q, want it to mention EVENT_RETENTION_DAYS", err.Error())
+			}
+		})
+	}
+}
+
 func TestEnvExampleCompleteness(t *testing.T) {
 	structKeys := configEnvKeys(t)
 	fileKeys := envExampleKeys(t)

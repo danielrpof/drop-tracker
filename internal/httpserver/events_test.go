@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
@@ -509,6 +510,125 @@ func TestListEvents_RetentionExcludesAgedOutRows(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("events row count = %d, want 2 (retention must never delete rows)", count)
+	}
+}
+
+// TestListEvents_RetentionBoundaryIsInclusive pins D-04: an event exactly at
+// the retention cutoff must remain visible -- the comparison is >=, never >.
+// The intuitive ">" reading is the wrong one here; this test is what pins
+// ">=" in place.
+//
+// This calls sqlc.Queries.ListEvents directly with an explicit, fixed
+// Cutoff, rather than going through events.Service.List with a
+// wall-clock-derived retention window. Service.List always recomputes
+// time.Now() internally (it is not injectable), so a boundary row timed
+// relative to *this test's* clock would race the *service's own*, slightly
+// later time.Now() read -- and any margin wide enough to reliably avoid
+// that race is also wide enough to satisfy a strict ">" just as well as
+// ">=", which would make this test unable to actually distinguish the two
+// operators (silently passing even if D-04 regressed). Fixing Cutoff to a
+// literal value the test controls removes the race and tests exactly what
+// D-04 locks: the SQL predicate's own boundary inclusivity.
+func TestListEvents_RetentionBoundaryIsInclusive(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	cutoff := time.Now().AddDate(0, 0, -90)
+	atCutoff := cutoff // exactly equal to the cutoff -- ">=" must include, ">" must exclude
+	beforeCutoff := cutoff.Add(-1 * time.Minute)
+
+	atCutoffID := insertTestEventAt(t, pool, artistID, mbid+"-at-cutoff", atCutoff)
+	beforeCutoffID := insertTestEventAt(t, pool, artistID, mbid+"-before-cutoff", beforeCutoff)
+
+	q := sqlc.New(pool)
+	rows, err := q.ListEvents(context.Background(), sqlc.ListEventsParams{
+		ArtistID: &artistID,
+		Cutoff:   pgtype.Timestamptz{Time: cutoff, Valid: true},
+		PageSize: events.MaxPageSize,
+	})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+
+	seen := make(map[int64]bool, len(rows))
+	for _, r := range rows {
+		seen[r.ID] = true
+	}
+	if !seen[atCutoffID] {
+		t.Fatalf("rows = %+v, want the exactly-at-cutoff event (id %d) included -- D-04 requires >=, not >", rows, atCutoffID)
+	}
+	if seen[beforeCutoffID] {
+		t.Fatalf("rows = %+v, want the before-cutoff event (id %d) excluded", rows, beforeCutoffID)
+	}
+}
+
+// TestListEvents_RetentionPagesNeverRepeatAnID resolves DATA-02's
+// concurrency edge probe: each page recomputes its own cutoff from
+// time.Now(), and because the cutoff only ever advances forward while
+// pagination walks id DESC from newest to oldest, a later page can only
+// exclude more old rows -- it can never resurrect an already-excluded one
+// or re-serve a row the previous page returned.
+func TestListEvents_RetentionPagesNeverRepeatAnID(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	now := time.Now()
+	var inWindowIDs []int64
+	for i := 0; i < 5; i++ {
+		id := insertTestEventAt(t, pool, artistID, mbid+"-in-"+string(rune('a'+i)), now.AddDate(0, 0, -i))
+		inWindowIDs = append(inWindowIDs, id)
+	}
+	agedOutA := insertTestEventAt(t, pool, artistID, mbid+"-aged-a", now.AddDate(0, 0, -120))
+	agedOutB := insertTestEventAt(t, pool, artistID, mbid+"-aged-b", now.AddDate(0, 0, -200))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+
+	seen := make(map[int64]bool)
+	var cursor *int64
+	for i := 0; i < len(inWindowIDs)+2; i++ { // extra iterations guard against an infinite loop if pagination breaks
+		page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistID, PageSize: 2, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("List (page %d): %v", i, err)
+		}
+		if len(page.Events) == 0 {
+			break
+		}
+		for _, e := range page.Events {
+			if seen[e.ID] {
+				t.Fatalf("event id %d appeared on two pages", e.ID)
+			}
+			seen[e.ID] = true
+		}
+		cursor = page.NextCursor
+		if cursor == nil {
+			break
+		}
+	}
+
+	if len(seen) != len(inWindowIDs) {
+		t.Fatalf("total distinct events paged through = %d, want %d (only the in-window rows)", len(seen), len(inWindowIDs))
+	}
+	for _, id := range inWindowIDs {
+		if !seen[id] {
+			t.Fatalf("in-window event id %d never appeared across any page", id)
+		}
+	}
+	if seen[agedOutA] || seen[agedOutB] {
+		t.Fatalf("an aged-out event id leaked into a page: seen = %+v", seen)
 	}
 }
 
