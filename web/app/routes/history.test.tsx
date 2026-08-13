@@ -59,6 +59,7 @@ describe("History route", () => {
     mockListEvents.mockResolvedValueOnce({
       events: [retryEvent],
       next_cursor: null,
+      has_older_events: false,
     })
 
     await userEvent.click(retryButton)
@@ -75,7 +76,11 @@ describe("History route", () => {
     const eventB = makeEvent({ id: 2, title: "Event Beta" })
     const eventC = makeEvent({ id: 3, title: "Event Charlie" })
 
-    const firstPage: EventsPage = { events: [eventA, eventB], next_cursor: 100 }
+    const firstPage: EventsPage = {
+      events: [eventA, eventB],
+      next_cursor: 100,
+      has_older_events: false,
+    }
     mockListEvents.mockResolvedValueOnce(firstPage)
 
     renderRoute(History, "/history")
@@ -88,6 +93,7 @@ describe("History route", () => {
     const secondPage: EventsPage = {
       events: [eventC, makeEvent({ id: 2, title: eventB.title })],
       next_cursor: null,
+      has_older_events: false,
     }
     mockListEvents.mockResolvedValueOnce(secondPage)
 
@@ -109,7 +115,11 @@ describe("History route", () => {
 
   it("shows the unfiltered empty state when there is no release activity at all", async () => {
     mockListWatchlist.mockResolvedValue([])
-    mockListEvents.mockResolvedValue({ events: [], next_cursor: null })
+    mockListEvents.mockResolvedValue({
+      events: [],
+      next_cursor: null,
+      has_older_events: false,
+    })
 
     renderRoute(History, "/history")
 
@@ -118,7 +128,11 @@ describe("History route", () => {
 
   it("shows the filtered empty state, distinct from the unfiltered one, once a filter is applied", async () => {
     mockListWatchlist.mockResolvedValue([])
-    mockListEvents.mockResolvedValue({ events: [], next_cursor: null })
+    mockListEvents.mockResolvedValue({
+      events: [],
+      next_cursor: null,
+      has_older_events: false,
+    })
 
     renderRoute(History, "/history")
 
@@ -130,5 +144,55 @@ describe("History route", () => {
     )
 
     await screen.findByRole("heading", { name: "No matching events" })
+  })
+
+  it("shows the retention empty state, not the unfiltered one, when the feed is empty but has_older_events is true", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListEvents.mockResolvedValue({
+      events: [],
+      next_cursor: null,
+      has_older_events: true,
+    })
+
+    renderRoute(History, "/history")
+
+    await screen.findByRole("heading", {
+      name: "Older than your retention window",
+    })
+    expect(
+      screen.getByText(
+        "There's release history for this view — it's just outside your retention window. Nothing was deleted.",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows the retention empty state over the filtered one when both has_older_events and a filter apply", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListEvents.mockResolvedValue({
+      events: [],
+      next_cursor: null,
+      has_older_events: true,
+    })
+
+    renderRoute(History, "/history")
+
+    await screen.findByRole("heading", {
+      name: "Older than your retention window",
+    })
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Event type" }),
+      "new_release",
+    )
+
+    await screen.findByRole("heading", {
+      name: "Older than your retention window",
+    })
+    // The negative assertion is what actually pins the priority order --
+    // mere presence of the retention heading would also pass if both
+    // branches somehow rendered at once.
+    expect(
+      screen.queryByRole("heading", { name: "No matching events" }),
+    ).not.toBeInTheDocument()
   })
 })

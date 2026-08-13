@@ -28,10 +28,14 @@ export interface EventItem {
 }
 
 // EventsPage mirrors internal/httpserver/events.go's eventsResponse
-// envelope.
+// envelope. has_older_events (DATA-02, D-06) is never null on the wire --
+// it mirrors the Go bool exactly -- and tells the History route whether
+// this scope has any event hidden by the retention window, distinct from
+// "no events ever."
 export interface EventsPage {
   events: EventItem[]
   next_cursor: number | null
+  has_older_events: boolean
 }
 
 // WatchlistEntry mirrors internal/watchlist.Entry's JSON shape. GET
