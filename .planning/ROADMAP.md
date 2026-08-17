@@ -341,7 +341,7 @@ Plans:
   3. A single artist's polling failure is logged and skipped: the rest of that cycle's artists are still polled and their events still recorded, and the cycle does not abort
   4. Two artists sharing a release group cannot lose a deluxe-change baseline update — a test that races them asserts the final stored baseline is correct, and the suite passes under `go test -race`
 
-**Plans**: 4/4 plans executed
+**Plans**: 4/5 plans executed
 
 Plans:
 
@@ -354,6 +354,7 @@ Plans:
 - [x] 11-02-PLAN.md — Bounded Deezer fan-out, plus the empirical proofs that concurrency preserves the per-source rate ceiling, the overlap guard, and per-artist error isolation (PERF-02, PERF-03)
 - [x] 11-03-PLAN.md — `AdvanceGroupTrackCountBaseline` atomic compare-and-set replacing the two-statement deluxe-change baseline read/write, re-derived detection branching, and the lost-update race test (PERF-04)
 - [x] 11-04-PLAN.md — Folded-in flaky-test fix: schema isolation for the destructive migrate-from-scratch test and a deterministic spacing seam in the notifier, so criterion 4's `-race` suite half is trustworthy
+- [ ] 11-05-PLAN.md — Gap closure (G-11-1): size the pgxpool `MaxConns` ceiling explicitly against `MusicBrainzPollWorkers + DeezerPollWorkers` instead of inheriting `max(4, runtime.NumCPU())`, preserving an operator's `pool_max_conns` override
 
 Notes: Criterion 4 requires replacing today's check-then-act baseline read/write with a database-level compare-and-set; `-race` alone will not catch this logical race, so the test must assert final-state correctness. Criterion 1's speedup must be measured during verification, not assumed — confirm the DB pool has not become the new bottleneck. Existing poller test doubles must become concurrency-safe.
 
