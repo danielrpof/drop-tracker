@@ -292,6 +292,19 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 // measured in the time between two commits -- this is an accepted,
 // documented residual, mirroring isSeedMode's existing precedent for
 // documenting an accepted edge rather than closing it.
+//
+// This InsertEvent failure has a second, distinct consequence beyond the
+// failing group itself: the `return fmt.Errorf(...)` below propagates out
+// of the `for _, g := range freshGroups` loop, so every group after the
+// failing one in that artist's freshGroups slice is skipped for the rest
+// of the current cycle. Those skipped groups are NOT lost the way the
+// failing group is -- their baselines were never advanced, so the next
+// cycle recomputes them from scratch and they are simply delayed by one
+// poll interval. The asymmetry is load-bearing: the failing group's
+// notification is permanently lost, while the groups behind it in the
+// slice are merely delayed. This failure mode is a pre-existing pattern
+// shared with the sibling detection passes, not something introduced by
+// the atomic-CTE rewrite above.
 func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, freshGroups []musicbrainz.ReleaseGroup, preCycleSeen map[string]struct{}, notifiedAt pgtype.Timestamptz) error {
 	if !deluxeDetectionEnabled(entry) {
 		return nil
@@ -389,10 +402,11 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 				// at Warn (distinct from a generic insert-level DB outage,
 				// mirroring the notifier's WR-03 line) before returning, so
 				// this specific failure mode is identifiable in production
-				// logs.
+				// logs via the static `window` field below.
 				logger.Warn("deluxe change event insert failed after baseline advance: this tracklist expansion will not be re-detected",
 					slog.String("artist_mbid", entry.MBID),
 					slog.String("release_group_mbid", groupMBID),
+					slog.String("window", "baseline_advanced_insert_failed"),
 					slog.String("error", err.Error()),
 				)
 				return fmt.Errorf("detection: detect deluxe changes: %w", err)
