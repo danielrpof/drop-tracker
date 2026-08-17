@@ -176,7 +176,7 @@ func PoolConfig(dsn string, pollWorkers int) (*pgxpool.Config, error) {
 	// misattributes the override check.
 	explicitMaxConns, err := dsnSetsMaxConns(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("parse pool config for %s: %w", redactedTarget(dsn), err)
+		return nil, fmt.Errorf("parse pool_max_conns override for %s: %w", redactedTarget(dsn), err)
 	}
 	if !explicitMaxConns {
 		cfg.MaxConns = poolMaxConnsForWorkers(pollWorkers)

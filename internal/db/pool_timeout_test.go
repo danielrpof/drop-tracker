@@ -16,6 +16,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -207,4 +209,75 @@ func TestPoolConfig_RespectsExplicitMaxConnsInDSN(t *testing.T) {
 	if got, want := cfg.MaxConns, int32(6); got != want {
 		t.Fatalf("MaxConns = %d, want %d (an explicit DSN setting must not be overridden by the worker ceiling, even when it is smaller)", got, want)
 	}
+}
+
+// TestPoolConfig_ParseErrorPathsAreDistinguishable pins D-11/IN-01:
+// PoolConfig's two internal parse-failure paths must produce distinguishable
+// error text, and both must interpolate redactedTarget(dsn), never the raw
+// dsn -- the DSN embeds the connection password (ASVS V7), which is this
+// test's most valuable assertion.
+func TestPoolConfig_ParseErrorPathsAreDistinguishable(t *testing.T) {
+	// distinctivePassword lets every assertion below prove the raw DSN never
+	// reaches the returned error text, not merely that "some redaction
+	// happened." Uses the same recognizable-fixture-marker convention as
+	// internal/db/migrate_test.go's password fixture, rather than a
+	// high-entropy string that a secret scanner would flag as a real
+	// credential.
+	const distinctivePassword = "local-test-fixture-password"
+
+	t.Run("pgxpool.ParseConfig rejection surfaces the first message only", func(t *testing.T) {
+		// A DSN malformed enough to fail pgxpool.ParseConfig (bad port) fails
+		// the underlying pgx URL/keyword-value grammar identically, so this
+		// DSN never reaches PoolConfig's second parse call at all -- only the
+		// first message can appear.
+		dsn := fmt.Sprintf("postgres://u:%s@127.0.0.1:notaport/db?sslmode=disable", distinctivePassword)
+
+		_, err := PoolConfig(dsn, 8)
+		if err == nil {
+			t.Fatal("PoolConfig: got nil error, want a parse failure")
+		}
+		if !strings.Contains(err.Error(), "parse pool config for") {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), "parse pool config for")
+		}
+		if strings.Contains(err.Error(), "parse pool_max_conns override") {
+			t.Errorf("error = %q, must not contain %q (this DSN never reaches the second parse)", err.Error(), "parse pool_max_conns override")
+		}
+		if strings.Contains(err.Error(), distinctivePassword) {
+			t.Errorf("error = %q, must not contain the DSN password", err.Error())
+		}
+	})
+
+	t.Run("dsnSetsMaxConns cannot fail independently of pgxpool.ParseConfig", func(t *testing.T) {
+		// dsnSetsMaxConns wraps pgx.ParseConfig, which -- unlike
+		// pgxpool.ParseConfig -- never validates pool_max_conns' value: to the
+		// plain pgx grammar it is just an unrecognised keyword, retained
+		// verbatim in RuntimeParams. Every malformed value tried here confirms
+		// dsnSetsMaxConns' own doc comment: its parse is defensive rather than
+		// expected, because any DSN that would make it fail already fails
+		// pgxpool.ParseConfig first (same grammar, same string). This is the
+		// reachable half of PoolConfig's second call site -- an error here
+		// never fires in practice.
+		for _, badPoolMaxConns := range []string{"notanumber", "-5", "99999999999999999999"} {
+			dsn := fmt.Sprintf("postgres://u:%s@127.0.0.1:5432/db?sslmode=disable&pool_max_conns=%s", distinctivePassword, badPoolMaxConns)
+			if _, err := dsnSetsMaxConns(dsn); err != nil {
+				t.Errorf("dsnSetsMaxConns(pool_max_conns=%q): got error %v, want nil (pgx.ParseConfig does not validate pool_max_conns)", badPoolMaxConns, err)
+			}
+		}
+
+		// Since PoolConfig's second error-wrapping line cannot be driven live,
+		// pin the source-level invariant directly: the two format strings
+		// differ, and both interpolate redactedTarget(dsn) rather than dsn.
+		src, err := os.ReadFile("pool.go")
+		if err != nil {
+			t.Fatalf("read pool.go: %v", err)
+		}
+		firstLiteral := `fmt.Errorf("parse pool config for %s: %w", redactedTarget(dsn), err)`
+		secondLiteral := `fmt.Errorf("parse pool_max_conns override for %s: %w", redactedTarget(dsn), err)`
+		if !strings.Contains(string(src), firstLiteral) {
+			t.Errorf("pool.go missing the first parse-error literal %q", firstLiteral)
+		}
+		if !strings.Contains(string(src), secondLiteral) {
+			t.Errorf("pool.go missing the second parse-error literal %q", secondLiteral)
+		}
+	})
 }
