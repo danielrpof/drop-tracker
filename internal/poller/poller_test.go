@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -129,7 +131,10 @@ var _ watchlist.Store = (*stubStore)(nil)
 // fakeReleaseGroupSource is a file-local double for ReleaseGroupSource. It
 // tracks call count, the MBIDs it was called with (in order), and the
 // maximum number of concurrently in-flight calls it ever observed -- the
-// real observation TestMusicBrainzCycle_Sequential asserts on.
+// real observation TestMusicBrainzCycle_ConcurrencyBoundedByWorkerCount,
+// TestMusicBrainzCycle_WorkerCountOneIsSequential,
+// TestMusicBrainzCycle_WorkerCountAboveEntryCountFansOutToEntryCount, and
+// TestMusicBrainzCycle_SingleEntryReachesOneInFlight assert on (PERF-01).
 type fakeReleaseGroupSource struct {
 	fn func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error)
 
@@ -316,36 +321,25 @@ func TestMusicBrainzCycle_CallsSourceOncePerEntry(t *testing.T) {
 	if got := atomic.LoadInt32(&mb.calls); got != 3 {
 		t.Fatalf("calls = %d, want 3", got)
 	}
+	// Membership, not order: under concurrent fan-out the three workers can
+	// finish in any order, so the assertion is on the set of MBIDs called,
+	// not a fixed dispatch-order sequence.
 	want := []string{"mbid-1", "mbid-2", "mbid-3"}
 	mb.mu.Lock()
 	got := append([]string(nil), mb.mbids...)
 	mb.mu.Unlock()
+	sort.Strings(got)
 	if len(got) != len(want) {
-		t.Fatalf("mbids = %v, want %v", got, want)
+		t.Fatalf("mbids = %v, want %v in any order", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("mbids[%d] = %q, want %q", i, got[i], want[i])
+			t.Fatalf("mbids = %v, want %v in any order", got, want)
 		}
 	}
 
 	if atomic.LoadInt32(&store.addCalls) != 0 || atomic.LoadInt32(&store.updateCalls) != 0 || atomic.LoadInt32(&store.removeCalls) != 0 {
 		t.Fatal("cycle must never write to the store (D-04)")
-	}
-}
-
-func TestMusicBrainzCycle_Sequential(t *testing.T) {
-	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
-	mb := &fakeReleaseGroupSource{}
-	logger, _ := newTestLogger()
-	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
-
-	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
-		t.Fatalf("RunMusicBrainzCycle: %v", err)
-	}
-
-	if got := atomic.LoadInt32(&mb.maxInFlight); got > 1 {
-		t.Fatalf("max in-flight = %d, want <= 1 (artists must be polled one at a time, D-07)", got)
 	}
 }
 
@@ -383,6 +377,162 @@ func TestMusicBrainzCycle_ConcurrencyBoundedByWorkerCount(t *testing.T) {
 
 	if got := atomic.LoadInt32(&mb.maxInFlight); got != 3 {
 		t.Fatalf("max in-flight = %d, want exactly 3", got)
+	}
+}
+
+// TestMusicBrainzCycle_WorkerCountOneIsSequential proves the old sequential
+// guarantee this phase's previous (now-removed) test used to hard-code as
+// the default is still reachable -- it is now a configuration
+// (WithMusicBrainzWorkers(1)), not a default. Deterministic with no
+// sleep/gating needed: with a pool size of
+// 1, the semaphore's single slot is only released after a worker's entire
+// body (including its fetch call) completes, so the dispatch loop cannot
+// even launch the next worker until the current one has fully finished --
+// maxInFlight can never exceed 1 regardless of how fast or slow the fake
+// runs.
+func TestMusicBrainzCycle_WorkerCountOneIsSequential(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
+		return []watchlist.Entry{
+			{MBID: "mbid-1", Name: "Artist One"},
+			{MBID: "mbid-2", Name: "Artist Two"},
+			{MBID: "mbid-3", Name: "Artist Three"},
+			{MBID: "mbid-4", Name: "Artist Four"},
+		}, nil
+	}}
+	mb := &fakeReleaseGroupSource{}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(1))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 1 {
+		t.Fatalf("max in-flight = %d, want exactly 1 (WithMusicBrainzWorkers(1) must still be reachable)", got)
+	}
+	if got := atomic.LoadInt32(&mb.calls); got != 4 {
+		t.Fatalf("calls = %d, want 4 (every entry still polled, just individually rather than concurrently)", got)
+	}
+}
+
+// TestMusicBrainzCycle_WorkerCountAboveEntryCountFansOutToEntryCount proves
+// a worker count larger than the entry count fans out to at most the entry
+// count and the dispatch loop never blocks waiting for slots it will never
+// need. release gates every fetch call so the test can deterministically
+// observe all 3 entries in flight simultaneously (rather than trusting a
+// fixed sleep duration is "long enough" on a loaded machine) before letting
+// them complete.
+func TestMusicBrainzCycle_WorkerCountAboveEntryCountFansOutToEntryCount(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	release := make(chan struct{})
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		<-release
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(8))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&mb.inFlight) < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 3 in-flight calls, last observed %d", atomic.LoadInt32(&mb.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunMusicBrainzCycle: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunMusicBrainzCycle did not return promptly after release -- possible deadlock on an unused semaphore slot")
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 3 {
+		t.Fatalf("max in-flight = %d, want exactly 3 (the entry count, not the 8-worker pool ceiling)", got)
+	}
+}
+
+// TestMusicBrainzCycle_SingleEntryReachesOneInFlight is deterministic with
+// no gating needed: a single entry can never produce more than 1 in-flight
+// call regardless of pool size.
+func TestMusicBrainzCycle_SingleEntryReachesOneInFlight(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
+		return []watchlist.Entry{{MBID: "mbid-1", Name: "Artist One"}}, nil
+	}}
+	mb := &fakeReleaseGroupSource{}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 1 {
+		t.Fatalf("max in-flight = %d, want exactly 1", got)
+	}
+}
+
+// TestMusicBrainzCycle_LogsCycleDurationAndArtistCount pins D-04/D-05: every
+// completed cycle emits exactly one "poll cycle complete" line carrying
+// artist_count equal to the watchlist size and a non-negative integer
+// duration_ms (Milliseconds() truncates toward zero -- the contract is an
+// integer, never a fractional JSON number).
+func TestMusicBrainzCycle_LogsCycleDurationAndArtistCount(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	mb := &fakeReleaseGroupSource{}
+	logger, buf := newTestLogger()
+	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	records := decodeLogRecords(t, buf)
+	var found map[string]any
+	count := 0
+	for _, rec := range records {
+		if rec["msg"] == "poll cycle complete" {
+			found = rec
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("found %d 'poll cycle complete' records, want exactly 1", count)
+	}
+
+	artistCount, ok := found["artist_count"].(float64)
+	if !ok {
+		t.Fatalf("artist_count = %v (%T), want a JSON number", found["artist_count"], found["artist_count"])
+	}
+	if int(artistCount) != 3 {
+		t.Fatalf("artist_count = %v, want 3", artistCount)
+	}
+
+	durationMS, ok := found["duration_ms"].(float64)
+	if !ok {
+		t.Fatalf("duration_ms = %v (%T), want a JSON number", found["duration_ms"], found["duration_ms"])
+	}
+	if durationMS < 0 {
+		t.Fatalf("duration_ms = %v, want >= 0", durationMS)
+	}
+	if durationMS != math.Trunc(durationMS) {
+		t.Fatalf("duration_ms = %v, want an integer (no fractional part)", durationMS)
 	}
 }
 
@@ -509,17 +659,45 @@ func TestMusicBrainzCycle_ListErrorReturnsZeroCallsNonNilError(t *testing.T) {
 	}
 }
 
+// TestMusicBrainzCycle_EmptyWatchlistNoCallsNilError also pins the empty
+// side of PERF-01's fan-out (zero goroutines, zero source calls), D-04/D-05
+// (the cycle-end log line still fires with artist_count 0), and D-05's
+// notifier contract (NotifyPending still runs exactly once even when there
+// is nothing to poll) -- constructed via New directly, not newTestPoller,
+// so the notifier fake is reachable for the assertion below.
 func TestMusicBrainzCycle_EmptyWatchlistNoCallsNilError(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
 	mb := &fakeReleaseGroupSource{}
-	logger, _ := newTestLogger()
-	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
+	notifier := &fakeNotifier{}
+	logger, buf := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, notifier, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
 		t.Fatalf("RunMusicBrainzCycle: %v, want nil", err)
 	}
 	if got := atomic.LoadInt32(&mb.calls); got != 0 {
 		t.Fatalf("calls = %d, want 0", got)
+	}
+	if got := atomic.LoadInt32(&notifier.calls); got != 1 {
+		t.Fatalf("notifier.calls = %d, want 1", got)
+	}
+
+	records := decodeLogRecords(t, buf)
+	var found map[string]any
+	for _, rec := range records {
+		if rec["msg"] == "poll cycle complete" {
+			found = rec
+		}
+	}
+	if found == nil {
+		t.Fatal("no 'poll cycle complete' log record found")
+	}
+	artistCount, ok := found["artist_count"].(float64)
+	if !ok || int(artistCount) != 0 {
+		t.Fatalf("artist_count = %v, want 0", found["artist_count"])
 	}
 }
 
@@ -949,8 +1127,19 @@ func TestPoller_RunMusicBrainzCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 	if !errors.Is(err, ErrCycleInProgress) {
 		t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
 	}
-	if got := atomic.LoadInt32(&events.calls); got != 1 {
-		t.Fatalf("events.calls = %d, want 1 (the skipped tick must perform zero detection calls)", got)
+	// store.listCalls, not events.calls: with the default worker pool, all
+	// 3 entries can be concurrently in flight and blocked inside events.fn
+	// by the time the "started" signal fires, and the still-running first
+	// cycle's own already-dispatched workers keep incrementing events.calls
+	// in the background regardless of what the second call does -- that
+	// makes any snapshot-based events.calls comparison inherently racy
+	// against the first cycle's own progress, not a measurement of the
+	// second call's behavior. store.List is the first thing the cycle body
+	// does after the CAS guard succeeds, so store.listCalls staying at 1
+	// is the deterministic proof the second, skipped call never performed
+	// any work at all -- not just zero detection calls.
+	if got := atomic.LoadInt32(&store.listCalls); got != 1 {
+		t.Fatalf("store.listCalls = %d, want 1 (the skipped tick must perform zero store reads)", got)
 	}
 
 	close(release)
@@ -1083,11 +1272,17 @@ func TestPoller_RunMusicBrainzCycle_DetectionErrorIsolatedPerArtist(t *testing.T
 	if got := atomic.LoadInt32(&events.calls); got != 2 {
 		t.Fatalf("events.calls = %d, want 2 (both artists must still be attempted)", got)
 	}
+	// Membership, not order: under concurrent fan-out the two workers can
+	// finish in either order, so asserting the set {mbid-1, mbid-2} was
+	// attempted (PERF-03's actual guarantee) rather than a fixed
+	// [mbid-1, mbid-2] sequence is what the concurrent design can promise.
 	events.mu.Lock()
 	gotMBIDs := append([]string(nil), events.mbids...)
 	events.mu.Unlock()
-	if len(gotMBIDs) != 2 || gotMBIDs[0] != "mbid-1" || gotMBIDs[1] != "mbid-2" {
-		t.Fatalf("events.mbids = %v, want [mbid-1 mbid-2] (the second artist's detection must still run)", gotMBIDs)
+	sort.Strings(gotMBIDs)
+	wantMBIDs := []string{"mbid-1", "mbid-2"}
+	if len(gotMBIDs) != len(wantMBIDs) || gotMBIDs[0] != wantMBIDs[0] || gotMBIDs[1] != wantMBIDs[1] {
+		t.Fatalf("events.mbids = %v, want %v in any order (the second artist's detection must still run)", gotMBIDs, wantMBIDs)
 	}
 
 	records := decodeLogRecords(t, buf)
@@ -1194,11 +1389,19 @@ func TestMusicBrainzCycle_OverlapGuard_SkipsWhileInFlight(t *testing.T) {
 	if !errors.Is(err, ErrCycleInProgress) {
 		t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
 	}
+	// store.listCalls is the deterministic proof here, not mb.calls: with
+	// the default worker pool, more than one entry can be concurrently in
+	// flight and blocked inside mb.fn by the time the "started" signal
+	// fires, and the still-running first cycle's own already-dispatched
+	// workers keep incrementing mb.calls in the background regardless of
+	// what the second call does -- a snapshot-based mb.calls comparison
+	// would be racing the first cycle's own progress, not measuring the
+	// second call's behavior. store.List is the first thing the cycle body
+	// does after the CAS guard succeeds, so store.listCalls staying at 1
+	// proves the second, skipped call never performed any work at all --
+	// not just zero source calls.
 	if got := atomic.LoadInt32(&store.listCalls); got != 1 {
 		t.Fatalf("store.listCalls = %d, want 1 (the skipped tick must perform zero store reads)", got)
-	}
-	if got := atomic.LoadInt32(&mb.calls); got != 1 {
-		t.Fatalf("mb.calls = %d, want 1 (the skipped tick must perform zero source calls)", got)
 	}
 
 	close(release)
