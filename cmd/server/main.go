@@ -90,7 +90,12 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 
-	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	// cfg.MusicBrainzPollWorkers + cfg.DeezerPollWorkers is the maximum number
+	// of DB-touching goroutines both poll cycles can produce at once (G-11-1)
+	// -- passing it through is what lets db.NewPool size the pool's MaxConns
+	// against the concurrency it must actually serve rather than against this
+	// host's own vCPU count.
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL, cfg.MusicBrainzPollWorkers+cfg.DeezerPollWorkers)
 	if err != nil {
 		return fmt.Errorf("connect to database: %w", err)
 	}

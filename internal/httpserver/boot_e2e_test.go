@@ -44,7 +44,10 @@ func TestBootToHealth_EndToEnd(t *testing.T) {
 		t.Fatalf("db.RunMigrations: %v", err)
 	}
 
-	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	// Mirrors cmd/server/main.go's call site: this test exists precisely to
+	// exercise the real boot chain, so the worker-ceiling argument must match
+	// production's (G-11-1).
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL, cfg.MusicBrainzPollWorkers+cfg.DeezerPollWorkers)
 	if err != nil {
 		t.Fatalf("db.NewPool: %v", err)
 	}

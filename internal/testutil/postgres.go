@@ -59,7 +59,13 @@ func NewTestPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("testutil.NewTestPool: run migrations: %v", err)
 	}
 
-	pool, err := db.NewPool(ctx, dsn)
+	// pollWorkers=0: test pools serve no poll cycles, so the computed default
+	// collapses to db.pollWorkerHeadroom -- the same floor pgxpool would have
+	// applied on a small CI runner and lower than the NumCPU-derived value on
+	// a large dev box, so per-package test connection pressure does not
+	// increase (verified against internal/poller/poller_test.go's DB-backed
+	// tests, which each drive a single-entry watchlist).
+	pool, err := db.NewPool(ctx, dsn, 0)
 	if err != nil {
 		t.Fatalf("testutil.NewTestPool: create pool: %v", err)
 	}
@@ -144,7 +150,9 @@ func NewIsolatedTestPool(t *testing.T, schema string) *pgxpool.Pool {
 		t.Fatalf("testutil.NewIsolatedTestPool: run migrations: %v", err)
 	}
 
-	pool, err := db.NewPool(ctx, scopedDSN)
+	// pollWorkers=0: same rationale as NewTestPool above -- test pools serve
+	// no poll cycles.
+	pool, err := db.NewPool(ctx, scopedDSN, 0)
 	if err != nil {
 		t.Fatalf("testutil.NewIsolatedTestPool: create pool: %v", err)
 	}
