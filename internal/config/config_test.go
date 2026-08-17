@@ -302,6 +302,90 @@ func TestLoad_EventRetentionDaysRejectsNonPositive(t *testing.T) {
 	}
 }
 
+// TestLoad_PollWorkerDefaults pins D-02's locked defaults: with neither
+// worker-count variable set, Load() must yield MusicBrainzPollWorkers=3 and
+// DeezerPollWorkers=5.
+func TestLoad_PollWorkerDefaults(t *testing.T) {
+	setRequired(t)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.MusicBrainzPollWorkers != 3 {
+		t.Errorf("MusicBrainzPollWorkers = %d, want 3", cfg.MusicBrainzPollWorkers)
+	}
+	if cfg.DeezerPollWorkers != 5 {
+		t.Errorf("DeezerPollWorkers = %d, want 5", cfg.DeezerPollWorkers)
+	}
+}
+
+// TestLoad_PollWorkerOverrides proves the defaults are not hardcoded past
+// the env read -- explicit values must flow through independently (D-01).
+func TestLoad_PollWorkerOverrides(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MUSICBRAINZ_POLL_WORKERS", "7")
+	t.Setenv("DEEZER_POLL_WORKERS", "2")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.MusicBrainzPollWorkers != 7 {
+		t.Errorf("MusicBrainzPollWorkers = %d, want 7", cfg.MusicBrainzPollWorkers)
+	}
+	if cfg.DeezerPollWorkers != 2 {
+		t.Errorf("DeezerPollWorkers = %d, want 2", cfg.DeezerPollWorkers)
+	}
+}
+
+// TestLoad_RejectsNonPositivePollWorkers pins the same fail-fast posture
+// TestLoad_EventRetentionDaysRejectsNonPositive pins for EVENT_RETENTION_DAYS:
+// an invalid pool size must abort boot, never be silently reinterpreted as
+// zero workers. MUSICBRAINZ_POLL_WORKERS=1 is exercised separately below as
+// the boundary value one step above the rejected range.
+func TestLoad_RejectsNonPositivePollWorkers(t *testing.T) {
+	cases := []struct {
+		envVar string
+		value  string
+	}{
+		{"MUSICBRAINZ_POLL_WORKERS", "0"},
+		{"MUSICBRAINZ_POLL_WORKERS", "-1"},
+		{"DEEZER_POLL_WORKERS", "0"},
+		{"DEEZER_POLL_WORKERS", "-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.envVar+"_"+tc.value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv(tc.envVar, tc.value)
+
+			_, err := config.Load()
+			if err == nil {
+				t.Fatalf("Load() with %s=%s returned nil error, want an error naming %s", tc.envVar, tc.value, tc.envVar)
+			}
+			if !strings.Contains(err.Error(), tc.envVar) {
+				t.Errorf("error = %q, want it to mention %s", err.Error(), tc.envVar)
+			}
+		})
+	}
+}
+
+// TestLoad_PollWorkersOneIsValid pins the boundary immediately above the
+// rejected range: 1 is a valid worker count (WorkerCountOneIsSequential
+// relies on this being accepted, not rejected).
+func TestLoad_PollWorkersOneIsValid(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MUSICBRAINZ_POLL_WORKERS", "1")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() with MUSICBRAINZ_POLL_WORKERS=1 returned unexpected error: %v", err)
+	}
+	if cfg.MusicBrainzPollWorkers != 1 {
+		t.Errorf("MusicBrainzPollWorkers = %d, want 1", cfg.MusicBrainzPollWorkers)
+	}
+}
+
 func TestEnvExampleCompleteness(t *testing.T) {
 	structKeys := configEnvKeys(t)
 	fileKeys := envExampleKeys(t)
