@@ -1,18 +1,22 @@
 ---
 phase: 11-bounded-concurrent-polling
-reviewed: 2026-08-17T06:24:47Z
+reviewed: 2026-08-17T00:00:00Z
 depth: standard
-files_reviewed: 17
+files_reviewed: 21
 files_reviewed_list:
+  - Makefile
   - cmd/server/main.go
   - internal/config/config.go
   - internal/config/config_test.go
   - internal/db/migrate_test.go
+  - internal/db/pool.go
+  - internal/db/pool_timeout_test.go
   - internal/db/sqlc/events.sql.go
   - internal/db/sqlc/querier.go
   - internal/detection/baseline_test.go
   - internal/detection/detector.go
   - internal/detection/musicbrainz.go
+  - internal/httpserver/boot_e2e_test.go
   - internal/httpserver/events_test.go
   - internal/notifier/export_test.go
   - internal/notifier/notifier.go
@@ -21,232 +25,80 @@ files_reviewed_list:
   - internal/poller/poller_test.go
   - internal/testutil/postgres.go
   - queries/events.sql
+  - .env.example
 findings:
   critical: 0
-  warning: 3
+  warning: 2
   info: 2
-  total: 5
+  total: 4
 status: issues_found
 ---
 
 # Phase 11: Code Review Report
 
-**Reviewed:** 2026-08-17T06:24:47Z
-**Depth:** standard
-**Files Reviewed:** 17
+**Reviewed:** 2026-08-17
+**Depth:** standard (with deep cross-file tracing on the CTE-locking and pool-sizing paths per the review brief)
+**Files Reviewed:** 21
 **Status:** issues_found
 
 ## Summary
 
-Phase 11 adds bounded worker-pool fan-out to both poll cycles, replaces the
-two-statement deluxe-baseline read/write with a single atomic
-compare-and-set query, and fixes several root causes of test flakiness
-under Go's default package-level test parallelism.
+This phase adds bounded worker-pool fan-out to `RunMusicBrainzCycle`/`RunDeezerCycle`, replaces a check-then-act deluxe-change baseline update with a single `FOR UPDATE` CTE, and sizes `pgxpool`'s `MaxConns` off the configured worker ceiling via a second `pgx.ParseConfig` call used only to detect an operator-supplied `pool_max_conns`.
 
-I traced the semaphore/WaitGroup dispatch loop in `poller.go` line by line
-for both `RunMusicBrainzCycle` and `RunDeezerCycle`: defer ordering for
-panic recovery → semaphore release → `wg.Done()` is correct (LIFO
-guarantees `recover()` runs before the slot is freed and before the
-WaitGroup is decremented), the double `ctx.Err()` check (in the dispatch
-loop's `select` and again inside each worker) correctly closes the race
-window that exists when `workers >= len(entries)` (verified against the
-`TestMusicBrainzCycle_ContextCancelledStopsIteration` /
-`TestDeezerCycle_ContextCancelledStopsIteration` reasoning, which forces
-`workers=1` specifically to make that ordering deterministic rather than
-scheduler-luck-dependent — this checks out), and `wg.Wait()` is always
-reached on every code path (including cancellation), so no goroutine can
-outlive `RunMusicBrainzCycle`/`RunDeezerCycle`'s return.
+I traced the concurrency-bearing code paths by hand against the Go memory model and Postgres's READ COMMITTED / `FOR UPDATE` re-evaluation semantics, not just by reading the (extensive) accompanying tests:
 
-I also traced `AdvanceGroupTrackCountBaseline` (`queries/events.sql` /
-`events.sql.go`) against Postgres's documented READ COMMITTED
-re-fetch-and-re-evaluate behavior for `FOR UPDATE`: a second concurrent
-caller blocked on the CTE's row lock is guaranteed to see the
-already-committed value once unblocked (not a stale pre-lock snapshot),
-and `TestAdvanceGroupBaseline_ConcurrentRace`'s three sub-tests correctly
-assert on the value read back from the database rather than trusting the
-functions' own return values. This closes the lost-update race PERF-04
-targets; I did not find a way to make two racing callers lose the higher
-count.
+- **Worker-pool bound (`poller.go`)**: the semaphore acquire/release, the double `ctx.Err()` check (dispatch-loop select + per-worker recheck), the panic-recovery wrapper, and the `wg.Wait()`-before-cycleErr-report ordering are all correct. I could not find a goroutine leak, a semaphore-permanently-held path, or a data race on `cycleErr`/`mbRunning`/`dzRunning` (all writes to `cycleErr` happen only on the dispatch-loop's own goroutine; the atomics are used correctly for the CAS overlap guards).
+- **`AdvanceGroupTrackCountBaseline` CTE (`queries/events.sql` / `detector.go`)**: the `WITH existing AS (... FOR UPDATE) UPDATE ... FROM existing` pattern is the correct, standard Postgres idiom for a race-free compare-and-set. Postgres does not inline a CTE containing a locking clause, and a transaction that blocks on the `FOR UPDATE` row lock re-evaluates against the newly-committed row once unblocked (READ COMMITTED's EvalPlanQual re-check) — so the lost-update race this replaces is genuinely closed, not just narrowed. `TestAdvanceGroupBaseline_ConcurrentRace` empirically confirms this.
+- **Pool sizing (`db/pool.go`)**: `poolMaxConnsForWorkers`'s clamp-then-convert to `int32` cannot overflow; `dsnSetsMaxConns`'s separate `pgx.ParseConfig` call is the only way to observe `pool_max_conns` before `pgxpool.ParseConfig` consumes it from `RuntimeParams`, and the reasoning in the comments matches actual `pgxpool` behavior.
 
-No BLOCKER-level defects found. Three WARNINGs are worth fixing: an
-identifier-injection pattern in a new test-support function (low practical
-risk, but a real anti-pattern the codebase shouldn't establish as
-precedent), a genuine (if narrow and already-logged) permanent-data-loss
-window introduced by re-ordering the deluxe-baseline advance ahead of the
-event insert, and a test-fragility trap in the notifier package's new
-package-level test seam.
+I found no BLOCKER-level bugs in the reviewed diff. The two WARNING-level items below are real, but narrow, and one of them is already partially (if imprecisely) documented by the authors themselves.
 
 ## Warnings
 
-### WR-01: Unescaped identifier interpolation in dynamic DDL (`testutil.NewIsolatedTestPool`)
+### WR-01: `detectDeluxeChanges`'s documented "accepted edge" undersells its own blast radius
 
-**File:** `internal/testutil/postgres.go:113-154` (specifically lines 125 and 128)
+**File:** `internal/detection/musicbrainz.go:295-416` (the `default:` branch at ~366-399), cross-referenced with `queries/events.sql:42-80`
 
-**Issue:** `NewIsolatedTestPool(t *testing.T, schema string)` builds `DROP
-SCHEMA`/`CREATE SCHEMA` statements via unescaped `fmt.Sprintf("DROP SCHEMA
-IF EXISTS %s CASCADE", schema)` and `fmt.Sprintf("CREATE SCHEMA %s",
-schema)`. Postgres identifiers cannot be parameterized as bind variables in
-DDL, so this pattern is sometimes unavoidable — but it must quote/validate
-the identifier rather than interpolate it raw. Every current call site
-passes a hardcoded literal (`"notifier_test"`), so there is no live
-exploit path today, but the function signature accepts an arbitrary `string`
-with zero validation, and this is exactly the kind of helper that gets
-reused later with a less-trusted input (e.g., a schema name derived from
-`t.Name()` or an env var) without anyone re-auditing the DDL construction.
-This is the same class of defect ASVS V5/SQL-injection guidance flags, just
-scoped to a DDL identifier instead of a data value.
+**Issue:** The method's doc comment (lines 278-294) documents that a crash/error between `advanceGroupBaseline`'s commit and the `InsertEvent` call permanently loses *that one group's* notification, and frames this as a narrow, accepted residual. What the comment does not mention: on an `InsertEvent` error, the `default:` branch does `return fmt.Errorf(...)` immediately, escaping the `for _, g := range freshGroups` loop entirely (musicbrainz.go:398). This means every *other* release-group later in that same artist's `freshGroups` slice — for which `advanceGroupBaseline` had not yet even run — is silently skipped for the rest of *this* cycle's deluxe-change pass too, not just the one group whose insert failed.
 
-**Fix:**
-```go
-import "github.com/jackc/pgx/v5"
+In practice the blast radius is bounded (each group is reconsidered fresh on the *next* poll cycle, since `freshGroups`/`preCycleSeen` are recomputed every cycle), so this is not data loss for those other groups — only a one-cycle delay. Only the specific group whose baseline had already advanced when the insert failed loses its notification permanently, exactly as documented. I confirmed this same "abort the whole per-event-type loop on the first `InsertEvent` error" pattern also exists, identically, in `DetectMusicBrainz`'s own new_release loop (musicbrainz.go:118-120) and in `detectGuestFeatures` (musicbrainz.go:212-214) — so this is pre-existing Detector architecture, not something phase 11 introduced. Phase 11's atomic-CTE change does, however, make the interaction sharper: the baseline for the failing group has *already durably moved* by the time the early return happens, in a way the two-statement predecessor never risked in the same statement.
 
-// ...
-sanitized := pgx.Identifier{schema}.Sanitize()
-if _, err := sqlDB.ExecContext(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", sanitized)); err != nil {
-    t.Fatalf("testutil.NewIsolatedTestPool: drop schema %s (setup): %v", schema, err)
-}
-if _, err := sqlDB.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA %s", sanitized)); err != nil {
-    t.Fatalf("testutil.NewIsolatedTestPool: create schema %s: %v", schema, err)
-}
-```
-At minimum, add a defensive `regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)`
-guard on `schema` at the top of the function and `t.Fatal` if it doesn't
-match, so any future caller passing a non-literal value fails loudly
-instead of silently executing arbitrary SQL.
+**Fix:** Tighten the doc comment on `detectDeluxeChanges` (musicbrainz.go:278-294) to state explicitly that an `InsertEvent` failure also skips any remaining groups in this artist's `freshGroups` slice for the rest of the current cycle (delayed, not lost, for those), so a future reader doesn't assume the failure is scoped to exactly one group the way the release-detail-fetch error path (which does `continue`, not `return`) is.
 
-### WR-02: Baseline-advance-before-insert ordering introduces a permanent, unrecoverable event-loss window
+### WR-02: `advanceGroupBaseline`-then-`InsertEvent` ordering is a real, if narrow, notification-loss window that this phase's own pool-hardening work makes more, not less, likely to trigger
 
-**File:** `internal/detection/musicbrainz.go:278-404` (see the `Known,
-accepted edge` doc comment above `detectDeluxeChanges`, and the `default:`
-branch's insert call around line 371-399); `internal/detection/detector.go:135-152`
+**File:** `internal/detection/musicbrainz.go:366-399`
 
-**Issue:** The former two-statement design (`groupBaseline` SELECT, then
-`setGroupBaseline` UPDATE only *after* `InsertEvent` succeeded) meant a
-failed insert left the baseline untouched, so the next poll cycle would
-naturally retry the same comparison. The new single-statement CAS
-(`AdvanceGroupTrackCountBaseline`) necessarily commits the new baseline
-*before* the caller can know whether to fire an event — the CAS's own
-return value is what decides that. If `InsertEvent` then fails (a
-transient connection drop, a pool exhaustion moment, etc.), the baseline
-has already durably advanced past the point that would trigger detecting
-this change again: the *event row itself* is never created, and no future
-cycle can ever recreate it, because the comparison that would have fired
-it can never recur. This is different from the notifier's WR-03 window
-(a row that already exists just fails to get marked `notified_at` — fully
-recoverable next pass); here the underlying detected-event record is
-permanently and silently lost from the database, not just undelivered.
+**Issue:** This is the specific case WR-01's comment already documents (correctly) as an accepted edge, but it's worth flagging on its own because of what else is in this same phase: `internal/db/pool.go`'s entire raison d'être this session is hardening against exactly the class of failure that would trigger this window — a DB call that fails or hangs mid-cycle (wedged connection, exhausted pool, etc.). If `pool_max_conns` is undersized relative to `mbWorkers+dzWorkers` (an operator override, per `TestPoolConfig_RespectsExplicitMaxConnsInDSN`'s deliberately-supported case), connection-acquire contention under load is more likely, which is precisely the kind of transient failure most likely to land a caller in this window: baseline advances, `InsertEvent` fails, and that release-group's deluxe-change notification is gone forever with no retry path (unlike every other failure mode in this codebase, which the whole notifier/detector design otherwise takes pains to make retry-safe — D-09's re-pickup contract, WR-03's mark-notified-failed handling, etc.).
 
-This is called out explicitly in the code's own doc comment as an accepted
-trade-off, and the failure path is logged at `Warn` (distinguishable from a
-generic DB error) and the error is still propagated up through
-`RunMusicBrainzCycle`'s per-artist error log — so it is *observable*, just
-not *recoverable*. Given this project's stated core value ("reliably
-detects and notifies on new releases"), a class of DB hiccup that
-permanently drops a detected domain event (not merely delays its delivery)
-deserves more than an accepted-risk comment, especially since the
-underlying cause (no transaction-capable seam on `Detector`, which only
-holds a `sqlc.Querier`) is a solvable architecture gap, not a fundamental
-limitation.
-
-**Fix:** Give `Detector` a transaction-capable seam (e.g. accept a
-`*pgxpool.Pool` or a narrow `BeginTx`-only interface alongside
-`sqlc.Querier`) so `AdvanceGroupTrackCountBaseline` and the subsequent
-`InsertEvent` can be wrapped in one explicit `pgx.Tx`:
-```go
-tx, err := d.pool.Begin(ctx)
-if err != nil { return err }
-defer tx.Rollback(ctx) // no-op if committed
-qtx := d.q.WithTx(tx)
-rows, err := qtx.AdvanceGroupTrackCountBaseline(ctx, ...)
-// ... decide whether to insert ...
-if err := qtx.InsertEvent(ctx, ...); err != nil { return err } // tx never commits, baseline never advances
-return tx.Commit(ctx)
-```
-This fully closes the window while preserving PERF-04's atomicity goal, at
-the cost of the transaction-plumbing work the current doc comment declines
-to justify. If that plumbing is deliberately deferred to a later phase,
-downgrade this from an implicit "documented and fine" to an explicit
-follow-up backlog item with a tracked issue reference, since the current
-comment reads as a closed decision rather than an open risk.
-
-### WR-03: `notifier` package-level test seams (`dbOpTimeout`, `spacingWait`) are only safe because no test currently calls `t.Parallel()`
-
-**File:** `internal/notifier/notifier.go:56,67`; `internal/notifier/export_test.go:21-26`
-
-**Issue:** `dbOpTimeout` and `spacingWait` are mutable package-level `var`s
-that production code reads and that `notifier_test.go`/`export_test.go`
-overwrite for the duration of a test via save-swap-restore
-(`SetSpacingWaitForTest`). This works today because none of
-`notifier_test.go`'s tests call `t.Parallel()` (confirmed: no matches in
-the package). But this is a latent trap: this same phase's own stated goal
-was fixing flakiness caused by tests running concurrently under Go's
-default parallelism, and a future contributor adding `t.Parallel()` to
-speed up this package's real-Postgres integration tests (a very natural
-thing to do, since several of them spin up their own isolated schema and
-have no reason not to run in parallel) would silently reintroduce a data
-race on these two globals with no compiler or vet warning — `go test -race`
-would catch it, but only if run, and CLAUDE.md doesn't currently mandate
-`-race` in CI for this repo's test step.
-
-**Fix:** Either (a) add a comment at the top of `notifier_test.go` stating
-explicitly "no test in this file may call `t.Parallel()` without first
-moving `dbOpTimeout`/`spacingWait` off package-level vars," or (b) do the
-more robust fix now: thread `spacing`-style values through `Notifier`'s
-own fields (already partially done for `spacing`) and make `dbOpTimeout`
-an unexported field with a functional-option override for tests, removing
-the shared mutable global entirely. Given this phase's whole premise is
-closing parallelism-driven flakiness, leaving a new parallelism trap in
-the same commit range is worth closing now rather than deferring.
+**Fix:** No code change required to ship this phase (the trade-off is real and reasonably argued), but consider tracking this as a follow-up: either wrap `advanceGroupBaseline` + `InsertEvent` in an explicit transaction once `Detector` gains a transaction-capable seam (the comment already anticipates this), or emit a distinguishable metric/log signal (beyond the existing `Warn` line) so an operator can detect how often this window is actually being hit in production rather than only reading about the risk in a code comment.
 
 ## Info
 
-### IN-01: `MUSICBRAINZ_POLL_WORKERS`/`DEEZER_POLL_WORKERS` have no upper bound
+### IN-01: `PoolConfig`'s two internal parse failures share identical wrapped error text
 
-**File:** `internal/config/config.go:54-55,79-84`
+**File:** `internal/db/pool.go:160-186`
 
-**Issue:** `Load()` rejects non-positive worker counts but places no
-ceiling on either value. An operator typo (e.g. `MUSICBRAINZ_POLL_WORKERS=30000`
-instead of `3`) would silently pass validation and allocate a
-30000-capacity semaphore channel plus fan out that many goroutines per
-cycle, which — combined with the tightly-limited MusicBrainz rate limiter
-(default burst 1) — would mostly just mean 30000 goroutines parked in
-`limiter.Wait`, but is still an unnecessary and unbounded resource
-footprint for a config mistake that's easy to catch at boot.
+**Issue:** `PoolConfig` wraps both `pgxpool.ParseConfig(dsn)`'s failure (line 163) and `dsnSetsMaxConns(dsn)`'s internal `pgx.ParseConfig(dsn)` failure (line 179) with the identical message `"parse pool config for %s: %w"`. Since the comment on line 172-176 explains the second failure is "defensive rather than expected," a production log line reading this text gives no way to tell which of the two parse calls actually failed, which matters for triage if the two parsers ever do diverge on some DSN in practice (they are, after all, two separate calls into two separate functions of the pgx module).
 
 **Fix:**
 ```go
-const maxPollWorkers = 50 // generous ceiling; no realistic watchlist needs more
-
-if cfg.MusicBrainzPollWorkers <= 0 || cfg.MusicBrainzPollWorkers > maxPollWorkers {
-    return nil, fmt.Errorf("MUSICBRAINZ_POLL_WORKERS must be between 1 and %d, got %d", maxPollWorkers, cfg.MusicBrainzPollWorkers)
+explicitMaxConns, err := dsnSetsMaxConns(dsn)
+if err != nil {
+    return nil, fmt.Errorf("parse pool_max_conns override for %s: %w", redactedTarget(dsn), err)
 }
 ```
-Apply the same pattern to `DeezerPollWorkers`.
 
-### IN-02: `AdvanceGroupTrackCountBaseline`'s `:many` return shape is easy to misuse
+### IN-02: `.env.example` could not be reviewed — sandboxed out by tool permissions
 
-**File:** `internal/db/sqlc/events.sql.go:60-78`; `internal/db/sqlc/querier.go:39`
+**File:** `.env.example`
 
-**Issue:** The query is guaranteed by the `(event_type, source,
-external_id)` unique constraint to return 0 or 1 rows, but sqlc generates
-it as `:many` (`[]*int32`), so every caller must remember to check
-`len(rows) == 0` and only ever look at `rows[0]`. `detector.go`'s
-`advanceGroupBaseline` does this correctly today, but the generated
-signature itself doesn't communicate the 0-or-1 invariant — a future
-caller could easily write `rows[0]` without the length check and panic on
-an index-out-of-range for the legitimate "no advance" case.
+**Issue:** Both the `Read` tool and `Bash cat .env.example` were denied by this session's permission settings ("File is in a directory that is denied by your permission settings" / "Permission to use Bash ... has been denied"), so the new `MUSICBRAINZ_POLL_WORKERS`/`DEEZER_POLL_WORKERS` entries this phase should have added to it were not directly inspected. This gap is substantially mitigated by `internal/config/config_test.go`'s `TestEnvExampleCompleteness`, which asserts (and would fail CI on) any drift between `Config`'s `env` struct tags and `.env.example`'s keys — so a missing or misspelled key would already be caught mechanically. What that test cannot catch is documentation quality (e.g., whether the new entries' inline comments correctly explain the worker-count semantics and the D-02 defaults).
 
-**Fix:** Change the query annotation to `:one` and have it return
-`(pgtype.Timestamptz`-style nullable, i.e. accept `pgx.ErrNoRows` as the
-"missing row" signal, translating it explicitly in Go — mirrors how
-`UpdateWatchlistPreferences`'s doc comment already describes translating
-`pgx.ErrNoRows` to `ErrNotFound`. This isn't required for correctness (the
-current code is correct), but it would make misuse a compile-time-adjacent
-error (a single `Scan` failing loudly) instead of a runtime panic risk for
-the next caller.
+**Fix:** Not a code defect; re-run this review (or a scoped follow-up) in an environment where `.env.example` is readable, or have a human confirm the two new lines read sensibly.
 
 ---
 
-_Reviewed: 2026-08-17T06:24:47Z_
+_Reviewed: 2026-08-17_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
