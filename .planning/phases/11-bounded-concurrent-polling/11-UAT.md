@@ -1,5 +1,5 @@
 ---
-status: complete
+status: diagnosed
 phase: 11-bounded-concurrent-polling
 source: [11-VERIFICATION.md]
 started: 2026-08-17T06:35:00Z
@@ -46,5 +46,13 @@ skipped: 0
   reason: "User reported: Pre-emptively fix it now: no VPS is provisioned yet, so size MaxConns explicitly rather than deferring to deployment."
   severity: minor
   test: 1
-  artifacts: []
-  missing: []
+  root_cause: "internal/db/pool.go's PoolConfig (lines 92-105) parses the DSN via pgxpool.ParseConfig and sets ConnectTimeout, PingTimeout, and MaxConnIdleTime explicitly, but never sets cfg.MaxConns. pgxpool therefore falls back to its own default, max(4, runtime.NumCPU()), evaluated on whatever host the process runs on. MusicBrainzPollWorkers + DeezerPollWorkers default to 3 + 5 = 8 concurrent DB-touching goroutines (internal/config/config.go:54-55), which can exceed that default pool ceiling on any host with fewer than 8 vCPUs."
+  artifacts:
+    - path: "internal/db/pool.go"
+      issue: "PoolConfig never sets cfg.MaxConns, so pool size is not sized against the worker-pool ceiling it must serve"
+    - path: "internal/config/config.go"
+      issue: "MusicBrainzPollWorkers/DeezerPollWorkers define the concurrency ceiling PoolConfig should be sized against, but nothing wires the two together"
+  missing:
+    - "Set cfg.MaxConns in PoolConfig to a value that comfortably exceeds MusicBrainzPollWorkers + DeezerPollWorkers, independent of runtime.NumCPU() on the deploy host"
+    - "Keep operator override intact: PoolConfig already skips overriding ConnectTimeout when the DSN sets connect_timeout explicitly (pool.go:98) — MaxConns should follow the same precedent (an operator-set pool_max_conns in the DSN wins) rather than force-overwriting it unconditionally"
+  debug_session: ""
