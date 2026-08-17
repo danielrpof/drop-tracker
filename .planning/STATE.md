@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-11)
 Phase: 11 (bounded-concurrent-polling) — EXECUTING
 Plan: 1 of 4
 Status: Executing Phase 11
-Last activity: 2026-08-16 — Phase 11 execution started
+Last activity: 2026-08-17 - Completed quick task 260817-cfu: Bump the Dockerfile's Go builder-stage base image from golang:1.26.5-alpine3.24 to a patched release to fix 8 HIGH-severity stdlib CVEs failing the Trivy build-scan gate in CI
 
 **v1.1 phases:**
 
@@ -187,6 +187,7 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 260806-hfn | Add a gitleaks pre-commit hook so secrets are caught locally before commit | 2026-08-06 | 18ad467 | [260806-hfn-add-a-gitleaks-pre-commit-hook-so-secret](./quick/260806-hfn-add-a-gitleaks-pre-commit-hook-so-secret/) |
 | 260808-pt0 | Close out Phase 5: commit docs, cleanup stray binary, mark phase complete, close backstop truncation test | 2026-08-08 | cbe73af | [260808-pt0-close-out-phase-5-commit-docs-cleanup-st](./quick/260808-pt0-close-out-phase-5-commit-docs-cleanup-st/) |
+| 260817-cfu | Bump the Dockerfile's Go builder-stage base image from golang:1.26.5-alpine3.24 to a patched release to fix 8 HIGH-severity stdlib CVEs failing the Trivy build-scan gate in CI | 2026-08-17 | 4f58465 | [260817-cfu-bump-the-dockerfile-s-go-builder-stage-b](./quick/260817-cfu-bump-the-dockerfile-s-go-builder-stage-b/) |
 
 ## Deferred Items
 
