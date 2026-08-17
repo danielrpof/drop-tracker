@@ -23,7 +23,7 @@ const EVENT_TYPE_OPTIONS: { value: EventItem["event_type"]; label: string }[] = 
 ]
 
 const selectClassName =
-  "h-9 rounded-md border border-input bg-input/30 px-3 text-body text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+  "h-9 rounded-md border border-input bg-input/30 px-3 text-body text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 [color-scheme:dark]"
 
 // HistoryFilters renders the artist and event-type controls (D-06). The
 // artist list is populated from listWatchlist() -- called independently
