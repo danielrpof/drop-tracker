@@ -341,13 +341,13 @@ Plans:
   3. A single artist's polling failure is logged and skipped: the rest of that cycle's artists are still polled and their events still recorded, and the cycle does not abort
   4. Two artists sharing a release group cannot lose a deluxe-change baseline update — a test that races them asserts the final stored baseline is correct, and the suite passes under `go test -race`
 
-**Plans**: 4 plans
+**Plans**: 1/4 plans executed
 
 Plans:
 
 **Wave 1**
 
-- [ ] 11-01-PLAN.md — Tracer: `MUSICBRAINZ_POLL_WORKERS`/`DEEZER_POLL_WORKERS` config surface, `poller.Option`, the bounded MusicBrainz fan-out, and the `poll cycle complete` duration/throughput log line, end-to-end from env var to test
+- [x] 11-01-PLAN.md — Tracer: `MUSICBRAINZ_POLL_WORKERS`/`DEEZER_POLL_WORKERS` config surface, `poller.Option`, the bounded MusicBrainz fan-out, and the `poll cycle complete` duration/throughput log line, end-to-end from env var to test
 
 **Wave 2**
 
@@ -374,7 +374,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 8. Frontend Test Suite | 5/5 | Complete    | 2026-08-12 |
 | 9. CI Coverage Gates | 5/5 | Complete    | 2026-08-13 |
 | 10. Event Retention Window | 2/2 | Complete    | 2026-08-13 |
-| 11. Bounded Concurrent Polling | 0/TBD | Not started | - |
+| 11. Bounded Concurrent Polling | 1/4 | In Progress|  |
 
 ## Backlog
 
