@@ -379,6 +379,17 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 ## Backlog
 
+### Phase 11.1: Address tech debt: v1.1 cleanup (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 11
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 11.1 to break down)
+
 ### Phase 999.1: Search result popularity sorting and same-name disambiguation (BACKLOG)
 
 **Goal:** [Captured for future planning] — Sort watchlist artist search results by popularity and improve disambiguation between same-named artists (e.g. multiple "Drake"s), so the intended artist isn't buried under less-relevant same-named matches.
