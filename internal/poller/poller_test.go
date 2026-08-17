@@ -349,6 +349,43 @@ func TestMusicBrainzCycle_Sequential(t *testing.T) {
 	}
 }
 
+// TestMusicBrainzCycle_ConcurrencyBoundedByWorkerCount is the tracer's
+// canonical proof for PERF-01: over 6 watchlist entries and a worker pool
+// bounded to 3 (WithMusicBrainzWorkers(3)), the fan-out must reach the
+// ceiling (proving it actually ran concurrently) and never exceed it
+// (proving the bound is enforced). fakeReleaseGroupSource's fetch sleeps
+// briefly so overlapping in-flight calls are actually observable -- without
+// a delay, a fast fake could complete each call before the next dispatches,
+// making maxInFlight read 1 even under a correct concurrent implementation.
+func TestMusicBrainzCycle_ConcurrencyBoundedByWorkerCount(t *testing.T) {
+	entries := []watchlist.Entry{
+		{MBID: "mbid-1", Name: "Artist One"},
+		{MBID: "mbid-2", Name: "Artist Two"},
+		{MBID: "mbid-3", Name: "Artist Three"},
+		{MBID: "mbid-4", Name: "Artist Four"},
+		{MBID: "mbid-5", Name: "Artist Five"},
+		{MBID: "mbid-6", Name: "Artist Six"},
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		time.Sleep(50 * time.Millisecond)
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 3 {
+		t.Fatalf("max in-flight = %d, want exactly 3", got)
+	}
+}
+
 func TestMusicBrainzCycle_LogsStructuredResult(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
 		return []watchlist.Entry{{MBID: "mbid-1", Name: "Artist One"}}, nil
@@ -486,6 +523,21 @@ func TestMusicBrainzCycle_EmptyWatchlistNoCallsNilError(t *testing.T) {
 	}
 }
 
+// TestMusicBrainzCycle_ContextCancelledStopsIteration pins the cancellation
+// contract: dispatching new workers stops once ctx is cancelled, and the
+// cycle returns the context error. This test explicitly bounds the pool to
+// 1 worker (WithMusicBrainzWorkers(1)), rather than relying on
+// newTestPoller's default of 3 over these same 3 entries -- with pool size
+// >= entry count the dispatch loop's semaphore send never actually blocks
+// (11-01-PLAN.md's own "never blocks" truth for that configuration), so
+// cancellation could only be observed by a goroutine-scheduling race, not a
+// deterministic happens-before edge. Forcing genuine semaphore contention
+// (1 worker, so dispatching mbid-2 must wait for mbid-1's worker to release
+// its slot) makes the ordering deterministic instead: mbid-1's fetch calls
+// cancel() and only *then* returns (releasing the semaphore via its
+// deferred `<-sem`), so ctx.Done() is guaranteed to close strictly before
+// that release -- the blocked dispatch-loop select always observes
+// cancellation, never the freed slot.
 func TestMusicBrainzCycle_ContextCancelledStopsIteration(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -496,11 +548,14 @@ func TestMusicBrainzCycle_ContextCancelledStopsIteration(t *testing.T) {
 		return []musicbrainz.ReleaseGroup{}, nil
 	}}
 	logger, _ := newTestLogger()
-	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(1))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
-	err := p.RunMusicBrainzCycle(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("RunMusicBrainzCycle error = %v, want context.Canceled", err)
+	cycleErr := p.RunMusicBrainzCycle(ctx)
+	if !errors.Is(cycleErr, context.Canceled) {
+		t.Fatalf("RunMusicBrainzCycle error = %v, want context.Canceled", cycleErr)
 	}
 	if got := atomic.LoadInt32(&mb.calls); got >= 3 {
 		t.Fatalf("calls = %d, want < 3 (iteration must stop once ctx is cancelled)", got)

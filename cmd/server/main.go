@@ -158,7 +158,7 @@ func run(ctx context.Context) error {
 	// budget: search traffic and poll traffic draw from the same token
 	// bucket, so a burst of /search calls can never push the combined
 	// outbound rate past what the operator configured (D-07).
-	pollr, err := poller.New(store, mbClient, dzClient, detector, notif, cfg.PollInterval, logger)
+	pollr, err := poller.New(store, mbClient, dzClient, detector, notif, cfg.PollInterval, logger, poller.WithMusicBrainzWorkers(cfg.MusicBrainzPollWorkers))
 	if err != nil {
 		return fmt.Errorf("build poller: %w", err)
 	}

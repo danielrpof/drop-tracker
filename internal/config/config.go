@@ -42,6 +42,17 @@ type Config struct {
 	// judgment call, not a project-wide "durations must be time.Duration"
 	// rule -- do not generalize it.
 	EventRetentionDays int `env:"EVENT_RETENTION_DAYS" envDefault:"90"`
+
+	// Phase 11 — per-source bounded-concurrency pool sizes for the poll
+	// cycle worker fan-out (PERF-01, D-01/D-02/D-03). Independent per-source
+	// fields, not one shared pool-size setting -- mirrors the codebase's
+	// existing fully independent per-source rate limiters
+	// (MusicBrainzRateLimitPerSec/DeezerRateLimitPer5s) and cycle-overlap
+	// guards (mbRunning/dzRunning), since MusicBrainz's tight 1 req/sec
+	// limiter and Deezer's faster ~10 req/sec limiter behave very
+	// differently under the same pool size.
+	MusicBrainzPollWorkers int `env:"MUSICBRAINZ_POLL_WORKERS" envDefault:"3"`
+	DeezerPollWorkers      int `env:"DEEZER_POLL_WORKERS" envDefault:"5"`
 }
 
 // Load parses Config from the process environment. On failure it returns
@@ -60,6 +71,16 @@ func Load() (*Config, error) {
 	// reinterpreted as "show everything" or "hide everything".
 	if cfg.EventRetentionDays <= 0 {
 		return nil, fmt.Errorf("EVENT_RETENTION_DAYS must be a positive integer, got %d", cfg.EventRetentionDays)
+	}
+	// Same rationale as the EVENT_RETENTION_DAYS check above: caarlos0/env/v11
+	// has no numeric-minimum struct tag, so a non-positive worker count must
+	// be rejected manually here rather than silently sized to zero workers
+	// (which would mean the poll cycle never dispatches anything).
+	if cfg.MusicBrainzPollWorkers <= 0 {
+		return nil, fmt.Errorf("MUSICBRAINZ_POLL_WORKERS must be a positive integer, got %d", cfg.MusicBrainzPollWorkers)
+	}
+	if cfg.DeezerPollWorkers <= 0 {
+		return nil, fmt.Errorf("DEEZER_POLL_WORKERS must be a positive integer, got %d", cfg.DeezerPollWorkers)
 	}
 	return cfg, nil
 }
