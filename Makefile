@@ -46,14 +46,22 @@ run:
 test-short:
 	go test ./... -short -race -count=1
 
-# -p 1 runs one package binary at a time. Every DB-backed package shares the
-# single database above, and internal/db's migration tests deliberately
-# `DROP SCHEMA public CASCADE` to prove migrations apply from scratch -- run in
-# parallel (Go's default) that drop lands underneath whichever other package is
-# mid-test, surfacing as unrelated-looking failures such as `relation "artists"
-# does not exist`.
+# Runs every package binary concurrently, at the toolchain's own default
+# package-level parallelism setting -- no invocation flag pins it down to
+# one at a time anymore. That pin used to be required here: internal/db's
+# migrate-from-scratch test used to `DROP SCHEMA public CASCADE` against the
+# shared fixture on a bare connection, outside golang-migrate's own
+# advisory-lock serialisation, and internal/notifier's NotifyPending
+# queried/marked the shared events table via a deliberately global,
+# unfiltered query (D-06) -- both let one package's DB-backed tests corrupt
+# or pollute another's when run concurrently. Both root causes are fixed at
+# the source rather than masked: see internal/db/migrate_test.go's dedicated
+# migrate_scratch schema and internal/notifier/notifier_test.go's
+# testutil.NewIsolatedTestPool. Verified stable across 5 separate
+# consecutive full-suite runs at default parallelism
+# (.planning/todos/completed/2026-08-11-fix-flaky-tests-under-parallel-go-test.md).
 test-integration: db-up
-	TEST_DATABASE_URL=$(TEST_DATABASE_URL) go test ./... -race -count=1 -p 1 \
+	TEST_DATABASE_URL=$(TEST_DATABASE_URL) go test ./... -race -count=1 \
 		-coverprofile=coverage.out -coverpkg=$(COVER_PKGS)
 
 test: test-integration
