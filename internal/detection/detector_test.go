@@ -1341,6 +1341,97 @@ func TestDetectMusicBrainz_DeluxeChange_FiresOnIncrease(t *testing.T) {
 	}
 }
 
+// errInsertEventFailingQuerier is the sentinel insertEventFailingQuerier
+// returns in place of a real InsertEvent failure -- distinct from any real
+// Postgres error so a test can assert precisely which path produced it.
+var errInsertEventFailingQuerier = errors.New("insertEventFailingQuerier: forced insert failure")
+
+// insertEventFailingQuerier embeds sqlc.Querier (an interface, not a
+// concrete *sqlc.Queries -- the seam this test relies on, since Detector
+// only ever holds a sqlc.Querier) so every method delegates to the real
+// querier with no boilerplate, except InsertEvent, which is overridden to
+// fail only for the deluxe_change event type. Scoping the failure this way
+// lets a test seed a real new_release baseline row through the same
+// querier first, then force only the deluxe-change insert to fail.
+type insertEventFailingQuerier struct {
+	sqlc.Querier
+}
+
+func (q *insertEventFailingQuerier) InsertEvent(ctx context.Context, arg sqlc.InsertEventParams) (int64, error) {
+	if arg.EventType == "deluxe_change" {
+		return 0, errInsertEventFailingQuerier
+	}
+	return q.Querier.InsertEvent(ctx, arg)
+}
+
+// TestDetectMusicBrainz_DeluxeChange_InsertFailureLogsWindowSignal proves the
+// D-12 window log signal actually fires on the real baseline-advanced/
+// insert-failed code path in detectDeluxeChanges's default: branch, rather
+// than merely existing as a string literal in the source. Mirrors
+// TestDetectMusicBrainz_DeluxeChange_FiresOnIncrease's arrange phase (plain
+// querier establishes the baseline across two cycles), then swaps in
+// insertEventFailingQuerier for the third cycle so the increase is real but
+// the resulting InsertEvent fails.
+func TestDetectMusicBrainz_DeluxeChange_InsertFailureLogsWindowSignal(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Deluxe Insert Failure Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Deluxe Insert Failure Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	groupMBID := mbid + "-rg1"
+	groups := []musicbrainz.ReleaseGroup{{MBID: groupMBID, Title: "Album", PrimaryType: "Album"}}
+
+	releases := &fakeReleaseDetailSource{}
+	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-orig", "Album", "2020-01-01", 12)})
+
+	// The baseline-establishing cycles use the plain querier -- only the
+	// cycle under test needs the failing decorator.
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("cycle 1 (discover): %v", err)
+	}
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("cycle 2 (establish baseline at 12): %v", err)
+	}
+
+	deluxeMBID := groupMBID + "-deluxe"
+	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(deluxeMBID, "Album (Deluxe)", "2020-06-01", 18)})
+
+	buf := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(buf, nil))
+	failing := &insertEventFailingQuerier{Querier: sqlc.New(pool)}
+	dFailing := detection.New(failing, fakeRecordingSource{}, releases)
+
+	if err := dFailing.DetectMusicBrainz(ctx, logger, entry, groups); err == nil {
+		t.Fatal("cycle 3 (increase to 18, insert forced to fail): DetectMusicBrainz returned nil error, want non-nil")
+	}
+
+	var found bool
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		if rec["window"] != "baseline_advanced_insert_failed" {
+			continue
+		}
+		found = true
+		if rec["artist_mbid"] != mbid {
+			t.Errorf("artist_mbid = %v, want %q", rec["artist_mbid"], mbid)
+		}
+		if rec["release_group_mbid"] != groupMBID {
+			t.Errorf("release_group_mbid = %v, want %q", rec["release_group_mbid"], groupMBID)
+		}
+	}
+	if !found {
+		t.Fatal("no log record with window = \"baseline_advanced_insert_failed\" found")
+	}
+}
+
 func TestDetectMusicBrainz_DeluxeChange_NoEventOnEqualCount(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	ctx := context.Background()
