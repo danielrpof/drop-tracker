@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: resolved
 phase: 11-bounded-concurrent-polling
 source: [11-VERIFICATION.md]
 started: 2026-08-17T06:35:00Z
-updated: 2026-08-17T07:05:00Z
+updated: 2026-08-17T11:45:00Z
 ---
 
 ## Current Test
@@ -42,7 +42,7 @@ skipped: 0
 
 - gap_id: G-11-1
   truth: "The pool's connection ceiling should comfortably exceed the maximum simultaneous DB-touching goroutines both cycles' worker pools can produce, or the operator should knowingly accept pool-acquire queueing as an acceptable v1.1 tradeoff."
-  status: failed
+  status: resolved
   reason: "User reported: Pre-emptively fix it now: no VPS is provisioned yet, so size MaxConns explicitly rather than deferring to deployment."
   severity: minor
   test: 1
