@@ -177,3 +177,10 @@ None - no external service configuration required.
 ---
 *Phase: 11-bounded-concurrent-polling*
 *Completed: 2026-08-17*
+
+## Self-Check: PASSED
+
+- FOUND: internal/detection/baseline_test.go
+- FOUND: 9930b4f
+- FOUND: 8ff0d65
+- FOUND: 2fb62f6
