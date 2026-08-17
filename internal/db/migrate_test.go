@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -123,42 +124,90 @@ func newCapturingLogger(buf io.Writer) *slog.Logger {
 	return logging.NewWithWriter(&config.Config{LogLevel: "debug", LogFormat: "json"}, buf)
 }
 
+// scratchSchemaDSN derives a DSN pointing at the same database as dsn, but
+// scoped to the given schema via a search_path query parameter. pgx treats
+// unrecognised URL query parameters as Postgres runtime parameters, so a
+// connection opened with this DSN resolves every unqualified table
+// reference -- both the migration files' CREATE TABLE statements and
+// golang-migrate's own schema_migrations bookkeeping -- against schema
+// instead of the connection role's default search_path.
+func scratchSchemaDSN(dsn, schema string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse dsn: %w", err)
+	}
+	q := u.Query()
+	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
 func TestRunMigrations_AppliesFromScratch(t *testing.T) {
 	dsn := testutil.RequirePostgresDSN(t)
 	ctx := context.Background()
 
-	// Reset state before running: drop the entire public schema and recreate
-	// it empty, so this test proves the apply-from-scratch path rather than
-	// trivially landing on the no-change path when it happens to run after
-	// another test. Dropping only schema_migrations is not enough once a
-	// migration (000002_watchlist, Phase 2) creates domain tables: without
-	// this, a rerun would try to CREATE TABLE artists/watchlist against
-	// tables a prior test run already left behind and fail with a dirty
-	// migration state.
+	// This test used to prove the apply-from-scratch path by dropping and
+	// recreating the shared fixture's default (public) schema wholesale on a
+	// bare sql.Open connection. That statement ran entirely outside
+	// golang-migrate's advisory-lock serialisation and could remove tables
+	// (e.g. artists) out from under any other package's concurrently-running
+	// integration test (RESEARCH.md Pitfall 6). Instead, this test now gets
+	// its own dedicated "migrate_scratch" schema and proves apply-from-scratch
+	// there, leaving the shared fixture's default schema untouched. A fixed
+	// schema name plus an if-exists guard is sufficient: Go runs one test
+	// binary per package, so two instances of this test cannot overlap.
 	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer func() { _ = sqlDB.Close() }()
-	if _, err := sqlDB.ExecContext(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
-		t.Fatalf("reset public schema: %v", err)
+	// Registered before the schema-drop cleanup below so it runs after that
+	// cleanup: t.Cleanup runs its registered funcs in LIFO order, and the
+	// drop needs a live connection to run against.
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	if _, err := sqlDB.ExecContext(ctx, "DROP SCHEMA IF EXISTS migrate_scratch CASCADE"); err != nil {
+		t.Fatalf("drop scratch schema (setup): %v", err)
+	}
+	if _, err := sqlDB.ExecContext(ctx, "CREATE SCHEMA migrate_scratch"); err != nil {
+		t.Fatalf("create scratch schema: %v", err)
+	}
+
+	// Capture the "before" reading of the shared fixture's default schema
+	// ahead of any work this test does, so a genuinely unmigrated fixture is
+	// never mistaken for a regression this test caused.
+	var beforePublicArtists sql.NullString
+	if err := sqlDB.QueryRowContext(ctx, "SELECT to_regclass('public.artists')::text").Scan(&beforePublicArtists); err != nil {
+		t.Fatalf("query public.artists before setup: %v", err)
+	}
+	if !beforePublicArtists.Valid {
+		t.Fatal("public.artists does not exist before this test's setup -- the shared fixture was not migrated; run `make db-up` and any other DB-backed test first")
+	}
+
+	// Cleanup drops the scratch schema; it no longer needs to re-run
+	// RunMigrations against the shared DSN "so test ordering does not affect
+	// other packages' fixtures" -- that step existed only to repair the
+	// damage the removed public-schema reset caused, and the shared schema
+	// is never touched by this test anymore.
+	t.Cleanup(func() {
+		if _, err := sqlDB.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS migrate_scratch CASCADE"); err != nil {
+			t.Errorf("cleanup: drop scratch schema: %v", err)
+		}
+	})
+
+	scratchDSN, err := scratchSchemaDSN(dsn, "migrate_scratch")
+	if err != nil {
+		t.Fatalf("derive scratch DSN: %v", err)
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	// Leave the database migrated afterwards so test ordering does not
-	// affect other packages' fixtures.
-	t.Cleanup(func() {
-		_ = db.RunMigrations(context.Background(), dsn, logger)
-	})
-
-	if err := db.RunMigrations(ctx, dsn, logger); err != nil {
+	if err := db.RunMigrations(ctx, scratchDSN, logger); err != nil {
 		t.Fatalf("RunMigrations: %v", err)
 	}
 
 	var version int
 	var dirty bool
-	if err := sqlDB.QueryRowContext(ctx, "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
+	if err := sqlDB.QueryRowContext(ctx, "SELECT version, dirty FROM migrate_scratch.schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
 	// Phase 5 added migration 000004_events_display_fields, so "from
@@ -166,6 +215,28 @@ func TestRunMigrations_AppliesFromScratch(t *testing.T) {
 	// migration existed).
 	if version != 4 || dirty {
 		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (4, false)", version, dirty)
+	}
+
+	// Isolation assertion 1: the migrations really landed in the scratch
+	// schema. If the search_path parameter were silently ignored, this would
+	// be NULL while the migration above still reported success (against
+	// public instead).
+	var scratchArtists sql.NullString
+	if err := sqlDB.QueryRowContext(ctx, "SELECT to_regclass('migrate_scratch.artists')::text").Scan(&scratchArtists); err != nil {
+		t.Fatalf("query migrate_scratch.artists: %v", err)
+	}
+	if !scratchArtists.Valid {
+		t.Fatal("migrate_scratch.artists does not exist after RunMigrations -- the search_path parameter was not honoured")
+	}
+
+	// Isolation assertion 2: the shared fixture's default schema was never
+	// disturbed by this test.
+	var afterPublicArtists sql.NullString
+	if err := sqlDB.QueryRowContext(ctx, "SELECT to_regclass('public.artists')::text").Scan(&afterPublicArtists); err != nil {
+		t.Fatalf("query public.artists after test: %v", err)
+	}
+	if !afterPublicArtists.Valid {
+		t.Fatal("public.artists no longer exists after this test -- the shared fixture's default schema was disturbed")
 	}
 }
 
