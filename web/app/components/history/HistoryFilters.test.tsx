@@ -46,6 +46,10 @@ function getArtistSelect() {
   return screen.getByRole("combobox", { name: "Artist" })
 }
 
+function getEventTypeSelect() {
+  return screen.getByRole("combobox", { name: "Event type" })
+}
+
 describe("HistoryFilters", () => {
   it("populates the artist select from listWatchlist", async () => {
     mockListWatchlist.mockResolvedValue(artists)
@@ -86,6 +90,43 @@ describe("HistoryFilters", () => {
     expect(onChange).toHaveBeenCalledWith({ ...selectedValue, artistId: null })
     expect(onChange).not.toHaveBeenCalledWith(
       expect.objectContaining({ artistId: 0 }),
+    )
+  })
+
+  it("reports the whole new value upward when an event type is chosen", async () => {
+    mockListWatchlist.mockResolvedValue(artists)
+    const onChange = vi.fn()
+
+    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    await screen.findByRole("option", { name: "Drake" })
+
+    await userEvent.selectOptions(getEventTypeSelect(), "New release")
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...emptyValue,
+      eventType: "new_release",
+    })
+  })
+
+  it("reports eventType as null, never an empty string, when 'All event types' is chosen", async () => {
+    mockListWatchlist.mockResolvedValue(artists)
+    const onChange = vi.fn()
+
+    const selectedValue: HistoryFiltersValue = {
+      artistId: null,
+      eventType: "new_release",
+    }
+    render(<HistoryFilters value={selectedValue} onChange={onChange} />)
+    await screen.findByRole("option", { name: "Drake" })
+
+    await userEvent.selectOptions(getEventTypeSelect(), "All event types")
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...selectedValue,
+      eventType: null,
+    })
+    expect(onChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "" }),
     )
   })
 })
