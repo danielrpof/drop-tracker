@@ -387,12 +387,16 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 **Plans:** 5 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 11.1-01-PLAN.md — Frontend test coverage, stale comment, and dropdown contrast fix (D-03, D-05a, D-05b, D-13)
-- [ ] 11.1-02-PLAN.md — Format the web tree and add a blocking prettier --check CI gate (D-04)
 - [ ] 11.1-03-PLAN.md — Detection doc/log signal and PoolConfig error differentiation (D-10, D-11, D-12)
 - [ ] 11.1-04-PLAN.md — Boot-test robustness, anchored coverage filter, and the committed port revert (D-01, D-02, D-06, D-07)
 - [ ] 11.1-05-PLAN.md — Milestone-audit amendment and Nyquist reconciliation for phases 08/09/10 (D-08, D-09)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 11.1-02-PLAN.md — Format the web tree and add a blocking prettier --check CI gate (D-04)
 
 ### Phase 999.1: Search result popularity sorting and same-name disambiguation (BACKLOG)
 
