@@ -64,6 +64,7 @@ created: 2026-08-17
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-08-17 | 12 | 12 | 0 | orchestrator (L1 grep-depth, register authored at plan time — asvs_level 1 short-circuit per secure-phase.md Step 3) |
+| 2026-08-17 | 12 | 12 | 0 | orchestrator (re-run via `/gsd-secure-phase 10`; confirmed no phase-10 mitigated query changed since prior audit — the only intervening commit touched `AdvanceGroupTrackCountBaseline`, unrelated to `ListEvents`/`HasOlderEvents`; asvs_level 1 short-circuit, no auditor re-spawn needed) |
 
 ---
 
