@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"golang.org/x/time/rate"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/deezer"
@@ -1654,6 +1655,262 @@ func TestMusicBrainzCycle_OverlapGuard_SkipsWhileInFlight(t *testing.T) {
 	}
 	if !warnFound {
 		t.Fatal("expected a warn-level log record naming the source for the skipped overlapping tick (D-09)")
+	}
+}
+
+// --- PERF-02: rate ceiling and overlap guard under concurrency ---
+
+// rateLimitedReleaseGroupSource is a test-local ReleaseGroupSource double
+// that consults a real *rate.Limiter before recording its call, mirroring
+// fakeReleaseGroupSource's inFlight/maxInFlight idiom -- used only by
+// TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit to prove the
+// limiter itself, not just the worker pool bound, still serialises
+// concurrent callers (PERF-02, 11-RESEARCH.md Pitfall 5).
+type rateLimitedReleaseGroupSource struct {
+	limiter *rate.Limiter
+
+	inFlight    int32
+	maxInFlight int32
+
+	mu         sync.Mutex
+	timestamps []time.Time
+}
+
+func (r *rateLimitedReleaseGroupSource) ReleaseGroupsByArtist(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+	// inFlight is tracked from entry, before limiter.Wait blocks -- this is
+	// what proves the worker pool actually dispatched maxInFlight callers
+	// concurrently (several sitting inside limiter.Wait at once), as opposed
+	// to only ever having one caller inside this method's body at a time,
+	// which the elapsed-span assertion alone could not distinguish from a
+	// correctly-bounded pool that just never fans out.
+	cur := atomic.AddInt32(&r.inFlight, 1)
+	defer atomic.AddInt32(&r.inFlight, -1)
+	for {
+		old := atomic.LoadInt32(&r.maxInFlight)
+		if cur <= old {
+			break
+		}
+		if atomic.CompareAndSwapInt32(&r.maxInFlight, old, cur) {
+			break
+		}
+	}
+
+	if err := r.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	r.timestamps = append(r.timestamps, time.Now())
+	r.mu.Unlock()
+
+	return nil, nil
+}
+
+// rateLimitedAlbumSource is rateLimitedReleaseGroupSource's Deezer-side
+// twin.
+type rateLimitedAlbumSource struct {
+	limiter *rate.Limiter
+
+	inFlight    int32
+	maxInFlight int32
+
+	mu         sync.Mutex
+	timestamps []time.Time
+}
+
+func (r *rateLimitedAlbumSource) ArtistAlbums(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+	// See rateLimitedReleaseGroupSource's identical comment on this same
+	// ordering -- inFlight is tracked from entry, before limiter.Wait
+	// blocks.
+	cur := atomic.AddInt32(&r.inFlight, 1)
+	defer atomic.AddInt32(&r.inFlight, -1)
+	for {
+		old := atomic.LoadInt32(&r.maxInFlight)
+		if cur <= old {
+			break
+		}
+		if atomic.CompareAndSwapInt32(&r.maxInFlight, old, cur) {
+			break
+		}
+	}
+
+	if err := r.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	r.timestamps = append(r.timestamps, time.Now())
+	r.mu.Unlock()
+
+	return nil, nil
+}
+
+func eightEntries() []watchlist.Entry {
+	var entries []watchlist.Entry
+	for i := 1; i <= 8; i++ {
+		id := fmt.Sprintf("%d0%d", i, i)
+		entries = append(entries, watchlist.Entry{MBID: fmt.Sprintf("mbid-%d", i), Name: fmt.Sprintf("Artist %d", i), DeezerID: deezerID(id)})
+	}
+	return entries
+}
+
+// TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit empirically
+// proves the shared *rate.Limiter still serialises concurrent workers
+// (PERF-02, 11-RESEARCH.md Pitfall 5) rather than trusting the library's
+// documented concurrency safety. burst 1 means the first call consumes the
+// initial token and every subsequent call waits a full 20ms
+// (rate.Limit(50) == 50/sec == 20ms/token); with 8 entries the aggregate
+// span from first to last recorded timestamp must therefore be at least
+// 7*20ms. maxInFlight reaching the configured worker count is asserted
+// alongside the span: without it, a purely sequential loop would also
+// satisfy the elapsed-time floor, making the test vacuous.
+func TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return eightEntries(), nil }}
+	mb := &rateLimitedReleaseGroupSource{limiter: rate.NewLimiter(rate.Limit(50), 1)}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(5))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 5 {
+		t.Fatalf("max in-flight = %d, want exactly 5 (otherwise the elapsed-span assertion below would also pass for a sequential loop)", got)
+	}
+
+	mb.mu.Lock()
+	timestamps := append([]time.Time(nil), mb.timestamps...)
+	mb.mu.Unlock()
+	if len(timestamps) != 8 {
+		t.Fatalf("recorded %d timestamps, want 8", len(timestamps))
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i].Before(timestamps[j]) })
+	span := timestamps[len(timestamps)-1].Sub(timestamps[0])
+	wantMin := 7 * 20 * time.Millisecond
+	if span < wantMin {
+		t.Fatalf("elapsed span between first and last call = %s, want >= %s (the rate limiter must still serialise concurrent callers)", span, wantMin)
+	}
+}
+
+// TestDeezerCycle_ConcurrentPollingStaysInsideRateLimit is
+// TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit's Deezer twin.
+func TestDeezerCycle_ConcurrentPollingStaysInsideRateLimit(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return eightEntries(), nil }}
+	dz := &rateLimitedAlbumSource{limiter: rate.NewLimiter(rate.Limit(50), 1)}
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(5))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&dz.maxInFlight); got != 5 {
+		t.Fatalf("max in-flight = %d, want exactly 5 (otherwise the elapsed-span assertion below would also pass for a sequential loop)", got)
+	}
+
+	dz.mu.Lock()
+	timestamps := append([]time.Time(nil), dz.timestamps...)
+	dz.mu.Unlock()
+	if len(timestamps) != 8 {
+		t.Fatalf("recorded %d timestamps, want 8", len(timestamps))
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i].Before(timestamps[j]) })
+	span := timestamps[len(timestamps)-1].Sub(timestamps[0])
+	wantMin := 7 * 20 * time.Millisecond
+	if span < wantMin {
+		t.Fatalf("elapsed span between first and last call = %s, want >= %s (the rate limiter must still serialise concurrent callers)", span, wantMin)
+	}
+}
+
+// TestMusicBrainzCycle_OverlapGuardHoldsWhileWorkersInFlight extends
+// TestMusicBrainzCycle_OverlapGuard_SkipsWhileInFlight to the specifically
+// concurrent case: with multiple workers genuinely blocked in flight
+// simultaneously (not just one), a second RunMusicBrainzCycle call must
+// still be rejected and must not increment the fake's call count.
+func TestMusicBrainzCycle_OverlapGuardHoldsWhileWorkersInFlight(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return eightEntries(), nil }}
+	release := make(chan struct{})
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		<-release
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(5))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&mb.inFlight) < 5 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 5 in-flight calls, last observed %d", atomic.LoadInt32(&mb.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	callsBefore := atomic.LoadInt32(&mb.calls)
+	err = p.RunMusicBrainzCycle(context.Background())
+	if !errors.Is(err, ErrCycleInProgress) {
+		t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
+	}
+	if got := atomic.LoadInt32(&mb.calls); got != callsBefore {
+		t.Fatalf("mb.calls changed from %d to %d -- the skipped call must not have issued any source call", callsBefore, got)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first RunMusicBrainzCycle: %v", err)
+	}
+}
+
+// TestDeezerCycle_RunsWhileMusicBrainzWorkersInFlight proves the two
+// sources' overlap guards remain independent under concurrency (D-08):
+// while a MusicBrainz cycle has multiple workers genuinely blocked in
+// flight, a full Deezer cycle must still run to completion.
+func TestDeezerCycle_RunsWhileMusicBrainzWorkersInFlight(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return eightEntries(), nil }}
+	release := make(chan struct{})
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		<-release
+		return nil, nil
+	}}
+	dz := &fakeAlbumSource{}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(5))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&mb.inFlight) < 5 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 5 in-flight MusicBrainz calls, last observed %d", atomic.LoadInt32(&mb.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle while MusicBrainz workers in flight: %v, want nil (the guards are independent, D-08)", err)
+	}
+	if got := atomic.LoadInt32(&dz.calls); got != 8 {
+		t.Fatalf("deezer calls = %d, want 8", got)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("musicbrainz cycle: %v", err)
 	}
 }
 
