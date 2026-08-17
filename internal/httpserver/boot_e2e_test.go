@@ -53,6 +53,20 @@ func TestBootToHealth_EndToEnd(t *testing.T) {
 	}
 	defer pool.Close()
 
+	// G-11-1's key-link assertion: prove the worker ceiling config.Load
+	// produced actually reaches the pool the real boot chain builds, not
+	// merely that db.PoolConfig computes the right value in isolation (that
+	// is already pinned by internal/db/pool_timeout_test.go). Asserting the
+	// relation (>=), not the literal 12, because the exact computed value is
+	// already pinned by that unit test -- this test's job is the wiring
+	// claim. This holds because the fixture DSN carries no pool_max_conns;
+	// an operator who sets one in their own TEST_DATABASE_URL is exercising
+	// the override path that the unit test covers instead.
+	wantMinConns := int32(cfg.MusicBrainzPollWorkers + cfg.DeezerPollWorkers)
+	if gotConns := pool.Config().MaxConns; gotConns < wantMinConns {
+		t.Fatalf("pool.Config().MaxConns = %d, want >= %d (MusicBrainzPollWorkers + DeezerPollWorkers): a pool ceiling below the combined worker ceiling means poll workers queue on connection acquire", gotConns, wantMinConns)
+	}
+
 	store := watchlist.NewService(sqlc.New(pool))
 	eventsStore := events.NewService(sqlc.New(pool), 90)
 	srv := httpserver.New(pool, store, eventsStore, nil, logger)
