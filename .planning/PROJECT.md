@@ -39,11 +39,11 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - ✓ Vitest + React Testing Library frontend test suite — watchlist, preference-toggle, search, and history/event-card surfaces each covered, API boundary (`web/app/lib/api.ts`) mocked (no real network calls), shared `createRoutesStub` router-context helper — Phase 08
 - ✓ CI coverage gate — 80% threshold for backend (Go), 70% threshold for frontend (Vitest); a coverage drop on either language blocks `build-scan`/`release` via `full-pipeline.yml`'s `needs:` graph — Phase 09
 - ✓ Events table retention — soft-delete/filter; `EVENT_RETENTION_DAYS` (default 90) hides aged-out rows from `GET /events` and the History UI while detection-state queries (dedup keys, deluxe-change baselines, seed-mode signal) stay unfiltered against the full table — Phase 10
+- ✓ Bounded worker-pool concurrent per-artist polling — env-configurable pool size (`MusicBrainzPollWorkers`/`DeezerPollWorkers`, default 3/5) for both MusicBrainz and Deezer poll cycles, still respecting existing rate limiters and overlap guards; deluxe-change baseline detection made race-safe with a single atomic CTE; connection pool `MaxConns` sized against the combined worker ceiling rather than `runtime.NumCPU()` — Phase 11
 
 ### Active
 
 - [ ] VPS SSH-based deploy step (added once the app is feature-stable — not part of initial phases)
-- [ ] Bounded worker-pool concurrent per-artist polling (env-configurable size, default 3-5)
 
 ### Out of Scope
 
@@ -117,4 +117,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-13 after Phase 10 (Event Retention Window) completion*
+*Last updated: 2026-08-17 after Phase 11 (Bounded Concurrent Polling) completion*
