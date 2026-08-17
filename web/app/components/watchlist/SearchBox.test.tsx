@@ -56,9 +56,9 @@ describe("SearchBox", () => {
   // The two tests below prove SearchBox's own doc-comment claim -- "a fresh
   // AbortController is created per debounced search and the prior one is
   // aborted before the new one starts" -- is true at the request level, not
-  // only at the discard-the-stale-result callback level. Both fail against
-  // current source: runSearch calls searchArtists(query) with one argument,
-  // so no signal ever reaches the request (see the folded todo).
+  // only at the discard-the-stale-result callback level. Both pass against
+  // current source: runSearch passes controller.signal as the second
+  // argument to searchArtists, as of fix 14003dd.
   it("passes an AbortSignal as the second argument to searchArtists", async () => {
     mockSearchArtists.mockResolvedValue(searchResponse)
     const onResults = vi.fn()

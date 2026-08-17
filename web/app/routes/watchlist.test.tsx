@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, waitForElementToBeRemoved } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -42,6 +42,34 @@ describe("Watchlist route", () => {
     )
 
     expect(mockRemoveWatchlist).toHaveBeenCalledWith(42)
+  })
+
+  it("removes the row from the DOM after a successful remove, with no rollback re-fetch", async () => {
+    mockListWatchlist.mockResolvedValue([entry])
+    mockRemoveWatchlist.mockResolvedValue(undefined)
+
+    renderRoute(Watchlist, "/watchlist")
+
+    await screen.findByText("Drake")
+
+    // The row removal is optimistic and synchronous (setEntries fires before
+    // the DELETE call), so by the time userEvent.click's promise resolves
+    // the row is already gone -- waitForElementToBeRemoved must start
+    // observing while "Drake" still exists, before the click fires, or its
+    // initial-existence check throws.
+    const removalPromise = waitForElementToBeRemoved(() =>
+      screen.queryByText("Drake"),
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Drake from watchlist" }),
+    )
+
+    await removalPromise
+
+    await screen.findByRole("heading", { name: "No artists yet" })
+
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
   })
 
   it("renders the error state with a retry control after a failed initial fetch, and retry re-issues the request", async () => {
