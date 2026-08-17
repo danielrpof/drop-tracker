@@ -880,15 +880,32 @@ func TestRetention_DetectionStateQueriesStayUnfiltered(t *testing.T) {
 	})
 
 	t.Run("deluxe baseline survives (criterion 5)", func(t *testing.T) {
-		baseline, err := q.GroupTrackCountBaseline(ctx, &releaseGroupMbid)
+		// The fixture deliberately sets external_id ("aged-out-release")
+		// and release_group_mbid (releaseGroupMbid) to different values,
+		// so AdvanceGroupTrackCountBaseline (keyed on external_id, not
+		// release_group_mbid) must be called with externalID here. A
+		// count one greater than the fixture's stored track_count (12)
+		// both advances the row and lets the returned previous value
+		// prove the aged-out row was found and read -- a zero-row result
+		// would be ambiguous between "the aged-out row was invisible"
+		// and "no advance was needed," whereas one row carrying the
+		// exact prior value proves both.
+		higherCount := trackCount + 1
+		rows, err := q.AdvanceGroupTrackCountBaseline(ctx, sqlc.AdvanceGroupTrackCountBaselineParams{
+			ExternalID: externalID,
+			TrackCount: &higherCount,
+		})
 		if err != nil {
-			t.Fatalf("GroupTrackCountBaseline: %v", err)
+			t.Fatalf("AdvanceGroupTrackCountBaseline: %v", err)
 		}
-		if !baseline.HasBaseline {
-			t.Fatal("HasBaseline = false, want true -- an aged-out row must still supply the deluxe-change baseline")
+		if len(rows) != 1 {
+			t.Fatalf("AdvanceGroupTrackCountBaseline returned %d rows, want 1 -- an aged-out row must still supply the deluxe-change baseline", len(rows))
 		}
-		if baseline.Baseline != trackCount {
-			t.Fatalf("Baseline = %d, want %d", baseline.Baseline, trackCount)
+		if rows[0] == nil {
+			t.Fatal("previous_track_count = nil, want non-nil (the aged-out row already had a baseline)")
+		}
+		if *rows[0] != trackCount {
+			t.Fatalf("previous_track_count = %d, want %d", *rows[0], trackCount)
 		}
 	})
 

@@ -251,17 +251,19 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 // or who has muted deluxe_change, costs zero release-detail requests.
 //
 // For each already-seen group, the maximum TrackCount() across its fetched
-// releases is compared against groupBaseline's recorded value:
-//   - No baseline recorded yet: the fresh maximum silently BECOMES the
-//     baseline (setGroupBaseline) and no event fires -- a first measurement
-//     is a baseline, not an observed increase (04-RESEARCH.md Pitfall #1).
-//   - Baseline exists and the fresh maximum is greater: a deluxe_change
-//     event is inserted, keyed on the winning release's own MBID (D-10),
-//     and the baseline advances to the new maximum.
-//   - Baseline exists and the fresh maximum is equal or lower: no event,
-//     baseline left untouched -- D-02 counts increases only, and lowering
-//     the baseline on a downward blip would let the same tracklist re-fire
+// releases is passed to advanceGroupBaseline, a single atomic
+// compare-and-set (PERF-04, 11-RESEARCH.md Pattern 2) that replaced the
+// former two-step read-then-write:
+//   - No advance (fresh maximum not a genuine increase): no-op, baseline
+//     left untouched -- D-02 counts increases only, and lowering the
+//     baseline on a downward blip would let the same tracklist re-fire
 //     later.
+//   - Advance with no prior baseline: the fresh maximum silently BECOMES
+//     the baseline and no event fires -- a first measurement is a
+//     baseline, not an observed increase (04-RESEARCH.md Pitfall #1).
+//   - Advance with a prior baseline: a deluxe_change event is inserted,
+//     keyed on the winning release's own MBID (D-10), carrying the
+//     returned previous value as PreviousTrackCount.
 //
 // A fresh maximum of 0 (absent/empty media, or media entries with no
 // track-count) means the response carried no usable data -- the group is
@@ -272,6 +274,24 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 // the pass continues to the next group and this method still returns nil,
 // so one unreachable release-group never discards the cycle's other
 // events (mirrors detectGuestFeatures's own error-isolation contract).
+//
+// Known, accepted edge: advanceGroupBaseline's atomic write necessarily
+// commits before the deluxe_change event insert below, because the advance
+// is what decides whether an event fires at all -- the previous
+// insert-then-advance ordering (baseline advanced only after the event was
+// already durably recorded) cannot be preserved once the two are collapsed
+// into one statement. A process crash between the advance committing and
+// the event insert permanently loses that group's notification: the next
+// cycle's fresh count is no longer an increase over the already-advanced
+// baseline, so nothing will fire for it later either. PERF-04's
+// atomicity requirement is satisfied regardless of this ordering; closing
+// this separate, narrower window would require wrapping both calls in an
+// explicit database transaction, which needs a transaction-capable seam
+// this codebase's Detector does not have today (it holds only a
+// sqlc.Querier interface). That machinery is not justified for a window
+// measured in the time between two commits -- this is an accepted,
+// documented residual, mirroring isSeedMode's existing precedent for
+// documenting an accepted edge rather than closing it.
 func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, freshGroups []musicbrainz.ReleaseGroup, preCycleSeen map[string]struct{}, notifiedAt pgtype.Timestamptz) error {
 	if !deluxeDetectionEnabled(entry) {
 		return nil
@@ -325,31 +345,29 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 			continue
 		}
 
-		baseline, hasBaseline, err := d.groupBaseline(ctx, g.MBID)
+		advanced, hadBaseline, previousBaseline, err := d.advanceGroupBaseline(ctx, g.MBID, maxCount)
 		if err != nil {
 			return err
 		}
 
 		switch {
-		case !hasBaseline:
-			if err := d.setGroupBaseline(ctx, g.MBID, maxCount); err != nil {
-				return err
-			}
+		case !advanced:
+			// Equal or lower: D-02 counts increases only. A lower count is
+			// an upstream data correction, and lowering the baseline would
+			// let the same tracklist re-fire later. advanceGroupBaseline
+			// already decided this atomically; nothing left to do here.
+		case !hadBaseline:
 			baselineEstablishedCount++
 			logger.Info("baseline_established",
 				slog.String("artist_mbid", entry.MBID),
 				slog.String("release_group_mbid", g.MBID),
 				slog.Int("track_count", maxCount),
 			)
-		case maxCount > baseline:
+		default: // advanced && hadBaseline
 			groupMBID := g.MBID
 			coverArt := coverArtURLForReleaseGroup(groupMBID)
 			trackCount := int32(maxCount) //nolint:gosec // maxCount sums MusicBrainz media.TrackCount fields; a real release is always orders of magnitude under int32 range (worst case on a malformed upstream value is a wrong stored number, not a security defect)
-			// D-04: capture the pre-update baseline now, before
-			// setGroupBaseline below overwrites the group's track_count with
-			// the new maximum -- the old count exists nowhere else once that
-			// call lands.
-			previousTrackCount := int32(baseline) //nolint:gosec // baseline is read back from our own previously-stored int32 column (see groupBaseline/setGroupBaseline), never a fresh unbounded external value
+			previousTrackCount := int32(previousBaseline) //nolint:gosec // previousBaseline is read back from advanceGroupBaseline's own previously-stored int32 column, never a fresh unbounded external value
 			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
 				ArtistID:           entry.ArtistID,
 				Source:             sourceMusicBrainz,
@@ -365,18 +383,23 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 				NotifiedAt:         notifiedAt,
 			})
 			if err != nil {
+				// Known, accepted edge (see this method's doc comment): the
+				// baseline already advanced above, so this tracklist
+				// expansion will not be re-detected on a later cycle. Log
+				// at Warn (distinct from a generic insert-level DB outage,
+				// mirroring the notifier's WR-03 line) before returning, so
+				// this specific failure mode is identifiable in production
+				// logs.
+				logger.Warn("deluxe change event insert failed after baseline advance: this tracklist expansion will not be re-detected",
+					slog.String("artist_mbid", entry.MBID),
+					slog.String("release_group_mbid", groupMBID),
+					slog.String("error", err.Error()),
+				)
 				return fmt.Errorf("detection: detect deluxe changes: %w", err)
 			}
 			if newly {
 				inserted++
 			}
-			if err := d.setGroupBaseline(ctx, g.MBID, maxCount); err != nil {
-				return err
-			}
-		default:
-			// Equal or lower: D-02 counts increases only. A lower count is
-			// an upstream data correction, and lowering the baseline would
-			// let the same tracklist re-fire later.
 		}
 	}
 

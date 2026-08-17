@@ -11,32 +11,70 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const groupTrackCountBaseline = `-- name: GroupTrackCountBaseline :one
-SELECT COALESCE(MAX(track_count), 0)::int AS baseline,
-       COUNT(track_count) > 0 AS has_baseline
-FROM events
-WHERE source = 'musicbrainz' AND release_group_mbid = $1
+const advanceGroupTrackCountBaseline = `-- name: AdvanceGroupTrackCountBaseline :many
+WITH existing AS (
+    SELECT track_count FROM events
+    WHERE event_type = 'new_release' AND source = 'musicbrainz' AND external_id = $1
+    FOR UPDATE
+)
+UPDATE events e
+SET track_count = $2
+FROM existing
+WHERE e.event_type = 'new_release' AND e.source = 'musicbrainz' AND e.external_id = $1
+  AND (existing.track_count IS NULL OR $2::int > existing.track_count)
+RETURNING existing.track_count AS previous_track_count
 `
 
-type GroupTrackCountBaselineRow struct {
-	Baseline    int32 `json:"baseline"`
-	HasBaseline bool  `json:"has_baseline"`
+type AdvanceGroupTrackCountBaselineParams struct {
+	ExternalID string `json:"external_id"`
+	TrackCount *int32 `json:"track_count"`
 }
 
-// Plan 04-04's baseline lookup for a release-group's deluxe-change
-// comparison (D-01/D-02), option-a resolution (04-01's Task 1 checkpoint):
-// track_count lives directly on the events row, not a second table.
-// has_baseline distinguishes "no baseline recorded yet" (COUNT is 0, this
-// group has never had track_count populated) from "baseline recorded as
-// zero" -- collapsing those two into one COALESCE(...,0) is exactly
-// 04-RESEARCH.md Pitfall #1's false-positive mechanism: the caller MUST
-// branch on has_baseline before comparing, never compare against baseline
-// alone.
-func (q *Queries) GroupTrackCountBaseline(ctx context.Context, releaseGroupMbid *string) (GroupTrackCountBaselineRow, error) {
-	row := q.db.QueryRow(ctx, groupTrackCountBaseline, releaseGroupMbid)
-	var i GroupTrackCountBaselineRow
-	err := row.Scan(&i.Baseline, &i.HasBaseline)
-	return i, err
+// Atomic replacement (PERF-04, 11-RESEARCH.md Pattern 2) for the former
+// two-statement GroupTrackCountBaseline SELECT + SetGroupTrackCountBaseline
+// UPDATE -- those two round trips left a check-then-act window where two
+// concurrent callers racing the same release group could both read the old
+// baseline before either wrote, letting the second writer silently clobber
+// the first writer's correct, higher value with its own stale one. This
+// statement closes that window entirely rather than narrowing it: the CTE's
+// FOR UPDATE takes a row lock on the group's own new_release row, so a
+// second concurrent caller racing the same external_id blocks on that lock
+// until the first transaction commits, then re-evaluates against the
+// just-committed value.
+//
+// Zero rows returned means no advance happened: the fresh count was not a
+// genuine increase over the already-committed baseline (D-02's "equal or
+// lower: no event" case, strictly greater-than, now enforced by Postgres
+// itself). One row returned means the write landed; previous_track_count
+// NULL vs non-NULL is the has_baseline distinction the removed
+// GroupTrackCountBaseline query used to report, letting the caller keep
+// branching on "silently established" vs "advanced, fire an event" from
+// this one call's result alone.
+//
+// Keyed on external_id (not release_group_mbid, which the removed read
+// query used) -- a deliberate narrowing: for a musicbrainz new_release row,
+// external_id and release_group_mbid hold the same release-group MBID (see
+// internal/detection/musicbrainz.go's new_release insert), and it is the
+// new_release row's own track_count that the removed write query mutated,
+// so this statement reads exactly the value the old pair wrote.
+func (q *Queries) AdvanceGroupTrackCountBaseline(ctx context.Context, arg AdvanceGroupTrackCountBaselineParams) ([]*int32, error) {
+	rows, err := q.db.Query(ctx, advanceGroupTrackCountBaseline, arg.ExternalID, arg.TrackCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*int32
+	for rows.Next() {
+		var previous_track_count *int32
+		if err := rows.Scan(&previous_track_count); err != nil {
+			return nil, err
+		}
+		items = append(items, previous_track_count)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const hasAnyEvent = `-- name: HasAnyEvent :one
@@ -219,8 +257,8 @@ type ListEventsRow struct {
 // (D-04). This is a read-side filter only, nothing is deleted -- an
 // aged-out row stays fully present and fully visible to every query below
 // that intentionally has no cutoff: ListExternalIDs (dedup keys),
-// HasAnyEvent (seed-mode), GroupTrackCountBaseline (deluxe baselines), and
-// ListUnnotified (pending notifications). Adding this predicate to any of
+// HasAnyEvent (seed-mode), AdvanceGroupTrackCountBaseline (deluxe
+// baselines), and ListUnnotified (pending notifications). Adding this predicate to any of
 // those four is the exact regression Phase 10's success criteria 3-5 exist
 // to catch -- do not "fix" them to also filter by retention.
 func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListEventsRow, error) {
@@ -354,30 +392,6 @@ UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL
 // instead of overwriting the recorded delivery time.
 func (q *Queries) MarkNotified(ctx context.Context, id int64) (int64, error) {
 	result, err := q.db.Exec(ctx, markNotified, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const setGroupTrackCountBaseline = `-- name: SetGroupTrackCountBaseline :execrows
-UPDATE events
-SET track_count = $2
-WHERE event_type = 'new_release' AND source = 'musicbrainz' AND external_id = $1
-`
-
-type SetGroupTrackCountBaselineParams struct {
-	ExternalID string `json:"external_id"`
-	TrackCount *int32 `json:"track_count"`
-}
-
-// Mutates track_count on the group's own new_release row -- this is
-// operational baseline state, not the D-12 display snapshot (title/
-// artist_name/release_date/cover_art_url), which stays write-once via
-// InsertEvent's ON CONFLICT DO NOTHING per D-20. No snapshot column is
-// ever written twice by this statement.
-func (q *Queries) SetGroupTrackCountBaseline(ctx context.Context, arg SetGroupTrackCountBaselineParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setGroupTrackCountBaseline, arg.ExternalID, arg.TrackCount)
 	if err != nil {
 		return 0, err
 	}

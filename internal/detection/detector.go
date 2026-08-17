@@ -112,36 +112,41 @@ func nullableString(s string) *string {
 	return &s
 }
 
-// groupBaseline returns the recorded track-count baseline for groupMBID
-// (04-01's option-a resolution: a mutable track_count column on the
-// group's own new_release event row) and whether a baseline has EVER been
-// recorded at all. Distinguishing "no baseline recorded yet" from
+// advanceGroupBaseline atomically compares count against groupMBID's
+// currently-committed track-count baseline (04-01's option-a resolution: a
+// mutable track_count column on the group's own new_release event row) and
+// writes it as the new baseline only if it is a genuine increase (or no
+// baseline exists yet) -- replacing the former groupBaseline (SELECT) +
+// setGroupBaseline (UPDATE) pair, whose two-round-trip gap PERF-04 exists
+// to close (11-RESEARCH.md Pattern 2). advanced reports whether the write
+// landed; hadBaseline/previousBaseline are only meaningful when advanced is
+// true.
+//
+// Distinguishing "no baseline recorded yet" (hadBaseline false) from
 // "baseline recorded as zero" is the entire mechanism preventing the
-// false-positive 04-RESEARCH.md Pitfall #1 describes -- a helper that
-// collapsed both to zero would report a real first-ever fetch as "the
-// count increased from 0," firing a spurious deluxe_change on every
-// release-group's first real comparison cycle.
-func (d *Detector) groupBaseline(ctx context.Context, groupMBID string) (baseline int, hasBaseline bool, err error) {
-	row, err := d.q.GroupTrackCountBaseline(ctx, &groupMBID)
-	if err != nil {
-		return 0, false, fmt.Errorf("detection: group baseline: %w", err)
-	}
-	return int(row.Baseline), row.HasBaseline, nil
-}
-
-// setGroupBaseline writes count as groupMBID's new baseline -- mutating the
-// track_count column on the group's own new_release row. This is
-// operational baseline state, not the D-12 display snapshot (title/
-// artist_name/release_date/cover_art_url), which stays write-once via
-// InsertEvent's ON CONFLICT DO NOTHING per D-20; no snapshot column is ever
-// touched by this call.
-func (d *Detector) setGroupBaseline(ctx context.Context, groupMBID string, count int) error {
+// false-positive 04-RESEARCH.md Pitfall #1 describes -- a caller that
+// collapsed both to zero would report a real first-ever fetch as "the count
+// increased from 0," firing a spurious deluxe_change on every
+// release-group's first real comparison cycle. This is operational
+// baseline state, not the D-12 display snapshot (title/artist_name/
+// release_date/cover_art_url), which stays write-once via InsertEvent's ON
+// CONFLICT DO NOTHING per D-20; no snapshot column is ever touched by this
+// call.
+func (d *Detector) advanceGroupBaseline(ctx context.Context, groupMBID string, count int) (advanced, hadBaseline bool, previousBaseline int, err error) {
 	trackCount := int32(count) //nolint:gosec // count is a real-world album/release track count (always well under int32 range)
-	if _, err := d.q.SetGroupTrackCountBaseline(ctx, sqlc.SetGroupTrackCountBaselineParams{
+	rows, err := d.q.AdvanceGroupTrackCountBaseline(ctx, sqlc.AdvanceGroupTrackCountBaselineParams{
 		ExternalID: groupMBID,
 		TrackCount: &trackCount,
-	}); err != nil {
-		return fmt.Errorf("detection: set group baseline: %w", err)
+	})
+	if err != nil {
+		return false, false, 0, fmt.Errorf("detection: advance group baseline: %w", err)
 	}
-	return nil
+	if len(rows) == 0 {
+		return false, false, 0, nil
+	}
+	previous := rows[0]
+	if previous == nil {
+		return true, false, 0, nil
+	}
+	return true, true, int(*previous), nil
 }

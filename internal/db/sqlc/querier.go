@@ -9,6 +9,34 @@ import (
 )
 
 type Querier interface {
+	// Atomic replacement (PERF-04, 11-RESEARCH.md Pattern 2) for the former
+	// two-statement GroupTrackCountBaseline SELECT + SetGroupTrackCountBaseline
+	// UPDATE -- those two round trips left a check-then-act window where two
+	// concurrent callers racing the same release group could both read the old
+	// baseline before either wrote, letting the second writer silently clobber
+	// the first writer's correct, higher value with its own stale one. This
+	// statement closes that window entirely rather than narrowing it: the CTE's
+	// FOR UPDATE takes a row lock on the group's own new_release row, so a
+	// second concurrent caller racing the same external_id blocks on that lock
+	// until the first transaction commits, then re-evaluates against the
+	// just-committed value.
+	//
+	// Zero rows returned means no advance happened: the fresh count was not a
+	// genuine increase over the already-committed baseline (D-02's "equal or
+	// lower: no event" case, strictly greater-than, now enforced by Postgres
+	// itself). One row returned means the write landed; previous_track_count
+	// NULL vs non-NULL is the has_baseline distinction the removed
+	// GroupTrackCountBaseline query used to report, letting the caller keep
+	// branching on "silently established" vs "advanced, fire an event" from
+	// this one call's result alone.
+	//
+	// Keyed on external_id (not release_group_mbid, which the removed read
+	// query used) -- a deliberate narrowing: for a musicbrainz new_release row,
+	// external_id and release_group_mbid hold the same release-group MBID (see
+	// internal/detection/musicbrainz.go's new_release insert), and it is the
+	// new_release row's own track_count that the removed write query mutated,
+	// so this statement reads exactly the value the old pair wrote.
+	AdvanceGroupTrackCountBaseline(ctx context.Context, arg AdvanceGroupTrackCountBaselineParams) ([]*int32, error)
 	CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error)
 	// :execrows returns the affected row count in one round trip, which is what
 	// lets the service distinguish "deleted" from "there was nothing to delete"
@@ -18,16 +46,6 @@ type Querier interface {
 	// row-level lock on this single statement is what makes the split
 	// deterministic under concurrency (T-02-15).
 	DeleteWatchlistEntry(ctx context.Context, id int64) (int64, error)
-	// Plan 04-04's baseline lookup for a release-group's deluxe-change
-	// comparison (D-01/D-02), option-a resolution (04-01's Task 1 checkpoint):
-	// track_count lives directly on the events row, not a second table.
-	// has_baseline distinguishes "no baseline recorded yet" (COUNT is 0, this
-	// group has never had track_count populated) from "baseline recorded as
-	// zero" -- collapsing those two into one COALESCE(...,0) is exactly
-	// 04-RESEARCH.md Pitfall #1's false-positive mechanism: the caller MUST
-	// branch on has_baseline before comparing, never compare against baseline
-	// alone.
-	GroupTrackCountBaseline(ctx context.Context, releaseGroupMbid *string) (GroupTrackCountBaselineRow, error)
 	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
 	// existing event rows for this artist+source means seed mode.
 	HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool, error)
@@ -83,8 +101,8 @@ type Querier interface {
 	// (D-04). This is a read-side filter only, nothing is deleted -- an
 	// aged-out row stays fully present and fully visible to every query below
 	// that intentionally has no cutoff: ListExternalIDs (dedup keys),
-	// HasAnyEvent (seed-mode), GroupTrackCountBaseline (deluxe baselines), and
-	// ListUnnotified (pending notifications). Adding this predicate to any of
+	// HasAnyEvent (seed-mode), AdvanceGroupTrackCountBaseline (deluxe
+	// baselines), and ListUnnotified (pending notifications). Adding this predicate to any of
 	// those four is the exact regression Phase 10's success criteria 3-5 exist
 	// to catch -- do not "fix" them to also filter by retention.
 	ListEvents(ctx context.Context, arg ListEventsParams) ([]ListEventsRow, error)
@@ -113,12 +131,6 @@ type Querier interface {
 	// instead of overwriting the recorded delivery time.
 	MarkNotified(ctx context.Context, id int64) (int64, error)
 	Ping(ctx context.Context) (int32, error)
-	// Mutates track_count on the group's own new_release row -- this is
-	// operational baseline state, not the D-12 display snapshot (title/
-	// artist_name/release_date/cover_art_url), which stays write-once via
-	// InsertEvent's ON CONFLICT DO NOTHING per D-20. No snapshot column is
-	// ever written twice by this statement.
-	SetGroupTrackCountBaseline(ctx context.Context, arg SetGroupTrackCountBaselineParams) (int64, error)
 	// The partial-update merge happens inside this statement, not in Go: each
 	// axis is resolved by a CASE whose ELSE names the column itself, so the
 	// value carried forward for an untouched axis is read from the row version
