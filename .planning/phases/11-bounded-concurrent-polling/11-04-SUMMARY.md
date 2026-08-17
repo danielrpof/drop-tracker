@@ -160,3 +160,7 @@ None — no external service configuration required.
 ---
 *Phase: 11-bounded-concurrent-polling*
 *Completed: 2026-08-17*
+
+## Self-Check: PASSED
+
+All claimed files verified present on disk (`internal/db/migrate_test.go`, `internal/notifier/notifier.go`, `internal/notifier/notifier_test.go`, `internal/notifier/export_test.go`, `internal/testutil/postgres.go`, `Makefile`, `.planning/todos/completed/2026-08-11-fix-flaky-tests-under-parallel-go-test.md`, this SUMMARY.md). All claimed commit hashes verified present in `git log` (`a0cb857`, `9f8ef83`, `431fe4b`, `707bc1f`).
