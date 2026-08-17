@@ -55,6 +55,17 @@ const defaultSpacing = 400 * time.Millisecond
 // rationale.
 var dbOpTimeout = 10 * time.Second
 
+// spacingWait returns the channel NotifyPending's inter-send select waits
+// on, given the configured spacing duration. Declared as a var, not called
+// directly as time.After, so notifier_test.go can substitute a recording
+// implementation that returns an already-fired channel -- mirroring
+// dbOpTimeout's identical rationale a few lines above: production code calls
+// through the seam unconditionally, and only the test binary ever
+// overwrites it (via export_test.go's exported setter, so no production API
+// surface is added). Initialised to time.After itself, so the production
+// call site's behaviour is unchanged.
+var spacingWait = time.After
+
 // Sender is the narrow seam NotifyPending depends on for outbound delivery,
 // declared here in the consumer (mirroring detection.RecordingSource) so a
 // test can substitute a fake with no real HTTP client.
@@ -207,7 +218,7 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 		// hammering the upstream is most likely to make things worse.
 		if i < len(events)-1 {
 			select {
-			case <-time.After(n.spacing):
+			case <-spacingWait(n.spacing):
 			case <-ctx.Done():
 				return ctx.Err()
 			}

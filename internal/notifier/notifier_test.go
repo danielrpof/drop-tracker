@@ -1,10 +1,20 @@
 package notifier_test
 
 // This file follows internal/detection/detector_test.go's real-Postgres
-// integration style (testutil.NewTestPool applies the embedded migrations)
-// combined with internal/musicbrainz/search_test.go's httptest.Server style
-// for the end-to-end drain case -- the tracer's proof that a pending events
-// row travels poll cycle -> notifier -> Discord -> acked row.
+// integration style, combined with internal/musicbrainz/search_test.go's
+// httptest.Server style for the end-to-end drain case -- the tracer's proof
+// that a pending events row travels poll cycle -> notifier -> Discord ->
+// acked row.
+//
+// Every test here uses testutil.NewIsolatedTestPool (not NewTestPool):
+// NotifyPending's ListUnnotified is a deliberately global, unfiltered query
+// (D-06), so a pool scoped to the shared fixture's default schema would let
+// any other concurrently-running package's own pending events rows leak
+// into this package's exact-count assertions -- and a real NotifyPending
+// call here could even mark one of those foreign rows notified out from
+// under its own test. NewIsolatedTestPool gives this package's tests their
+// own dedicated schema, migrated independently, so counts here reflect only
+// what this package's own tests inserted.
 
 import (
 	"bytes"
@@ -57,6 +67,32 @@ func (f *fakeSender) Send(ctx context.Context, embed discord.Embed) error {
 }
 
 var _ notifier.Sender = (*fakeSender)(nil)
+
+// spacingRecorder installs a recording spacingWait seam for the duration of
+// t (via notifier.SetSpacingWaitForTest) and returns a func reporting the
+// durations NotifyPending's send loop requested. Each request is answered
+// with an already-fired channel, so the select in the send loop never
+// actually waits -- what is recorded is what NotifyPending asked for, which
+// is deterministic, rather than how long a goroutine happened to sleep,
+// which is not under CPU or scheduler contention.
+func spacingRecorder(t *testing.T) func() []time.Duration {
+	t.Helper()
+	var mu sync.Mutex
+	var recorded []time.Duration
+	notifier.SetSpacingWaitForTest(t, func(d time.Duration) <-chan time.Time {
+		mu.Lock()
+		recorded = append(recorded, d)
+		mu.Unlock()
+		ch := make(chan time.Time, 1)
+		ch <- time.Now()
+		return ch
+	})
+	return func() []time.Duration {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]time.Duration(nil), recorded...)
+	}
+}
 
 // testArtistMBID derives a short, unique-per-test-and-suffix artist mbid,
 // matching internal/poller/poller_test.go's testArtistMBID convention.
@@ -137,7 +173,7 @@ func isNotified(t *testing.T, pool *pgxpool.Pool, eventID int64) bool {
 }
 
 func TestNotifyPending_ZeroPendingRows_NoRequestNoMarkNoError(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -160,7 +196,7 @@ func TestNotifyPending_ZeroPendingRows_NoRequestNoMarkNoError(t *testing.T) {
 }
 
 func TestNotifyPending_OnePendingRow_204MarksNotified(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -189,7 +225,7 @@ func TestNotifyPending_OnePendingRow_204MarksNotified(t *testing.T) {
 }
 
 func TestNotifyPending_SendFails_LeavesNotifiedAtNullAndRePicksUpNextPass(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, buf := newTestLogger()
 
@@ -226,7 +262,7 @@ func TestNotifyPending_SendFails_LeavesNotifiedAtNullAndRePicksUpNextPass(t *tes
 }
 
 func TestNotifyPending_ReentrantCallSkippedWhileInFlight(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -291,7 +327,7 @@ func TestSelect_EmptyWebhookURL_ReturnsNoOpAndLogsDisabledLine(t *testing.T) {
 // scheduler a chance to interleave the two calls would prove nothing about
 // the race this guard exists to survive.
 func TestNotifyPending_ConcurrentCallsNoDoublePost(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -341,10 +377,15 @@ func TestNotifyPending_ConcurrentCallsNoDoublePost(t *testing.T) {
 }
 
 // TestNotifyPending_BatchSpacingBetweenSends proves D-07's inter-send
-// spacing with measured elapsed time across a real multi-row batch, not by
-// inspecting the spacing constant.
+// spacing by asserting which spacing durations NotifyPending requested
+// through the spacingWait seam, not by measuring elapsed wall-clock time
+// across a real multi-row batch. An elapsed-time lower bound is also
+// satisfied by an unrelated slow machine (a false pass) and can be missed
+// under CPU or scheduler contention (a false failure); asserting the
+// requested duration directly is both a stronger and a deterministic form
+// of the same property.
 func TestNotifyPending_BatchSpacingBetweenSends(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -353,36 +394,27 @@ func TestNotifyPending_BatchSpacingBetweenSends(t *testing.T) {
 	insertPendingEvent(t, pool, artistID, "spacing-ext-2")
 	insertPendingEvent(t, pool, artistID, "spacing-ext-3")
 
-	var mu sync.Mutex
-	var timestamps []time.Time
-	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
-		mu.Lock()
-		timestamps = append(timestamps, time.Now())
-		mu.Unlock()
-		return nil
-	}}
+	sender := &fakeSender{}
 
 	const spacing = 50 * time.Millisecond
+	recorded := spacingRecorder(t)
 	n := notifier.New(q, sender, spacing)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
 	}
 
-	mu.Lock()
-	got := append([]time.Time(nil), timestamps...)
-	mu.Unlock()
-	if len(got) != 3 {
-		t.Fatalf("recorded %d sends, want 3", len(got))
+	if got := atomic.LoadInt32(&sender.calls); got != 3 {
+		t.Fatalf("sender.calls = %d, want 3", got)
 	}
 
-	gapsMet := 0
-	for i := 1; i < len(got); i++ {
-		if got[i].Sub(got[i-1]) >= spacing {
-			gapsMet++
-		}
+	got := recorded()
+	if len(got) != 2 {
+		t.Fatalf("recorded %d spacing requests, want exactly 2 (three rows, spacing skipped after the last): %v", len(got), got)
 	}
-	if gapsMet < 2 {
-		t.Fatalf("only %d of 2 required inter-send gaps were >= %v (measured elapsed time, not the spacing constant); timestamps: %v", gapsMet, spacing, got)
+	for i, d := range got {
+		if d != spacing {
+			t.Fatalf("spacing request %d = %v, want exactly %v", i, d, spacing)
+		}
 	}
 }
 
@@ -405,7 +437,7 @@ func (markNotifiedFailingQuerier) MarkNotified(ctx context.Context, id int64) (i
 // the next pass re-sends it) -- this must be logged at Warn, distinguishable
 // from a generic DB-outage error, and still returned as a hard failure.
 func TestNotifyPending_MarkNotifiedFails_LogsWarnAndReturnsError(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, buf := newTestLogger()
 
@@ -441,9 +473,12 @@ func TestNotifyPending_MarkNotifiedFails_LogsWarnAndReturnsError(t *testing.T) {
 // TestNotifyPending_SpacingAppliedEvenAfterFailedSend is the WR-01
 // regression guard: the inter-send spacing wait must not be skipped on a
 // failed Send, since a backlog of failing sends (e.g. during a Discord
-// outage) is exactly the scenario D-07's pacing exists to protect.
+// outage) is exactly the scenario D-07's pacing exists to protect. It
+// asserts the requested spacing duration through the spacingWait seam
+// rather than measuring elapsed wall-clock time -- deterministic under CPU
+// or scheduler contention, where an elapsed-time lower bound is not.
 func TestNotifyPending_SpacingAppliedEvenAfterFailedSend(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -452,36 +487,29 @@ func TestNotifyPending_SpacingAppliedEvenAfterFailedSend(t *testing.T) {
 	insertPendingEvent(t, pool, artistID, "failspacing-ext-2")
 	insertPendingEvent(t, pool, artistID, "failspacing-ext-3")
 
-	var mu sync.Mutex
-	var timestamps []time.Time
 	failing := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
-		mu.Lock()
-		timestamps = append(timestamps, time.Now())
-		mu.Unlock()
 		return errors.New("send exploded")
 	}}
 
 	const spacing = 50 * time.Millisecond
+	recorded := spacingRecorder(t)
 	n := notifier.New(q, failing, spacing)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil (a send failure must not abort the pass, D-09)", err)
 	}
 
-	mu.Lock()
-	got := append([]time.Time(nil), timestamps...)
-	mu.Unlock()
-	if len(got) != 3 {
-		t.Fatalf("recorded %d sends, want 3", len(got))
+	if got := atomic.LoadInt32(&failing.calls); got != 3 {
+		t.Fatalf("failing.calls = %d, want 3 (all three rows must still be attempted)", got)
 	}
 
-	gapsMet := 0
-	for i := 1; i < len(got); i++ {
-		if got[i].Sub(got[i-1]) >= spacing {
-			gapsMet++
-		}
+	got := recorded()
+	if len(got) != 2 {
+		t.Fatalf("recorded %d spacing requests, want exactly 2 on the all-failed path (spacing must not be skipped after a failed Send): %v", len(got), got)
 	}
-	if gapsMet < 2 {
-		t.Fatalf("only %d of 2 required inter-send gaps were >= %v on the all-failed path (spacing must not be skipped after a failed Send); timestamps: %v", gapsMet, spacing, got)
+	for i, d := range got {
+		if d != spacing {
+			t.Fatalf("spacing request %d = %v, want exactly %v", i, d, spacing)
+		}
 	}
 }
 
@@ -491,7 +519,7 @@ func TestNotifyPending_SpacingAppliedEvenAfterFailedSend(t *testing.T) {
 // also return nil) -- it positively confirms the row after the failed one
 // was both attempted and delivered.
 func TestNotifyPending_BatchMidFailureContinuesToLaterRows(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -535,7 +563,7 @@ func TestNotifyPending_BatchMidFailureContinuesToLaterRows(t *testing.T) {
 // request gets a 429 with a small retry_after; its retry and rows one/three
 // all get 204. Every row must still be delivered exactly once, in order.
 func TestNotifyPending_BatchHonorsRetryAfterWithoutDroppingOtherRows(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -628,7 +656,7 @@ func TestNotifyPending_BatchHonorsRetryAfterWithoutDroppingOtherRows(t *testing.
 // after the webhook recovers -- must find and deliver the same row. No
 // retry-count or give-up state may prevent this.
 func TestNotifyPending_CrossCycleRecoveryAfterOutage(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
