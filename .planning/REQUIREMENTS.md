@@ -90,7 +90,7 @@ Requirements for the "Hardening & Scale Readiness" milestone — closing four pe
 - [ ] **PERF-01**: Per-source polling (MusicBrainz, Deezer) uses a bounded, env-configurable concurrent worker pool (default 3-5 workers) instead of strictly sequential per-artist iteration
 - [ ] **PERF-02**: Concurrent polling preserves the existing per-source rate limiter and per-source cycle-overlap guard
 - [ ] **PERF-03**: A single artist's polling error does not abort the rest of that cycle's batch (errors are logged and skipped, not fatal)
-- [ ] **PERF-04**: Concurrent updates to a shared release-group's deluxe-change baseline cannot lose an update (baseline compare-and-set is atomic at the database level)
+- [x] **PERF-04**: Concurrent updates to a shared release-group's deluxe-change baseline cannot lose an update (baseline compare-and-set is atomic at the database level)
 
 ## v2 Requirements
 
@@ -187,7 +187,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERF-01 | Phase 11 | Pending |
 | PERF-02 | Phase 11 | Pending |
 | PERF-03 | Phase 11 | Pending |
-| PERF-04 | Phase 11 | Pending |
+| PERF-04 | Phase 11 | Complete |
 
 **Coverage:**
 
