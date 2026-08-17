@@ -1535,6 +1535,306 @@ func TestPoller_RunMusicBrainzCycle_DetectionErrorIsolatedPerArtist(t *testing.T
 	}
 }
 
+// --- PERF-03: simultaneous per-artist error isolation under concurrency ---
+
+// recordMBID extracts a decoded log record's artist_mbid attribute as a
+// plain string, defaulting to "" if absent -- decodeLogRecords produces
+// map[string]any records, so every field access needs a type assertion.
+func recordMBID(rec map[string]any) string {
+	mbid, _ := rec["artist_mbid"].(string)
+	return mbid
+}
+
+// sixEntries returns 6 watchlist entries, every one carrying a non-nil
+// DeezerID -- used by the Simultaneous... tests below, which need a worker
+// count strictly less than the entry count and at least 3 failing entries
+// so at least two failures are guaranteed to be in flight simultaneously.
+func sixEntries() []watchlist.Entry {
+	var entries []watchlist.Entry
+	for i := 1; i <= 6; i++ {
+		id := fmt.Sprintf("%d0%d", i, i)
+		entries = append(entries, watchlist.Entry{MBID: fmt.Sprintf("mbid-%d", i), Name: fmt.Sprintf("Artist %d", i), DeezerID: deezerID(id)})
+	}
+	return entries
+}
+
+// failFirstThree returns a set of the first n of xs, for a fixed,
+// order-independent partition of a 6-entry watchlist into 3 failing / 3
+// succeeding entries.
+func failFirstThree(entries []watchlist.Entry) map[string]bool {
+	fail := map[string]bool{}
+	for i, e := range entries {
+		if i < 3 {
+			fail[e.MBID] = true
+		}
+	}
+	return fail
+}
+
+// TestMusicBrainzCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle proves
+// PERF-03 under genuine concurrent failure: with 6 entries and a pool of 3,
+// failing 3 of the 6 guarantees at least two failures are in flight at
+// once -- a single-failure test cannot distinguish isolated failure from
+// lucky ordering.
+func TestMusicBrainzCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle(t *testing.T) {
+	entries := sixEntries()
+	failSet := failFirstThree(entries)
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		if failSet[mbid] {
+			return nil, errors.New("upstream exploded")
+		}
+		return []musicbrainz.ReleaseGroup{}, nil
+	}}
+	events := &fakeEventRecorder{}
+	logger, buf := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle returned %v, want nil (simultaneous per-artist failures must not abort the cycle)", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.calls); got != 6 {
+		t.Fatalf("mb.calls = %d, want 6 (every entry must still be attempted)", got)
+	}
+	if got := atomic.LoadInt32(&events.calls); got != 3 {
+		t.Fatalf("events.calls = %d, want 3 (only the 3 succeeding fetches reach detection)", got)
+	}
+	events.mu.Lock()
+	gotDetected := append([]string(nil), events.mbids...)
+	events.mu.Unlock()
+	for _, mbid := range gotDetected {
+		if failSet[mbid] {
+			t.Fatalf("detection was called for %s, which was configured to fail its fetch", mbid)
+		}
+	}
+
+	errCount := 0
+	for _, rec := range decodeLogRecords(t, buf) {
+		if rec["msg"] == "poll artist failed" && failSet[recordMBID(rec)] {
+			errCount++
+		}
+	}
+	if errCount != 3 {
+		t.Fatalf("found %d 'poll artist failed' records for the failing set, want 3", errCount)
+	}
+}
+
+// TestMusicBrainzCycle_SimultaneousDetectionErrorsDoNotAbortCycle is
+// TestMusicBrainzCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle's
+// detection-side twin: all 6 fetches succeed, but 3 of the 6 detection
+// calls fail simultaneously.
+func TestMusicBrainzCycle_SimultaneousDetectionErrorsDoNotAbortCycle(t *testing.T) {
+	entries := sixEntries()
+	failSet := failFirstThree(entries)
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	mb := &fakeReleaseGroupSource{}
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+		if failSet[entry.MBID] {
+			return errors.New("detection exploded")
+		}
+		return nil
+	}}
+	logger, buf := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle returned %v, want nil", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.calls); got != 6 {
+		t.Fatalf("mb.calls = %d, want 6", got)
+	}
+	if got := atomic.LoadInt32(&events.calls); got != 6 {
+		t.Fatalf("events.calls = %d, want 6 (every fetch succeeded, so every entry reaches detection)", got)
+	}
+
+	errCount := 0
+	for _, rec := range decodeLogRecords(t, buf) {
+		if rec["msg"] == "detection failed" && failSet[recordMBID(rec)] {
+			errCount++
+		}
+	}
+	if errCount != 3 {
+		t.Fatalf("found %d 'detection failed' records for the failing set, want 3", errCount)
+	}
+}
+
+// TestDeezerCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle is
+// TestMusicBrainzCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle's
+// Deezer twin.
+func TestDeezerCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle(t *testing.T) {
+	entries := sixEntries()
+	failSet := failFirstThree(entries)
+	failIDs := map[string]bool{}
+	for _, e := range entries {
+		if failSet[e.MBID] {
+			failIDs[*e.DeezerID] = true
+		}
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+		if failIDs[artistID] {
+			return nil, errors.New("upstream exploded")
+		}
+		return []deezer.Album{}, nil
+	}}
+	events := &fakeEventRecorder{}
+	logger, buf := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle returned %v, want nil (simultaneous per-artist failures must not abort the cycle)", err)
+	}
+
+	if got := atomic.LoadInt32(&dz.calls); got != 6 {
+		t.Fatalf("dz.calls = %d, want 6 (every entry must still be attempted)", got)
+	}
+	if got := atomic.LoadInt32(&events.deezerCalls); got != 3 {
+		t.Fatalf("events.deezerCalls = %d, want 3 (only the 3 succeeding fetches reach detection)", got)
+	}
+
+	errCount := 0
+	for _, rec := range decodeLogRecords(t, buf) {
+		if rec["msg"] == "poll artist failed" && failSet[recordMBID(rec)] {
+			errCount++
+		}
+	}
+	if errCount != 3 {
+		t.Fatalf("found %d 'poll artist failed' records for the failing set, want 3", errCount)
+	}
+}
+
+// TestDeezerCycle_SimultaneousDetectionErrorsDoNotAbortCycle is
+// TestMusicBrainzCycle_SimultaneousDetectionErrorsDoNotAbortCycle's Deezer
+// twin.
+func TestDeezerCycle_SimultaneousDetectionErrorsDoNotAbortCycle(t *testing.T) {
+	entries := sixEntries()
+	failSet := failFirstThree(entries)
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	dz := &fakeAlbumSource{}
+	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error {
+		if failSet[entry.MBID] {
+			return errors.New("detection exploded")
+		}
+		return nil
+	}}
+	logger, buf := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle returned %v, want nil", err)
+	}
+
+	if got := atomic.LoadInt32(&dz.calls); got != 6 {
+		t.Fatalf("dz.calls = %d, want 6", got)
+	}
+	if got := atomic.LoadInt32(&events.deezerCalls); got != 6 {
+		t.Fatalf("events.deezerCalls = %d, want 6 (every fetch succeeded, so every entry reaches detection)", got)
+	}
+
+	errCount := 0
+	for _, rec := range decodeLogRecords(t, buf) {
+		if rec["msg"] == "detection failed" && failSet[recordMBID(rec)] {
+			errCount++
+		}
+	}
+	if errCount != 3 {
+		t.Fatalf("found %d 'detection failed' records for the failing set, want 3", errCount)
+	}
+}
+
+// TestMusicBrainzCycle_ConcurrentLogLinesAreFullyLabelled pins D-07's
+// interleaved-but-labelled contract: every poll result / poll artist
+// failed record carries cycle_id/source/artist_mbid/artist_name, all
+// records share one cycle_id, and the multiset of artist_mbid values
+// across those records equals the entry set exactly once each. Emission
+// order is deliberately not asserted anywhere in this test -- D-07
+// explicitly declines to specify it, and an order assertion here would be
+// a false guarantee that fails intermittently. A future contributor should
+// not "fix" this test by adding one.
+func TestMusicBrainzCycle_ConcurrentLogLinesAreFullyLabelled(t *testing.T) {
+	entries := sixEntries()
+	// A fixed, deterministic 2-of-6 failing set -- not derived from any
+	// runtime counter, which would itself be an unsynchronized read/write
+	// race across the concurrent worker goroutines calling this closure.
+	failSet := map[string]bool{"mbid-1": true, "mbid-2": true}
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		if failSet[mbid] {
+			return nil, errors.New("upstream exploded")
+		}
+		return []musicbrainz.ReleaseGroup{}, nil
+	}}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	logger, buf := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle returned %v, want nil", err)
+	}
+
+	records := decodeLogRecords(t, buf)
+	var perArtistRecords []map[string]any
+	sharedCycleID := ""
+	seenMBIDs := map[string]int{}
+	for _, rec := range records {
+		msg, _ := rec["msg"].(string)
+		if msg != "poll result" && msg != "poll artist failed" {
+			continue
+		}
+		perArtistRecords = append(perArtistRecords, rec)
+
+		cycleID, ok := rec["cycle_id"].(string)
+		if !ok || cycleID == "" {
+			t.Fatalf("record %v: cycle_id missing or empty", rec)
+		}
+		if sharedCycleID == "" {
+			sharedCycleID = cycleID
+		} else if cycleID != sharedCycleID {
+			t.Fatalf("record %v: cycle_id = %q, want %q (all records in one cycle must share cycle_id)", rec, cycleID, sharedCycleID)
+		}
+
+		if rec["source"] != sourceMusicBrainz {
+			t.Fatalf("record %v: source = %v, want %q", rec, rec["source"], sourceMusicBrainz)
+		}
+
+		mbid, ok := rec["artist_mbid"].(string)
+		if !ok || mbid == "" {
+			t.Fatalf("record %v: artist_mbid missing or empty", rec)
+		}
+		seenMBIDs[mbid]++
+
+		name, ok := rec["artist_name"].(string)
+		if !ok || name == "" {
+			t.Fatalf("record %v: artist_name missing or empty", rec)
+		}
+	}
+
+	if len(perArtistRecords) != len(entries) {
+		t.Fatalf("found %d per-artist records, want %d (one per entry)", len(perArtistRecords), len(entries))
+	}
+	for _, e := range entries {
+		if seenMBIDs[e.MBID] != 1 {
+			t.Fatalf("artist_mbid %s appeared %d times across per-artist records, want exactly 1", e.MBID, seenMBIDs[e.MBID])
+		}
+	}
+}
+
 func TestPoller_RunMusicBrainzCycle_EmptyWatchlist(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
 	mb := &fakeReleaseGroupSource{}
