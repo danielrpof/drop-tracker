@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -75,27 +74,44 @@ func TestRun_BootServesHealthThenGracefulShutdownOnCancel(t *testing.T) {
 	}()
 
 	healthURL := "http://127.0.0.1:" + portStr + "/health"
-	deadline := time.Now().Add(10 * time.Second)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		resp, getErr := http.Get(healthURL)
-		if getErr != nil {
-			lastErr = getErr
-			time.Sleep(50 * time.Millisecond)
-			continue
+	deadline := time.After(10 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+pollHealthy:
+	for {
+		select {
+		case runErr := <-done:
+			// run() returned before the server ever became healthy -- report
+			// its real error directly instead of letting the deadline case
+			// below mask it as a generic health-timeout.
+			t.Fatalf("run() returned before the server became healthy: %v", runErr)
+		case <-deadline:
+			t.Fatal("server never became healthy before the deadline")
+		case <-ticker.C:
+			// Bounded per-attempt timeout: a bare http.Get has none, so a
+			// connection that completes its TCP handshake but never writes a
+			// response (e.g. something else already accepting on the port)
+			// would block this select case indefinitely -- starving the
+			// done/deadline cases above of ever being chosen again and
+			// defeating this loop's own bounded-wait contract.
+			pollCtx, pollCancel := context.WithTimeout(ctx, 2*time.Second)
+			req, reqErr := http.NewRequestWithContext(pollCtx, http.MethodGet, healthURL, nil)
+			if reqErr != nil {
+				pollCancel()
+				t.Fatalf("build health request: %v", reqErr)
+			}
+			resp, getErr := http.DefaultClient.Do(req)
+			pollCancel()
+			if getErr != nil {
+				continue
+			}
+			if resp.StatusCode == http.StatusOK {
+				_ = resp.Body.Close()
+				break pollHealthy
+			}
+			_ = resp.Body.Close()
 		}
-		_ = resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			lastErr = nil
-			break
-		}
-		lastErr = fmt.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
-		time.Sleep(50 * time.Millisecond)
-	}
-	if lastErr != nil {
-		cancel()
-		<-done
-		t.Fatalf("server never became healthy before the deadline: %v", lastErr)
 	}
 
 	cancel()
