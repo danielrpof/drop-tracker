@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"sort"
@@ -890,19 +891,20 @@ func TestDeezerCycle_SkipsNilDeezerID(t *testing.T) {
 	if got := atomic.LoadInt32(&dz.calls); got != 2 {
 		t.Fatalf("calls = %d, want 2", got)
 	}
+	// Membership, not order: under concurrent fan-out the two workers can
+	// finish in either order, so the assertion is on the set of artist ids
+	// called, not a fixed dispatch-order sequence.
 	dz.mu.Lock()
 	ids := append([]string(nil), dz.artistIDs...)
 	dz.mu.Unlock()
+	sort.Strings(ids)
 	want := []string{"101", "103"}
 	if len(ids) != len(want) {
-		t.Fatalf("artistIDs = %v, want %v", ids, want)
+		t.Fatalf("artistIDs = %v, want %v in any order", ids, want)
 	}
 	for i := range want {
 		if ids[i] != want[i] {
-			t.Fatalf("artistIDs[%d] = %q, want %q", i, ids[i], want[i])
-		}
-		if ids[i] == "" {
-			t.Fatal("artist id must never be empty")
+			t.Fatalf("artistIDs = %v, want %v in any order", ids, want)
 		}
 	}
 
@@ -1058,22 +1060,245 @@ func TestDeezerCycle_EmptyWatchlistNoCallsNilError(t *testing.T) {
 	}
 }
 
+// TestDeezerCycle_ContextCancelledStopsIteration pins the cancellation
+// contract, mirroring TestMusicBrainzCycle_ContextCancelledStopsIteration's
+// own comment: WithDeezerWorkers(1) is required, not the newTestPoller
+// default (5), because with pool size >= the 2 Deezer-capable entries in
+// threeEntries() the dispatch loop's semaphore send never blocks, making
+// cancellation observation a goroutine-scheduling race rather than a
+// deterministic happens-before edge -- confirmed empirically flaky (3/100
+// failures) before this fix. Forcing genuine semaphore contention (1
+// worker, so dispatching mbid-3 must wait for mbid-1's worker to release
+// its slot) makes mbid-1's cancel()-then-return strictly precede mbid-3's
+// dispatch.
 func TestDeezerCycle_ContextCancelledStopsIteration(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	ctx, cancel := context.WithCancel(context.Background())
 	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
-		cancel()
+		if artistID == "101" {
+			cancel()
+		}
 		return []deezer.Album{}, nil
 	}}
 	logger, _ := newTestLogger()
-	p := newTestPoller(t, store, &fakeReleaseGroupSource{}, dz, logger)
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(1))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
-	err := p.RunDeezerCycle(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("RunDeezerCycle error = %v, want context.Canceled", err)
+	cycleErr := p.RunDeezerCycle(ctx)
+	if !errors.Is(cycleErr, context.Canceled) {
+		t.Fatalf("RunDeezerCycle error = %v, want context.Canceled", cycleErr)
 	}
 	if got := atomic.LoadInt32(&dz.calls); got >= 2 {
 		t.Fatalf("calls = %d, want < 2 (iteration must stop once ctx is cancelled)", got)
+	}
+}
+
+// TestDeezerCycle_ConcurrencyBoundedByWorkerCount is RunDeezerCycle's own
+// canonical proof for PERF-01, mirroring
+// TestMusicBrainzCycle_ConcurrencyBoundedByWorkerCount: over 9
+// Deezer-capable entries and a worker pool bounded to 4
+// (WithDeezerWorkers(4)), the fan-out must reach the ceiling (proving it
+// actually ran concurrently) and never exceed it (proving the bound is
+// enforced). fakeAlbumSource's fetch sleeps briefly so overlapping
+// in-flight calls are actually observable.
+func TestDeezerCycle_ConcurrencyBoundedByWorkerCount(t *testing.T) {
+	var entries []watchlist.Entry
+	for i := 1; i <= 9; i++ {
+		id := fmt.Sprintf("%d0%d", i, i)
+		entries = append(entries, watchlist.Entry{MBID: fmt.Sprintf("mbid-%d", i), Name: fmt.Sprintf("Artist %d", i), DeezerID: deezerID(id)})
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+		time.Sleep(50 * time.Millisecond)
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(4))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&dz.maxInFlight); got != 4 {
+		t.Fatalf("max in-flight = %d, want exactly 4", got)
+	}
+}
+
+// TestDeezerCycle_WorkerCountEqualToEntryCountRunsAllConcurrently pins the
+// PERF-02 adjacency case: when the configured worker count exactly equals
+// the entry count, every entry runs concurrently -- maxInFlight equals the
+// entry count exactly, with no worker left queued.
+func TestDeezerCycle_WorkerCountEqualToEntryCountRunsAllConcurrently(t *testing.T) {
+	entries := []watchlist.Entry{
+		{MBID: "mbid-1", Name: "Artist One", DeezerID: deezerID("101")},
+		{MBID: "mbid-2", Name: "Artist Two", DeezerID: deezerID("102")},
+		{MBID: "mbid-3", Name: "Artist Three", DeezerID: deezerID("103")},
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	release := make(chan struct{})
+	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+		<-release
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunDeezerCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&dz.inFlight) < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 3 in-flight calls, last observed %d", atomic.LoadInt32(&dz.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunDeezerCycle: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunDeezerCycle did not return promptly after release -- possible deadlock on an unused semaphore slot")
+	}
+
+	if got := atomic.LoadInt32(&dz.maxInFlight); got != 3 {
+		t.Fatalf("max in-flight = %d, want exactly 3 (worker count == entry count)", got)
+	}
+}
+
+// TestDeezerCycle_NilDeezerIDConsumesNoWorkerSlot proves a nil-DeezerID
+// entry never occupies a worker slot or spawns a goroutine (D-06): a
+// watchlist where the number of nil-DeezerID entries exceeds the worker
+// count must still reach the non-nil entries' worker ceiling and call
+// ArtistAlbums exactly once per non-nil entry.
+func TestDeezerCycle_NilDeezerIDConsumesNoWorkerSlot(t *testing.T) {
+	entries := []watchlist.Entry{
+		{MBID: "mbid-1", Name: "Artist One", DeezerID: nil},
+		{MBID: "mbid-2", Name: "Artist Two", DeezerID: nil},
+		{MBID: "mbid-3", Name: "Artist Three", DeezerID: nil},
+		{MBID: "mbid-4", Name: "Artist Four", DeezerID: deezerID("104")},
+		{MBID: "mbid-5", Name: "Artist Five", DeezerID: deezerID("105")},
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	release := make(chan struct{})
+	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+		<-release
+		return nil, nil
+	}}
+	events := &fakeEventRecorder{}
+	logger, buf := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(2))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunDeezerCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&dz.inFlight) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 2 in-flight calls, last observed %d", atomic.LoadInt32(&dz.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunDeezerCycle: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunDeezerCycle did not return promptly after release")
+	}
+
+	if got := atomic.LoadInt32(&dz.calls); got != 2 {
+		t.Fatalf("dz.calls = %d, want 2 (only the non-nil DeezerID entries)", got)
+	}
+	dz.mu.Lock()
+	gotIDs := append([]string(nil), dz.artistIDs...)
+	dz.mu.Unlock()
+	sort.Strings(gotIDs)
+	wantIDs := []string{"104", "105"}
+	if len(gotIDs) != len(wantIDs) || gotIDs[0] != wantIDs[0] || gotIDs[1] != wantIDs[1] {
+		t.Fatalf("dz.artistIDs = %v, want %v in any order", gotIDs, wantIDs)
+	}
+	if got := atomic.LoadInt32(&events.deezerCalls); got != 2 {
+		t.Fatalf("events.deezerCalls = %d, want 2", got)
+	}
+
+	records := decodeLogRecords(t, buf)
+	skipCount := 0
+	for _, rec := range records {
+		if rec["artist_mbid"] == "mbid-1" || rec["artist_mbid"] == "mbid-2" || rec["artist_mbid"] == "mbid-3" {
+			msg, _ := rec["msg"].(string)
+			if strings.Contains(strings.ToLower(msg), "deezer_id") {
+				skipCount++
+			}
+		}
+	}
+	if skipCount != 3 {
+		t.Fatalf("found %d skip log records for nil-DeezerID entries, want 3", skipCount)
+	}
+}
+
+// TestDeezerCycle_LogsCycleDurationAndArtistCount is
+// TestMusicBrainzCycle_LogsCycleDurationAndArtistCount's Deezer twin,
+// pinning D-04/D-05 for RunDeezerCycle.
+func TestDeezerCycle_LogsCycleDurationAndArtistCount(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	dz := &fakeAlbumSource{}
+	logger, buf := newTestLogger()
+	p := newTestPoller(t, store, &fakeReleaseGroupSource{}, dz, logger)
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+
+	records := decodeLogRecords(t, buf)
+	var found map[string]any
+	count := 0
+	for _, rec := range records {
+		if rec["msg"] == "poll cycle complete" {
+			found = rec
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("found %d 'poll cycle complete' records, want exactly 1", count)
+	}
+
+	artistCount, ok := found["artist_count"].(float64)
+	if !ok {
+		t.Fatalf("artist_count = %v (%T), want a JSON number", found["artist_count"], found["artist_count"])
+	}
+	if int(artistCount) != 3 {
+		t.Fatalf("artist_count = %v, want 3", artistCount)
+	}
+
+	durationMS, ok := found["duration_ms"].(float64)
+	if !ok {
+		t.Fatalf("duration_ms = %v (%T), want a JSON number", found["duration_ms"], found["duration_ms"])
+	}
+	if durationMS < 0 {
+		t.Fatalf("duration_ms = %v, want >= 0", durationMS)
+	}
+	if durationMS != math.Trunc(durationMS) {
+		t.Fatalf("duration_ms = %v, want an integer (no fractional part)", durationMS)
 	}
 }
 
@@ -1207,8 +1432,20 @@ func TestPoller_RunDeezerCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 	if !errors.Is(err, ErrCycleInProgress) {
 		t.Fatalf("second RunDeezerCycle error = %v, want ErrCycleInProgress", err)
 	}
-	if got := atomic.LoadInt32(&events.deezerCalls); got != 1 {
-		t.Fatalf("events.deezerCalls = %d, want 1 (the skipped tick must perform zero detection calls)", got)
+	// store.listCalls, not events.deezerCalls: with the default worker pool,
+	// both Deezer-capable entries can be concurrently in flight and blocked
+	// inside events.deezerFn by the time the "started" signal fires, and the
+	// still-running first cycle's own already-dispatched workers keep
+	// incrementing events.deezerCalls in the background regardless of what
+	// the second call does -- that makes any snapshot-based
+	// events.deezerCalls comparison inherently racy against the first
+	// cycle's own progress, not a measurement of the second call's
+	// behavior. store.List is the first thing the cycle body does after the
+	// CAS guard succeeds, so store.listCalls staying at 1 is the
+	// deterministic proof the second, skipped call never performed any work
+	// at all -- not just zero detection calls.
+	if got := atomic.LoadInt32(&store.listCalls); got != 1 {
+		t.Fatalf("store.listCalls = %d, want 1 (the skipped tick must perform zero store reads)", got)
 	}
 
 	close(release)
