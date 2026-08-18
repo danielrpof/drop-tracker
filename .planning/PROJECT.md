@@ -40,6 +40,7 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - ✓ CI coverage gate — 80% threshold for backend (Go), 70% threshold for frontend (Vitest); a coverage drop on either language blocks `build-scan`/`release` via `full-pipeline.yml`'s `needs:` graph — Phase 09
 - ✓ Events table retention — soft-delete/filter; `EVENT_RETENTION_DAYS` (default 90) hides aged-out rows from `GET /events` and the History UI while detection-state queries (dedup keys, deluxe-change baselines, seed-mode signal) stay unfiltered against the full table — Phase 10
 - ✓ Bounded worker-pool concurrent per-artist polling — env-configurable pool size (`MusicBrainzPollWorkers`/`DeezerPollWorkers`, default 3/5) for both MusicBrainz and Deezer poll cycles, still respecting existing rate limiters and overlap guards; deluxe-change baseline detection made race-safe with a single atomic CTE; connection pool `MaxConns` sized against the combined worker ceiling rather than `runtime.NumCPU()` — Phase 11
+- ✓ v1.1 tech-debt cleanup (13 locked decisions closing residual items from `.planning/v1.1-MILESTONE-AUDIT.md`) — frontend test-coverage gaps filled, History filter dropdown legibility fixed (native `<select>` replaced with a hand-rolled combobox after a CSS-only fix was found not to work on Windows Chromium), `prettier --check` now gates CI, notification-loss window made log-observable, `PoolConfig`'s two parse errors differentiated, boot test hardened, coverage-filter regex anchored, Postgres port revert (5433→5432) committed with full history, and Phases 08/09/10's Nyquist `VALIDATION.md` files reconciled out of `draft` — Phase 11.1
 
 ### Active
 
@@ -117,4 +118,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-17 after Phase 11 (Bounded Concurrent Polling) completion*
+*Last updated: 2026-08-17 after Phase 11.1 (v1.1 tech-debt cleanup) completion*
