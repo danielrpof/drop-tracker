@@ -8,7 +8,21 @@ A Go-based release tracker for hip-hop, reggaeton, and R&B: users maintain a wat
 
 A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice (lint, test, security scan, SBOM, versioned image publish, and eventually automated deploy).
 
-## Current Milestone: v1.1 Hardening & Scale Readiness
+## Current State
+
+**Shipped:** v1.1 Hardening & Scale Readiness (2026-08-17)
+
+v1.0's four peer-reviewed gaps are closed without changing user-facing behavior: the frontend has a real Vitest + RTL test suite, CI now blocks merges on coverage regressions (80% backend / 70% frontend), event history has a configurable retention window with zero data loss to detection state, and polling runs several artists at a time per source through a bounded, race-safe worker pool. A follow-on tech-debt phase (11.1) closed everything the milestone audit flagged, including a real accessibility bug in the History filter UI.
+
+## Next Milestone Goals
+
+Not yet scoped — run `/gsd-new-milestone` to define v1.2. Candidates carried in ROADMAP.md's Backlog:
+- Phase 999.1: Search-result popularity sorting and same-name artist disambiguation (captured during Phase 6 UAT)
+- Phase 999.2: Deezer artist-art backfill for MusicBrainz-only-matched artists (captured 2026-08-12)
+- v2 requirements tracked in the outgoing REQUIREMENTS.md archive: VPS SSH deploy (DPLY-01), producer watchlist entities (WLST-07), PR coverage-diff comments (CICD-13), Playwright E2E suite (TEST-03)
+
+<details>
+<summary>Previous Milestone: v1.1 Hardening & Scale Readiness (shipped 2026-08-17)</summary>
 
 **Goal:** Close four peer-reviewed gaps from v1.0 — frontend test coverage, CI coverage enforcement, events data retention, and concurrent polling — without changing user-facing behavior.
 
@@ -17,6 +31,8 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - CI coverage gates: 80% threshold for backend (Go), 70% threshold for frontend (Vitest)
 - Events table retention: soft-delete/filter — rows older than 90 days hidden from display/API, detection state (dedup keys, deluxe-change baselines, seed-mode) left intact
 - Bounded worker-pool concurrent per-artist polling (env-configurable pool size, default 3-5), replacing sequential polling, still respecting existing rate limiters
+
+</details>
 
 ## Requirements
 
@@ -63,6 +79,9 @@ A single Go binary that reliably detects and notifies on new releases for watche
 - MusicBrainz and Deezer clients should be real, testable HTTP clients — tests mock the external calls with `httptest.Server`, not fake/stub business logic.
 - musicbrainz.org's TLS handshake fails with an `unexpected eof`/server `decode_error` alert from this developer's WSL2 network path specifically — reproduced identically with plain `curl` (bypassing drop-tracker's Go client entirely), confirmed environmental (not a code defect) during Phase 03 UAT. Deezer is unaffected. If a future phase's live testing hits the same MusicBrainz-only TLS failure on this machine, this is already a known, accepted limitation — see `.planning/phases/03-external-clients-search/03-VERIFICATION.md` Acknowledged Gaps and Broken Windows Ledger entry #3 (waived).
 - Config/settings library (pydantic-settings equivalent — e.g. envconfig/viper) and exact structured-logging setup are implementation details left to phase research/planning rather than locked here.
+- Current codebase size (as of v1.1 close, 2026-08-17): ~23,200 LOC Go across 72 files, ~3,500 LOC TypeScript/TSX across 33 files (`web/app/`, excludes generated build output). Backend coverage 83.5%+, frontend coverage 70%+, both CI-enforced.
+- One pre-existing, non-blocking UI bug noted at v1.1 close (v1.1-MILESTONE-AUDIT.md, not introduced by any v1.1 phase): `CoverArt.tsx`'s image-load-error state never resets when `src` changes on a retained component instance, so a component that once failed to load keeps showing the placeholder even if a later `src` would succeed. Affects both History and Watchlist rows. Left open deliberately rather than fixed outside its own scoped phase — candidate for a small future cleanup phase.
+- Windows dev-machine limitations remain (`go test -race` unusable — ThreadSanitizer allocation failure under memory pressure; musicbrainz.org TLS handshake fails over WSL2). Both are documented, waived, environmental, not code defects. See `.planning/WINDOWS.md`.
 
 ## Constraints
 
@@ -99,6 +118,11 @@ A single Go binary that reliably detects and notifies on new releases for watche
 | Vitest + React Testing Library for frontend tests, jsdom environment | Matches the existing Vite toolchain; RTL steers toward user-visible-behavior assertions over implementation detail | Validated Phase 08 — 5 test files / 16 tests, `mockReset: true`, no `passWithNoTests` escape; the `frontend-test` CI job runs in `full-pipeline.yml`'s parallel tier but is deliberately not yet wired into `build-scan`'s `needs:` — that blocking wiring is Phase 09's job (CI Coverage Gates), which edits the same file |
 | Hand-rolled Makefile coverage gate (backend) + Vitest `coverage.thresholds` (frontend), no third-party coverage-gating action | Both languages already have a coverage-producing invocation from Phase 07/08; a single greppable threshold literal per side is simpler to audit than a new GitHub Action | Validated Phase 09 — `Makefile`'s `coverage-gate` recipe fails closed on missing/empty/unparseable profiles; `web/vitest.config.ts` thresholds fail `pnpm test` non-zero below 70% on any of 4 axes; `build-scan.needs` extended to include `test`+`frontend-test`, confirmed live on a real GitHub Actions run (backend-red, frontend-red, and full-green cases all directly observed, `build-scan` correctly reported `skipped` on both red cases) |
 | Soft-delete/filter retention, not hard delete | Rows must stay in the table permanently so dedup keys, deluxe-change baselines, and the per-source seed-mode signal all survive; hard delete would have reintroduced all three failure modes | Validated Phase 10 — zero `DELETE`/`TRUNCATE` in `queries/events.sql`; `TestRetention_DetectionStateQueriesStayUnfiltered` proves dedup keys, seed-mode signal, and deluxe baseline all survive retention filtering while `GET /events`/History UI correctly hide aged-out rows |
+| Buffered-channel semaphore for bounded per-source polling concurrency, not a third-party worker-pool library | Stdlib-only; the concurrency shape needed (N-wide fan-out per cycle, wait for drain, per-artist panic isolation) is a handful of lines with `chan struct{}` | Validated Phase 11 — `MUSICBRAINZ_POLL_WORKERS`/`DEEZER_POLL_WORKERS` (defaults 3/5) drive both cycles; existing per-source `rate.Limiter` and overlap guard proven to still hold under concurrency via real captured request timestamps |
+| Atomic `FOR UPDATE`-locked `UPDATE...RETURNING` CTE for the deluxe-change baseline, replacing check-then-act read/write | Concurrent polling made the prior two-statement baseline update a real lost-update race once two artists could share a release group in-flight simultaneously | Validated Phase 11 — `AdvanceGroupTrackCountBaseline`, proven via a deliberate two-caller race test asserting final stored state is correct |
+| Connection pool `MaxConns` sized against `MusicBrainzPollWorkers + DeezerPollWorkers` (+ headroom), not `runtime.NumCPU()` default | Bounded concurrency raises the number of simultaneous DB connections polling can need; the old default sizing was blind to the new worker-count knob | Validated Phase 11 (gap closure 11-05) — `poolMaxConnsForWorkers` clamps and computes explicitly, still honoring an operator's own `pool_max_conns` override |
+| Hand-rolled accessible combobox to replace the native `<select>` for History filters | A CSS-only contrast fix for the native dropdown was disproven on Windows Chromium during Phase 11.1 UAT — the underlying legibility bug needed a real component fix, not styling | Validated Phase 11.1 — `aria-activedescendant`-wired combobox verified live in-browser on the failing platform |
+| Blocking `prettier --check` added to the existing `frontend-test` CI job, not a new job | Formatting drift (40 files) had accumulated silently with no CI signal; reusing the job that already runs on every push avoids adding pipeline surface for a lint-adjacent check | Validated Phase 11.1 — `web/` tree reformatted once, gate now fails the build on any future drift |
 
 ## Evolution
 
@@ -118,4 +142,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-17 after Phase 11.1 (v1.1 tech-debt cleanup) completion*
+*Last updated: 2026-08-17 after v1.1 milestone completion*

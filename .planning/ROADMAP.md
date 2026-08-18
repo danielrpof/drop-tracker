@@ -4,7 +4,14 @@
 
 drop-tracker starts from an empty repo and builds outward from the data layer: a Postgres schema, config, and health-checked service skeleton first, then a fully tested watchlist CRUD API, then rate-limited MusicBrainz/Deezer clients with live search, then the detection engine that diffs poll results into new-release/guest-feature/deluxe events, then Discord notifications for those events, then the React UI that ties watchlist management and release history together, and finally the single-image containerization and full GitHub Actions CI/CD pipeline (lint, test, security scan, SBOM, semantic versioning, ghcr.io publish) that is the actual point of the project. Each phase produces something a user (or operator) can directly observe working before the next phase builds on it.
 
-**v1.1 Hardening & Scale Readiness** picks up from a shipped, working v1.0 and closes four peer-reviewed gaps without changing what the app does for its user: the React frontend gets the component test suite it never had, the Full Pipeline starts enforcing coverage floors on both languages instead of merely running tests, the events table gets a retention window that hides stale history from display while leaving every detection-critical row in place, and the poller stops walking the watchlist one artist at a time. Ordering is deliberate: tests before the gate that measures them, and the concurrency rewrite last, once a working coverage harness exists to catch what it breaks.
+v1.1 picked up from a shipped, working v1.0 and closed four peer-reviewed gaps without changing what the app does for its user: the React frontend gained the component test suite it never had, the Full Pipeline started enforcing coverage floors on both languages instead of merely running tests, the events table gained a retention window that hides stale history from display while leaving every detection-critical row in place, and the poller stopped walking the watchlist one artist at a time.
+
+## Milestones
+
+- ✅ **v1.0 MVP** — Phases 1-7 (shipped 2026-08-12)
+- ✅ **v1.1 Hardening & Scale Readiness** — Phases 8-11.1 (shipped 2026-08-17)
+
+Full phase-by-phase detail for both is archived at `.planning/milestones/v1.0-ROADMAP.md` and `.planning/milestones/v1.1-ROADMAP.md`. Accomplishment summaries: `.planning/MILESTONES.md`.
 
 ## Phases
 
@@ -15,7 +22,8 @@ drop-tracker starts from an empty repo and builds outward from the data layer: a
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-**v1.0 MVP — shipped 2026-08-12**
+<details>
+<summary>✅ v1.0 MVP (Phases 1-7) — SHIPPED 2026-08-12</summary>
 
 - [x] **Phase 1: Foundation — Data Layer, Config & Health** - Postgres schema/migrations, sqlc, env-based config, structured logging, and a `/health` endpoint the rest of the app is built on (completed 2026-08-05)
 - [x] **Phase 2: Watchlist Core** - Users can add, remove, list, and configure per-artist alert preferences through a tested watchlist API (completed 2026-08-06)
@@ -25,378 +33,27 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Frontend & Release History** - Users manage their watchlist and browse detected release history entirely through a web UI (completed 2026-08-11)
 - [x] **Phase 7: Containerization & CI/CD Pipeline** - The app ships as a single scanned, versioned, non-root Docker image via an automated GitHub Actions pipeline, with docker-compose for local dev (completed 2026-08-12)
 
-**v1.1 Hardening & Scale Readiness — in progress**
+</details>
+
+<details>
+<summary>✅ v1.1 Hardening & Scale Readiness (Phases 8-11.1) — SHIPPED 2026-08-17</summary>
 
 - [x] **Phase 8: Frontend Test Suite** - The watchlist, search, and history React surfaces get a Vitest + React Testing Library suite that mocks the app's own API boundary (completed 2026-08-12)
 - [x] **Phase 9: CI Coverage Gates** - The Full Pipeline blocks the build when Go coverage drops below 80% or frontend coverage drops below 70% (completed 2026-08-13)
 - [x] **Phase 10: Event Retention Window** - History and API hide events older than a configurable window (default 90 days) while every row and all detection state stay intact (completed 2026-08-13)
 - [x] **Phase 11: Bounded Concurrent Polling** - Each source polls several artists at a time through a bounded worker pool, without breaking rate limits, overlap guards, or baseline correctness (completed 2026-08-17)
+- [x] **Phase 11.1: Address tech debt: v1.1 cleanup (INSERTED)** - Closed the milestone audit's non-blocking tech debt: frontend coverage gaps, a real History filter accessibility bug, a Prettier CI gate, notification-loss observability, and Nyquist validation reconciliation (completed 2026-08-17)
 
-## Phase Details
-
-### Phase 1: Foundation — Data Layer, Config & Health
-
-**Goal**: The service boots reliably from environment configuration, persists to a migrated Postgres schema, and reports its own health — the foundation every later phase is built on.
-**Mode:** mvp
-**Depends on**: Nothing (first phase)
-**Requirements**: OPS-01, OPS-02, OPS-03
-**Success Criteria** (what must be TRUE):
-
-  1. Operator can query `/health` and see accurate service and database connectivity status
-  2. Every HTTP request and poll cycle emits a structured JSON log line with a correlating request ID
-  3. The service starts entirely from environment variables (via `.env.example` documenting every setting), with no real secret ever committed to the repo
-
-**Plans**: 5/5 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 01-01-PLAN.md — Tracer: scaffold the module and wire env config → migrated Postgres → chi → `GET /health` end-to-end
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 01-02-PLAN.md — Health degraded/timeout branches, concurrent polling, and `X-Request-Id` correlation proven against the log line
-- [x] 01-03-PLAN.md — Complete the `Config` surface through Phase 5, `.env.example` parity, and fail-fast rejection coverage
-- [x] 01-04-PLAN.md — Wire sqlc end-to-end (config, query, committed codegen, execution test) plus the `make sqlc-check` drift gate
-- [x] 01-05-PLAN.md — Injectable migrate-on-boot retry policy with apply/idempotency/exhaustion/cancellation/redaction coverage
-
-### Phase 2: Watchlist Core
-
-**Goal**: Users can fully manage their watchlist — add, remove, list, and configure per-artist alert preferences — through a tested API service layer.
-**Mode:** mvp
-**Depends on**: Phase 1
-**Requirements**: WLST-02, WLST-03, WLST-04, WLST-05, WLST-06
-**Success Criteria** (what must be TRUE):
-
-  1. User can add an artist to the watchlist
-  2. User can remove an artist from the watchlist
-  3. User can list all artists currently on the watchlist
-  4. User can set per-artist release-type filters (album/single/EP/deluxe) that control which release types trigger alerts
-  5. User can mute specific notification types per artist (e.g., deluxe/reissue alerts)
-
-**Plans**: 8/8 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 02-01-PLAN.md — Tracer: `POST /watchlist` end-to-end — artists/watchlist schema, sqlc codegen, `internal/watchlist` Store seam, widened `httpserver.New`
-
-**Wave 2** *(blocked on Wave 1)*
-
-- [x] 02-02-PLAN.md — Add-path completeness: 409 duplicate via SQLSTATE 23505, optional initial preferences with allow-list validation, request-size and field-length bounds
-
-**Wave 3** *(blocked on Wave 2)*
-
-- [x] 02-03-PLAN.md — `GET /watchlist` stably ordered with `[]` on empty, and `DELETE /watchlist/{id}` hard delete with honest 404 under concurrency
-
-**Wave 4** *(blocked on Wave 3)*
-
-- [x] 02-04-PLAN.md — `PATCH /watchlist/{id}` independent preference axes with partial updates, CHECK-constraint backstop proof, phase-closing gate
-
-**Gap closure — Wave 1** *(from 02-UAT.md test 2: "fix both WRs")*
-
-- [x] 02-05-PLAN.md — G-02-2a: widen `UpsertArtist`'s `ON CONFLICT` SET list so a re-add refreshes `disambiguation`/`image_url` instead of silently discarding them
-
-**Gap closure — Wave 2** *(blocked on Gap closure Wave 1)*
-
-- [x] 02-06-PLAN.md — G-02-2b: collapse `UpdatePreferences` into one locked statement — honest 404 on the deleted-mid-write race, no lost update between concurrent PATCH calls
-
-**Gap closure — Wave 1** *(from 02-UAT.md tests 1 and 2: "fix"; independent, no shared files)*
-
-- [x] 02-07-PLAN.md — G-02-1: move the neither-axis rule into `watchlist.Service` behind an `ErrNoPreferencesSupplied` sentinel (WR-01), and reject a second concatenated JSON value on both body-taking routes through one shared decode path (WR-02)
-- [x] 02-08-PLAN.md — G-02-2: give `redactError` keyword/value-form DSN password coverage (CR-01), proven by unit tests against both redaction helpers, and correct the migration test that never exercised the gap
-
-### Phase 3: External Clients & Search
-
-**Goal**: The service can search and poll MusicBrainz and Deezer safely within their rate limits, and users can search those catalogs live to find artists to watch.
-**Mode:** mvp
-**Depends on**: Phase 1
-**Requirements**: WLST-01, CLNT-01, CLNT-02, CLNT-03
-**Success Criteria** (what must be TRUE):
-
-  1. User can search MusicBrainz and Deezer catalogs via a live search-proxy endpoint and see matching artists to add
-  2. System polls MusicBrainz for each watchlisted artist on a configurable schedule without exceeding MusicBrainz's rate limit
-  3. System polls Deezer for each watchlisted artist on a configurable schedule without exceeding Deezer's rate limit
-
-**Plans**: 4/4 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 03-01-PLAN.md — Tracer: `GET /search?q=` end-to-end via a rate-limited, User-Agent-identified MusicBrainz client, with the source-keyed response envelope and the widened `httpserver.New`
-
-**Wave 2** *(blocked on Wave 1)*
-
-- [x] 03-02-PLAN.md — Deezer client (search + artist albums, HTTP-200 in-body error detection) joined to the `/search` fan-out as an independent second source
-- [x] 03-03-PLAN.md — MusicBrainz release-groups browse-by-artist with bounded, limiter-paced pagination and no retry loop
-
-**Wave 3** *(blocked on Wave 2)*
-
-- [x] 03-04-PLAN.md — `internal/poller`: two independent cron cycles with per-source overlap guards, sequential per-artist polling, nil-`deezer_id` skip, and drain-before-pool-close shutdown
-
-### Phase 4: Detection Engine
-
-**Goal**: The system reliably detects new releases, guest features, and deluxe/tracklist changes for watched artists, with no duplicate or overlapping detection runs.
-**Mode:** mvp
-**Depends on**: Phase 2, Phase 3
-**Requirements**: DTCT-01, DTCT-02, DTCT-03, DTCT-04, DTCT-05
-**Success Criteria** (what must be TRUE):
-
-  1. A new release-group for a watchlisted artist is detected and recorded as a "new release" event
-  2. A new release inside an existing release-group with an expanded tracklist is detected and recorded as a "deluxe/tracklist-change" event
-  3. A recording where a watchlisted artist appears as a non-primary artist-credit is detected and recorded as a "guest feature" event
-  4. The system never re-records or re-notifies for a release/change it has already seen
-  5. The system never runs two poll cycles for the same source concurrently, even if a prior cycle is still running
-
-**Plans**: 4/4 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 04-01-PLAN.md — Tracer: a MusicBrainz poll cycle records previously-unseen release-groups as `new_release` events end-to-end (migration `000003_events`, `queries/events.sql`, `internal/detection`, the `poller.EventRecorder` seam), plus the `ON CONFLICT DO NOTHING` idempotency and overlap-guard proofs
-
-**Wave 2** *(blocked on Wave 1)*
-
-- [x] 04-02-PLAN.md — `new_release` completeness: both preference axes applied at detection time (including the `deluxe` pseudo-type), per-source seed mode with `notified_at` pre-set, and the Deezer cycle as an independent second source
-
-**Wave 3** *(blocked on Wave 2)*
-
-- [x] 04-03-PLAN.md — Guest-feature slice: `RecordingsByArtist` bounded browse plus the positional artist-credit rule, malformed-credit guards, and page-ceiling visibility
-
-**Wave 4** *(blocked on Wave 3)*
-
-- [x] 04-04-PLAN.md — Deluxe/tracklist-change slice: `ReleasesByReleaseGroup` with multi-disc track-count summing and establish-then-compare baseline tracking that fires no false positive on a group's first measurement
-
-### Phase 5: Discord Notifications
-
-**Goal**: Users are notified in Discord immediately and distinctly when a detected event matches their preferences.
-**Mode:** mvp
-**Depends on**: Phase 4
-**Requirements**: NTFY-01, NTFY-02, NTFY-03, NTFY-04
-**Success Criteria** (what must be TRUE):
-
-  1. User receives a Discord webhook message for each new-release event including title, artist, cover art, release date, and release type
-  2. User receives a visually distinct Discord webhook message for guest-feature events
-  3. User receives a visually distinct Discord webhook message for deluxe/tracklist-change events
-  4. User does not receive notifications for artists/release-types they've muted via their preferences
-
-**Plans**: 3/3 plans executed
-
-- [x] 05-01-PLAN.md
-- [x] 05-02-PLAN.md
-- [x] 05-03-PLAN.md
-
-### Phase 6: Frontend & Release History
-
-**Goal**: Users can manage their watchlist and review detected release activity entirely through a web UI, without touching the API directly.
-**Mode:** mvp
-**Depends on**: Phase 2, Phase 3, Phase 4
-**Requirements**: UI-01, UI-02, UI-03, HIST-01
-**Success Criteria** (what must be TRUE):
-
-  1. User can search for and add an artist to the watchlist via the web UI
-  2. User can view and manage (remove, set preferences on) their watchlist via the web UI
-  3. User can browse a feed/history of detected release events per artist via the web UI, including what changed
-
-**Plans**: 4/4 plans executed
-**UI hint**: yes
-
-Plans:
-**Wave 1**
-
-- [x] 06-01-PLAN.md — Tracer: `GET /events` end-to-end — `ListEvents` keyset query, `internal/events` Store seam, the embedded React Router SPA served by the Go binary via `go:embed`, and a History route rendering real rows
-
-**Wave 2** *(blocked on Wave 1)*
-
-- [x] 06-02-PLAN.md — History feed completeness: validated/clamped `artist_id`/`event_type`/`cursor`/`limit` params, and type-specific art-forward event cards with filters, load-more and every empty/loading/error state
-- [x] 06-03-PLAN.md — Watchlist tab: the artist list with all its states, inline preference toggles with optimistic rollback, and one-click remove with an honestly-labelled Undo
-
-**Wave 3** *(blocked on Wave 2)*
-
-- [x] 06-04-PLAN.md — Artist search at the top of the Watchlist tab: debounced two-column source results, one-click add, client-side "Already watching", plus the phase-closing manual UAT gate
-
-### Phase 7: Containerization & CI/CD Pipeline
-
-**Goal**: Every push is automatically linted, tested, and security-scanned, and every merge to main produces a versioned, non-root, single-image build published to a container registry — with the full stack (API, scheduler, notifier, embedded SPA) also runnable locally via docker-compose.
-**Mode:** mvp
-**Depends on**: Phase 6
-**Requirements**: CICD-01, CICD-02, CICD-03, CICD-04, CICD-05, CICD-06, CICD-07, CICD-08, CICD-09, CICD-10
-**Success Criteria** (what must be TRUE):
-
-  1. Every push runs golangci-lint, go vet, and the full Go test suite (MusicBrainz/Deezer calls mocked via `httptest.Server`) before any build or publish step
-  2. Every push is scanned for committed secrets (gitleaks) and, once built, the image is scanned for critical vulnerabilities (Trivy) — either finding blocks the pipeline
-  3. A merge to main computes a semantic version, generates an SBOM, and pushes the built image to ghcr.io tagged with that version
-  4. The full application (API + scheduler + notifier + embedded SPA) runs as a single non-root multi-stage Docker image, reproducible locally via `docker-compose up` alongside Postgres
-  5. All security-sensitive third-party GitHub Actions are pinned to commit SHAs, and a pre-commit hook runs golangci-lint and gitleaks locally before any commit reaches the pipeline
-
-**Plans**: 4/4 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 07-01-PLAN.md — Multi-stage non-root image + docker-compose `app:` service (CICD-03, CICD-09)
-- [x] 07-02-PLAN.md — golangci-lint v2 config + pre-commit hook (CICD-01, CICD-10)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 07-03-PLAN.md — Full Pipeline workflow: lint/vet/test/gitleaks/PR-title gates + Trivy-blocked image build (CICD-01, CICD-02, CICD-04, CICD-08)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 07-04-PLAN.md — Release path: svu semver, ghcr.io push, SBOM, seeded v0.1.0 tag (CICD-05, CICD-06, CICD-07)
-
-### Phase 8: Frontend Test Suite
-
-**Goal**: The React frontend's watchlist, search, and history surfaces are covered by a real component test suite, so a regression in the UI is caught by a test run instead of by hand-clicking the app.
-**Depends on**: Phase 7 (v1.0 complete)
-**Requirements**: TEST-01, TEST-02
-**Success Criteria** (what must be TRUE):
-
-  1. A single command runs the frontend suite (Vitest + React Testing Library, jsdom) locally and in CI, and exits non-zero when a component regresses
-  2. The watchlist list/row, preference-toggle, search, and history/event-filter surfaces each have at least one passing test asserting user-visible behavior — e.g. the watchlist row's remove control triggers the remove API call, and a preference toggle rolls back its optimistic state when the call fails
-  3. Tests mock the app's API boundary (`web/app/lib/api.ts`), not raw `fetch` — no test issues a real network request, and the whole suite passes with no server running
-  4. Components needing router context render through one shared helper (React Router's `createRoutesStub`), established once and reused, rather than each test reinventing router wrapping
-
-**Plans**: 5/5 plans executed
-
-Plans:
-
-- [x] 08-01-PLAN.md
-- [x] 08-02-PLAN.md
-- [x] 08-03-PLAN.md
-- [x] 08-04-PLAN.md
-- [x] 08-05-PLAN.md
-
-- [ ] TBD (run /gsd-plan-phase 8 to break down)
-
-Notes: Vitest cannot reuse `web/vite.config.ts` — React Router's Vite plugin is incompatible, so this phase adds a separate `vitest.config.ts`. Test files co-locate beside source (`*.test.tsx`), mirroring Go's `_test.go` convention already used in this repo.
-
-### Phase 9: CI Coverage Gates
-
-**Goal**: The Full Pipeline stops merely running tests and starts enforcing them — a drop in coverage on either language blocks the build before anything is packaged or published.
-**Depends on**: Phase 8 (a frontend coverage number is meaningless until a frontend suite exists)
-**Requirements**: CICD-11, CICD-12
-**Success Criteria** (what must be TRUE):
-
-  1. The backend job produces a Go coverage profile and fails the pipeline when aggregate coverage is below 80%
-  2. The frontend job runs Vitest with coverage and fails the pipeline when aggregate coverage is below 70%
-  3. A coverage failure on either side blocks the downstream build/scan/release jobs — no image is built, scanned, or pushed to ghcr.io when a gate trips
-  4. Both starting baselines are measured and recorded before enforcement, and the thresholds committed to CI are the required 80%/70% — not a number quietly lowered to fit whatever the baseline turned out to be
-
-**Plans**: 5/5 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 09-01-PLAN.md — Backend coverage instrumentation, hand-rolled gate target at 80%, and recorded backend baseline (tracer)
-- [x] 09-02-PLAN.md — Vitest v8 coverage provider, explicit first-party denominator, and recorded frontend baseline
-
-**Wave 2**
-
-- [x] 09-03-PLAN.md — Backend gap-closing tests (boot path, logger, embedded SPA handler) until the 80% gate passes
-- [x] 09-04-PLAN.md — Frontend gap-closing tests (history route, API fetch path) and the committed 70% threshold
-
-**Wave 3**
-
-- [x] 09-05-PLAN.md — Wire the backend gate into the `test` job and make both gates block build/scan/release
-
-Notes: Both gates edit the same file (`.github/workflows/full-pipeline.yml`), which is why they are one phase rather than two. If a measured baseline lands under its threshold, closing that gap with real tests is in scope for this phase; lowering the requirement is not. Backend extends the existing `test` job; the `frontend-test` job already exists from Phase 8 as report-only, so this phase only adds it to `build-scan`'s `needs:` (09-CONTEXT.md D-11).
-
-### Phase 10: Event Retention Window
-
-**Goal**: Users see recent release history instead of an ever-growing scroll, while the system keeps every row it needs to stay correct — nothing is ever deleted.
-**Depends on**: Nothing new in v1.1 (builds on Phase 4 detection and Phase 6 history; independent of Phases 8-9)
-**Requirements**: DATA-01, DATA-02
-**Success Criteria** (what must be TRUE):
-
-  1. An operator can set the retention window with an environment variable, and with it unset the window is 90 days
-  2. The History UI and the events API return no event older than the retention window, consistently across every display path (feed, filters, pagination)
-  3. No event row is deleted — an event aged past the window is still in the database, and the release it recorded still does not re-notify (dedup key intact)
-  4. An artist whose entire visible history has aged out does not fall back into seed mode and does not re-announce its back catalogue on the next poll cycle
-  5. A deluxe/tracklist-change baseline recorded before the window still fires a deluxe alert when that release group's tracklist later expands
-
-**Plans**: 2/2 plans executed
-
-**Design decision (locked, do not revisit during planning)**: soft-delete/filter, not hard delete. Retention is a read-side filter on display/API queries; rows stay in the table permanently so dedup keys, deluxe-change baselines (`events.track_count`), and the per-source seed-mode signal all survive. The hard-delete variants explored in research — including the `release_group_baselines` migration needed to make hard delete safe — are rejected. Success criteria 3, 4, and 5 exist specifically to prove the three failure modes hard delete would have reintroduced (dedup-key loss, seed-mode reset, baseline loss).
-
-Plans:
-
-**Wave 1**
-
-- [x] 10-01-PLAN.md — `EVENT_RETENTION_DAYS` config + fail-fast validation, the always-applied `created_at` cutoff on `ListEvents`, and integration proof that the four detection-state queries stay unfiltered
-
-**Wave 2**
-
-- [x] 10-02-PLAN.md — `has_older_events` signal from SQL through the `/events` envelope, and the third History empty state
-
-### Phase 11: Bounded Concurrent Polling
-
-**Goal**: A poll cycle works through the watchlist several artists at a time instead of one at a time, without breaking the rate limits, overlap guards, or detection correctness that v1.0 established.
-**Depends on**: Phase 9 (land last, behind working coverage gates, so this milestone's highest-risk change is the one most protected against regression)
-**Requirements**: PERF-01, PERF-02, PERF-03, PERF-04
-**Success Criteria** (what must be TRUE):
-
-  1. An operator can set the per-source worker-pool size via an environment variable (default in the 3-5 range), and a cycle over a multi-artist watchlist finishes measurably faster than the sequential baseline it replaces
-  2. Concurrent polling stays inside each source's existing rate limit — no burst above the configured per-second ceiling — and each source's cycle-overlap guard still skips a new cycle while the prior one for that source is running
-  3. A single artist's polling failure is logged and skipped: the rest of that cycle's artists are still polled and their events still recorded, and the cycle does not abort
-  4. Two artists sharing a release group cannot lose a deluxe-change baseline update — a test that races them asserts the final stored baseline is correct, and the suite passes under `go test -race`
-
-**Plans**: 5/5 plans executed
-
-Plans:
-
-**Wave 1**
-
-- [x] 11-01-PLAN.md — Tracer: `MUSICBRAINZ_POLL_WORKERS`/`DEEZER_POLL_WORKERS` config surface, `poller.Option`, the bounded MusicBrainz fan-out, and the `poll cycle complete` duration/throughput log line, end-to-end from env var to test
-
-**Wave 2**
-
-- [x] 11-02-PLAN.md — Bounded Deezer fan-out, plus the empirical proofs that concurrency preserves the per-source rate ceiling, the overlap guard, and per-artist error isolation (PERF-02, PERF-03)
-- [x] 11-03-PLAN.md — `AdvanceGroupTrackCountBaseline` atomic compare-and-set replacing the two-statement deluxe-change baseline read/write, re-derived detection branching, and the lost-update race test (PERF-04)
-- [x] 11-04-PLAN.md — Folded-in flaky-test fix: schema isolation for the destructive migrate-from-scratch test and a deterministic spacing seam in the notifier, so criterion 4's `-race` suite half is trustworthy
-- [x] 11-05-PLAN.md — Gap closure (G-11-1): size the pgxpool `MaxConns` ceiling explicitly against `MusicBrainzPollWorkers + DeezerPollWorkers` instead of inheriting `max(4, runtime.NumCPU())`, preserving an operator's `pool_max_conns` override
-
-Notes: Criterion 4 requires replacing today's check-then-act baseline read/write with a database-level compare-and-set; `-race` alone will not catch this logical race, so the test must assert final-state correctness. Criterion 1's speedup must be measured during verification, not assumed — confirm the DB pool has not become the new bottleneck. Existing poller test doubles must become concurrency-safe.
+</details>
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Foundation — Data Layer, Config & Health | 5/5 | Complete    | 2026-08-05 |
-| 2. Watchlist Core | 8/8 | Complete    | 2026-08-06 |
-| 3. External Clients & Search | 4/4 | Complete    | 2026-08-07 |
-| 4. Detection Engine | 4/4 | Complete    | 2026-08-08 |
-| 5. Discord Notifications | 3/3 | Complete    | 2026-08-08 |
-| 6. Frontend & Release History | 4/4 | Complete    | 2026-08-11 |
-| 7. Containerization & CI/CD Pipeline | 4/4 | Complete    | 2026-08-12 |
-| 8. Frontend Test Suite | 5/5 | Complete    | 2026-08-12 |
-| 9. CI Coverage Gates | 5/5 | Complete    | 2026-08-13 |
-| 10. Event Retention Window | 2/2 | Complete    | 2026-08-13 |
-| 11. Bounded Concurrent Polling | 5/5 | Complete    | 2026-08-17 |
+| Milestone | Phases | Status | Completed |
+| --------- | ------ | ------ | --------- |
+| v1.0 MVP | 1-7 | Complete | 2026-08-12 |
+| v1.1 Hardening & Scale Readiness | 8-11.1 | Complete | 2026-08-17 |
 
 ## Backlog
-
-### Phase 11.1: Address tech debt: v1.1 cleanup (INSERTED)
-
-**Goal:** The accumulated non-blocking tech debt from v1.1 is closed — doc comments tell the truth, the two flagged test-coverage gaps are filled, CI catches formatting drift, the notification-loss window is observable, the Postgres port revert is committed with its full history intact, and the History filter dropdowns are readable.
-**Requirements**: None (ROADMAP carried `TBD`); scope is the 13 locked decisions D-01…D-13 in `11.1-CONTEXT.md`, each closing an item from `.planning/v1.1-MILESTONE-AUDIT.md`
-**Depends on:** Phase 11
-**Plans:** 5/5 plans complete
-
-Plans:
-**Wave 1**
-
-- [x] 11.1-01-PLAN.md — Frontend test coverage, stale comment, and dropdown contrast fix (D-03, D-05a, D-05b, D-13)
-- [x] 11.1-03-PLAN.md — Detection doc/log signal and PoolConfig error differentiation (D-10, D-11, D-12)
-- [x] 11.1-04-PLAN.md — Boot-test robustness, anchored coverage filter, and the committed port revert (D-01, D-02, D-06, D-07)
-- [x] 11.1-05-PLAN.md — Milestone-audit amendment and Nyquist reconciliation for phases 08/09/10 (D-08, D-09)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 11.1-02-PLAN.md — Format the web tree and add a blocking prettier --check CI gate (D-04)
 
 ### Phase 999.1: Search result popularity sorting and same-name disambiguation (BACKLOG)
 

@@ -2,44 +2,35 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: cleanup
-current_phase: 999.1
-current_phase_name: Search result popularity sorting and same-name disambiguation (BACKLOG)
-status: planning
+status: Awaiting next milestone
 stopped_at: Completed 11.1-04-PLAN.md
-last_updated: "2026-08-18T03:34:09.578Z"
+last_updated: "2026-08-18T04:27:51.234Z"
 last_activity: 2026-08-17
-last_activity_desc: Phase 11.1 complete, transitioned to Phase 999.1
+last_activity_desc: Milestone v1.1 completed and archived
 progress:
   total_phases: 12
   completed_phases: 12
   total_plans: 54
   completed_plans: 54
+current_phase: 999.1
+current_phase_name: Search result popularity sorting and same-name disambiguation (BACKLOG)
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-11)
+See: .planning/PROJECT.md (updated 2026-08-18)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 11.1 — address-tech-debt-v1-1-cleanup
+**Current focus:** Planning next milestone (v1.2) — run /gsd-new-milestone
 
 ## Current Position
 
-Phase: 999.1 — Search result popularity sorting and same-name disambiguation (BACKLOG)
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-17 — Phase 11.1 complete, transitioned to Phase 999.1
-
-**v1.1 phases:**
-
-| Phase | Name | Requirements |
-|-------|------|--------------|
-| 08 | Frontend Test Suite | TEST-01, TEST-02 |
-| 09 | CI Coverage Gates | CICD-11, CICD-12 |
-| 10 | Event Retention Window | DATA-01, DATA-02 |
-| 11 | Bounded Concurrent Polling | PERF-01, PERF-02, PERF-03, PERF-04 |
+Phase: Milestone v1.1 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-17 — Milestone v1.1 completed and archived
 
 ## Performance Metrics
 
@@ -211,3 +202,7 @@ Items acknowledged and carried forward from previous milestone close:
 Last session: 2026-08-18T02:35:02.566Z
 Stopped at: Completed 11.1-04-PLAN.md
 Resume file: None
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
