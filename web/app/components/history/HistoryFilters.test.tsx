@@ -139,4 +139,71 @@ describe("HistoryFilters", () => {
       expect.objectContaining({ eventType: "" }),
     )
   })
+
+  it("closes the dropdown when clicking outside its container", async () => {
+    mockListWatchlist.mockResolvedValue(artists)
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+
+    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    const trigger = getArtistSelect()
+
+    await user.click(trigger)
+    expect(screen.getByRole("listbox", { name: "Artist" })).toBeInTheDocument()
+
+    await user.click(document.body)
+
+    expect(screen.queryByRole("listbox", { name: "Artist" })).not.toBeInTheDocument()
+  })
+
+  it("opens via ArrowDown while closed and commits the highlighted option with Enter", async () => {
+    mockListWatchlist.mockResolvedValue(artists)
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+
+    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    const trigger = getEventTypeSelect()
+    trigger.focus()
+
+    // Closed -> ArrowDown opens the listbox at the currently selected option
+    // ("All event types", index 0) instead of moving a highlight.
+    await user.keyboard("{ArrowDown}")
+    expect(await screen.findByRole("listbox", { name: "Event type" })).toBeInTheDocument()
+
+    // Open -> ArrowDown now moves the highlight forward to "New release".
+    await user.keyboard("{ArrowDown}")
+    await user.keyboard("{Enter}")
+
+    expect(onChange).toHaveBeenCalledWith({ ...emptyValue, eventType: "new_release" })
+  })
+
+  it("moves the highlight back up with ArrowUp and Escape closes without changing the value", async () => {
+    mockListWatchlist.mockResolvedValue(artists)
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+
+    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    const trigger = getEventTypeSelect()
+
+    await user.click(trigger)
+    await user.keyboard("{ArrowDown}")
+    await user.keyboard("{ArrowUp}")
+    await user.keyboard("{Escape}")
+
+    expect(screen.queryByRole("listbox", { name: "Event type" })).not.toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
+    expect(trigger).toHaveFocus()
+  })
+
+  it("falls back to only the 'All artists' option when listWatchlist rejects", async () => {
+    mockListWatchlist.mockRejectedValue(new Error("network down"))
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+
+    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    await user.click(getArtistSelect())
+
+    expect(await screen.findByRole("option", { name: "All artists" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Drake" })).not.toBeInTheDocument()
+  })
 })

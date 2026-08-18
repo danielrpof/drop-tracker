@@ -138,9 +138,11 @@ describe("History route", () => {
 
     await screen.findByRole("heading", { name: "No release activity yet" })
 
-    await userEvent.selectOptions(
+    await userEvent.click(
       screen.getByRole("combobox", { name: "Event type" }),
-      "new_release",
+    )
+    await userEvent.click(
+      await screen.findByRole("option", { name: "New release" }),
     )
 
     await screen.findByRole("heading", { name: "No matching events" })
@@ -180,9 +182,11 @@ describe("History route", () => {
       name: "Older than your retention window",
     })
 
-    await userEvent.selectOptions(
+    await userEvent.click(
       screen.getByRole("combobox", { name: "Event type" }),
-      "new_release",
+    )
+    await userEvent.click(
+      await screen.findByRole("option", { name: "New release" }),
     )
 
     await screen.findByRole("heading", {
