@@ -384,7 +384,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 **Goal:** The accumulated non-blocking tech debt from v1.1 is closed — doc comments tell the truth, the two flagged test-coverage gaps are filled, CI catches formatting drift, the notification-loss window is observable, the Postgres port revert is committed with its full history intact, and the History filter dropdowns are readable.
 **Requirements**: None (ROADMAP carried `TBD`); scope is the 13 locked decisions D-01…D-13 in `11.1-CONTEXT.md`, each closing an item from `.planning/v1.1-MILESTONE-AUDIT.md`
 **Depends on:** Phase 11
-**Plans:** 5/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 **Wave 1**
