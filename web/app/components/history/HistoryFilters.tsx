@@ -71,6 +71,7 @@ function Combobox<TValue extends string>({
     opt.value === "" ? value === null : opt.value === value
   )
   const selectedOption = options[selectedIndex === -1 ? 0 : selectedIndex]
+  const optionId = (index: number) => `${listboxId}-option-${index}`
 
   useEffect(() => {
     if (!open) return
@@ -138,6 +139,7 @@ function Combobox<TValue extends string>({
         aria-haspopup="listbox"
         aria-controls={listboxId}
         aria-label={label}
+        aria-activedescendant={open ? optionId(highlightedIndex) : undefined}
         className={triggerClassName}
         onClick={() =>
           open
@@ -162,6 +164,7 @@ function Combobox<TValue extends string>({
           {options.map((opt, index) => (
             <li
               key={opt.value === "" ? "__all__" : opt.value}
+              id={optionId(index)}
               role="option"
               aria-selected={
                 opt.value === "" ? value === null : opt.value === value
