@@ -42,6 +42,13 @@ const artists: WatchlistEntry[] = [
 
 const emptyValue: HistoryFiltersValue = { artistId: null, eventType: null }
 
+// getArtistSelect / getEventTypeSelect return the trigger button (D-13: a
+// hand-rolled combobox, not a native <select> -- see HistoryFilters.tsx's
+// module comment for why). The trigger must be clicked to open the listbox
+// before its options are queryable, unlike a native <select> which keeps
+// every <option> in the DOM/accessibility tree even while closed -- this is
+// actually more correct test behavior, since a real user must open the
+// dropdown before seeing its options too.
 function getArtistSelect() {
   return screen.getByRole("combobox", { name: "Artist" })
 }
@@ -50,29 +57,32 @@ function getEventTypeSelect() {
   return screen.getByRole("combobox", { name: "Event type" })
 }
 
+async function chooseOption(user: ReturnType<typeof userEvent.setup>, trigger: HTMLElement, optionName: string) {
+  await user.click(trigger)
+  await user.click(await screen.findByRole("option", { name: optionName }))
+}
+
 describe("HistoryFilters", () => {
-  it("populates the artist select from listWatchlist", async () => {
+  it("populates the artist combobox from listWatchlist", async () => {
     mockListWatchlist.mockResolvedValue(artists)
     const onChange = vi.fn()
+    const user = userEvent.setup()
 
     render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    await user.click(getArtistSelect())
 
-    expect(
-      await screen.findByRole("option", { name: "Drake" }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("option", { name: "Bad Bunny" }),
-    ).toBeInTheDocument()
+    expect(await screen.findByRole("option", { name: "Drake" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "Bad Bunny" })).toBeInTheDocument()
   })
 
   it("reports the whole new value upward when an artist is chosen", async () => {
     mockListWatchlist.mockResolvedValue(artists)
     const onChange = vi.fn()
+    const user = userEvent.setup()
 
     render(<HistoryFilters value={emptyValue} onChange={onChange} />)
-    await screen.findByRole("option", { name: "Drake" })
 
-    await userEvent.selectOptions(getArtistSelect(), "Drake")
+    await chooseOption(user, getArtistSelect(), "Drake")
 
     expect(onChange).toHaveBeenCalledWith({ ...emptyValue, artistId: 10 })
   })
@@ -80,12 +90,12 @@ describe("HistoryFilters", () => {
   it("reports artistId as null, never 0, when 'All artists' is chosen", async () => {
     mockListWatchlist.mockResolvedValue(artists)
     const onChange = vi.fn()
+    const user = userEvent.setup()
 
     const selectedValue: HistoryFiltersValue = { artistId: 10, eventType: null }
     render(<HistoryFilters value={selectedValue} onChange={onChange} />)
-    await screen.findByRole("option", { name: "Drake" })
 
-    await userEvent.selectOptions(getArtistSelect(), "All artists")
+    await chooseOption(user, getArtistSelect(), "All artists")
 
     expect(onChange).toHaveBeenCalledWith({ ...selectedValue, artistId: null })
     expect(onChange).not.toHaveBeenCalledWith(
@@ -96,11 +106,11 @@ describe("HistoryFilters", () => {
   it("reports the whole new value upward when an event type is chosen", async () => {
     mockListWatchlist.mockResolvedValue(artists)
     const onChange = vi.fn()
+    const user = userEvent.setup()
 
     render(<HistoryFilters value={emptyValue} onChange={onChange} />)
-    await screen.findByRole("option", { name: "Drake" })
 
-    await userEvent.selectOptions(getEventTypeSelect(), "New release")
+    await chooseOption(user, getEventTypeSelect(), "New release")
 
     expect(onChange).toHaveBeenCalledWith({
       ...emptyValue,
@@ -111,15 +121,15 @@ describe("HistoryFilters", () => {
   it("reports eventType as null, never an empty string, when 'All event types' is chosen", async () => {
     mockListWatchlist.mockResolvedValue(artists)
     const onChange = vi.fn()
+    const user = userEvent.setup()
 
     const selectedValue: HistoryFiltersValue = {
       artistId: null,
       eventType: "new_release",
     }
     render(<HistoryFilters value={selectedValue} onChange={onChange} />)
-    await screen.findByRole("option", { name: "Drake" })
 
-    await userEvent.selectOptions(getEventTypeSelect(), "All event types")
+    await chooseOption(user, getEventTypeSelect(), "All event types")
 
     expect(onChange).toHaveBeenCalledWith({
       ...selectedValue,
