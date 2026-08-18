@@ -50,7 +50,9 @@ describe("SearchBox", () => {
     expect(mockSearchArtists).toHaveBeenCalledTimes(1)
     expect(mockSearchArtists.mock.calls[0][0]).toBe("dra")
 
-    await vi.waitFor(() => expect(onResults).toHaveBeenCalledWith(searchResponse))
+    await vi.waitFor(() =>
+      expect(onResults).toHaveBeenCalledWith(searchResponse)
+    )
   })
 
   // The two tests below prove SearchBox's own doc-comment claim -- "a fresh
@@ -69,8 +71,8 @@ describe("SearchBox", () => {
     await vi.waitFor(() =>
       expect(mockSearchArtists).toHaveBeenCalledWith(
         "dra",
-        expect.any(AbortSignal),
-      ),
+        expect.any(AbortSignal)
+      )
     )
   })
 

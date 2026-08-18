@@ -103,10 +103,10 @@ describe("EventCard", () => {
     // percent-encode the space on its own, passing even against unfixed
     // source and proving nothing.
     expect(
-      screen.getByRole("link", { name: "Special Chars Track" }),
+      screen.getByRole("link", { name: "Special Chars Track" })
     ).toHaveAttribute(
       "href",
-      "https://musicbrainz.org/recording/abc%20def%2Fg%23h",
+      "https://musicbrainz.org/recording/abc%20def%2Fg%23h"
     )
   })
 
@@ -121,7 +121,7 @@ describe("EventCard", () => {
     render(<EventCard event={event} />)
 
     expect(
-      screen.getByRole("link", { name: "Special Chars Track" }),
+      screen.getByRole("link", { name: "Special Chars Track" })
     ).toHaveAttribute("href", "https://www.deezer.com/track/abc%20def%2Fg%23h")
   })
 
@@ -136,10 +136,10 @@ describe("EventCard", () => {
     render(<EventCard event={event} />)
 
     expect(
-      screen.getByRole("link", { name: "Ordinary Track" }),
+      screen.getByRole("link", { name: "Ordinary Track" })
     ).toHaveAttribute(
       "href",
-      "https://musicbrainz.org/recording/123e4567-e89b-12d3-a456-426614174000",
+      "https://musicbrainz.org/recording/123e4567-e89b-12d3-a456-426614174000"
     )
   })
 })

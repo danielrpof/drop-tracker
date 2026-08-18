@@ -16,7 +16,9 @@ export function EmptyState({ heading, body, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center gap-4 rounded-md bg-card px-6 py-16 text-center">
       <div className="flex flex-col gap-2">
-        <h2 className="text-heading font-semibold text-foreground">{heading}</h2>
+        <h2 className="text-heading font-semibold text-foreground">
+          {heading}
+        </h2>
         <p className="text-body text-muted-foreground">{body}</p>
       </div>
       {action}

@@ -30,7 +30,7 @@ export function CoverArt({ src, alt, size = 96, className }: CoverArtProps) {
         aria-label={alt}
         className={cn(
           "flex shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground",
-          className,
+          className
         )}
         style={style}
       >

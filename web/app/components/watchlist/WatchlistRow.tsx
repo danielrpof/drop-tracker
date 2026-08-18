@@ -22,7 +22,11 @@ export interface WatchlistRowProps {
 // React's default auto-escaping, the T-06-12 mitigation this component
 // relies on. A name too long for the row's name column truncates with an
 // ellipsis and carries the full name via a native title attribute.
-export function WatchlistRow({ entry, onEntryChange, onRemove }: WatchlistRowProps) {
+export function WatchlistRow({
+  entry,
+  onEntryChange,
+  onRemove,
+}: WatchlistRowProps) {
   return (
     <li className="flex flex-col gap-4 rounded-md bg-card p-4 sm:flex-row sm:items-center">
       <CoverArt src={entry.image_url} alt={entry.name} size={64} />

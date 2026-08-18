@@ -2,11 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
-import type {
-  SearchArtist,
-  SearchResponse,
-  WatchlistEntry,
-} from "~/lib/api"
+import type { SearchArtist, SearchResponse, WatchlistEntry } from "~/lib/api"
 
 import { SearchResultsColumns } from "./SearchResultsColumns"
 
@@ -70,13 +66,13 @@ describe("SearchResultsColumns", () => {
         response={response}
         watchlistEntries={null}
         onAdd={vi.fn()}
-      />,
+      />
     )
 
     expect(
       screen.getByText(
-        "Deezer is unavailable right now — showing MusicBrainz results only.",
-      ),
+        "Deezer is unavailable right now — showing MusicBrainz results only."
+      )
     ).toBeInTheDocument()
   })
 
@@ -93,7 +89,7 @@ describe("SearchResultsColumns", () => {
         response={response}
         watchlistEntries={null}
         onAdd={vi.fn()}
-      />,
+      />
     )
 
     expect(screen.getByText('No matches for "nobody"')).toBeInTheDocument()
@@ -112,11 +108,11 @@ describe("SearchResultsColumns", () => {
         response={response}
         watchlistEntries={[watchlistEntry]}
         onAdd={vi.fn()}
-      />,
+      />
     )
 
     expect(
-      screen.getByRole("button", { name: "Already watching" }),
+      screen.getByRole("button", { name: "Already watching" })
     ).toBeDisabled()
   })
 
@@ -133,11 +129,11 @@ describe("SearchResultsColumns", () => {
         response={response}
         watchlistEntries={null}
         onAdd={vi.fn()}
-      />,
+      />
     )
 
     expect(
-      screen.getByRole("button", { name: "Search MusicBrainz to add" }),
+      screen.getByRole("button", { name: "Search MusicBrainz to add" })
     ).toBeDisabled()
   })
 
@@ -147,7 +143,7 @@ describe("SearchResultsColumns", () => {
       () =>
         new Promise<void>((resolve) => {
           resolveAdd = resolve
-        }),
+        })
     )
 
     const response: SearchResponse = {
@@ -162,7 +158,7 @@ describe("SearchResultsColumns", () => {
         response={response}
         watchlistEntries={null}
         onAdd={onAdd}
-      />,
+      />
     )
 
     const addButton = screen.getByRole("button", { name: "Add to Watchlist" })
@@ -173,8 +169,6 @@ describe("SearchResultsColumns", () => {
 
     resolveAdd()
 
-    await waitFor(() =>
-      expect(addButton).toHaveAttribute("aria-busy", "false"),
-    )
+    await waitFor(() => expect(addButton).toHaveAttribute("aria-busy", "false"))
   })
 })

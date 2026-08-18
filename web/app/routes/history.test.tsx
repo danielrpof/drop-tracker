@@ -109,7 +109,7 @@ describe("History route", () => {
     expect(screen.getAllByText(eventB.title)).toHaveLength(1)
 
     expect(mockListEvents).toHaveBeenLastCalledWith(
-      expect.objectContaining({ cursor: 100 }),
+      expect.objectContaining({ cursor: 100 })
     )
   })
 
@@ -138,11 +138,9 @@ describe("History route", () => {
 
     await screen.findByRole("heading", { name: "No release activity yet" })
 
+    await userEvent.click(screen.getByRole("combobox", { name: "Event type" }))
     await userEvent.click(
-      screen.getByRole("combobox", { name: "Event type" }),
-    )
-    await userEvent.click(
-      await screen.findByRole("option", { name: "New release" }),
+      await screen.findByRole("option", { name: "New release" })
     )
 
     await screen.findByRole("heading", { name: "No matching events" })
@@ -163,8 +161,8 @@ describe("History route", () => {
     })
     expect(
       screen.getByText(
-        "There's release history for this view — it's just outside your retention window. Nothing was deleted.",
-      ),
+        "There's release history for this view — it's just outside your retention window. Nothing was deleted."
+      )
     ).toBeInTheDocument()
   })
 
@@ -182,11 +180,9 @@ describe("History route", () => {
       name: "Older than your retention window",
     })
 
+    await userEvent.click(screen.getByRole("combobox", { name: "Event type" }))
     await userEvent.click(
-      screen.getByRole("combobox", { name: "Event type" }),
-    )
-    await userEvent.click(
-      await screen.findByRole("option", { name: "New release" }),
+      await screen.findByRole("option", { name: "New release" })
     )
 
     await screen.findByRole("heading", {
@@ -196,7 +192,7 @@ describe("History route", () => {
     // mere presence of the retention heading would also pass if both
     // branches somehow rendered at once.
     expect(
-      screen.queryByRole("heading", { name: "No matching events" }),
+      screen.queryByRole("heading", { name: "No matching events" })
     ).not.toBeInTheDocument()
   })
 })

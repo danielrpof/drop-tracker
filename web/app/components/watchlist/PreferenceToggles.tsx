@@ -27,7 +27,10 @@ export interface PreferenceTogglesProps {
 // clobber the other axis's already-applied value if it resolves second. A
 // partial patch merged by the parent's functional state update (against
 // the current row, not a stale closure) only ever touches its own axis.
-export function PreferenceToggles({ entry, onEntryChange }: PreferenceTogglesProps) {
+export function PreferenceToggles({
+  entry,
+  onEntryChange,
+}: PreferenceTogglesProps) {
   const [releasePending, setReleasePending] = useState(false)
   const [mutePending, setMutePending] = useState(false)
 
@@ -40,12 +43,16 @@ export function PreferenceToggles({ entry, onEntryChange }: PreferenceTogglesPro
   // saved when its PATCH failed" prohibition).
   async function toggleReleaseType(type: string, next: boolean) {
     const previous = entry.release_types
-    const optimistic = next ? [...previous, type] : previous.filter((t) => t !== type)
+    const optimistic = next
+      ? [...previous, type]
+      : previous.filter((t) => t !== type)
 
     onEntryChange(entry.id, { release_types: optimistic })
     setReleasePending(true)
     try {
-      const updated = await updateWatchlistPreferences(entry.id, { releaseTypes: optimistic })
+      const updated = await updateWatchlistPreferences(entry.id, {
+        releaseTypes: optimistic,
+      })
       onEntryChange(entry.id, { release_types: updated.release_types })
     } catch {
       onEntryChange(entry.id, { release_types: previous })
@@ -57,12 +64,16 @@ export function PreferenceToggles({ entry, onEntryChange }: PreferenceTogglesPro
 
   async function toggleMutedEventType(type: string, next: boolean) {
     const previous = entry.muted_event_types
-    const optimistic = next ? [...previous, type] : previous.filter((t) => t !== type)
+    const optimistic = next
+      ? [...previous, type]
+      : previous.filter((t) => t !== type)
 
     onEntryChange(entry.id, { muted_event_types: optimistic })
     setMutePending(true)
     try {
-      const updated = await updateWatchlistPreferences(entry.id, { mutedEventTypes: optimistic })
+      const updated = await updateWatchlistPreferences(entry.id, {
+        mutedEventTypes: optimistic,
+      })
       onEntryChange(entry.id, { muted_event_types: updated.muted_event_types })
     } catch {
       onEntryChange(entry.id, { muted_event_types: previous })
@@ -75,36 +86,42 @@ export function PreferenceToggles({ entry, onEntryChange }: PreferenceTogglesPro
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:gap-6">
       <fieldset className="flex flex-col gap-1.5" disabled={releasePending}>
-        <legend className="text-label text-muted-foreground">Release types</legend>
+        <legend className="text-label text-muted-foreground">
+          Release types
+        </legend>
         <div className="flex flex-wrap gap-3">
           <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
             <Checkbox
-              checked={entry.release_types.includes('album')}
-              onCheckedChange={(checked) => toggleReleaseType('album', checked)}
+              checked={entry.release_types.includes("album")}
+              onCheckedChange={(checked) => toggleReleaseType("album", checked)}
               aria-label="Album release type"
             />
             Album
           </label>
           <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
             <Checkbox
-              checked={entry.release_types.includes('single')}
-              onCheckedChange={(checked) => toggleReleaseType('single', checked)}
+              checked={entry.release_types.includes("single")}
+              onCheckedChange={(checked) =>
+                toggleReleaseType("single", checked)
+              }
               aria-label="Single release type"
             />
             Single
           </label>
           <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
             <Checkbox
-              checked={entry.release_types.includes('ep')}
-              onCheckedChange={(checked) => toggleReleaseType('ep', checked)}
+              checked={entry.release_types.includes("ep")}
+              onCheckedChange={(checked) => toggleReleaseType("ep", checked)}
               aria-label="EP release type"
             />
             EP
           </label>
           <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
             <Checkbox
-              checked={entry.release_types.includes('deluxe')}
-              onCheckedChange={(checked) => toggleReleaseType('deluxe', checked)}
+              checked={entry.release_types.includes("deluxe")}
+              onCheckedChange={(checked) =>
+                toggleReleaseType("deluxe", checked)
+              }
               aria-label="Deluxe release type"
             />
             Deluxe
@@ -113,28 +130,36 @@ export function PreferenceToggles({ entry, onEntryChange }: PreferenceTogglesPro
       </fieldset>
 
       <fieldset className="flex flex-col gap-1.5" disabled={mutePending}>
-        <legend className="text-label text-muted-foreground">Mute alerts</legend>
+        <legend className="text-label text-muted-foreground">
+          Mute alerts
+        </legend>
         <div className="flex flex-wrap gap-3">
           <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
             <Checkbox
-              checked={entry.muted_event_types.includes('new_release')}
-              onCheckedChange={(checked) => toggleMutedEventType('new_release', checked)}
+              checked={entry.muted_event_types.includes("new_release")}
+              onCheckedChange={(checked) =>
+                toggleMutedEventType("new_release", checked)
+              }
               aria-label="Mute new release alerts"
             />
             New release
           </label>
           <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
             <Checkbox
-              checked={entry.muted_event_types.includes('guest_feature')}
-              onCheckedChange={(checked) => toggleMutedEventType('guest_feature', checked)}
+              checked={entry.muted_event_types.includes("guest_feature")}
+              onCheckedChange={(checked) =>
+                toggleMutedEventType("guest_feature", checked)
+              }
               aria-label="Mute guest feature alerts"
             />
             Guest feature
           </label>
           <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
             <Checkbox
-              checked={entry.muted_event_types.includes('deluxe_change')}
-              onCheckedChange={(checked) => toggleMutedEventType('deluxe_change', checked)}
+              checked={entry.muted_event_types.includes("deluxe_change")}
+              onCheckedChange={(checked) =>
+                toggleMutedEventType("deluxe_change", checked)
+              }
               aria-label="Mute deluxe change alerts"
             />
             Deluxe change

@@ -40,7 +40,7 @@ describe("PreferenceToggles", () => {
     render(<PreferenceToggles entry={entry} onEntryChange={onEntryChange} />)
 
     await userEvent.click(
-      screen.getByRole("checkbox", { name: /^Single release type/ }),
+      screen.getByRole("checkbox", { name: /^Single release type/ })
     )
 
     expect(mockUpdateWatchlistPreferences).toHaveBeenCalledWith(1, {
@@ -55,7 +55,7 @@ describe("PreferenceToggles", () => {
     render(<PreferenceToggles entry={entry} onEntryChange={onEntryChange} />)
 
     await userEvent.click(
-      screen.getByRole("checkbox", { name: /^Single release type/ }),
+      screen.getByRole("checkbox", { name: /^Single release type/ })
     )
 
     // optimistic update fired immediately
@@ -67,7 +67,7 @@ describe("PreferenceToggles", () => {
     await waitFor(() =>
       expect(onEntryChange).toHaveBeenLastCalledWith(1, {
         release_types: ["album"],
-      }),
+      })
     )
   })
 })

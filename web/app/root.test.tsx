@@ -15,15 +15,12 @@ function routeErrorResponse(status: number, statusText: string) {
 describe("ErrorBoundary", () => {
   it("shows the 404 message and copy for a 404 route error", () => {
     render(
-      <ErrorBoundary
-        params={{}}
-        error={routeErrorResponse(404, "Not Found")}
-      />,
+      <ErrorBoundary params={{}} error={routeErrorResponse(404, "Not Found")} />
     )
 
     expect(screen.getByRole("heading", { name: "404" })).toBeInTheDocument()
     expect(
-      screen.getByText("The requested page could not be found."),
+      screen.getByText("The requested page could not be found.")
     ).toBeInTheDocument()
   })
 
@@ -32,7 +29,7 @@ describe("ErrorBoundary", () => {
       <ErrorBoundary
         params={{}}
         error={routeErrorResponse(500, "Internal Server Error")}
-      />,
+      />
     )
 
     expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument()
@@ -44,18 +41,18 @@ describe("ErrorBoundary", () => {
 
     expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument()
     expect(
-      screen.getByText("An unexpected error occurred."),
+      screen.getByText("An unexpected error occurred.")
     ).toBeInTheDocument()
   })
 
   it("shows an unrecognized error value's default Oops copy with no stack trace", () => {
     const { container } = render(
-      <ErrorBoundary params={{}} error={"not an Error"} />,
+      <ErrorBoundary params={{}} error={"not an Error"} />
     )
 
     expect(screen.getByRole("heading", { name: "Oops!" })).toBeInTheDocument()
     expect(
-      screen.getByText("An unexpected error occurred."),
+      screen.getByText("An unexpected error occurred.")
     ).toBeInTheDocument()
     expect(container.querySelector("pre")).not.toBeInTheDocument()
   })
@@ -80,10 +77,10 @@ describe("App", () => {
     renderAppAt("/watchlist")
 
     expect(screen.getByRole("link", { name: "Watchlist" }).className).toContain(
-      "border-accent-indigo",
+      "border-accent-indigo"
     )
     expect(screen.getByRole("link", { name: "History" }).className).toContain(
-      "border-transparent",
+      "border-transparent"
     )
   })
 
@@ -91,10 +88,10 @@ describe("App", () => {
     renderAppAt("/history")
 
     expect(screen.getByRole("link", { name: "History" }).className).toContain(
-      "border-accent-indigo",
+      "border-accent-indigo"
     )
     expect(screen.getByRole("link", { name: "Watchlist" }).className).toContain(
-      "border-transparent",
+      "border-transparent"
     )
   })
 })

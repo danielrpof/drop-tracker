@@ -16,11 +16,12 @@ export interface HistoryFiltersProps {
 
 // EVENT_TYPE_OPTIONS populates the event-type control from the three fixed
 // values -- no server round trip needed, unlike the artist control below.
-const EVENT_TYPE_OPTIONS: { value: EventItem["event_type"]; label: string }[] = [
-  { value: "new_release", label: "New release" },
-  { value: "guest_feature", label: "Guest feature" },
-  { value: "deluxe_change", label: "Deluxe change" },
-]
+const EVENT_TYPE_OPTIONS: { value: EventItem["event_type"]; label: string }[] =
+  [
+    { value: "new_release", label: "New release" },
+    { value: "guest_feature", label: "Guest feature" },
+    { value: "deluxe_change", label: "Deluxe change" },
+  ]
 
 // D-13: a native `<select>` was tried first and fixed with a scoped
 // `[color-scheme:dark]` token (see commit 8844812), but Chromium on Windows
@@ -66,7 +67,9 @@ function Combobox<TValue extends string>({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const listboxId = useId()
 
-  const selectedIndex = options.findIndex((opt) => (opt.value === "" ? value === null : opt.value === value))
+  const selectedIndex = options.findIndex((opt) =>
+    opt.value === "" ? value === null : opt.value === value
+  )
   const selectedOption = options[selectedIndex === -1 ? 0 : selectedIndex]
 
   useEffect(() => {
@@ -97,7 +100,12 @@ function Combobox<TValue extends string>({
 
   function handleTriggerKeyDown(e: React.KeyboardEvent<HTMLButtonElement>) {
     if (!open) {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
+      if (
+        e.key === "ArrowDown" ||
+        e.key === "ArrowUp" ||
+        e.key === "Enter" ||
+        e.key === " "
+      ) {
         e.preventDefault()
         openAt(selectedIndex === -1 ? 0 : selectedIndex)
       }
@@ -131,7 +139,11 @@ function Combobox<TValue extends string>({
         aria-controls={listboxId}
         aria-label={label}
         className={triggerClassName}
-        onClick={() => (open ? setOpen(false) : openAt(selectedIndex === -1 ? 0 : selectedIndex))}
+        onClick={() =>
+          open
+            ? setOpen(false)
+            : openAt(selectedIndex === -1 ? 0 : selectedIndex)
+        }
         onKeyDown={handleTriggerKeyDown}
       >
         <span>{selectedOption?.label}</span>
@@ -151,7 +163,9 @@ function Combobox<TValue extends string>({
             <li
               key={opt.value === "" ? "__all__" : opt.value}
               role="option"
-              aria-selected={opt.value === "" ? value === null : opt.value === value}
+              aria-selected={
+                opt.value === "" ? value === null : opt.value === value
+              }
               data-highlighted={index === highlightedIndex}
               className={optionClassName}
               onMouseEnter={() => setHighlightedIndex(index)}
@@ -194,7 +208,10 @@ export function HistoryFilters({ value, onChange }: HistoryFiltersProps) {
 
   const artistOptions: ComboboxOption<string>[] = [
     { value: "", label: "All artists" },
-    ...artists.map((artist) => ({ value: String(artist.artist_id), label: artist.name })),
+    ...artists.map((artist) => ({
+      value: String(artist.artist_id),
+      label: artist.name,
+    })),
   ]
 
   const eventTypeOptions: ComboboxOption<EventItem["event_type"]>[] = [
@@ -210,7 +227,9 @@ export function HistoryFilters({ value, onChange }: HistoryFiltersProps) {
           label="Artist"
           options={artistOptions}
           value={value.artistId === null ? null : String(value.artistId)}
-          onSelect={(raw) => onChange({ ...value, artistId: raw === null ? null : Number(raw) })}
+          onSelect={(raw) =>
+            onChange({ ...value, artistId: raw === null ? null : Number(raw) })
+          }
         />
       </label>
 

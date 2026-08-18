@@ -90,11 +90,11 @@ export function EventCard({ event }: EventCardProps) {
 // mirroring the distinct Discord embed shapes from Phase 5 (D-08).
 function EventCardBody({ event }: { event: EventItem }) {
   switch (event.event_type) {
-    case 'new_release':
+    case "new_release":
       return <NewReleaseBody event={event} />
-    case 'guest_feature':
+    case "guest_feature":
       return <GuestFeatureBody event={event} />
-    case 'deluxe_change':
+    case "deluxe_change":
       return <DeluxeChangeBody event={event} />
     default:
       return null
@@ -159,9 +159,7 @@ function GuestFeatureBody({ event }: { event: EventItem }) {
 function DeluxeChangeBody({ event }: { event: EventItem }) {
   const current = event.track_count ?? "?"
   if (event.previous_track_count == null) {
-    return (
-      <p className="text-label text-muted-foreground">{current} tracks</p>
-    )
+    return <p className="text-label text-muted-foreground">{current} tracks</p>
   }
   return (
     <p className="text-label text-muted-foreground">

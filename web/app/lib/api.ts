@@ -180,7 +180,7 @@ export async function addWatchlist(params: {
 // pass only the axis they're changing.
 export async function updateWatchlistPreferences(
   id: number,
-  params: { releaseTypes?: string[]; mutedEventTypes?: string[] },
+  params: { releaseTypes?: string[]; mutedEventTypes?: string[] }
 ): Promise<WatchlistEntry> {
   return apiFetch<WatchlistEntry>(`/watchlist/${id}`, {
     method: "PATCH",
@@ -206,7 +206,7 @@ export async function removeWatchlist(id: number): Promise<void> {
 // fetch, so placing the signal in init here is sufficient.
 export async function searchArtists(
   query: string,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<SearchResponse> {
   const qs = new URLSearchParams({ q: query })
   return apiFetch<SearchResponse>(`/search?${qs.toString()}`, { signal })

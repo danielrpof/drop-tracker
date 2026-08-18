@@ -83,7 +83,7 @@ export function SearchBox({ onResults }: SearchBoxProps) {
 
     debounceRef.current = setTimeout(
       () => runSearch(trimmed),
-      SEARCH_DEBOUNCE_MS,
+      SEARCH_DEBOUNCE_MS
     )
   }
 

@@ -3,7 +3,12 @@ import { useState } from "react"
 
 import { CoverArt } from "~/components/common/CoverArt"
 import { Button } from "~/components/ui/button"
-import type { SearchArtist, SearchResponse, SourceResult, WatchlistEntry } from "~/lib/api"
+import type {
+  SearchArtist,
+  SearchResponse,
+  SourceResult,
+  WatchlistEntry,
+} from "~/lib/api"
 
 // SOURCE_LABELS maps a GET /search source key to its display name -- falls
 // back to the raw key for any source not yet known here, so a future
@@ -83,20 +88,20 @@ function SourceColumn({
         {sourceLabel(sourceName)}
       </h2>
 
-      {result.status === 'error' && (
+      {result.status === "error" && (
         <p className="text-label text-muted-foreground">
           {sourceLabel(sourceName)} is unavailable right now — showing{" "}
           {otherSourceNames.map(sourceLabel).join(", ")} results only.
         </p>
       )}
 
-      {result.status !== 'error' && result.artists.length === 0 && (
+      {result.status !== "error" && result.artists.length === 0 && (
         <p className="text-label text-muted-foreground">
           No matches for "{query}"
         </p>
       )}
 
-      {result.status !== 'error' && result.artists.length > 0 && (
+      {result.status !== "error" && result.artists.length > 0 && (
         <ul className="flex max-h-96 flex-col gap-3 overflow-y-auto">
           {result.artists.map((artist) => (
             <SearchResultRow
@@ -107,7 +112,7 @@ function SourceColumn({
                 watchlistEntries?.some((entry) =>
                   sourceName === "deezer"
                     ? entry.deezer_id === artist.id
-                    : entry.mbid === artist.id,
+                    : entry.mbid === artist.id
                 ) ?? false
               }
               onAdd={onAdd}

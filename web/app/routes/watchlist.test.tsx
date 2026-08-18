@@ -38,7 +38,7 @@ describe("Watchlist route", () => {
     await screen.findByText("Drake")
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Remove Drake from watchlist" }),
+      screen.getByRole("button", { name: "Remove Drake from watchlist" })
     )
 
     expect(mockRemoveWatchlist).toHaveBeenCalledWith(42)
@@ -58,11 +58,11 @@ describe("Watchlist route", () => {
     // observing while "Drake" still exists, before the click fires, or its
     // initial-existence check throws.
     const removalPromise = waitForElementToBeRemoved(() =>
-      screen.queryByText("Drake"),
+      screen.queryByText("Drake")
     )
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Remove Drake from watchlist" }),
+      screen.getByRole("button", { name: "Remove Drake from watchlist" })
     )
 
     await removalPromise
@@ -111,7 +111,7 @@ describe("Watchlist route", () => {
     mockListWatchlist.mockResolvedValueOnce([entry])
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Remove Drake from watchlist" }),
+      screen.getByRole("button", { name: "Remove Drake from watchlist" })
     )
 
     // The optimistic removal happens immediately, then the failed DELETE's

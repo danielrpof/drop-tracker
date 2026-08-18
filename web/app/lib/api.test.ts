@@ -30,14 +30,14 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
       new Response(JSON.stringify({ error: "artist not found" }), {
         status: 404,
         statusText: "Not Found",
-      }),
+      })
     )
 
     const err = await listEvents().then(
       () => {
         throw new Error("expected listEvents() to reject")
       },
-      (e: unknown) => e,
+      (e: unknown) => e
     )
 
     expect(err).toBeInstanceOf(ApiError)
@@ -50,14 +50,14 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
       new Response("not json{{{", {
         status: 500,
         statusText: "Internal Server Error",
-      }),
+      })
     )
 
     const err = await listEvents().then(
       () => {
         throw new Error("expected listEvents() to reject")
       },
-      (e: unknown) => e,
+      (e: unknown) => e
     )
 
     expect(err).toBeInstanceOf(ApiError)
@@ -81,7 +81,7 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
       new Response(JSON.stringify(page), {
         status: 200,
         headers: { "Content-Type": "application/json" },
-      }),
+      })
     )
 
     await expect(listEvents()).resolves.toEqual(page)
@@ -91,12 +91,16 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     beforeEach(() => {
       fetchMock.mockResolvedValue(
         new Response(
-          JSON.stringify({ events: [], next_cursor: null, has_older_events: false }),
+          JSON.stringify({
+            events: [],
+            next_cursor: null,
+            has_older_events: false,
+          }),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
-          },
-        ),
+          }
+        )
       )
     })
 
@@ -118,7 +122,7 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
       // The Go handler expects snake_case query params -- artistId/eventType
       // do not match artist_id/event_type verbatim.
       expect(fetchMock.mock.calls[0][0]).toBe(
-        "/events?artist_id=7&event_type=new_release&cursor=42",
+        "/events?artist_id=7&event_type=new_release&cursor=42"
       )
     })
   })

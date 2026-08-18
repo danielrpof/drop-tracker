@@ -33,7 +33,7 @@ export default function Watchlist() {
   const [entries, setEntries] = useState<WatchlistEntry[] | null>(null)
   const [error, setError] = useState(false)
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(
-    null,
+    null
   )
 
   const refresh = useCallback(() => {
@@ -58,7 +58,7 @@ export default function Watchlist() {
   // clobber the other axis's already-applied value.
   function handleEntryChange(id: number, patch: Partial<WatchlistEntry>) {
     setEntries((rows) =>
-      rows ? rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) : rows,
+      rows ? rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) : rows
     )
   }
 
@@ -87,7 +87,10 @@ export default function Watchlist() {
   // project has no cross-source identity resolution), so sourceName here
   // should always be "musicbrainz"; the guard below is defense-in-depth,
   // not the primary safeguard.
-  async function handleAddSearchResult(sourceName: string, result: SearchArtist) {
+  async function handleAddSearchResult(
+    sourceName: string,
+    result: SearchArtist
+  ) {
     if (sourceName !== "musicbrainz") {
       toast.error("Can't add this artist yet -- search MusicBrainz instead.")
       return
@@ -146,7 +149,9 @@ export default function Watchlist() {
           })
             .then(refresh)
             .catch(() => {
-              toast.error(`Couldn't restore ${entry.name}. Try adding it again.`)
+              toast.error(
+                `Couldn't restore ${entry.name}. Try adding it again.`
+              )
             })
         },
       },

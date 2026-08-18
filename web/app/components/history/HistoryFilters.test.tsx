@@ -57,7 +57,11 @@ function getEventTypeSelect() {
   return screen.getByRole("combobox", { name: "Event type" })
 }
 
-async function chooseOption(user: ReturnType<typeof userEvent.setup>, trigger: HTMLElement, optionName: string) {
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  trigger: HTMLElement,
+  optionName: string
+) {
   await user.click(trigger)
   await user.click(await screen.findByRole("option", { name: optionName }))
 }
@@ -71,8 +75,12 @@ describe("HistoryFilters", () => {
     render(<HistoryFilters value={emptyValue} onChange={onChange} />)
     await user.click(getArtistSelect())
 
-    expect(await screen.findByRole("option", { name: "Drake" })).toBeInTheDocument()
-    expect(screen.getByRole("option", { name: "Bad Bunny" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("option", { name: "Drake" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: "Bad Bunny" })
+    ).toBeInTheDocument()
   })
 
   it("reports the whole new value upward when an artist is chosen", async () => {
@@ -99,7 +107,7 @@ describe("HistoryFilters", () => {
 
     expect(onChange).toHaveBeenCalledWith({ ...selectedValue, artistId: null })
     expect(onChange).not.toHaveBeenCalledWith(
-      expect.objectContaining({ artistId: 0 }),
+      expect.objectContaining({ artistId: 0 })
     )
   })
 
@@ -136,7 +144,7 @@ describe("HistoryFilters", () => {
       eventType: null,
     })
     expect(onChange).not.toHaveBeenCalledWith(
-      expect.objectContaining({ eventType: "" }),
+      expect.objectContaining({ eventType: "" })
     )
   })
 
@@ -153,7 +161,9 @@ describe("HistoryFilters", () => {
 
     await user.click(document.body)
 
-    expect(screen.queryByRole("listbox", { name: "Artist" })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("listbox", { name: "Artist" })
+    ).not.toBeInTheDocument()
   })
 
   it("opens via ArrowDown while closed and commits the highlighted option with Enter", async () => {
@@ -168,13 +178,18 @@ describe("HistoryFilters", () => {
     // Closed -> ArrowDown opens the listbox at the currently selected option
     // ("All event types", index 0) instead of moving a highlight.
     await user.keyboard("{ArrowDown}")
-    expect(await screen.findByRole("listbox", { name: "Event type" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("listbox", { name: "Event type" })
+    ).toBeInTheDocument()
 
     // Open -> ArrowDown now moves the highlight forward to "New release".
     await user.keyboard("{ArrowDown}")
     await user.keyboard("{Enter}")
 
-    expect(onChange).toHaveBeenCalledWith({ ...emptyValue, eventType: "new_release" })
+    expect(onChange).toHaveBeenCalledWith({
+      ...emptyValue,
+      eventType: "new_release",
+    })
   })
 
   it("moves the highlight back up with ArrowUp and Escape closes without changing the value", async () => {
@@ -190,7 +205,9 @@ describe("HistoryFilters", () => {
     await user.keyboard("{ArrowUp}")
     await user.keyboard("{Escape}")
 
-    expect(screen.queryByRole("listbox", { name: "Event type" })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("listbox", { name: "Event type" })
+    ).not.toBeInTheDocument()
     expect(onChange).not.toHaveBeenCalled()
     expect(trigger).toHaveFocus()
   })
@@ -203,7 +220,11 @@ describe("HistoryFilters", () => {
     render(<HistoryFilters value={emptyValue} onChange={onChange} />)
     await user.click(getArtistSelect())
 
-    expect(await screen.findByRole("option", { name: "All artists" })).toBeInTheDocument()
-    expect(screen.queryByRole("option", { name: "Drake" })).not.toBeInTheDocument()
+    expect(
+      await screen.findByRole("option", { name: "All artists" })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: "Drake" })
+    ).not.toBeInTheDocument()
   })
 })
