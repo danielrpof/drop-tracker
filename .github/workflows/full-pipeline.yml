@@ -107,6 +107,14 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # A step inside this already-blocking job, not a new top-level job
+      # (08-REVIEW.md CR-01): a new job would have to be appended to
+      # build-scan's needs: array to gate anything, and this repo already
+      # shipped that exact defect once (frontend-test existed non-blocking
+      # for a whole phase before Phase 9 wired it in). A step inherits the
+      # job's existing needs: membership for free.
+      - name: Check formatting
+        run: pnpm exec prettier --check "**/*.{ts,tsx}"
       - name: Run Vitest suite
         run: pnpm test
 
