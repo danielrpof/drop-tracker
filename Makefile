@@ -22,8 +22,15 @@ SQLC_VERSION := v1.31.1
 # and would silently never enter the coverage profile under Go's default
 # self-package-only instrumentation (09-CONTEXT.md D-05). Deferred assignment
 # (`=`, not `:=`) so the `go list` subprocess only runs when a target that
-# actually references this variable is built.
-COVER_PKGS = $(shell go list ./... | grep -v '/internal/db/sqlc' | paste -sd, -)
+# actually references this variable is built. The exclusion pattern is
+# anchored (`(^|/)...$$`) rather than a bare substring match -- an unanchored
+# match would also drop a future package such as internal/db/sqlcgen or
+# internal/db/sqlc_helpers from the coverage profile, silently changing the
+# percentage the CICD-11 gate enforces (09-REVIEW.md WR-02). The doubled `$$`
+# is required: a single `$` is consumed by make's own variable expansion
+# before the shell ever sees it, silently turning the anchor into an empty
+# string.
+COVER_PKGS = $(shell go list ./... | grep -vE '(^|/)internal/db/sqlc$$' | paste -sd, -)
 
 # CICD-11: 80% is the required floor for aggregate backend coverage, not a
 # tunable -- `?=` only exists so this can be overridden on the command line
