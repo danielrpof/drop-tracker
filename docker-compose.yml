@@ -6,15 +6,21 @@ services:
       POSTGRES_PASSWORD: drop_tracker
       POSTGRES_DB: drop_tracker
     ports:
-      # Published on 5433 rather than Postgres's default 5432 deliberately.
+      # Published on Postgres's default 5432. This was briefly remapped to
+      # 5433 because a leftover Postgres container from an unrelated agent
+      # workspace had squatted on host port 5432, and that collision cost a
+      # full debug session -- see
+      # .planning/debug/resolved/notify-pass-hangs-forever.md. That stray
+      # container has since been shut down, so the collision that motivated
+      # 5433 no longer exists, and the mapping is reverted to 5432
+      # permanently.
       # Binding 5432 on a dev box that already has any other Postgres on it
       # does not fail in a way anyone notices: compose refuses to start this
       # container, the app connects to whichever instance owns the port, its
       # migrations create a schema that looks correct, and every query then
-      # runs against the wrong database. That cost a full debug session --
-      # see .planning/debug/resolved/notify-pass-hangs-forever.md.
+      # runs against the wrong database.
       # Keep in lockstep with Makefile's TEST_DATABASE_URL and .env.example.
-      - "5433:5432"
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U drop_tracker"]
       interval: 2s
@@ -25,12 +31,16 @@ services:
     build: .
     env_file: .env
     environment:
-      # .env's DATABASE_URL points at localhost:5433 (the host-mapped port
-      # `go run` uses locally, per Makefile's TEST_DATABASE_URL comment).
-      # Inside the compose network the app must reach postgres by service
-      # name on the internal, unmapped port 5432, not localhost:5433 -- this
-      # override on top of env_file is intentional. Do NOT "fix" this to
-      # match .env; see .env.example and the port-remap comment above.
+      # .env's DATABASE_URL points at localhost:5432 (the host-published
+      # port `go run` uses locally, per Makefile's TEST_DATABASE_URL
+      # comment). Inside the compose network the app must reach postgres by
+      # its service name, "postgres", on the internal Docker network --
+      # "localhost" inside this container would not resolve to the postgres
+      # service at all. This override on top of env_file is intentional even
+      # though both DSNs now share the same port number; the distinction is
+      # service-name-on-internal-network versus localhost-on-published-port,
+      # not a port difference. Do NOT "fix" this to match .env; see
+      # .env.example and the port-remap comment above.
       DATABASE_URL: postgres://drop_tracker:drop_tracker@postgres:5432/drop_tracker?sslmode=disable
     ports:
       - "8080:8080"

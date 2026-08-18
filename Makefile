@@ -1,11 +1,12 @@
 .PHONY: build run test test-short test-integration coverage-gate sqlc sqlc-check sqlc-version-check db-up db-down hooks web
 
-# Port 5433, not Postgres's default 5432, and it must stay in lockstep with
-# docker-compose.yml's published port -- see the comment there. Pointing this
-# at 5432 on a machine where another project already holds that port does not
-# fail loudly; it silently runs migrations and writes test rows into that
-# other project's database.
-TEST_DATABASE_URL ?= postgres://drop_tracker:drop_tracker@localhost:5433/drop_tracker?sslmode=disable
+# Must stay in lockstep with docker-compose.yml's published port -- see the
+# comment there. Pointing this at a port another project already holds does
+# not fail loudly; it silently runs migrations and writes test rows into that
+# other project's database. Was briefly repointed at 5433 during a stray
+# leftover Postgres container's collision with the host's default 5432; that
+# container has since been shut down, so this is back on 5432 permanently.
+TEST_DATABASE_URL ?= postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable
 
 # Override on boxes where the interpreter is `python3` instead of `python`.
 PYTHON ?= python
