@@ -384,15 +384,15 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 **Goal:** The accumulated non-blocking tech debt from v1.1 is closed — doc comments tell the truth, the two flagged test-coverage gaps are filled, CI catches formatting drift, the notification-loss window is observable, the Postgres port revert is committed with its full history intact, and the History filter dropdowns are readable.
 **Requirements**: None (ROADMAP carried `TBD`); scope is the 13 locked decisions D-01…D-13 in `11.1-CONTEXT.md`, each closing an item from `.planning/v1.1-MILESTONE-AUDIT.md`
 **Depends on:** Phase 11
-**Plans:** 1/5 plans executed
+**Plans:** 4/5 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 11.1-01-PLAN.md — Frontend test coverage, stale comment, and dropdown contrast fix (D-03, D-05a, D-05b, D-13)
-- [ ] 11.1-03-PLAN.md — Detection doc/log signal and PoolConfig error differentiation (D-10, D-11, D-12)
+- [x] 11.1-01-PLAN.md — Frontend test coverage, stale comment, and dropdown contrast fix (D-03, D-05a, D-05b, D-13)
+- [x] 11.1-03-PLAN.md — Detection doc/log signal and PoolConfig error differentiation (D-10, D-11, D-12)
 - [x] 11.1-04-PLAN.md — Boot-test robustness, anchored coverage filter, and the committed port revert (D-01, D-02, D-06, D-07)
-- [ ] 11.1-05-PLAN.md — Milestone-audit amendment and Nyquist reconciliation for phases 08/09/10 (D-08, D-09)
+- [x] 11.1-05-PLAN.md — Milestone-audit amendment and Nyquist reconciliation for phases 08/09/10 (D-08, D-09)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
