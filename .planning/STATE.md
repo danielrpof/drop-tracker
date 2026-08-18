@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: cleanup
-current_phase: 999.1
-current_phase_name: Search result popularity sorting and same-name disambiguation (BACKLOG)
+current_phase: 11.1
+current_phase_name: address-tech-debt-v1-1-cleanup
 status: executing
-stopped_at: Phase 11.1 context gathered
-last_updated: "2026-08-17T21:48:34.785Z"
+stopped_at: Completed 11.1-04-PLAN.md
+last_updated: "2026-08-18T02:35:02.645Z"
 last_activity: 2026-08-17
-last_activity_desc: Phase 11 complete, transitioned to Phase 999.1
+last_activity_desc: Phase 11.1 execution started
 progress:
   total_phases: 12
   completed_phases: 11
   total_plans: 54
-  completed_plans: 49
+  completed_plans: 50
 ---
 
 # Project State
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-11)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 11 — bounded-concurrent-polling
+**Current focus:** Phase 11.1 — address-tech-debt-v1-1-cleanup
 
 ## Current Position
 
-Phase: 999.1 — Search result popularity sorting and same-name disambiguation (BACKLOG)
-Plan: Not started
+Phase: 11.1 (address-tech-debt-v1-1-cleanup) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-08-17 — Phase 11 complete, transitioned to Phase 999.1
+Last activity: 2026-08-17 — Phase 11.1 execution started
 
 **v1.1 phases:**
 
@@ -98,6 +98,7 @@ Last activity: 2026-08-17 — Phase 11 complete, transitioned to Phase 999.1
 | Phase 05 P01 | 55min | 2 tasks | 15 files |
 | Phase 05 P02 | 45min | 2 tasks | 7 files |
 | Phase 05 P03 | 40min | 2 tasks | 2 files |
+| Phase 11.1 P04 | 240min | 4 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -173,6 +174,8 @@ Recent decisions affecting current work:
 - [v1.1 Roadmap]: Bounded concurrent polling (Phase 11) lands last — highest correctness risk of the milestone, and it benefits from executing behind working coverage gates.
 - [Phase 09 UAT, closed 2026-08-13]: Closed the phase's backstop-tier human-verification truth (real GitHub Actions run proving the coverage gate fires and `build-scan` is skipped) live on scratch branch `test/coverage-gate-ci-check` — never `main`. All three cases directly observed: backend threshold raised past measured 87.1% → `test` red, `build-scan`/`release` skipped (run 31724487315); frontend thresholds raised past measured 78/72/76/80% → `frontend-test` red, same skip (run 31724744670); both restored to 80/70 → full pipeline green through `build-scan` (run 31724954534). Branch deleted after (local + remote).
 - [Phase 09 Security]: `/gsd-secure-phase 09` closed all 25 registered threats (22 mitigated, 3 accepted) via L1 grep-depth verification plus the live CI runs above as direct evidence for the two highest-severity threats (T-09-19 `needs` graph, T-09-24 scratch-branch discipline). See 09-SECURITY.md.
+- [Phase ?]: [Phase 11.1-04]: Task 4's .env.example DATABASE_URL port fix (5433 -> 5432) performed by the human developer directly, since no agent tool in this workflow can Read/Edit that file (permission-denied, reproducing 11-REVIEW.md IN-02).
+- [Phase ?]: [Phase 11.1-04]: go test -race unusable on this Windows dev machine (ThreadSanitizer allocation failure under memory pressure) -- pre-existing documented limitation; substituted plain go test for make test-integration's verification, coverage-gate confirmed 87.1% matching prior baseline.
 
 ### Pending Todos
 
@@ -204,6 +207,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-17T21:13:57.221Z
-Stopped at: Phase 11.1 context gathered
-Resume file: .planning/phases/11.1-address-tech-debt-v1-1-cleanup/11.1-CONTEXT.md
+Last session: 2026-08-18T02:35:02.566Z
+Stopped at: Completed 11.1-04-PLAN.md
+Resume file: None
