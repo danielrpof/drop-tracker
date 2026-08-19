@@ -126,3 +126,7 @@ None - no external service configuration required.
 ---
 *Phase: 12-cleanup-coverart-reset-search-popularity-ranking*
 *Completed: 2026-08-18*
+
+## Self-Check: PASSED
+
+All created files and commit hashes verified present on disk / in git log.
