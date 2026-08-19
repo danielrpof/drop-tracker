@@ -49,9 +49,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 ### Phase 12: Cleanup: CoverArt Reset & Search Popularity Ranking
 
 **Goal:** Close two loose ends left after v1.1 closes: (1) `CoverArt.tsx`'s image-load-error state never resets when `src` changes on a retained component instance, so a component that once failed to load keeps showing the placeholder forever even if a later `src` would succeed — flagged in `.planning/v1.1-MILESTONE-AUDIT.md` as pre-existing, non-blocking tech debt; (2) promoted from backlog Phase 999.1 — search results aren't ranked by popularity and same-named artists (e.g. multiple "Drake"s) are hard to disambiguate, since MusicBrainz's search API doesn't rank by popularity and its `disambiguation` field is often blank.
-**Requirements**: TBD
+**Requirements**: TBD — no REQ-IDs mapped; `12-CONTEXT.md`'s locked decisions D-01 through D-10 are the authoritative scope and are traced through the plans' `requirements` fields
 **Depends on:** Phase 11
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Context:
 - CoverArt fix: affects both History and Watchlist rows (shared component). Reset the error state on `src` change, likely via a `useEffect` keyed on `src` or a `key` prop forcing remount.
@@ -59,7 +59,9 @@ Context:
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 12 to break down)
+- [ ] 12-01-PLAN.md — CoverArt error-state reset on `src` change plus its regression test (D-01, D-02) — wave 1
+- [ ] 12-02-PLAN.md — Deezer fan-count capture and stable descending popularity sort inside the client (D-03, D-04) — wave 1
+- [ ] 12-03-PLAN.md — MusicBrainz country fallback end-to-end, plus preserved-order and no-fan-count-on-the-wire guardrails (D-05 through D-10) — wave 2
 
 ## Progress
 
