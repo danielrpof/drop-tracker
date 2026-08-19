@@ -138,3 +138,12 @@ None - no external service configuration required.
 ---
 *Phase: 12-cleanup-coverart-reset-search-popularity-ranking*
 *Completed: 2026-08-19*
+
+## Self-Check: PASSED
+
+- FOUND: internal/deezer/search.go
+- FOUND: internal/deezer/search_test.go
+- FOUND: .planning/phases/12-cleanup-coverart-reset-search-popularity-ranking/12-02-SUMMARY.md
+- FOUND: commit a3e4916 (feat(12-02): rank Deezer search results by fan-count popularity)
+- FOUND: commit ded4dbf (test(12-02): assert fan-count decode and tie-order stability)
+- FOUND: commit 8882b6b (docs(12-02): add plan summary)
