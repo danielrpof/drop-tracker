@@ -192,3 +192,18 @@ None - no external service configuration required.
 ---
 *Phase: 12-cleanup-coverart-reset-search-popularity-ranking*
 *Completed: 2026-08-19*
+
+## Self-Check: PASSED
+
+- FOUND: internal/musicbrainz/search.go
+- FOUND: internal/musicbrainz/search_test.go
+- FOUND: internal/httpserver/search.go
+- FOUND: internal/httpserver/search_test.go
+- FOUND: web/app/lib/api.ts
+- FOUND: web/app/components/watchlist/SearchResultsColumns.tsx
+- FOUND: web/app/components/watchlist/SearchResultsColumns.test.tsx
+- FOUND: web/app/components/watchlist/SearchBox.test.tsx
+- FOUND: commit ae628a2 (feat(12-03): thread MusicBrainz country as a disambiguation fallback)
+- FOUND: commit 1cc9a2b (test(12-03): pin adapter mapping, MusicBrainz order and wire key set)
+- FOUND: commit 91c8f97 (test(12-03): pin disambiguation-over-country preference and the both-absent case)
+- FOUND: commit 9ee256e (docs(12-03): add plan summary)
