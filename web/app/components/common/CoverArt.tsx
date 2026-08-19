@@ -1,5 +1,5 @@
 import { Music } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { cn } from "~/lib/utils"
 
@@ -19,6 +19,20 @@ export interface CoverArtProps {
 
 export function CoverArt({ src, alt, size = 96, className }: CoverArtProps) {
   const [failed, setFailed] = useState(false)
+
+  // D-01: reset the failed flag whenever src changes on this retained
+  // instance -- WatchlistRow, EventCard and SearchResultsColumns all reuse
+  // the same CoverArt instance across re-renders rather than remounting via
+  // key={src}. Choosing an effect-based reset over a key-based remount is a
+  // deliberate, locked deviation from React's own "prefer key remount"
+  // guidance (react.dev/learn/you-might-not-need-an-effect), made to avoid
+  // touching those three call sites. The accepted cost is one render frame
+  // that can still show the stale placeholder before this effect commits
+  // (12-RESEARCH.md Pitfall 1). Do not revert this to a remount-based reset.
+  useEffect(() => {
+    setFailed(false)
+  }, [src])
+
   const showPlaceholder = !src || failed
 
   const style = { width: size, height: size }
