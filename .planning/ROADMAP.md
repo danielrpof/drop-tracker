@@ -51,7 +51,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Goal:** Close two loose ends left after v1.1 closes: (1) `CoverArt.tsx`'s image-load-error state never resets when `src` changes on a retained component instance, so a component that once failed to load keeps showing the placeholder forever even if a later `src` would succeed — flagged in `.planning/v1.1-MILESTONE-AUDIT.md` as pre-existing, non-blocking tech debt; (2) promoted from backlog Phase 999.1 — search results aren't ranked by popularity and same-named artists (e.g. multiple "Drake"s) are hard to disambiguate, since MusicBrainz's search API doesn't rank by popularity and its `disambiguation` field is often blank.
 **Requirements**: TBD — no REQ-IDs mapped; `12-CONTEXT.md`'s locked decisions D-01 through D-10 are the authoritative scope and are traced through the plans' `requirements` fields
 **Depends on:** Phase 11
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Context:
 
@@ -61,8 +61,8 @@ Context:
 Plans:
 **Wave 1**
 
-- [ ] 12-01-PLAN.md — CoverArt error-state reset on `src` change plus its regression test (D-01, D-02) — wave 1
-- [ ] 12-02-PLAN.md — Deezer fan-count capture and stable descending popularity sort inside the client (D-03, D-04) — wave 1
+- [x] 12-01-PLAN.md — CoverArt error-state reset on `src` change plus its regression test (D-01, D-02) — wave 1
+- [x] 12-02-PLAN.md — Deezer fan-count capture and stable descending popularity sort inside the client (D-03, D-04) — wave 1
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
