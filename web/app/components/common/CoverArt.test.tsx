@@ -33,4 +33,43 @@ describe("CoverArt", () => {
       )
     })
   })
+
+  it("keeps the placeholder when src stays the same after a load error", async () => {
+    const { rerender } = render(
+      <CoverArt
+        src="https://example.invalid/broken.png"
+        alt="Same Src Artist"
+      />
+    )
+
+    fireEvent.error(screen.getByAltText("Same Src Artist"))
+
+    await waitFor(() => {
+      expect(screen.queryByAltText("Same Src Artist")).toBeNull()
+    })
+
+    rerender(
+      <CoverArt
+        src="https://example.invalid/broken.png"
+        alt="Same Src Artist"
+      />
+    )
+
+    // D-01's effect must not re-fire when the dependency (src) is
+    // unchanged -- an unchanged src should never re-show a known-broken
+    // image. Asserted through waitFor for consistency with Pitfall 1's
+    // rule, so a spurious reset would be caught rather than raced past.
+    await waitFor(() => {
+      expect(screen.queryByAltText("Same Src Artist")).toBeNull()
+    })
+  })
+
+  it("renders the placeholder when src is null", () => {
+    render(<CoverArt src={null} alt="No Art Artist" />)
+
+    expect(screen.queryByAltText("No Art Artist")).toBeNull()
+    expect(
+      screen.getByRole("img", { name: "No Art Artist" })
+    ).toBeInTheDocument()
+  })
 })
