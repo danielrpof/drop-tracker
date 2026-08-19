@@ -132,9 +132,11 @@ interface SearchResultRowProps {
 }
 
 // SearchResultRow renders one result: cover art, name, type, and a
-// one-line-truncated disambiguation when present, all as plain JSX text
-// nodes -- every one of these strings comes from a third-party catalogue,
-// so this tree never reaches for React's raw-HTML injection escape hatch.
+// one-line-truncated secondary label (disambiguation, falling back to
+// country when disambiguation is blank) when present, all as plain JSX
+// text nodes -- every one of these strings comes from a third-party
+// catalogue, so this tree never reaches for React's raw-HTML injection
+// escape hatch.
 // The trailing control is one of three states: the disabled "Already
 // watching" state (D-11, cross-referenced against the already-loaded
 // watchlist entries by source-appropriate id -- mbid for MusicBrainz,
@@ -155,6 +157,7 @@ function SearchResultRow({
 }: SearchResultRowProps) {
   const [pending, setPending] = useState(false)
   const canAdd = sourceName === "musicbrainz"
+  const secondaryLabel = artist.disambiguation ?? artist.country
 
   async function handleClick() {
     setPending(true)
@@ -173,9 +176,9 @@ function SearchResultRow({
           {artist.name}
         </span>
         <span className="text-label text-muted-foreground">{artist.type}</span>
-        {artist.disambiguation !== null && (
+        {secondaryLabel !== null && (
           <span className="truncate text-label text-muted-foreground">
-            {artist.disambiguation}
+            {secondaryLabel}
           </span>
         )}
       </div>

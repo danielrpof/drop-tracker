@@ -36,6 +36,7 @@ type SearchArtist struct {
 	ID             string  `json:"id"`
 	Name           string  `json:"name"`
 	Disambiguation *string `json:"disambiguation"`
+	Country        *string `json:"country"`
 	Type           string  `json:"type"`
 	ImageURL       *string `json:"image_url"`
 }
@@ -91,11 +92,17 @@ func (s musicBrainzSource) SearchArtists(ctx context.Context, q string, limit in
 			d := a.Disambiguation
 			disambiguation = &d
 		}
+		var country *string
+		if a.Country != "" {
+			c := a.Country
+			country = &c
+		}
 		out = append(out, SearchArtist{
 			Source:         "musicbrainz",
 			ID:             a.MBID,
 			Name:           a.Name,
 			Disambiguation: disambiguation,
+			Country:        country,
 			Type:           a.Type,
 			ImageURL:       nil,
 		})
@@ -141,8 +148,10 @@ func (s deezerSource) SearchArtists(ctx context.Context, q string, limit int) ([
 			ID:             strconv.FormatInt(a.ID, 10),
 			Name:           a.Name,
 			Disambiguation: nil,
-			Type:           artistType,
-			ImageURL:       imageURL,
+			// Deezer's search response has no country-equivalent field.
+			Country:  nil,
+			Type:     artistType,
+			ImageURL: imageURL,
 		})
 	}
 	return out, nil

@@ -60,6 +60,7 @@ export interface SearchArtist {
   id: string
   name: string
   disambiguation: string | null
+  country: string | null
   type: string
   image_url: string | null
 }

@@ -35,12 +35,14 @@ func escapeLucene(s string) string {
 // Artist is MusicBrainz's ws/2/artist search result shape, decoded from
 // the live-verified response documented in 03-RESEARCH.md. Only the fields
 // this phase's search-proxy needs are kept -- MusicBrainz's response
-// carries more (country, life-span, etc.) with no consumer yet.
+// carries more (life-span, etc.) with no consumer yet; Country is now
+// decoded as the disambiguation fallback (D-09).
 type Artist struct {
 	MBID           string `json:"id"`
 	Name           string `json:"name"`
 	SortName       string `json:"sort-name"`
 	Disambiguation string `json:"disambiguation"`
+	Country        string `json:"country"`
 	Type           string `json:"type"`
 	Score          int    `json:"score"`
 }
