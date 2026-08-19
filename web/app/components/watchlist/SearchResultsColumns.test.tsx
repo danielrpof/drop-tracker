@@ -50,6 +50,16 @@ const countryOnlyArtist: SearchArtist = {
   image_url: null,
 }
 
+const bothHintsArtist: SearchArtist = {
+  source: "musicbrainz",
+  id: "mbid-both-hints",
+  name: "Disambiguated Drake",
+  disambiguation: "Canadian rapper",
+  country: "CA",
+  type: "Person",
+  image_url: null,
+}
+
 const watchlistEntry: WatchlistEntry = {
   id: 1,
   artist_id: 1,
@@ -167,6 +177,48 @@ describe("SearchResultsColumns", () => {
     )
 
     expect(screen.getByText("CA")).toBeInTheDocument()
+  })
+
+  it("prefers disambiguation over country when both are present", () => {
+    const response: SearchResponse = {
+      query: "drake",
+      sources: {
+        musicbrainz: { status: "ok", artists: [bothHintsArtist] },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={null}
+        onAdd={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Canadian rapper")).toBeInTheDocument()
+    expect(screen.queryByText("CA")).toBeNull()
+  })
+
+  it("renders no secondary label when disambiguation and country are both absent", () => {
+    const response: SearchResponse = {
+      query: "deezer only",
+      sources: {
+        deezer: { status: "ok", artists: [deezerArtist] },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={null}
+        onAdd={vi.fn()}
+      />
+    )
+
+    const row = screen.getByRole("listitem")
+    expect(row.textContent).toBe(
+      `${deezerArtist.name}${deezerArtist.type}Search MusicBrainz to add`
+    )
   })
 
   it("calls onAdd with the source name and artist when Add to Watchlist is clicked, and stays busy until it resolves", async () => {
