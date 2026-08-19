@@ -1,11 +1,13 @@
 package deezer
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -22,6 +24,7 @@ type Artist struct {
 	Link    string `json:"link"`
 	Picture string `json:"picture"`
 	NbAlbum int    `json:"nb_album"`
+	NbFan   int    `json:"nb_fan"`
 	Type    string `json:"type"`
 }
 
@@ -36,8 +39,10 @@ type artistSearchResponse struct {
 }
 
 // SearchArtists queries Deezer's /search/artist endpoint for query. limit is
-// clamped to this package's valid range via clampLimit. Results are returned
-// in Deezer's own order -- this method never sorts.
+// clamped to this package's valid range via clampLimit. Results come back
+// ordered by fan count (NbFan) descending -- the most popular match first --
+// with Deezer's own upstream order kept as the tiebreaker for artists that
+// share a fan count (D-04).
 func (c *Client) SearchArtists(ctx context.Context, query string, limit int) ([]Artist, error) {
 	trimmed := strings.TrimSpace(query)
 	if trimmed == "" {
@@ -84,5 +89,20 @@ func (c *Client) SearchArtists(ctx context.Context, query string, limit int) ([]
 	// consumer needs to special-case an empty search result.
 	artists := make([]Artist, 0, len(env.Data))
 	artists = append(artists, env.Data...)
+
+	// D-04: rank by fan count (popularity) descending. SortStableFunc, not
+	// SortFunc -- artists sharing a fan count (very common; an unmatched
+	// artist decodes to the zero value) must keep Deezer's own upstream
+	// relevance order as the tiebreaker rather than having ties scrambled
+	// arbitrarily. The swapped argument order (b, a) produces descending.
+	// D-04: rank by fan count (popularity) descending. SortStableFunc, not
+	// SortFunc -- artists sharing a fan count (very common; an unmatched
+	// artist decodes to the zero value) must keep Deezer's own upstream
+	// relevance order as the tiebreaker rather than having ties scrambled
+	// arbitrarily. The swapped argument order (b, a) produces descending.
+	slices.SortStableFunc(artists, func(a, b Artist) int {
+		return cmp.Compare(b.NbFan, a.NbFan)
+	})
+
 	return artists, nil
 }
