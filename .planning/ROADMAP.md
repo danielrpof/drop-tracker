@@ -54,13 +54,18 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans:** 3 plans
 
 Context:
+
 - CoverArt fix: affects both History and Watchlist rows (shared component). Reset the error state on `src` change, likely via a `useEffect` keyed on `src` or a `key` prop forcing remount.
 - Popularity/disambiguation (ex-999.1, captured during Phase 6 UAT 06-04): the Watchlist search UI already renders `disambiguation` when present (`SearchResultsColumns.tsx`) — the gap is upstream ranking, not the UI. Likely needs a popularity signal (Deezer search results carry fan-count data not currently captured by `internal/deezer`) and/or better MusicBrainz result ranking in `internal/httpserver/search.go`.
 
 Plans:
+**Wave 1**
 
 - [ ] 12-01-PLAN.md — CoverArt error-state reset on `src` change plus its regression test (D-01, D-02) — wave 1
 - [ ] 12-02-PLAN.md — Deezer fan-count capture and stable descending popularity sort inside the client (D-03, D-04) — wave 1
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 12-03-PLAN.md — MusicBrainz country fallback end-to-end, plus preserved-order and no-fan-count-on-the-wire guardrails (D-05 through D-10) — wave 2
 
 ## Progress
