@@ -19,6 +19,7 @@ import (
 
 	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
+	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 )
 
 // stubDeezerArtistSearcher is a file-local double for deezer.ArtistSearcher,
@@ -37,6 +38,24 @@ func (s stubDeezerArtistSearcher) SearchArtists(ctx context.Context, query strin
 }
 
 var _ deezer.ArtistSearcher = stubDeezerArtistSearcher{}
+
+// stubMusicBrainzArtistSearcher is a file-local double for
+// musicbrainz.ArtistSearcher, mirroring stubDeezerArtistSearcher's
+// func-field pattern -- used to drive httpserver.NewMusicBrainzSource
+// directly rather than through a real *musicbrainz.Client / httptest.Server
+// pair.
+type stubMusicBrainzArtistSearcher struct {
+	searchFunc func(ctx context.Context, query string, limit int) ([]musicbrainz.Artist, error)
+}
+
+func (s stubMusicBrainzArtistSearcher) SearchArtists(ctx context.Context, query string, limit int) ([]musicbrainz.Artist, error) {
+	if s.searchFunc != nil {
+		return s.searchFunc(ctx, query, limit)
+	}
+	return nil, nil
+}
+
+var _ musicbrainz.ArtistSearcher = stubMusicBrainzArtistSearcher{}
 
 // stubSearchSource is a file-local double for httpserver.SearchSource,
 // mirroring stubStore/stubPinger's func-field pattern.
@@ -104,6 +123,61 @@ func TestSearch_Success(t *testing.T) {
 	}
 	if len(mb.Artists) != 1 || mb.Artists[0].Source != "musicbrainz" {
 		t.Fatalf("sources.musicbrainz.artists = %+v, want one entry with source musicbrainz", mb.Artists)
+	}
+}
+
+// TestSearch_MusicBrainzCountryReachesResponseBody proves D-09/D-10's
+// end-to-end path: a MusicBrainz artist with a blank disambiguation but a
+// populated country survives client struct -> adapter -> JSON encode ->
+// HTTP body, through the real router (not a stubSearchSource shortcut).
+func TestSearch_MusicBrainzCountryReachesResponseBody(t *testing.T) {
+	stub := stubMusicBrainzArtistSearcher{searchFunc: func(context.Context, string, int) ([]musicbrainz.Artist, error) {
+		return []musicbrainz.Artist{
+			{
+				MBID:           "9fff2f8a-21e6-47de-a2b8-7f449929d43f",
+				Name:           "Drake",
+				Type:           "Person",
+				Score:          100,
+				Disambiguation: "",
+				Country:        "CA",
+			},
+		}, nil
+	}}
+	src := httpserver.NewMusicBrainzSource(stub)
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{src}, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/search?q=drake")
+	if err != nil {
+		t.Fatalf("GET /search: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body searchResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	mb, ok := body.Sources["musicbrainz"]
+	if !ok {
+		t.Fatal("sources.musicbrainz missing")
+	}
+	if mb.Status != "ok" {
+		t.Fatalf("sources.musicbrainz.status = %q, want %q", mb.Status, "ok")
+	}
+	if len(mb.Artists) != 1 {
+		t.Fatalf("len(sources.musicbrainz.artists) = %d, want 1", len(mb.Artists))
+	}
+	got := mb.Artists[0]
+	if got.Disambiguation != nil {
+		t.Errorf("Disambiguation = %v, want nil", got.Disambiguation)
+	}
+	if got.Country == nil || *got.Country != "CA" {
+		t.Errorf("Country = %v, want a pointer to %q", got.Country, "CA")
 	}
 }
 

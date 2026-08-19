@@ -22,6 +22,7 @@ const searchResponse: SearchResponse = {
           id: "mbid-drake",
           name: "Drake",
           disambiguation: null,
+          country: null,
           type: "Person",
           image_url: null,
         },
