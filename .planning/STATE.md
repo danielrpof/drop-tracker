@@ -188,6 +188,7 @@ None yet.
 ### Roadmap Evolution
 
 - Phase 11.1 inserted after Phase 11: Address tech debt: v1.1 cleanup (URGENT)
+- Phase 12 added: Cleanup: CoverArt Reset & Search Popularity Ranking — bundles the deferred CoverArt.tsx image-reset bug with backlog Phase 999.1 (search popularity/disambiguation), which was promoted and folded into this phase
 
 ## Deferred Items
 
