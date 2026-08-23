@@ -54,7 +54,7 @@ export default function App() {
   return (
     <div className="flex min-h-screen flex-col">
       <nav className="flex border-b border-border px-8">
-        <NavLink to="/watchlist" className={tabLinkClassName}>
+        <NavLink to="/" className={tabLinkClassName}>
           Watchlist
         </NavLink>
         <NavLink to="/history" className={tabLinkClassName}>
