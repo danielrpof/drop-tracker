@@ -75,16 +75,17 @@ Plans:
 | v1.0 MVP | 1-7 | Complete | 2026-08-12 |
 | v1.1 Hardening & Scale Readiness | 8-11.1 | Complete | 2026-08-17 |
 
-## Backlog
+### Phase 13: Fix History Dates, Guest-Feature Art & Artist Art
 
-### Phase 999.2: Deezer artist-art backfill for MusicBrainz-only artists (BACKLOG)
-
-**Goal:** [Captured for future planning] — Homepage artist cards render hero-sized artist art, but MusicBrainz carries no artist images; any watchlisted artist added without a confident Deezer match at add-time has `image_url = NULL` forever and renders with no art, which stands out badly at hero size.
-**Requirements:** TBD
+**Goal:** Resolve three outstanding display/data bugs users are still hitting after Phase 12: (1) History tab entries (single/feature/deluxe) don't show a release date next to each item; (2) guest-feature release cards don't show album art even though new-release cards do; (3) artist art from MusicBrainz still doesn't render, despite Deezer artists being linkable to MusicBrainz artists so Deezer pictures could be used. Absorbs backlog Phase 999.2 (Deezer artist-art backfill) where it overlaps with bug 3. Must actually resolve these — no repeat phases for the same unfixed behavior.
+**Requirements**: TBD
+**Depends on:** Phase 12
 **Plans:** 0 plans
-
-Context (captured 2026-08-12, brainstorming session): `artists.deezer_id`/`artists.image_url` already exist and get populated by `UpsertArtist` when a Deezer match was available at add-time (Phase 2) — the gap is a one-time/on-demand backfill for artists that never got a match, not new schema. Proposed approach: Deezer artist-name search (`internal/deezer`) filtered to close name equality as the primary signal; a shared album/release title used only as a tie-breaker when multiple same-named Deezer artists come back, never as the sole match signal (album titles collide across unrelated artists and MB/Deezer titles diverge in casing/edition tags); fail closed to "no art" on low confidence rather than risk attaching the wrong artist's photo. Note: PROJECT.md's Out of Scope explicitly rejects full "dual-source (MusicBrainz + Deezer) reconciliation" as too complex for the payoff — this is a narrower, one-directional, art-only slice (no event/detection logic touched), but sits in the same territory and should be scoped deliberately, not assumed in by default. Intended to be structured into v1.2 alongside Phase 12 (which absorbed the former Phase 999.1).
 
 Plans:
 
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [ ] TBD (run /gsd-plan-phase 13 to break down)
+
+## Backlog
+
+*(none currently — Phase 999.2 was absorbed into Phase 13)*
