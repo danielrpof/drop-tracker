@@ -192,6 +192,17 @@ func resultFor(c deezer.Artist) Result {
 	return Result{Matched: true, DeezerID: &id, ImageURL: nilIfEmpty(c.Picture)}
 }
 
+// maxTieBreakCandidates bounds the tie-break (RED-phase placeholder value;
+// GREEN wires this into tieBreak's actual bound check).
+const maxTieBreakCandidates = 5
+
+// titlesMatch is a RED-phase placeholder that always reports no match, so
+// TestTitlesMatch and every positive tie-break test fail until GREEN
+// implements the real equality-or-guarded-containment comparison.
+func titlesMatch(_, _ string) bool {
+	return false
+}
+
 // tieBreak is the marked seam Task 2 replaces with D-08's shared-album-title
 // tie-break (titlesMatch, maxTieBreakCandidates, minTieBreakTitleLength).
 // Until Task 2 lands, an ambiguous same-name tie falls closed to a
