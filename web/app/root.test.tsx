@@ -65,7 +65,7 @@ describe("App", () => {
         path: "/",
         Component: App,
         children: [
-          { path: "watchlist", Component: () => <div>Watchlist page</div> },
+          { index: true, Component: () => <div>Watchlist page</div> },
           { path: "history", Component: () => <div>History page</div> },
         ],
       },
@@ -73,8 +73,8 @@ describe("App", () => {
     return render(<Stub initialEntries={[path]} />)
   }
 
-  it("marks the Watchlist tab active and the History tab inactive on /watchlist", () => {
-    renderAppAt("/watchlist")
+  it("marks the Watchlist tab active and the History tab inactive on /", () => {
+    renderAppAt("/")
 
     expect(screen.getByRole("link", { name: "Watchlist" }).className).toContain(
       "border-accent-indigo"
