@@ -73,6 +73,64 @@ describe("EventCard", () => {
     expect(screen.getByText("Deluxe change")).toBeInTheDocument()
   })
 
+  it("renders the release date ahead of the track-count delta for a deluxe_change event", () => {
+    const event = buildEvent({
+      event_type: "deluxe_change",
+      title: "Deluxe Edition",
+      release_date: "2026-02-01",
+      previous_track_count: 12,
+      track_count: 18,
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.getByText("2026-02-01 · 12 → 18 tracks")).toBeInTheDocument()
+  })
+
+  it("falls back to 'Release date unknown' for a null-dated deluxe_change event, preserving the separator ordering", () => {
+    const event = buildEvent({
+      event_type: "deluxe_change",
+      title: "Deluxe Edition",
+      release_date: null,
+      previous_track_count: 12,
+      track_count: 18,
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(
+      screen.getByText("Release date unknown · 12 → 18 tracks")
+    ).toBeInTheDocument()
+  })
+
+  it("renders the date on the no-arrow branch when previous_track_count is null", () => {
+    const event = buildEvent({
+      event_type: "deluxe_change",
+      title: "Deluxe Edition",
+      release_date: "2026-02-01",
+      previous_track_count: null,
+      track_count: 18,
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.getByText("2026-02-01 · 18 tracks")).toBeInTheDocument()
+  })
+
+  it("renders the date followed by the '?' placeholder when track_count is null", () => {
+    const event = buildEvent({
+      event_type: "deluxe_change",
+      title: "Deluxe Edition",
+      release_date: "2026-02-01",
+      previous_track_count: 12,
+      track_count: null,
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.getByText("2026-02-01 · 12 → ? tracks")).toBeInTheDocument()
+  })
+
   it("falls back to an 'Unknown' badge without throwing for an event_type outside the known union", () => {
     // Pitfall 6: the type system correctly can't represent this literal
     // normally -- the deliberate cast simulates GET /events returning an
@@ -123,6 +181,30 @@ describe("EventCard", () => {
     expect(
       screen.getByRole("link", { name: "Special Chars Track" })
     ).toHaveAttribute("href", "https://www.deezer.com/track/abc%20def%2Fg%23h")
+  })
+
+  it("renders the release date on a guest_feature card when release_date is set", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Feature Track",
+      release_date: "2026-03-04",
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.getByText("2026-03-04")).toBeInTheDocument()
+  })
+
+  it("falls back to 'Release date unknown' on a guest_feature card when release_date is null", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Feature Track",
+      release_date: null,
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.getByText("Release date unknown")).toBeInTheDocument()
   })
 
   it("leaves an ordinary UUID-shaped external_id's href unchanged", () => {

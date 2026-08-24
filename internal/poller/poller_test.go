@@ -80,6 +80,10 @@ func (fakeRecordingSource) RecordingsByArtist(ctx context.Context, mbid string) 
 	return nil, nil
 }
 
+func (fakeRecordingSource) ReleasesForRecording(ctx context.Context, mbid string) ([]musicbrainz.RecordingRelease, error) {
+	return nil, nil
+}
+
 // fakeReleaseDetailSource is a no-op detection.ReleaseDetailSource double,
 // used only to satisfy detection.New's widened signature (Phase 4 plan
 // 04-04) for the integration tests below, which exercise new_release

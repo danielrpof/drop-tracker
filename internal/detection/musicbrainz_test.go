@@ -77,6 +77,117 @@ func TestIsGuestFeature_MissingArtistID(t *testing.T) {
 	}
 }
 
+func TestEarliestReleaseDate(t *testing.T) {
+	tests := []struct {
+		name     string
+		releases []musicbrainz.RecordingRelease
+		want     string
+	}{
+		{
+			name: "different years picks the smallest year",
+			releases: []musicbrainz.RecordingRelease{
+				{Date: "2021-05"},
+				{Date: "2019-08-14"},
+				{Date: "2020"},
+			},
+			want: "2019-08-14",
+		},
+		{
+			// Pins Q2's fix: the original plain-`<` design would have
+			// wrongly picked "2020" here, since "2020" < "2020-01-05"
+			// lexicographically. The more precise same-year date must win.
+			name: "same year, one a strict prefix of the other -- the more precise date wins",
+			releases: []musicbrainz.RecordingRelease{
+				{Date: "2020"},
+				{Date: "2020-01-05"},
+			},
+			want: "2020-01-05",
+		},
+		{
+			// Same case, reversed order in the input slice -- earlierDate
+			// must be order-independent.
+			name: "same year, prefix case with reversed input order",
+			releases: []musicbrainz.RecordingRelease{
+				{Date: "2020-01-05"},
+				{Date: "2020"},
+			},
+			want: "2020-01-05",
+		},
+		{
+			name: "same year, equal precision -- plain comparison is correct",
+			releases: []musicbrainz.RecordingRelease{
+				{Date: "2020-03"},
+				{Date: "2020-01"},
+			},
+			want: "2020-01",
+		},
+		{
+			name: "empty dates never win by sorting first",
+			releases: []musicbrainz.RecordingRelease{
+				{Date: ""},
+				{Date: ""},
+				{Date: "2020"},
+			},
+			want: "2020",
+		},
+		{
+			name: "all dates empty returns empty",
+			releases: []musicbrainz.RecordingRelease{
+				{Date: ""},
+				{Date: ""},
+			},
+			want: "",
+		},
+		{
+			name:     "no releases returns empty",
+			releases: nil,
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := earliestReleaseDate(tt.releases); got != tt.want {
+				t.Fatalf("earliestReleaseDate(%+v) = %q, want %q", tt.releases, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGuestFeatureArt(t *testing.T) {
+	t.Run("returns the first release carrying a release-group MBID", func(t *testing.T) {
+		releases := []musicbrainz.RecordingRelease{
+			{Date: "2020-01-01", ReleaseGroup: musicbrainz.RecordingReleaseGroup{}},
+			{Date: "2020-02-01", ReleaseGroup: musicbrainz.RecordingReleaseGroup{MBID: "rg-1"}},
+		}
+		gotMBID, gotURL := guestFeatureArt(releases)
+		if gotMBID != "rg-1" {
+			t.Errorf("releaseGroupMBID = %q, want %q", gotMBID, "rg-1")
+		}
+		wantURL := "https://coverartarchive.org/release-group/rg-1/front"
+		if gotURL != wantURL {
+			t.Errorf("coverArtURL = %q, want %q", gotURL, wantURL)
+		}
+	})
+
+	t.Run("no release carries a release-group MBID returns two empty strings", func(t *testing.T) {
+		releases := []musicbrainz.RecordingRelease{
+			{Date: "2020-01-01"},
+		}
+		gotMBID, gotURL := guestFeatureArt(releases)
+		if gotMBID != "" || gotURL != "" {
+			t.Fatalf("guestFeatureArt = (%q, %q), want (\"\", \"\")", gotMBID, gotURL)
+		}
+	})
+
+	t.Run("empty release list returns two empty strings", func(t *testing.T) {
+		gotMBID, gotURL := guestFeatureArt(nil)
+		if gotMBID != "" || gotURL != "" {
+			t.Fatalf("guestFeatureArt(nil) = (%q, %q), want (\"\", \"\")", gotMBID, gotURL)
+		}
+	})
+}
+
 func TestIsGuestFeature_Positional(t *testing.T) {
 	const watched = "watched-mbid"
 	const other = "other-mbid"

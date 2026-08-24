@@ -132,13 +132,16 @@ function guestFeatureHref(event: EventItem): string | null {
 }
 
 // GuestFeatureBody shows the recording title (event.title is the recording
-// title for a guest_feature row) linked out to the source.
+// title for a guest_feature row) linked out to the source, plus a release
+// date line (OQ-01) using the identical `?? "Release date unknown"`
+// fallback expression NewReleaseBody already uses -- no new copy invented.
+// Both the linked and unlinked title branches render the date line.
 function GuestFeatureBody({ event }: { event: EventItem }) {
   const href = guestFeatureHref(event)
-  if (!href) {
-    return <p className="text-label text-muted-foreground">{event.title}</p>
-  }
-  return (
+  const dateLabel = event.release_date ?? "Release date unknown"
+  const titleLine = !href ? (
+    <p className="text-label text-muted-foreground">{event.title}</p>
+  ) : (
     <p className="text-label text-muted-foreground">
       Featured on{" "}
       <a
@@ -151,19 +154,33 @@ function GuestFeatureBody({ event }: { event: EventItem }) {
       </a>
     </p>
   )
+  return (
+    <>
+      {titleLine}
+      <p className="text-label text-muted-foreground">{dateLabel}</p>
+    </>
+  )
 }
 
-// DeluxeChangeBody shows the track-count delta as previous → current
-// tracks. A null previous_track_count is defensive-only (D-04 should
+// DeluxeChangeBody shows the release date (D-04) ahead of the track-count
+// delta as previous → current tracks, reusing NewReleaseBody's exact
+// `?? "Release date unknown"` fallback expression (D-05) -- a null
+// release_date falls back to that literal rather than rendering a blank
+// segment. A null previous_track_count is defensive-only (D-04 should
 // always populate it) and renders the current track_count alone, no arrow.
 function DeluxeChangeBody({ event }: { event: EventItem }) {
+  const dateLabel = event.release_date ?? "Release date unknown"
   const current = event.track_count ?? "?"
   if (event.previous_track_count == null) {
-    return <p className="text-label text-muted-foreground">{current} tracks</p>
+    return (
+      <p className="text-label text-muted-foreground">
+        {dateLabel} · {current} tracks
+      </p>
+    )
   }
   return (
     <p className="text-label text-muted-foreground">
-      {event.previous_track_count} → {current} tracks
+      {dateLabel} · {event.previous_track_count} → {current} tracks
     </p>
   )
 }

@@ -32,6 +32,10 @@ func (noRecordingSource) RecordingsByArtist(ctx context.Context, mbid string) ([
 	return nil, nil
 }
 
+func (noRecordingSource) ReleasesForRecording(ctx context.Context, mbid string) ([]musicbrainz.RecordingRelease, error) {
+	return nil, nil
+}
+
 // noReleaseDetailSource is a no-op detection.ReleaseDetailSource double,
 // mirroring noRecordingSource -- Phase 4 plan 04-04 widened New to require
 // a ReleaseDetailSource, and DetectMusicBrainz now always runs its
