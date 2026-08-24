@@ -541,9 +541,12 @@ func displayArtistName(rec musicbrainz.Recording, fallback string) string {
 // year-month) can't round-trip through time.Time without inventing a
 // month/day, mirroring musicbrainz.Release.Date's existing rationale.
 //
-// Empty-string dates are filtered first (an empty string would otherwise
-// sort before every real date), and the remainder is folded pairwise via
-// earlierDate, never plain `min` via `<` -- earlierDate applies three rules
+// Dates shorter than 4 characters (empty, or malformed/community-edited
+// values under a full year in length) are filtered first -- an empty date
+// would otherwise sort before every real date, and a short one would panic
+// earlierDate's a[:4]/b[:4] slicing (WR-01, 13-REVIEW.md) -- and the
+// remainder is folded pairwise via earlierDate, never plain `min` via `<`
+// -- earlierDate applies three rules
 // in order: (1) different years, smaller year wins outright; (2) same
 // year, one date a strict prefix of the other (a precision difference,
 // e.g. "2020" vs "2020-01-05") -- the LONGER, more precise date wins, the
@@ -555,7 +558,11 @@ func earliestReleaseDate(releases []musicbrainz.RecordingRelease) string {
 	earliest := ""
 	// range only -- releases is externally-supplied (T-04-12, ASVS V5).
 	for _, r := range releases {
-		if r.Date == "" {
+		// A date shorter than 4 characters is malformed (MusicBrainz partial
+		// dates always start with a full year) -- treat it the same as an
+		// empty date so it never reaches earlierDate's a[:4]/b[:4] slicing
+		// (WR-01, 13-REVIEW.md).
+		if len(r.Date) < 4 {
 			continue
 		}
 		if earliest == "" {
@@ -570,7 +577,7 @@ func earliestReleaseDate(releases []musicbrainz.RecordingRelease) string {
 // earlierDate returns whichever of a, b is earlier under
 // earliestReleaseDate's precision-aware rule. Both a and b are guaranteed
 // non-empty and at least 4 characters (a full year) by
-// earliestReleaseDate's empty-string filter -- MusicBrainz partial dates
+// earliestReleaseDate's length-based filter -- MusicBrainz partial dates
 // always start with a full year.
 func earlierDate(a, b string) string {
 	yearA, yearB := a[:4], b[:4]
