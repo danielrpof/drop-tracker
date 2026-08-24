@@ -83,9 +83,13 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 13-01-PLAN.md — Guest-feature release date & cover art, end-to-end through the History card (D-01–D-05, plus guest-feature date rendering and per-recording lookup error isolation)
 - [ ] 13-02-PLAN.md — artistart matcher package: close-name match, shared-album-title tie-break, fail-closed policy, and the ListArtistsMissingImage query (D-06, D-08, D-09)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 13-03-PLAN.md — Add-time artist-art wiring and the one-time startup backfill sweep (D-06, D-07, D-09)
 
 ## Backlog

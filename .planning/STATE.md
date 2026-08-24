@@ -5,7 +5,7 @@ milestone_name: cleanup
 current_phase: 12
 status: completed
 stopped_at: Phase 13 context gathered
-last_updated: "2026-08-24T17:52:20.914Z"
+last_updated: "2026-08-24T18:30:07.858Z"
 last_activity: 2026-08-24
 last_activity_desc: "Completed quick task 260824-339: Fix code-review findings #5 and #6: extract nilIfEmpty helper in internal/httpserver/search.go, and fix stale /watchlist route literal in web/app/routes/watchlist.test.tsx"
 progress:
