@@ -4,10 +4,10 @@ milestone: v1.1
 milestone_name: cleanup
 current_phase: 12
 status: completed
-stopped_at: Phase 12 context gathered
-last_updated: "2026-08-24T02:01:58.483Z"
-last_activity: 2026-08-23
-last_activity_desc: Completed quick task 260823-t7n: Prevent graphify knowledge graph from being bloated with stale/completed planning docs
+stopped_at: Phase 13 context gathered
+last_updated: "2026-08-24T17:52:20.914Z"
+last_activity: 2026-08-24
+last_activity_desc: "Completed quick task 260824-339: Fix code-review findings #5 and #6: extract nilIfEmpty helper in internal/httpserver/search.go, and fix stale /watchlist route literal in web/app/routes/watchlist.test.tsx"
 progress:
   total_phases: 0
   completed_phases: 0
@@ -197,6 +197,7 @@ None yet.
 
 - Phase 11.1 inserted after Phase 11: Address tech debt: v1.1 cleanup (URGENT)
 - Phase 12 added: Cleanup: CoverArt Reset & Search Popularity Ranking — bundles the deferred CoverArt.tsx image-reset bug with backlog Phase 999.1 (search popularity/disambiguation), which was promoted and folded into this phase
+- Phase 13 added: Fix History Dates, Guest-Feature Art & Artist Art — bundles three post-Phase-12 display/data bugs (History tab missing release dates, guest-feature cards missing album art, MusicBrainz artist art not rendering) with backlog Phase 999.2 (Deezer artist-art backfill), which was absorbed where it overlaps with the artist-art bug
 
 ## Deferred Items
 
@@ -208,9 +209,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-19T01:34:45.980Z
-Stopped at: Phase 12 context gathered
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/12-cleanup-coverart-reset-search-popularity-ranking/12-CONTEXT.md
+Last session: 2026-08-24T17:52:20.869Z
+Stopped at: Phase 13 context gathered
+Resume file: .planning/phases/13-fix-history-dates-guest-feature-art-artist-art/13-CONTEXT.md
 
 ## Operator Next Steps
 
