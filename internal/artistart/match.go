@@ -192,21 +192,114 @@ func resultFor(c deezer.Artist) Result {
 	return Result{Matched: true, DeezerID: &id, ImageURL: nilIfEmpty(c.Picture)}
 }
 
-// maxTieBreakCandidates bounds the tie-break (RED-phase placeholder value;
-// GREEN wires this into tieBreak's actual bound check).
+// maxTieBreakCandidates bounds the tie-break: the tie-break costs one
+// MusicBrainz release-group browse plus one Deezer album fetch per tied
+// candidate, and this runs synchronously inside an HTTP add request in the
+// sibling plan, so an implausibly large tie set is treated as unresolvable
+// rather than expensive. When the tied-candidate count exceeds this, Match
+// returns the zero Result with a nil error and issues no fetches at all.
 const maxTieBreakCandidates = 5
 
-// titlesMatch is a RED-phase placeholder that always reports no match, so
-// TestTitlesMatch and every positive tie-break test fail until GREEN
-// implements the real equality-or-guarded-containment comparison.
-func titlesMatch(_, _ string) bool {
-	return false
+// albumLimit bounds each tied candidate's Deezer album fetch during the
+// tie-break.
+const albumLimit = 50
+
+// minTieBreakTitleLength guards titlesMatch's containment loosening against
+// a degenerate short-substring collision (e.g. a one-character or
+// two-character normalized title "matching" almost anything via
+// containment).
+const minTieBreakTitleLength = 4
+
+// titlesMatch reports whether two already-normalizeArtistName-normalized
+// title strings should be treated as the same release for D-08's tie-break
+// (grilling round Q6): true on exact equality, OR when one is a non-empty
+// substring of the other AND the shorter of the two strings is at least
+// minTieBreakTitleLength runes long.
+//
+// Real-world edition suffixes ("(deluxe)", "(remastered 2020)") are common
+// enough that exact-only comparison would make this tie-break path almost
+// never resolve anything in practice, which would defeat the reason it
+// exists; requiring the shorter title to clear a minimum length keeps this
+// from degenerating into "any short string matches everything." This
+// loosening only ever applies to the already-narrow tie-break signal -- it
+// never touches D-08's primary name-equality check (Match's own candidate
+// filter) and never weakens D-09's fail-closed default, since an unresolved
+// or still-ambiguous tie still falls through to a non-match exactly as
+// before.
+func titlesMatch(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if a == "" || b == "" {
+		return false
+	}
+	shorter, longer := a, b
+	if len(longer) < len(shorter) {
+		shorter, longer = longer, shorter
+	}
+	if len([]rune(shorter)) < minTieBreakTitleLength {
+		return false
+	}
+	return strings.Contains(longer, shorter)
 }
 
-// tieBreak is the marked seam Task 2 replaces with D-08's shared-album-title
-// tie-break (titlesMatch, maxTieBreakCandidates, minTieBreakTitleLength).
-// Until Task 2 lands, an ambiguous same-name tie falls closed to a
-// non-match (D-09) rather than guessing.
-func (m *Matcher) tieBreak(_ context.Context, _ string, _ []deezer.Artist) (Result, error) {
-	return Result{}, nil
+// tieBreak implements D-08's shared-album-title tie-break (grilling round
+// Q6) for two or more same-normalized-name Deezer candidates. tied must
+// have length >= 2 (Match only calls this in that case).
+func (m *Matcher) tieBreak(ctx context.Context, mbid string, tied []deezer.Artist) (Result, error) {
+	if len(tied) > maxTieBreakCandidates {
+		return Result{}, nil
+	}
+
+	groups, err := m.groups.ReleaseGroupsByArtist(ctx, mbid)
+	if err != nil {
+		return Result{}, err
+	}
+
+	groupTitles := make(map[string]struct{}, len(groups))
+	for _, g := range groups {
+		normalized := normalizeArtistName(g.Title)
+		if normalized == "" {
+			continue
+		}
+		groupTitles[normalized] = struct{}{}
+	}
+	if len(groupTitles) == 0 {
+		// Nothing to break the tie with, and D-08 forbids resolving it by
+		// any other signal.
+		return Result{}, nil
+	}
+
+	var winners []deezer.Artist
+	for _, c := range tied {
+		albums, err := m.albums.ArtistAlbums(ctx, strconv.FormatInt(c.ID, 10), albumLimit)
+		if err != nil {
+			return Result{}, err
+		}
+
+		for _, a := range albums {
+			normalizedAlbumTitle := normalizeArtistName(a.Title)
+			if normalizedAlbumTitle == "" {
+				continue
+			}
+			matched := false
+			for groupTitle := range groupTitles {
+				if titlesMatch(normalizedAlbumTitle, groupTitle) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				winners = append(winners, c)
+				break
+			}
+		}
+	}
+
+	if len(winners) != 1 {
+		// Zero winners or two-or-more winners: D-09 fail-closed. An
+		// ambiguous tie-break resolves to no photo, never to a guess.
+		return Result{}, nil
+	}
+	return resultFor(winners[0]), nil
 }
