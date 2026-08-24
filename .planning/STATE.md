@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: cleanup
-current_phase: 12
-status: completed
+current_phase: 13
+current_phase_name: fix-history-dates-guest-feature-art-artist-art
+status: executing
 stopped_at: Phase 13 context gathered
-last_updated: "2026-08-24T18:30:07.858Z"
+last_updated: "2026-08-24T22:05:48.871Z"
 last_activity: 2026-08-24
-last_activity_desc: "Completed quick task 260824-339: Fix code-review findings #5 and #6: extract nilIfEmpty helper in internal/httpserver/search.go, and fix stale /watchlist route literal in web/app/routes/watchlist.test.tsx"
+last_activity_desc: Phase 13 execution resumed (wave continue)
 progress:
   total_phases: 0
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
-current_phase_name: cleanup-coverart-reset-search-popularity-ranking
 ---
 
 # Project State
@@ -23,14 +23,14 @@ current_phase_name: cleanup-coverart-reset-search-popularity-ranking
 See: .planning/PROJECT.md (updated 2026-08-18)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 12 — cleanup-coverart-reset-search-popularity-ranking
+**Current focus:** Phase 13 — fix-history-dates-guest-feature-art-artist-art
 
 ## Current Position
 
-Phase: 12
-Plan: Not started
-Status: All phases complete
-Last activity: 2026-08-24 - Completed quick task 260824-339: Fix code-review findings #5 and #6: extract nilIfEmpty helper in internal/httpserver/search.go, and fix stale /watchlist route literal in web/app/routes/watchlist.test.tsx
+Phase: 13 (fix-history-dates-guest-feature-art-artist-art) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 13
+Last activity: 2026-08-24 — Phase 13 execution resumed (wave continue)
 
 ## Performance Metrics
 
