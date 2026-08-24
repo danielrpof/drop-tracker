@@ -162,17 +162,25 @@ function GuestFeatureBody({ event }: { event: EventItem }) {
   )
 }
 
-// DeluxeChangeBody shows the track-count delta as previous → current
-// tracks. A null previous_track_count is defensive-only (D-04 should
+// DeluxeChangeBody shows the release date (D-04) ahead of the track-count
+// delta as previous → current tracks, reusing NewReleaseBody's exact
+// `?? "Release date unknown"` fallback expression (D-05) -- a null
+// release_date falls back to that literal rather than rendering a blank
+// segment. A null previous_track_count is defensive-only (D-04 should
 // always populate it) and renders the current track_count alone, no arrow.
 function DeluxeChangeBody({ event }: { event: EventItem }) {
+  const dateLabel = event.release_date ?? "Release date unknown"
   const current = event.track_count ?? "?"
   if (event.previous_track_count == null) {
-    return <p className="text-label text-muted-foreground">{current} tracks</p>
+    return (
+      <p className="text-label text-muted-foreground">
+        {dateLabel} · {current} tracks
+      </p>
+    )
   }
   return (
     <p className="text-label text-muted-foreground">
-      {event.previous_track_count} → {current} tracks
+      {dateLabel} · {event.previous_track_count} → {current} tracks
     </p>
   )
 }
