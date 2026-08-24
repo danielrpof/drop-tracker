@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/danielrpof/drop-tracker/internal/artistart"
 	"github.com/danielrpof/drop-tracker/internal/config"
 	"github.com/danielrpof/drop-tracker/internal/db"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
@@ -39,6 +40,12 @@ const shutdownTimeout = 10 * time.Second
 // cycle to finish before giving up, mirroring shutdownTimeout's reasoning:
 // a hung upstream must not make the process unkillable.
 const pollDrainTimeout = 10 * time.Second
+
+// backfillDrainTimeout bounds how long shutdown waits for an in-flight
+// artist-art backfill sweep (D-07) to finish before giving up, mirroring
+// pollDrainTimeout's reasoning: a hung upstream must not make the process
+// unkillable.
+const backfillDrainTimeout = 10 * time.Second
 
 // HTTP server timeouts (WR-02): an http.Server with all zero-value timeouts
 // lets a client that opens a connection and sends headers/body slowly (or
@@ -101,22 +108,15 @@ func run(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	store := watchlist.NewService(sqlc.New(pool))
-
-	// eventsStore backs GET /events (Phase 6, HIST-01) -- a fourth
-	// sqlc.New(pool) instance, matching store/detector/notif's own pattern:
-	// sqlc.Queries is a stateless wrapper over the shared pool.
-	// cfg.EventRetentionDays (Phase 10, DATA-01) is threaded straight from
-	// boot-time config so the retention window an operator sets is what
-	// every List call actually applies.
-	eventsStore := events.NewService(sqlc.New(pool), cfg.EventRetentionDays)
-
 	// Exactly one *musicbrainz.Client and one rate.Limiter for the whole
 	// process (D-07) -- plan 03-04's poller reuses this same instance, so
 	// total outbound MusicBrainz rate stays bounded across search traffic
 	// and poll traffic together, not per-caller (T-03-08). Deliberately a
 	// separate limiter instance from dzLimiter below (D-08): MusicBrainz's
 	// ~1/sec pace must never throttle Deezer's faster pace, and vice versa.
+	// Constructed before store below (Phase 13 bug #3, 13-RESEARCH.md
+	// Pitfall 3): store's own construction now depends on a matcher that
+	// depends on this client, so this block must move ahead of it.
 	mbLimiter := rate.NewLimiter(rate.Limit(cfg.MusicBrainzRateLimitPerSec), 1)
 	mbClient := musicbrainz.NewClient(cfg.MusicBrainzUserAgent, mbLimiter, nil)
 
@@ -140,9 +140,41 @@ func run(ctx context.Context) error {
 	// budget. The rate is the per-second equivalent of Deezer's documented
 	// 50-per-5-second ceiling; the burst is the full five-second allowance,
 	// so a short burst is admitted and sustained traffic settles to the
-	// documented average.
+	// documented average. Constructed before store below, mirroring
+	// mbClient's own reordering above (Phase 13 bug #3, 13-RESEARCH.md
+	// Pitfall 3).
 	dzLimiter := rate.NewLimiter(rate.Limit(float64(cfg.DeezerRateLimitPer5s)/5.0), cfg.DeezerRateLimitPer5s)
 	dzClient := deezer.NewClient(dzLimiter, nil)
+
+	// artMatcher is the single artistart.Matcher instance serving both of
+	// D-06's call sites: the add-time option store's construction wires in
+	// below, and the startup backfill sweep further down. One shared
+	// instance is what keeps D-08's match rule and D-09's
+	// fail-closed policy from ever drifting apart between the two call
+	// sites. It reuses these exact dzClient/mbClient instances (rather than
+	// constructing separate clients) so both call sites stay inside the
+	// process-wide rate limiters above -- no second outbound budget is
+	// opened.
+	artMatcher := artistart.NewMatcher(dzClient, dzClient, mbClient)
+
+	// artActivityGate (D-10, grilling round Q1) coordinates the add-time
+	// matcher and the backfill sweep below, both of which share the same
+	// rate-limited clients: without this, the sweep would compete with
+	// every interactive add for the same budget, worst right after every
+	// deploy when the sweep's backlog is largest. This single shared gate
+	// is what lets the sweep detect and yield to interactive activity
+	// instead.
+	artActivityGate := artistart.NewActivityGate()
+
+	store := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(artMatcher, artActivityGate, logger))
+
+	// eventsStore backs GET /events (Phase 6, HIST-01) -- a fourth
+	// sqlc.New(pool) instance, matching store/detector/notif's own pattern:
+	// sqlc.Queries is a stateless wrapper over the shared pool.
+	// cfg.EventRetentionDays (Phase 10, DATA-01) is threaded straight from
+	// boot-time config so the retention window an operator sets is what
+	// every List call actually applies.
+	eventsStore := events.NewService(sqlc.New(pool), cfg.EventRetentionDays)
 
 	srv := httpserver.New(pool, store, eventsStore, []httpserver.SearchSource{
 		httpserver.NewMusicBrainzSource(mbClient),
@@ -180,6 +212,42 @@ func run(ctx context.Context) error {
 		defer cancel()
 		if err := pollr.Stop(drainCtx); err != nil {
 			logger.Error("poller drain failed", "poller_error", err.Error())
+		}
+	}()
+
+	// artistart.Backfill (D-07, cooldown-bounded per D-12, yielding per
+	// D-10) sweeps every watchlisted artist with a NULL image and no recent
+	// match attempt. Run in its own goroutine, deliberately asynchronously:
+	// the sweep's duration scales with the number of image-less watchlisted
+	// artists times the rate-limited upstream calls each needs, and
+	// blocking the listener on it would make container startup and health
+	// checks scale with watchlist size. Its own sqlc.New(pool) instance is
+	// the fifth, matching this file's existing deliberate idiom of one
+	// stateless sqlc.Queries wrapper per consumer -- do not consolidate the
+	// existing ones. Backfill itself already logs one Info summary line
+	// carrying its Stats, including the computed match rate (D-11) -- the
+	// log call below is only for a non-nil returned error, not a second
+	// summary.
+	backfillDone := make(chan struct{})
+	go func() {
+		defer close(backfillDone)
+		if _, err := artistart.Backfill(ctx, logger, sqlc.New(pool), artMatcher, artActivityGate); err != nil {
+			logger.Error("artist art backfill failed", "backfill_error", err.Error())
+		}
+	}()
+	// Deferred AFTER defer pool.Close() (above), mirroring the poller
+	// drain immediately above it: Go's LIFO defer ordering guarantees this
+	// drain also runs *before* the pool closes, so a still-in-flight
+	// backfill query at shutdown never races the pool closing underneath
+	// it (03-RESEARCH.md pitfall 4, the same failure mode the poller drain
+	// already guards against). Do not move this defer earlier in the
+	// function: doing so would silently reverse the drain-before-close
+	// ordering it depends on.
+	defer func() {
+		select {
+		case <-backfillDone:
+		case <-time.After(backfillDrainTimeout):
+			logger.Warn("artist art backfill drain timed out")
 		}
 	}()
 
