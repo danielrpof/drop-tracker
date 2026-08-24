@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-18)
 Phase: 12
 Plan: Not started
 Status: All phases complete
-Last activity: 2026-08-24 - Completed quick task 260824-2q4: Fix code-review finding #4: centralize frontend source-identity logic (isAddableSource/identityField) instead of inline musicbrainz/deezer string comparisons
+Last activity: 2026-08-24 - Completed quick task 260824-339: Fix code-review findings #5 and #6: extract nilIfEmpty helper in internal/httpserver/search.go, and fix stale /watchlist route literal in web/app/routes/watchlist.test.tsx
 
 ## Performance Metrics
 
@@ -191,6 +191,7 @@ None yet.
 | 260824-23o | Fix code-review finding #2: factor RunMusicBrainzCycle/RunDeezerCycle's duplicated bounded-fan-out logic in internal/poller/poller.go into a shared runCycle method | 2026-08-24 | f65f959 | [260824-23o-fix-code-review-finding-2-factor-runmusi](./quick/260824-23o-fix-code-review-finding-2-factor-runmusi/) |
 | 260824-2fw | Fix code-review finding #3: extract shared trimAndCap helper for handleAddWatchlist's repeated field validation in internal/httpserver/watchlist.go | 2026-08-24 | ba8f3d9 | [260824-2fw-fix-code-review-finding-3-extract-shared](./quick/260824-2fw-fix-code-review-finding-3-extract-shared/) |
 | 260824-2q4 | Fix code-review finding #4: centralize frontend source-identity logic (isAddableSource/identityField) instead of inline musicbrainz/deezer string comparisons | 2026-08-24 | d8bdd3d | [260824-2q4-fix-code-review-finding-4-centralize-fro](./quick/260824-2q4-fix-code-review-finding-4-centralize-fro/) |
+| 260824-339 | Fix code-review findings #5 and #6: extract nilIfEmpty helper in internal/httpserver/search.go, and fix stale /watchlist route literal in web/app/routes/watchlist.test.tsx | 2026-08-24 | 50b554f | [260824-339-fix-code-review-findings-5-and-6-extract](./quick/260824-339-fix-code-review-findings-5-and-6-extract/) |
 
 ### Roadmap Evolution
 
