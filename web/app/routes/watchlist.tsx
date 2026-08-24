@@ -16,6 +16,7 @@ import {
   listWatchlist,
   removeWatchlist,
 } from "~/lib/api"
+import { isAddableSource } from "~/lib/sources"
 
 // Watchlist renders the UI-02 management surface: fetches listWatchlist()
 // on mount and renders the entries in exactly the order the server
@@ -91,7 +92,7 @@ export default function Watchlist() {
     sourceName: string,
     result: SearchArtist
   ) {
-    if (sourceName !== "musicbrainz") {
+    if (!isAddableSource(sourceName)) {
       toast.error("Can't add this artist yet -- search MusicBrainz instead.")
       return
     }
