@@ -9,6 +9,7 @@ import type {
   SourceResult,
   WatchlistEntry,
 } from "~/lib/api"
+import { identityField, isAddableSource } from "~/lib/sources"
 
 // SOURCE_LABELS maps a GET /search source key to its display name -- falls
 // back to the raw key for any source not yet known here, so a future
@@ -109,11 +110,10 @@ function SourceColumn({
               sourceName={sourceName}
               artist={artist}
               alreadyWatching={
-                watchlistEntries?.some((entry) =>
-                  sourceName === "deezer"
-                    ? entry.deezer_id === artist.id
-                    : entry.mbid === artist.id
-                ) ?? false
+                watchlistEntries?.some((entry) => {
+                  const field = identityField(sourceName)
+                  return entry[field] === artist.id
+                }) ?? false
               }
               onAdd={onAdd}
             />
@@ -156,7 +156,7 @@ function SearchResultRow({
   onAdd,
 }: SearchResultRowProps) {
   const [pending, setPending] = useState(false)
-  const canAdd = sourceName === "musicbrainz"
+  const canAdd = isAddableSource(sourceName)
   const secondaryLabel = artist.disambiguation ?? artist.country
 
   async function handleClick() {
