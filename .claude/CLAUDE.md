@@ -194,4 +194,14 @@ Use the graph to narrow the search, then read the specific files it points at be
 
 A root `.graphifyignore` keeps completed and ephemeral planning docs out of the graph, excluding the closed `.planning/milestones/v1.0-phases/` directory plus `.planning/quick/`, `.planning/debug/`, `.planning/todos/`, and `.planning/research/`. These are archival churn, and indexing them buries current architecture and decisions under stale planning nodes. `PROJECT.md`, `ROADMAP.md`, `STATE.md`, `RETROSPECTIVE.md`, `MILESTONES.md`, the codebase map directory, the active phases directory, and the current milestone's phase directory all stay indexed. When a milestone completes, or quick-task and debug dirs pile up, add the newly-closed milestone's phase directory to `.graphifyignore` before the next `/graphify . --update` rebuild.
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root (not yet created; created lazily by `/domain-modeling`). See `docs/agents/domain.md`.
+
 *Hand-maintained section — it sits outside the GSD marker blocks above so `generate-claude-md` never overwrites it. Keep it last.*
