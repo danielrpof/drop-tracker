@@ -258,15 +258,16 @@ func (p *Poller) Stop(ctx context.Context) error {
 	}
 }
 
-// RunMusicBrainzCycle reads the live watchlist and calls
-// ReleaseGroupsByArtist once per entry, fanned out over a bounded worker
-// pool sized by p.mbWorkers (PERF-01), then hands the fetched results to
-// the EventRecorder seam so previously-unseen releases are recorded (Phase
-// 4, DTCT-01). A per-artist fetch or detection error is logged inside its
-// own worker and never propagated to any sibling worker or the caller
-// (PERF-03) -- one unreachable or misbehaving artist must not cost the rest
-// of the cycle.
-func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
+// runCycle carries the bounded-fan-out-with-overlap-guard mechanics shared
+// by RunMusicBrainzCycle and RunDeezerCycle: it CAS-guards against an
+// overlapping cycle for the same source, reads the live watchlist,
+// dispatches every shouldDispatch-approved entry across a worker pool
+// bounded by workers (calling fetchAndRecord for each dispatched entry),
+// and drains the notifier outbox once the pool has fully drained. source is
+// used both as the guard's identity for logging and as the cycle_id prefix
+// (D-08's per-source independence lives in the caller's choice of running
+// pointer and workers count, not in this method).
+func (p *Poller) runCycle(ctx context.Context, running *atomic.Bool, source string, workers int, shouldDispatch func(entry watchlist.Entry, logger *slog.Logger) bool, fetchAndRecord func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry)) error {
 	// Compare-and-swap, not a mutex: a tick that arrives during a run must
 	// be *skipped*, not queued behind it (D-09) -- a mutex would serialise
 	// ticks into a backlog and eventually run every missed cycle back to
@@ -274,14 +275,14 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 	// the guard also releases on an error return *and* on a panic -- a
 	// wedged flag would silently stop this source polling for the
 	// process's lifetime.
-	if !p.mbRunning.CompareAndSwap(false, true) {
-		p.logger.Warn("skipping poll cycle: previous cycle still in progress", slog.String("source", sourceMusicBrainz))
+	if !running.CompareAndSwap(false, true) {
+		p.logger.Warn("skipping poll cycle: previous cycle still in progress", slog.String("source", source))
 		return ErrCycleInProgress
 	}
-	defer p.mbRunning.Store(false)
+	defer running.Store(false)
 
-	cycleID := fmt.Sprintf("musicbrainz-%d", nextCycleID.Add(1))
-	logger := p.logger.With(slog.String("source", sourceMusicBrainz), slog.String("cycle_id", cycleID))
+	cycleID := fmt.Sprintf("%s-%d", source, nextCycleID.Add(1))
+	logger := p.logger.With(slog.String("source", source), slog.String("cycle_id", cycleID))
 	cycleStart := time.Now()
 
 	entries, err := p.store.List(ctx)
@@ -290,7 +291,7 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 	}
 
 	// Bounded fan-out (PERF-01): sem is a buffered-channel semaphore sized
-	// to p.mbWorkers, created fresh for this one cycle invocation and
+	// to workers, created fresh for this one cycle invocation and
 	// discarded when it returns -- no persistent pool, no lifecycle wiring
 	// into Start/Stop (11-RESEARCH.md "Don't Hand-Roll"). Acquiring a slot
 	// is a select against ctx.Done() rather than a plain blocking send: if
@@ -301,12 +302,16 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 	// doing that here would abandon any already-dispatched goroutines and
 	// skip wg.Wait() below, so instead the cancellation error is recorded
 	// and the loop breaks, always reaching wg.Wait().
-	sem := make(chan struct{}, p.mbWorkers)
+	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
 	var cycleErr error
 
 dispatch:
 	for _, entry := range entries {
+		if !shouldDispatch(entry, logger) {
+			continue
+		}
+
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
@@ -322,13 +327,13 @@ dispatch:
 			// caller's own defer/recover -- panics do not cross goroutine
 			// boundaries in Go, unlike the sequential loop this replaces,
 			// where a panic on one artist would unwind through the same
-			// call stack RunMusicBrainzCycle's own caller was running on.
-			// Left unrecovered here, one artist's panic (e.g. a malformed
-			// upstream response triggering a nil pointer/index-out-of-range)
-			// would crash the entire process instead of costing only that
-			// artist's own result -- the exact failure mode PERF-03's
-			// per-artist isolation exists to prevent, just via panic
-			// instead of a returned error.
+			// call stack the caller's own would run on. Left unrecovered
+			// here, one artist's panic (e.g. a malformed upstream response
+			// triggering a nil pointer/index-out-of-range) would crash the
+			// entire process instead of costing only that artist's own
+			// result -- the exact failure mode PERF-03's per-artist
+			// isolation exists to prevent, just via panic instead of a
+			// returned error.
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Error("poll worker panicked",
@@ -341,8 +346,8 @@ dispatch:
 
 			// A worker whose slot was acquired before cancellation but
 			// which has not yet started its fetch must still not issue
-			// one -- when p.mbWorkers is large enough that the dispatch
-			// loop above never blocks on sem (e.g. worker count >= entry
+			// one -- when workers is large enough that the dispatch loop
+			// above never blocks on sem (e.g. worker count >= entry
 			// count), a cancellation racing the dispatch loop would
 			// otherwise go unobserved by every already-dispatched worker,
 			// silently fetching all of them despite the cancelled
@@ -352,38 +357,15 @@ dispatch:
 				return
 			}
 
-			groups, err := p.mb.ReleaseGroupsByArtist(ctx, entry.MBID)
-			if err != nil {
-				logger.Error("poll artist failed",
-					slog.String("artist_mbid", entry.MBID),
-					slog.String("artist_name", entry.Name),
-					slog.String("musicbrainz_error", err.Error()),
-				)
-				return
-			}
-
-			logger.Info("poll result",
-				slog.String("artist_mbid", entry.MBID),
-				slog.String("artist_name", entry.Name),
-				slog.Int("item_count", len(groups)),
-			)
-
-			if err := p.events.DetectMusicBrainz(ctx, logger, entry, groups); err != nil {
-				logger.Error("detection failed",
-					slog.String("artist_mbid", entry.MBID),
-					slog.String("artist_name", entry.Name),
-					slog.String("detection_error", err.Error()),
-				)
-				return
-			}
+			fetchAndRecord(ctx, logger, entry)
 		}(entry)
 	}
 	wg.Wait()
 
 	// cycleErr is only set when the dispatch loop itself observed
-	// cancellation while waiting for a semaphore slot -- when p.mbWorkers
-	// is large enough that dispatch never blocks (e.g. worker count >=
-	// entry count, as in this cycle's default configuration over a small
+	// cancellation while waiting for a semaphore slot -- when workers is
+	// large enough that dispatch never blocks (e.g. worker count >= entry
+	// count, as in this cycle's default configuration over a small
 	// watchlist), every entry can dispatch before any worker's own
 	// in-flight ctx.Err() check (above) has a chance to run, so the
 	// dispatch loop's own select never observes the cancellation even
@@ -416,6 +398,52 @@ dispatch:
 	return nil
 }
 
+// RunMusicBrainzCycle reads the live watchlist and calls
+// ReleaseGroupsByArtist once per entry, fanned out over a bounded worker
+// pool sized by p.mbWorkers (PERF-01), then hands the fetched results to
+// the EventRecorder seam so previously-unseen releases are recorded (Phase
+// 4, DTCT-01). MusicBrainz has no skip case -- every watchlist entry is
+// dispatched, unlike RunDeezerCycle's nil-DeezerID skip. A per-artist fetch
+// or detection error is logged inside its own worker and never propagated
+// to any sibling worker or the caller (PERF-03) -- one unreachable or
+// misbehaving artist must not cost the rest of the cycle. ErrCycleInProgress
+// is returned when a previous MusicBrainz cycle is still running -- see
+// runCycle for the shared overlap-guard/fan-out mechanics.
+func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
+	shouldDispatch := func(entry watchlist.Entry, logger *slog.Logger) bool {
+		return true
+	}
+
+	fetchAndRecord := func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry) {
+		groups, err := p.mb.ReleaseGroupsByArtist(ctx, entry.MBID)
+		if err != nil {
+			logger.Error("poll artist failed",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("artist_name", entry.Name),
+				slog.String("musicbrainz_error", err.Error()),
+			)
+			return
+		}
+
+		logger.Info("poll result",
+			slog.String("artist_mbid", entry.MBID),
+			slog.String("artist_name", entry.Name),
+			slog.Int("item_count", len(groups)),
+		)
+
+		if err := p.events.DetectMusicBrainz(ctx, logger, entry, groups); err != nil {
+			logger.Error("detection failed",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("artist_name", entry.Name),
+				slog.String("detection_error", err.Error()),
+			)
+			return
+		}
+	}
+
+	return p.runCycle(ctx, &p.mbRunning, sourceMusicBrainz, p.mbWorkers, shouldDispatch, fetchAndRecord)
+}
+
 // RunDeezerCycle reads the live watchlist and calls ArtistAlbums once per
 // entry that carries a non-nil DeezerID, fanned out over a bounded worker
 // pool sized by p.dzWorkers (PERF-01), then hands the fetched albums to the
@@ -425,126 +453,52 @@ dispatch:
 // request, no recorder call, and no row -- there is no name-search fallback
 // to backfill it (D-06); this check happens before the semaphore is
 // acquired, so a skipped entry never occupies a worker slot or spawns a
-// goroutine. A per-artist fetch or detection error is logged inside its own
-// worker and never propagated to any sibling worker or the caller
-// (PERF-03).
+// goroutine. This skip is Deezer-only; RunMusicBrainzCycle dispatches every
+// entry unconditionally. A per-artist fetch or detection error is logged
+// inside its own worker and never propagated to any sibling worker or the
+// caller (PERF-03). ErrCycleInProgress is returned when a previous Deezer
+// cycle is still running -- see runCycle for the shared overlap-guard/
+// fan-out mechanics (dzRunning is a wholly independent guard from mbRunning
+// (D-08), so an overlapping MusicBrainz cycle never blocks or delays a
+// Deezer tick).
 func (p *Poller) RunDeezerCycle(ctx context.Context) error {
-	// See RunMusicBrainzCycle's comment on this same pattern -- dzRunning is
-	// a wholly independent guard from mbRunning (D-08), so an overlapping
-	// MusicBrainz cycle never blocks or delays a Deezer tick.
-	if !p.dzRunning.CompareAndSwap(false, true) {
-		p.logger.Warn("skipping poll cycle: previous cycle still in progress", slog.String("source", sourceDeezer))
-		return ErrCycleInProgress
-	}
-	defer p.dzRunning.Store(false)
-
-	cycleID := fmt.Sprintf("deezer-%d", nextCycleID.Add(1))
-	logger := p.logger.With(slog.String("source", sourceDeezer), slog.String("cycle_id", cycleID))
-	cycleStart := time.Now()
-
-	entries, err := p.store.List(ctx)
-	if err != nil {
-		return fmt.Errorf("poller: list watchlist: %w", err)
-	}
-
-	// Bounded fan-out (PERF-01), mirroring RunMusicBrainzCycle's identical
-	// pattern above -- see that function's comments for the full rationale
-	// on the semaphore, the cancellation select, and why the dispatch loop
-	// always breaks (never returns) to guarantee wg.Wait() is reached.
-	sem := make(chan struct{}, p.dzWorkers)
-	var wg sync.WaitGroup
-	var cycleErr error
-
-dispatch:
-	for _, entry := range entries {
+	shouldDispatch := func(entry watchlist.Entry, logger *slog.Logger) bool {
 		if entry.DeezerID == nil {
 			logger.Info("skipping deezer poll: no deezer_id",
 				slog.String("artist_mbid", entry.MBID),
 				slog.String("artist_name", entry.Name),
 			)
-			continue
+			return false
 		}
+		return true
+	}
 
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			cycleErr = ctx.Err()
-			break dispatch
-		}
-
-		wg.Add(1)
-		go func(entry watchlist.Entry) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			// See RunMusicBrainzCycle's identical comment on this same
-			// pattern -- a panic inside this goroutine can never be
-			// recovered by a caller's own defer/recover.
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("poll worker panicked",
-						slog.String("artist_mbid", entry.MBID),
-						slog.String("artist_name", entry.Name),
-						slog.Any("panic_value", r),
-					)
-				}
-			}()
-
-			// See RunMusicBrainzCycle's identical comment on this same
-			// check -- catches the case where p.dzWorkers is large enough
-			// that the dispatch loop above never blocks on sem.
-			if err := ctx.Err(); err != nil {
-				return
-			}
-
-			albums, err := p.dz.ArtistAlbums(ctx, *entry.DeezerID, deezerAlbumPageSize)
-			if err != nil {
-				logger.Error("poll artist failed",
-					slog.String("artist_mbid", entry.MBID),
-					slog.String("artist_name", entry.Name),
-					slog.String("deezer_error", err.Error()),
-				)
-				return
-			}
-
-			logger.Info("poll result",
+	fetchAndRecord := func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry) {
+		albums, err := p.dz.ArtistAlbums(ctx, *entry.DeezerID, deezerAlbumPageSize)
+		if err != nil {
+			logger.Error("poll artist failed",
 				slog.String("artist_mbid", entry.MBID),
 				slog.String("artist_name", entry.Name),
-				slog.Int("item_count", len(albums)),
+				slog.String("deezer_error", err.Error()),
 			)
+			return
+		}
 
-			if err := p.events.DetectDeezer(ctx, logger, entry, albums); err != nil {
-				logger.Error("detection failed",
-					slog.String("artist_mbid", entry.MBID),
-					slog.String("artist_name", entry.Name),
-					slog.String("detection_error", err.Error()),
-				)
-				return
-			}
-		}(entry)
-	}
-	wg.Wait()
+		logger.Info("poll result",
+			slog.String("artist_mbid", entry.MBID),
+			slog.String("artist_name", entry.Name),
+			slog.Int("item_count", len(albums)),
+		)
 
-	// See RunMusicBrainzCycle's identical comment on this same re-check --
-	// catches cancellation when p.dzWorkers is large enough that the
-	// dispatch loop's own select never blocks and so never observes it.
-	if cycleErr == nil {
-		cycleErr = ctx.Err()
-	}
-
-	logger.Info("poll cycle complete",
-		slog.Int("artist_count", len(entries)),
-		slog.Int64("duration_ms", time.Since(cycleStart).Milliseconds()),
-	)
-
-	if cycleErr != nil {
-		return cycleErr
+		if err := p.events.DetectDeezer(ctx, logger, entry, albums); err != nil {
+			logger.Error("detection failed",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("artist_name", entry.Name),
+				slog.String("detection_error", err.Error()),
+			)
+			return
+		}
 	}
 
-	// See RunMusicBrainzCycle's identical comment on this same call -- D-05,
-	// logged not returned.
-	if err := p.notifier.NotifyPending(ctx, logger); err != nil {
-		logger.Error("notify pending failed", slog.String("notifier_error", err.Error()))
-	}
-
-	return nil
+	return p.runCycle(ctx, &p.dzRunning, sourceDeezer, p.dzWorkers, shouldDispatch, fetchAndRecord)
 }
