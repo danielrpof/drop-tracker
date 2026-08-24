@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-18)
 Phase: 12
 Plan: Not started
 Status: All phases complete
-Last activity: 2026-08-23 — Phase 12 complete
+Last activity: 2026-08-24 - Completed quick task 260824-1gy: Fix code-review finding: extract shared rate-limited HTTP client seam from musicbrainz/deezer clients into internal/httpclient
 
 ## Performance Metrics
 
@@ -187,6 +187,7 @@ None yet.
 | 260817-cfu | Bump the Dockerfile's Go builder-stage base image from golang:1.26.5-alpine3.24 to a patched release to fix 8 HIGH-severity stdlib CVEs failing the Trivy build-scan gate in CI | 2026-08-17 | 4f58465 | [260817-cfu-bump-the-dockerfile-s-go-builder-stage-b](./quick/260817-cfu-bump-the-dockerfile-s-go-builder-stage-b/) |
 | 260823-sp6 | Add a note in CLAUDE.md instructing agents to use graphify (the knowledge graph in graphify-out/) whenever possible for codebase questions, to save tokens and be more efficient | 2026-08-23 | 336e2ef | [260823-sp6-add-a-note-in-claude-md-instructing-agen](./quick/260823-sp6-add-a-note-in-claude-md-instructing-agen/) |
 | 260823-t7n | Prevent graphify knowledge graph from being bloated with stale/completed planning docs: add .graphifyignore excluding archival planning content and note the convention in CLAUDE.md's graphify section | 2026-08-23 | e2006ab | [260823-t7n-prevent-graphify-knowledge-graph-from-be](./quick/260823-t7n-prevent-graphify-knowledge-graph-from-be/) |
+| 260824-1gy | Fix code-review finding: extract shared rate-limited HTTP client seam from musicbrainz/deezer clients into internal/httpclient | 2026-08-24 | 0d0050f | [260824-1gy-fix-code-review-finding-extract-shared-r](./quick/260824-1gy-fix-code-review-finding-extract-shared-r/) |
 
 ### Roadmap Evolution
 
