@@ -51,7 +51,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Goal:** Close two loose ends left after v1.1 closes: (1) `CoverArt.tsx`'s image-load-error state never resets when `src` changes on a retained component instance, so a component that once failed to load keeps showing the placeholder forever even if a later `src` would succeed — flagged in `.planning/v1.1-MILESTONE-AUDIT.md` as pre-existing, non-blocking tech debt; (2) promoted from backlog Phase 999.1 — search results aren't ranked by popularity and same-named artists (e.g. multiple "Drake"s) are hard to disambiguate, since MusicBrainz's search API doesn't rank by popularity and its `disambiguation` field is often blank.
 **Requirements**: TBD — no REQ-IDs mapped; `12-CONTEXT.md`'s locked decisions D-01 through D-10 are the authoritative scope and are traced through the plans' `requirements` fields
 **Depends on:** Phase 11
-**Plans:** 3/3 plans executed
+**Plans:** 3/3 plans complete
 
 Context:
 
