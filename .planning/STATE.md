@@ -5,9 +5,9 @@ milestone_name: cleanup
 current_phase: 12
 status: completed
 stopped_at: Phase 12 context gathered
-last_updated: "2026-08-24T01:36:34.127Z"
+last_updated: "2026-08-24T02:01:58.483Z"
 last_activity: 2026-08-23
-last_activity_desc: Completed quick task 260823-sp6: Add a note in CLAUDE.md instructing agents to use graphify whenever possible for codebase questions
+last_activity_desc: Completed quick task 260823-t7n: Prevent graphify knowledge graph from being bloated with stale/completed planning docs
 progress:
   total_phases: 0
   completed_phases: 0
@@ -186,6 +186,7 @@ None yet.
 | 260808-pt0 | Close out Phase 5: commit docs, cleanup stray binary, mark phase complete, close backstop truncation test | 2026-08-08 | cbe73af | [260808-pt0-close-out-phase-5-commit-docs-cleanup-st](./quick/260808-pt0-close-out-phase-5-commit-docs-cleanup-st/) |
 | 260817-cfu | Bump the Dockerfile's Go builder-stage base image from golang:1.26.5-alpine3.24 to a patched release to fix 8 HIGH-severity stdlib CVEs failing the Trivy build-scan gate in CI | 2026-08-17 | 4f58465 | [260817-cfu-bump-the-dockerfile-s-go-builder-stage-b](./quick/260817-cfu-bump-the-dockerfile-s-go-builder-stage-b/) |
 | 260823-sp6 | Add a note in CLAUDE.md instructing agents to use graphify (the knowledge graph in graphify-out/) whenever possible for codebase questions, to save tokens and be more efficient | 2026-08-23 | 336e2ef | [260823-sp6-add-a-note-in-claude-md-instructing-agen](./quick/260823-sp6-add-a-note-in-claude-md-instructing-agen/) |
+| 260823-t7n | Prevent graphify knowledge graph from being bloated with stale/completed planning docs: add .graphifyignore excluding archival planning content and note the convention in CLAUDE.md's graphify section | 2026-08-23 | e2006ab | [260823-t7n-prevent-graphify-knowledge-graph-from-be](./quick/260823-t7n-prevent-graphify-knowledge-graph-from-be/) |
 
 ### Roadmap Evolution
 
