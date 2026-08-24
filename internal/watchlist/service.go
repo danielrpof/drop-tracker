@@ -9,13 +9,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/danielrpof/drop-tracker/internal/artistart"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// matchTimeout bounds the add-time artist-art match attempt Service.Add
+// makes when a caller supplies no ImageURL (D-06). This bound is
+// load-bearing, not decorative: artistart.Matcher.Match's tie-break path can
+// reach the MusicBrainz limiter, a whole-process budget shared with the poll
+// cycle and paced near one request per second (D-07), and
+// cmd/server/main.go sets the HTTP server's write timeout to 15 seconds.
+// Without this bound, a saturated limiter could turn an add request into a
+// write-timeout failure instead of merely an add with no resolved art.
+const matchTimeout = 8 * time.Second
 
 // ReleaseTypes and EventTypes mirror the watchlist_release_types_valid and
 // watchlist_muted_event_types_valid CHECK constraints
@@ -91,14 +103,62 @@ type Store interface {
 	Remove(ctx context.Context, id int64) error
 }
 
+// ArtistMatcher is the narrow seam Service depends on to resolve artist art
+// at add time (D-06) -- declared here, in the consumer, mirroring
+// detection.RecordingSource (internal/detection/detector.go), so tests
+// substitute a stub instead of a concrete *artistart.Matcher. artistart must
+// not import watchlist; this package is the only side of the dependency.
+type ArtistMatcher interface {
+	Match(ctx context.Context, mbid, name string) (artistart.Result, error)
+}
+
+// Option customizes a Service's construction, mirroring poller.Option's
+// functional-option pattern (poller.New builds a Poller from its defaults
+// and applies each supplied option in order). This is load-bearing for diff
+// size: NewService has call sites in cmd/server/main.go and across
+// internal/httpserver's test files, and a variadic option is what lets all
+// of them compile unchanged when a new dependency is added.
+type Option func(*Service)
+
+// WithArtistArt supplies the add-time artist-art match dependency (D-06,
+// D-10). gate is optional: nil means "no coordination with a backfill
+// sweep" (e.g. in tests, or a hypothetical deployment with no backfill) --
+// WithArtistArt never panics or nil-dereferences when handed one, and Add
+// simply skips registering on it. logger falls back to slog.Default() when
+// nil, since this option is useless without a way to report a failed or
+// unresolved match rather than silently swallowing it.
+func WithArtistArt(m ArtistMatcher, gate *artistart.ActivityGate, logger *slog.Logger) Option {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return func(s *Service) {
+		s.matcher = m
+		s.activityGate = gate
+		s.logger = logger
+	}
+}
+
 // Service is the sqlc-backed implementation of Store.
 type Service struct {
 	q sqlc.Querier
+
+	// matcher, activityGate and logger are populated only by WithArtistArt.
+	// matcher == nil is the "no art matching configured" state Add gates on
+	// -- NewService(q) with no options behaves exactly as it did before D-06.
+	matcher      ArtistMatcher
+	activityGate *artistart.ActivityGate
+	logger       *slog.Logger
 }
 
-// NewService builds a Service backed by q.
-func NewService(q sqlc.Querier) *Service {
-	return &Service{q: q}
+// NewService builds a Service backed by q, applying each supplied Option in
+// order. With no options, behavior is unchanged from before D-06: no art
+// match attempt is ever made.
+func NewService(q sqlc.Querier, opts ...Option) *Service {
+	s := &Service{q: q}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 var _ Store = (*Service)(nil)
@@ -133,6 +193,50 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 		if err != nil {
 			return Entry{}, err
 		}
+	}
+
+	// D-06: resolve artist art synchronously when the caller supplied none.
+	// Gated on s.matcher != nil so a Service built with NewService(q) (no
+	// options) never attempts a match. Art resolution can fail in any way
+	// -- no match, upstream error, timeout -- without ever failing the add
+	// (D-09): a Match error is logged and the add proceeds with no art.
+	if s.matcher != nil && p.ImageURL == nil {
+		matchCtx, cancel := context.WithTimeout(ctx, matchTimeout)
+
+		// D-10: register on the shared ActivityGate for exactly the
+		// duration of this match call, so a concurrently-running backfill
+		// sweep (artistart.Backfill, sibling plan) can detect it and yield.
+		// gate is optional -- nil simply means no coordination to perform.
+		var end func()
+		if s.activityGate != nil {
+			end = s.activityGate.Begin()
+		}
+
+		res, matchErr := s.matcher.Match(matchCtx, p.MBID, p.Name)
+		cancel()
+		if end != nil {
+			end()
+		}
+
+		switch {
+		case matchErr != nil:
+			s.logger.Warn("artist art match failed",
+				slog.String("artist_mbid", p.MBID),
+				slog.String("artist_name", p.Name),
+				slog.String("error", matchErr.Error()),
+			)
+		case res.Matched:
+			// A caller-supplied Deezer id always wins over a matched one;
+			// ImageURL is only ever nil here (the gate above already
+			// required it), so it is always assigned outright.
+			p.ImageURL = res.ImageURL
+			if p.DeezerID == nil {
+				p.DeezerID = res.DeezerID
+			}
+		}
+		// res.Matched == false: D-09 fail-closed. Leave p.ImageURL/p.DeezerID
+		// exactly as they were -- UpsertArtist's COALESCE clauses below
+		// preserve whatever the row already holds.
 	}
 
 	artist, err := s.q.UpsertArtist(ctx, sqlc.UpsertArtistParams{
