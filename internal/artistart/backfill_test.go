@@ -155,6 +155,33 @@ func TestBackfill_UnmatchedArtist_NoUpsertButRecordsAttempt(t *testing.T) {
 	}
 }
 
+// WR-02 (13-REVIEW.md): when RecordArtMatchAttempt fails for an unmatched
+// artist, Stats must count that artist as Errored only -- not also as
+// Unmatched -- so Matched+Unmatched+Errored keeps summing to Visited per
+// the Stats doc comment's own invariant.
+func TestBackfill_UnmatchedArtist_RecordAttemptFails_CountsErroredNotUnmatched(t *testing.T) {
+	artists := []sqlc.Artist{{Mbid: "mb-unmatched-err", Name: "No Match Artist"}}
+	// No configured outcome for this name: zero candidates, D-09 fail-closed.
+	searcher := perArtistSearcher{byName: map[string]perArtistOutcome{}}
+	m := NewMatcher(searcher, &stubAlbumLister{}, &stubGroupLister{})
+	store := &stubStore{
+		artists:          artists,
+		attemptErrByMbid: map[string]error{"mb-unmatched-err": errors.New("write failed")},
+	}
+
+	stats, err := Backfill(context.Background(), testLogger(), store, m, nil)
+	if err != nil {
+		t.Fatalf("Backfill: %v", err)
+	}
+
+	if stats.Visited != 1 || stats.Matched != 0 || stats.Unmatched != 0 || stats.Errored != 1 {
+		t.Fatalf("stats = %+v, want Visited=1 Matched=0 Unmatched=0 Errored=1 (a failed RecordArtMatchAttempt must not also count as Unmatched)", stats)
+	}
+	if got := stats.Matched + stats.Unmatched + stats.Errored; got != stats.Visited {
+		t.Fatalf("Matched+Unmatched+Errored = %d, want %d (Visited) -- Stats' own documented invariant", got, stats.Visited)
+	}
+}
+
 func TestBackfill_MatchError_NoUpsertNoRecordAttempt_ContinuesOthers(t *testing.T) {
 	artists := []sqlc.Artist{
 		{Mbid: "mb-ok-1", Name: "Good Artist One"},
