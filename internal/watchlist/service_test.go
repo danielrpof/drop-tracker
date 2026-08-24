@@ -45,6 +45,11 @@ type stubMatcher struct {
 
 	blockUntil chan struct{}
 
+	// panicWith, when non-nil, makes Match panic with this value instead of
+	// returning -- used to drive WR-03's ActivityGate-leak-on-panic
+	// regression test (13-REVIEW.md).
+	panicWith any
+
 	calls [][2]string // [mbid, name] per call, in order
 }
 
@@ -52,6 +57,9 @@ func (m *stubMatcher) Match(_ context.Context, mbid, name string) (artistart.Res
 	m.calls = append(m.calls, [2]string{mbid, name})
 	if m.blockUntil != nil {
 		<-m.blockUntil
+	}
+	if m.panicWith != nil {
+		panic(m.panicWith)
 	}
 	return m.result, m.err
 }
@@ -1968,5 +1976,38 @@ func TestService_Add_ArtistArt_ActivityGateActiveDuringMatch(t *testing.T) {
 
 	if gate.Active() {
 		t.Fatal("gate.Active() == true after Add returned, want false")
+	}
+}
+
+// TestService_Add_ArtistArt_ActivityGateReleasedEvenIfMatchPanics is
+// -race-clean and proves WR-03's fix (13-REVIEW.md): a panic inside
+// Matcher.Match must not leak the ActivityGate registration permanently
+// active. Before the fix, cancel()/end() were plain (non-deferred)
+// statements after the Match call, so a panic skipped them entirely.
+func TestService_Add_ArtistArt_ActivityGateReleasedEvenIfMatchPanics(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	gate := artistart.NewActivityGate()
+	stub := &stubMatcher{panicWith: "simulated Match panic"}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, gate, testLogger()))
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("Add did not panic, want it to propagate the stubMatcher panic")
+			}
+		}()
+		_, _ = svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Activity Gate Panic Test"})
+	}()
+
+	if gate.Active() {
+		t.Fatal("gate.Active() == true after Match panicked, want false (ActivityGate registration must not leak)")
 	}
 }
