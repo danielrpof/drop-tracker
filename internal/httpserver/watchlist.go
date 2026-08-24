@@ -174,24 +174,24 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 	// field was absent from the body) is left untouched; only a supplied
 	// value is trimmed and measured.
 	if req.DeezerID != nil {
-		v := strings.TrimSpace(*req.DeezerID)
-		if utf8.RuneCountInString(v) > maxDeezerIDRunes {
+		v, ok := trimAndCap(*req.DeezerID, maxDeezerIDRunes)
+		if !ok {
 			writeError(w, http.StatusBadRequest, "deezer_id must be at most 64 characters")
 			return
 		}
 		req.DeezerID = &v
 	}
 	if req.Disambiguation != nil {
-		v := strings.TrimSpace(*req.Disambiguation)
-		if utf8.RuneCountInString(v) > maxDisambiguationRunes {
+		v, ok := trimAndCap(*req.Disambiguation, maxDisambiguationRunes)
+		if !ok {
 			writeError(w, http.StatusBadRequest, "disambiguation must be at most 512 characters")
 			return
 		}
 		req.Disambiguation = &v
 	}
 	if req.ImageURL != nil {
-		v := strings.TrimSpace(*req.ImageURL)
-		if utf8.RuneCountInString(v) > maxImageURLRunes {
+		v, ok := trimAndCap(*req.ImageURL, maxImageURLRunes)
+		if !ok {
 			writeError(w, http.StatusBadRequest, "image_url must be at most 2048 characters")
 			return
 		}
