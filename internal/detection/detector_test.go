@@ -1293,6 +1293,216 @@ func TestDetectMusicBrainz_GuestFeature_SourceErrorPreservesNewReleases(t *testi
 	}
 }
 
+// The tests below (13-01 task 2) prove D-02's precision-aware earliest-date
+// rule, D-03's no-releases fallback, OQ-02's per-recording error isolation,
+// and D-13's per-cycle lookup cap all reach the database correctly, not just
+// their unit-level helpers (musicbrainz_test.go's TestEarliestReleaseDate/
+// TestGuestFeatureArt).
+
+func TestDetectMusicBrainz_GuestFeature_EarliestDateReachesDB(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Earliest Date DB Artist")
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Earliest Date DB Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+
+	recordingMBID := mbid + "-rec1"
+	recordings := []musicbrainz.Recording{
+		{
+			MBID:  recordingMBID,
+			Title: "Feature Track",
+			ArtistCredit: []musicbrainz.ArtistCreditEntry{
+				mkCredit("primary-mbid-0000", "Primary Artist"),
+				mkCredit(mbid, "Earliest Date DB Artist"),
+			},
+		},
+	}
+	// A same-year prefix pair ("2020" vs "2020-01-05") proves the DB-level
+	// wiring uses earliestReleaseDate's corrected comparator, not a plain
+	// lexicographic pick that would wrongly choose "2020".
+	releasesForRecording := map[string][]musicbrainz.RecordingRelease{
+		recordingMBID: {
+			{MBID: "rel-vague", Title: "Reissue", Date: "2020", ReleaseGroup: musicbrainz.RecordingReleaseGroup{MBID: "rg-vague"}},
+			{MBID: "rel-precise", Title: "Original", Date: "2020-01-05", ReleaseGroup: musicbrainz.RecordingReleaseGroup{MBID: "rg-precise"}},
+		},
+	}
+
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings, releasesForRecording: releasesForRecording}, &fakeReleaseDetailSource{})
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	var releaseDate string
+	if err := pool.QueryRow(ctx, "SELECT release_date FROM events WHERE artist_id = $1 AND event_type = 'guest_feature' AND external_id = $2", artistID, recordingMBID).Scan(&releaseDate); err != nil {
+		t.Fatalf("query release_date: %v", err)
+	}
+	if releaseDate != "2020-01-05" {
+		t.Fatalf("release_date = %q, want %q (the more precise same-year date, not the vaguer one)", releaseDate, "2020-01-05")
+	}
+}
+
+func TestDetectMusicBrainz_GuestFeature_EmptyReleaseListInsertsWithNulls(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Empty Release List Artist")
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Empty Release List Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+
+	recordingMBID := mbid + "-rec1"
+	recordings := []musicbrainz.Recording{
+		{
+			MBID:  recordingMBID,
+			Title: "Feature Track",
+			ArtistCredit: []musicbrainz.ArtistCreditEntry{
+				mkCredit("primary-mbid-0000", "Primary Artist"),
+				mkCredit(mbid, "Empty Release List Artist"),
+			},
+		},
+	}
+	// releasesForRecording deliberately omits recordingMBID -- the fake's
+	// zero-value default (nil slice, nil error) mirrors a lookup that
+	// succeeds but returns no releases (D-03).
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings}, &fakeReleaseDetailSource{})
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	var count int
+	var releaseGroupMbid, releaseDate, coverArtURL *string
+	row := pool.QueryRow(ctx, `SELECT release_group_mbid, release_date, cover_art_url
+		FROM events WHERE artist_id = $1 AND event_type = 'guest_feature' AND external_id = $2`, artistID, recordingMBID)
+	if err := row.Scan(&releaseGroupMbid, &releaseDate, &coverArtURL); err != nil {
+		t.Fatalf("query guest_feature row: %v", err)
+	}
+	if releaseGroupMbid != nil {
+		t.Errorf("release_group_mbid = %v, want NULL", *releaseGroupMbid)
+	}
+	if releaseDate != nil {
+		t.Errorf("release_date = %v, want NULL", *releaseDate)
+	}
+	if coverArtURL != nil {
+		t.Errorf("cover_art_url = %v, want NULL", *coverArtURL)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'guest_feature'", artistID).Scan(&count); err != nil {
+		t.Fatalf("count guest_feature events: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("guest_feature event row count = %d, want 1 (D-03: still inserted, just with NULL date/art)", count)
+	}
+}
+
+func TestDetectMusicBrainz_GuestFeature_PerRecordingLookupErrorIsolated(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Per Recording Error Artist")
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Per Recording Error Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+
+	okMBID1 := mbid + "-rec-ok-1"
+	failMBID := mbid + "-rec-fail"
+	okMBID2 := mbid + "-rec-ok-2"
+	recordings := []musicbrainz.Recording{
+		{MBID: okMBID1, Title: "OK Track 1", ArtistCredit: []musicbrainz.ArtistCreditEntry{mkCredit("primary-mbid-0000", "Primary Artist"), mkCredit(mbid, "Per Recording Error Artist")}},
+		{MBID: failMBID, Title: "Failing Track", ArtistCredit: []musicbrainz.ArtistCreditEntry{mkCredit("primary-mbid-0000", "Primary Artist"), mkCredit(mbid, "Per Recording Error Artist")}},
+		{MBID: okMBID2, Title: "OK Track 2", ArtistCredit: []musicbrainz.ArtistCreditEntry{mkCredit("primary-mbid-0000", "Primary Artist"), mkCredit(mbid, "Per Recording Error Artist")}},
+	}
+
+	d := detection.New(sqlc.New(pool), erroringRecordingSource{
+		recordings: recordings,
+		errByMBID:  map[string]error{failMBID: errors.New("recording release lookup failed")},
+	}, &fakeReleaseDetailSource{})
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v, want nil (a per-recording lookup error must not fail the cycle)", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'guest_feature'", artistID).Scan(&count); err != nil {
+		t.Fatalf("count guest_feature events: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("guest_feature event row count = %d, want 2 (the two siblings still insert; only the failing recording is skipped)", count)
+	}
+	var failCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'guest_feature' AND external_id = $2", artistID, failMBID).Scan(&failCount); err != nil {
+		t.Fatalf("count failing recording's events: %v", err)
+	}
+	if failCount != 0 {
+		t.Fatalf("failing recording's event row count = %d, want 0", failCount)
+	}
+}
+
+func TestDetectMusicBrainz_GuestFeature_PerCycleLookupCap(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Lookup Cap Artist")
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Lookup Cap Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+
+	const totalRecordings = 25 // maxNewGuestFeatureLookupsPerCycle (20) + 5
+	recordings := make([]musicbrainz.Recording, totalRecordings)
+	releasesForRecording := make(map[string][]musicbrainz.RecordingRelease, totalRecordings)
+	for i := 0; i < totalRecordings; i++ {
+		recMBID := fmt.Sprintf("%s-rec%d", mbid, i)
+		recordings[i] = musicbrainz.Recording{
+			MBID:  recMBID,
+			Title: fmt.Sprintf("Track %d", i),
+			ArtistCredit: []musicbrainz.ArtistCreditEntry{
+				mkCredit("primary-mbid-0000", "Primary Artist"),
+				mkCredit(mbid, "Lookup Cap Artist"),
+			},
+		}
+		releasesForRecording[recMBID] = []musicbrainz.RecordingRelease{
+			{MBID: "rel-" + recMBID, Title: "Album", Date: "2020-01-01", ReleaseGroup: musicbrainz.RecordingReleaseGroup{MBID: "rg-" + recMBID}},
+		}
+	}
+
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings, releasesForRecording: releasesForRecording}, &fakeReleaseDetailSource{})
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'guest_feature'", artistID).Scan(&count); err != nil {
+		t.Fatalf("count guest_feature events: %v", err)
+	}
+	if count != 20 {
+		t.Fatalf("guest_feature event row count = %d, want 20 (maxNewGuestFeatureLookupsPerCycle)", count)
+	}
+
+	// The excess recordings must be absent from the seen store too (not
+	// just un-inserted), so a subsequent cycle would reconsider them --
+	// re-running the same cycle must insert the remaining 5.
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+		t.Fatalf("DetectMusicBrainz (second cycle): %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'guest_feature'", artistID).Scan(&count); err != nil {
+		t.Fatalf("count guest_feature events after second cycle: %v", err)
+	}
+	if count != totalRecordings {
+		t.Fatalf("guest_feature event row count after second cycle = %d, want %d (the excess 5 must have been eligible again)", count, totalRecordings)
+	}
+}
+
+// erroringRecordingSource is a controllable detection.RecordingSource double
+// that fails ReleasesForRecording only for mbids listed in errByMBID --
+// unlike fakeRecordingSource's single err field (all-or-nothing), this lets
+// a test fail exactly one recording's lookup while its siblings succeed.
+type erroringRecordingSource struct {
+	recordings []musicbrainz.Recording
+	errByMBID  map[string]error
+}
+
+func (s erroringRecordingSource) RecordingsByArtist(ctx context.Context, mbid string) ([]musicbrainz.Recording, error) {
+	return s.recordings, nil
+}
+
+func (s erroringRecordingSource) ReleasesForRecording(ctx context.Context, mbid string) ([]musicbrainz.RecordingRelease, error) {
+	if err, ok := s.errByMBID[mbid]; ok {
+		return nil, err
+	}
+	return nil, nil
+}
+
 // The tests below (04-04 task 1) prove DTCT-02's deluxe/tracklist-change
 // slice end-to-end: for a release-group already in the seen store, a
 // per-release track-count fetch is compared against a persisted baseline,

@@ -18,6 +18,21 @@ const (
 	eventTypeNewRelease   = "new_release"
 	eventTypeGuestFeature = "guest_feature"
 	eventTypeDeluxeChange = "deluxe_change"
+
+	// maxNewGuestFeatureLookupsPerCycle bounds one artist's contribution to
+	// a single detectGuestFeatures call's ReleasesForRecording lookup
+	// volume (D-13, grilling round Q5). Every worker in the poll cycle's
+	// worker pool (internal/poller's WithMusicBrainzWorkers) shares one
+	// process-wide MusicBrainz rate.Limiter, so a single newly-added artist
+	// whose seed cycle surfaces dozens of new guest-feature recordings
+	// could otherwise consume that whole cycle's rate budget on its own --
+	// this cap bounds one artist's worst-case contribution to a cycle's
+	// wall-clock cost, not cross-artist blocking, which the worker pool
+	// already handles by dispatching artists concurrently. Once reached,
+	// the remaining not-yet-looked-up recordings for this artist are
+	// simply skipped this cycle (not inserted, not marked seen), exactly
+	// like a lookup error, so they are naturally retried next cycle.
+	maxNewGuestFeatureLookupsPerCycle = 20
 )
 
 // DetectMusicBrainz diffs groups -- freshly fetched for entry via
@@ -190,6 +205,9 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 	}
 
 	inserted := 0
+	lookupCount := 0
+	lookupCapReachedAt := 0
+	releaseLinkCeilingCount := 0
 	// range only -- recordings is externally-supplied (T-04-12, ASVS V5);
 	// isGuestFeature applies its own defensive length guard before indexing.
 	for _, rec := range recordings {
@@ -200,39 +218,58 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 			continue
 		}
 
-		// D-01: source a release date and release-group MBID for this
-		// genuinely-new recording via one per-recording lookup. This first
-		// pass takes the first release carrying both a non-empty Date and a
-		// non-empty ReleaseGroup.MBID; Task 2 replaces this provisional
-		// pick with D-02's precision-aware earliest-date rule.
-		releases, err := d.recordings.ReleasesForRecording(ctx, rec.MBID)
-		if err != nil {
-			return fmt.Errorf("detection: detect guest features: %w", err)
-		}
-		var releaseGroupMBID, releaseDate string
-		// range only -- releases is externally-supplied (T-04-12, ASVS V5).
-		for _, r := range releases {
-			if r.Date != "" && r.ReleaseGroup.MBID != "" {
-				releaseGroupMBID = r.ReleaseGroup.MBID
-				releaseDate = r.Date
-				break
+		// D-13: once this artist's cycle has spent its lookup budget, the
+		// remaining not-yet-looked-up recordings are skipped entirely --
+		// not inserted, not marked seen -- exactly like a lookup error, so
+		// they are naturally retried next cycle rather than consuming the
+		// whole poll cycle's shared rate budget.
+		if lookupCount >= maxNewGuestFeatureLookupsPerCycle {
+			if lookupCapReachedAt == 0 {
+				lookupCapReachedAt = maxNewGuestFeatureLookupsPerCycle
 			}
+			continue
 		}
 
+		// D-01: source a release date and release-group MBID for this
+		// genuinely-new recording via one per-recording lookup.
+		releases, err := d.recordings.ReleasesForRecording(ctx, rec.MBID)
+		lookupCount++
+		if err != nil {
+			// OQ-02: a per-recording lookup error is isolated to that one
+			// recording -- it is not inserted this cycle and is retried
+			// next cycle because it never enters the seen store. Every
+			// other recording in this browse result still gets processed.
+			logger.Error("recording release lookup failed",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("recording_mbid", rec.MBID),
+				slog.String("musicbrainz_error", err.Error()),
+			)
+			continue
+		}
+		if len(releases) >= musicbrainz.MaxRecordingReleaseLinks {
+			releaseLinkCeilingCount++
+		}
+
+		// D-02 (amended, grilling round Q2): earliestReleaseDate picks the
+		// precision-aware earliest date. guestFeatureArt independently
+		// finds any release carrying a release-group MBID -- the date and
+		// the cover-art source need not come from the same release.
+		releaseDate := earliestReleaseDate(releases)
+		releaseGroupMBID, coverArt := guestFeatureArt(releases)
+
 		params := sqlc.InsertEventParams{
-			ArtistID:   entry.ArtistID,
-			Source:     sourceMusicBrainz,
-			EventType:  eventTypeGuestFeature,
-			ExternalID: rec.MBID,
-			Title:      rec.Title,
-			ArtistName: displayArtistName(rec, entry.Name),
-			NotifiedAt: notifiedAt,
+			ArtistID:    entry.ArtistID,
+			Source:      sourceMusicBrainz,
+			EventType:   eventTypeGuestFeature,
+			ExternalID:  rec.MBID,
+			Title:       rec.Title,
+			ArtistName:  displayArtistName(rec, entry.Name),
+			ReleaseDate: nullableString(releaseDate),
+			NotifiedAt:  notifiedAt,
 		}
 		if releaseGroupMBID != "" {
-			coverArt := coverArtURLForReleaseGroup(releaseGroupMBID)
 			groupMBID := releaseGroupMBID
 			params.ReleaseGroupMbid = &groupMBID
-			params.ReleaseDate = nullableString(releaseDate)
 			params.CoverArtUrl = &coverArt
 		}
 
@@ -260,6 +297,8 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 		slog.Int("inserted_count", inserted),
 		slog.Bool("seed_mode", seedMode),
 		slog.Bool("page_ceiling_reached", pageCeilingReached),
+		slog.Int("release_link_ceiling_count", releaseLinkCeilingCount),
+		slog.Int("guest_feature_lookup_cap_reached_at", lookupCapReachedAt),
 	)
 
 	return nil
@@ -494,6 +533,86 @@ func displayArtistName(rec musicbrainz.Recording, fallback string) string {
 		return first.Name
 	}
 	return fallback
+}
+
+// earliestReleaseDate implements D-02 as amended by the grilling round's
+// Q2: picks the earliest release date among releases. Dates are never
+// parsed into time.Time -- MusicBrainz partial dates (year-only,
+// year-month) can't round-trip through time.Time without inventing a
+// month/day, mirroring musicbrainz.Release.Date's existing rationale.
+//
+// Empty-string dates are filtered first (an empty string would otherwise
+// sort before every real date), and the remainder is folded pairwise via
+// earlierDate, never plain `min` via `<` -- earlierDate applies three rules
+// in order: (1) different years, smaller year wins outright; (2) same
+// year, one date a strict prefix of the other (a precision difference,
+// e.g. "2020" vs "2020-01-05") -- the LONGER, more precise date wins, the
+// exact case the original plain-`<` design got wrong (D-02's amendment:
+// "2020" < "2020-01-05" lexicographically, which would wrongly pick the
+// vaguer date); (3) same year, equal precision (neither a prefix of the
+// other, e.g. two different months) -- plain Go `<` is correct here.
+func earliestReleaseDate(releases []musicbrainz.RecordingRelease) string {
+	earliest := ""
+	// range only -- releases is externally-supplied (T-04-12, ASVS V5).
+	for _, r := range releases {
+		if r.Date == "" {
+			continue
+		}
+		if earliest == "" {
+			earliest = r.Date
+			continue
+		}
+		earliest = earlierDate(earliest, r.Date)
+	}
+	return earliest
+}
+
+// earlierDate returns whichever of a, b is earlier under
+// earliestReleaseDate's precision-aware rule. Both a and b are guaranteed
+// non-empty and at least 4 characters (a full year) by
+// earliestReleaseDate's empty-string filter -- MusicBrainz partial dates
+// always start with a full year.
+func earlierDate(a, b string) string {
+	yearA, yearB := a[:4], b[:4]
+	if yearA != yearB {
+		// Safe: both are fixed-width 4-digit numerals, so lexicographic
+		// and numeric ordering agree.
+		if yearA < yearB {
+			return a
+		}
+		return b
+	}
+	// Same year: a precision difference (one is a strict prefix of the
+	// other) is not resolved by plain string comparison -- the more
+	// precise value wins, e.g. "2020" vs "2020-01-05" -> "2020-01-05".
+	if strings.HasPrefix(b, a) {
+		return b
+	}
+	if strings.HasPrefix(a, b) {
+		return a
+	}
+	// Equal precision, same year (e.g. "2020-03" vs "2020-01"): plain
+	// comparison is correct here.
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// guestFeatureArt returns the first non-empty release-group MBID found in
+// releases (by range, never a fixed index -- T-04-12, ASVS V5) and the
+// Cover Art Archive URL built from it via the existing
+// coverArtURLForReleaseGroup helper -- or two empty strings when no release
+// carries a release-group MBID (D-03's fallback). Deliberately independent
+// of earliestReleaseDate: the cover-art source need not be the same release
+// that supplied the earliest date.
+func guestFeatureArt(releases []musicbrainz.RecordingRelease) (releaseGroupMBID string, coverArtURL string) {
+	for _, r := range releases {
+		if r.ReleaseGroup.MBID != "" {
+			return r.ReleaseGroup.MBID, coverArtURLForReleaseGroup(r.ReleaseGroup.MBID)
+		}
+	}
+	return "", ""
 }
 
 // seenExternalIDs returns the set of external ids already recorded for
