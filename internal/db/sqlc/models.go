@@ -9,14 +9,15 @@ import (
 )
 
 type Artist struct {
-	ID             int64              `json:"id"`
-	Mbid           string             `json:"mbid"`
-	DeezerID       *string            `json:"deezer_id"`
-	Name           string             `json:"name"`
-	Disambiguation *string            `json:"disambiguation"`
-	ImageUrl       *string            `json:"image_url"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID                  int64              `json:"id"`
+	Mbid                string             `json:"mbid"`
+	DeezerID            *string            `json:"deezer_id"`
+	Name                string             `json:"name"`
+	Disambiguation      *string            `json:"disambiguation"`
+	ImageUrl            *string            `json:"image_url"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ArtMatchAttemptedAt pgtype.Timestamptz `json:"art_match_attempted_at"`
 }
 
 type Event struct {

@@ -9,6 +9,80 @@ import (
 	"context"
 )
 
+const listArtistsMissingImage = `-- name: ListArtistsMissingImage :many
+SELECT a.id, a.mbid, a.deezer_id, a.name, a.disambiguation, a.image_url, a.created_at, a.updated_at, a.art_match_attempted_at
+FROM artists a
+JOIN watchlist w ON w.artist_id = a.id
+WHERE a.image_url IS NULL
+  AND (a.art_match_attempted_at IS NULL OR a.art_match_attempted_at < now() - INTERVAL '24 hours')
+ORDER BY a.id ASC
+`
+
+// Phase 13 (bug #3, D-06/D-07/D-12, grilling round Q4): the artists a
+// backfill sweep must visit. Three halves make up this scope decision:
+//   - a NULL image_url is D-07's sweep predicate -- only artists with no
+//     art at all are candidates.
+//   - the watchlist join is D-06's: an artists row with no watchlist row is
+//     a legitimate state (Service.Add's own doc comment already documents
+//     this), and spending Deezer request budget on artists nobody is
+//     watching is waste, not coverage.
+//   - the art_match_attempted_at cooldown is D-12 (grilling round Q4):
+//     without it, a fail-closed artist (D-09) would be re-queried against
+//     Deezer on every single process restart forever, which matters
+//     specifically because this project's own purpose is demonstrating
+//     frequent, low-friction CI/CD redeploys.
+//
+// This query is read-only. Every write in the backfill goes through the
+// existing UpsertArtist (image/deezer_id) and the new RecordArtMatchAttempt
+// (attempt timestamp) below -- their semantics never overlap.
+func (q *Queries) ListArtistsMissingImage(ctx context.Context) ([]Artist, error) {
+	rows, err := q.db.Query(ctx, listArtistsMissingImage)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Artist
+	for rows.Next() {
+		var i Artist
+		if err := rows.Scan(
+			&i.ID,
+			&i.Mbid,
+			&i.DeezerID,
+			&i.Name,
+			&i.Disambiguation,
+			&i.ImageUrl,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ArtMatchAttemptedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recordArtMatchAttempt = `-- name: RecordArtMatchAttempt :exec
+UPDATE artists SET art_match_attempted_at = now() WHERE mbid = $1
+`
+
+// Phase 13 (bug #3, D-12, grilling round Q4): must be called for EVERY
+// artist the backfill sweep visits, regardless of outcome -- matched,
+// unmatched (D-09 fail-closed), or errored -- because it is the only signal
+// that lets a future sweep tell "never tried" apart from "tried and
+// failed." This is deliberately a separate, minimal write from UpsertArtist:
+// D-09 already forbids calling UpsertArtist on a Matched: false outcome (no
+// fields to write), but the attempt itself still needs to be recorded so
+// ListArtistsMissingImage's cooldown predicate above has something to
+// check.
+func (q *Queries) RecordArtMatchAttempt(ctx context.Context, mbid string) error {
+	_, err := q.db.Exec(ctx, recordArtMatchAttempt, mbid)
+	return err
+}
+
 const upsertArtist = `-- name: UpsertArtist :one
 INSERT INTO artists (mbid, deezer_id, name, disambiguation, image_url)
 VALUES ($1, $2, $3, $4, $5)
@@ -18,7 +92,7 @@ ON CONFLICT (mbid) DO UPDATE
         disambiguation = COALESCE(EXCLUDED.disambiguation, artists.disambiguation),
         image_url = COALESCE(EXCLUDED.image_url, artists.image_url),
         updated_at = now()
-RETURNING id, mbid, deezer_id, name, disambiguation, image_url, created_at, updated_at
+RETURNING id, mbid, deezer_id, name, disambiguation, image_url, created_at, updated_at, art_match_attempted_at
 `
 
 type UpsertArtistParams struct {
@@ -57,6 +131,7 @@ func (q *Queries) UpsertArtist(ctx context.Context, arg UpsertArtistParams) (Art
 		&i.ImageUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ArtMatchAttemptedAt,
 	)
 	return i, err
 }
