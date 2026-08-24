@@ -33,7 +33,7 @@ describe("Watchlist route", () => {
     mockListWatchlist.mockResolvedValue([entry])
     mockRemoveWatchlist.mockResolvedValue(undefined)
 
-    renderRoute(Watchlist, "/watchlist")
+    renderRoute(Watchlist, "/")
 
     await screen.findByText("Drake")
 
@@ -48,7 +48,7 @@ describe("Watchlist route", () => {
     mockListWatchlist.mockResolvedValue([entry])
     mockRemoveWatchlist.mockResolvedValue(undefined)
 
-    renderRoute(Watchlist, "/watchlist")
+    renderRoute(Watchlist, "/")
 
     await screen.findByText("Drake")
 
@@ -75,7 +75,7 @@ describe("Watchlist route", () => {
   it("renders the error state with a retry control after a failed initial fetch, and retry re-issues the request", async () => {
     mockListWatchlist.mockRejectedValueOnce(new Error("network down"))
 
-    renderRoute(Watchlist, "/watchlist")
+    renderRoute(Watchlist, "/")
 
     await screen.findByRole("heading", {
       name: "Couldn't load your watchlist.",
@@ -94,7 +94,7 @@ describe("Watchlist route", () => {
   it("shows the empty state when the watchlist has no entries", async () => {
     mockListWatchlist.mockResolvedValue([])
 
-    renderRoute(Watchlist, "/watchlist")
+    renderRoute(Watchlist, "/")
 
     await screen.findByRole("heading", { name: "No artists yet" })
     expect(screen.getByText("Search above to add one.")).toBeInTheDocument()
@@ -104,7 +104,7 @@ describe("Watchlist route", () => {
     mockListWatchlist.mockResolvedValueOnce([entry])
     mockRemoveWatchlist.mockRejectedValueOnce(new Error("network down"))
 
-    renderRoute(Watchlist, "/watchlist")
+    renderRoute(Watchlist, "/")
 
     await screen.findByText("Drake")
 
