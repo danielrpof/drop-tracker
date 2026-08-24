@@ -90,8 +90,8 @@ type Querier interface {
 	//     specifically because this project's own purpose is demonstrating
 	//     frequent, low-friction CI/CD redeploys.
 	// This query is read-only. Every write in the backfill goes through the
-	// existing UpsertArtist (image/deezer_id) and the new RecordArtMatchAttempt
-	// (attempt timestamp) below -- their semantics never overlap.
+	// existing UpsertArtist (image/deezer_id) and the new attempt-timestamp
+	// write below -- their semantics never overlap.
 	ListArtistsMissingImage(ctx context.Context) ([]Artist, error)
 	// Phase 6's HIST-01 history feed backing query (D-05): one global
 	// chronological read across all watched artists, newest first -- not a
@@ -155,8 +155,7 @@ type Querier interface {
 	// failed." This is deliberately a separate, minimal write from UpsertArtist:
 	// D-09 already forbids calling UpsertArtist on a Matched: false outcome (no
 	// fields to write), but the attempt itself still needs to be recorded so
-	// ListArtistsMissingImage's cooldown predicate above has something to
-	// check.
+	// the read query's cooldown predicate above has something to check.
 	RecordArtMatchAttempt(ctx context.Context, mbid string) error
 	// The partial-update merge happens inside this statement, not in Go: each
 	// axis is resolved by a CASE whose ELSE names the column itself, so the

@@ -34,8 +34,8 @@ RETURNING *;
 --     specifically because this project's own purpose is demonstrating
 --     frequent, low-friction CI/CD redeploys.
 -- This query is read-only. Every write in the backfill goes through the
--- existing UpsertArtist (image/deezer_id) and the new RecordArtMatchAttempt
--- (attempt timestamp) below -- their semantics never overlap.
+-- existing UpsertArtist (image/deezer_id) and the new attempt-timestamp
+-- write below -- their semantics never overlap.
 SELECT a.*
 FROM artists a
 JOIN watchlist w ON w.artist_id = a.id
@@ -51,6 +51,5 @@ ORDER BY a.id ASC;
 -- failed." This is deliberately a separate, minimal write from UpsertArtist:
 -- D-09 already forbids calling UpsertArtist on a Matched: false outcome (no
 -- fields to write), but the attempt itself still needs to be recorded so
--- ListArtistsMissingImage's cooldown predicate above has something to
--- check.
+-- the read query's cooldown predicate above has something to check.
 UPDATE artists SET art_match_attempted_at = now() WHERE mbid = $1;
