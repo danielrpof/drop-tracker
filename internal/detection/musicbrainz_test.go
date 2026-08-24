@@ -143,6 +143,24 @@ func TestEarliestReleaseDate(t *testing.T) {
 			releases: nil,
 			want:     "",
 		},
+		{
+			// WR-01 (13-REVIEW.md): a malformed/community-edited MusicBrainz
+			// date shorter than 4 characters must never reach earlierDate's
+			// a[:4]/b[:4] slicing -- treat it the same as an empty date.
+			name: "malformed date shorter than 4 characters is treated as empty, not selected",
+			releases: []musicbrainz.RecordingRelease{
+				{Date: "9"},
+				{Date: "2020"},
+			},
+			want: "2020",
+		},
+		{
+			name: "malformed short date does not panic when it is the only release",
+			releases: []musicbrainz.RecordingRelease{
+				{Date: "20"},
+			},
+			want: "",
+		},
 	}
 
 	for _, tt := range tests {
