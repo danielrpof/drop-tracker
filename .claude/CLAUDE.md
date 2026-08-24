@@ -192,4 +192,6 @@ This repo ships a prebuilt graphify knowledge graph in `graphify-out/` (`graph.j
 
 Use the graph to narrow the search, then read the specific files it points at before editing anything. If it looks stale relative to recent commits, refresh with `/graphify . --update`.
 
+A root `.graphifyignore` keeps completed and ephemeral planning docs out of the graph, excluding the closed `.planning/milestones/v1.0-phases/` directory plus `.planning/quick/`, `.planning/debug/`, `.planning/todos/`, and `.planning/research/`. These are archival churn, and indexing them buries current architecture and decisions under stale planning nodes. `PROJECT.md`, `ROADMAP.md`, `STATE.md`, `RETROSPECTIVE.md`, `MILESTONES.md`, the codebase map directory, the active phases directory, and the current milestone's phase directory all stay indexed. When a milestone completes, or quick-task and debug dirs pile up, add the newly-closed milestone's phase directory to `.graphifyignore` before the next `/graphify . --update` rebuild.
+
 *Hand-maintained section — it sits outside the GSD marker blocks above so `generate-claude-md` never overwrites it. Keep it last.*
