@@ -49,7 +49,7 @@ function tabLinkClassName({ isActive }: { isActive: boolean }) {
 
 // App is the root layout: D-01's two-tab bar (Watchlist, History) above the
 // routed page content. The two tabs stay fully decoupled per D-03/D-04 --
-// neither route's component references the other's data. 
+// neither route's component references the other's data.
 export default function App() {
   return (
     <div className="flex min-h-screen flex-col">
