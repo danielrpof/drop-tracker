@@ -78,6 +78,18 @@ func NewMusicBrainzSource(c musicbrainz.ArtistSearcher) SearchSource {
 	return musicBrainzSource{client: c}
 }
 
+// nilIfEmpty returns nil for an empty string and a pointer to the value
+// otherwise -- the shared idiom search.go's per-source adapters use to map
+// an optional upstream string field into search.go's *string JSON fields
+// (disambiguation, country, image_url), which encode as JSON null rather
+// than an empty string when absent.
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 func (s musicBrainzSource) Name() string { return "musicbrainz" }
 
 func (s musicBrainzSource) SearchArtists(ctx context.Context, q string, limit int) ([]SearchArtist, error) {
@@ -87,16 +99,8 @@ func (s musicBrainzSource) SearchArtists(ctx context.Context, q string, limit in
 	}
 	out := make([]SearchArtist, 0, len(artists))
 	for _, a := range artists {
-		var disambiguation *string
-		if a.Disambiguation != "" {
-			d := a.Disambiguation
-			disambiguation = &d
-		}
-		var country *string
-		if a.Country != "" {
-			c := a.Country
-			country = &c
-		}
+		disambiguation := nilIfEmpty(a.Disambiguation)
+		country := nilIfEmpty(a.Country)
 		out = append(out, SearchArtist{
 			Source:         "musicbrainz",
 			ID:             a.MBID,
@@ -134,11 +138,7 @@ func (s deezerSource) SearchArtists(ctx context.Context, q string, limit int) ([
 	}
 	out := make([]SearchArtist, 0, len(artists))
 	for _, a := range artists {
-		var imageURL *string
-		if a.Picture != "" {
-			p := a.Picture
-			imageURL = &p
-		}
+		imageURL := nilIfEmpty(a.Picture)
 		artistType := a.Type
 		if artistType == "" {
 			artistType = "artist"
