@@ -76,6 +76,23 @@ type Querier interface {
 	// parameter keeps its number -- D-20's write-once guarantee applies to
 	// these two snapshot columns exactly as it does to the original nine.
 	InsertEvent(ctx context.Context, arg InsertEventParams) (int64, error)
+	// Phase 13 (bug #3, D-06/D-07/D-12, grilling round Q4): the artists a
+	// backfill sweep must visit. Three halves make up this scope decision:
+	//   - a NULL image_url is D-07's sweep predicate -- only artists with no
+	//     art at all are candidates.
+	//   - the watchlist join is D-06's: an artists row with no watchlist row is
+	//     a legitimate state (Service.Add's own doc comment already documents
+	//     this), and spending Deezer request budget on artists nobody is
+	//     watching is waste, not coverage.
+	//   - the art_match_attempted_at cooldown is D-12 (grilling round Q4):
+	//     without it, a fail-closed artist (D-09) would be re-queried against
+	//     Deezer on every single process restart forever, which matters
+	//     specifically because this project's own purpose is demonstrating
+	//     frequent, low-friction CI/CD redeploys.
+	// This query is read-only. Every write in the backfill goes through the
+	// existing UpsertArtist (image/deezer_id) and the new attempt-timestamp
+	// write below -- their semantics never overlap.
+	ListArtistsMissingImage(ctx context.Context) ([]Artist, error)
 	// Phase 6's HIST-01 history feed backing query (D-05): one global
 	// chronological read across all watched artists, newest first -- not a
 	// per-artist drill-down. Ordered and keyset-paginated on id DESC, not
@@ -131,6 +148,15 @@ type Querier interface {
 	// instead of overwriting the recorded delivery time.
 	MarkNotified(ctx context.Context, id int64) (int64, error)
 	Ping(ctx context.Context) (int32, error)
+	// Phase 13 (bug #3, D-12, grilling round Q4): must be called for EVERY
+	// artist the backfill sweep visits, regardless of outcome -- matched,
+	// unmatched (D-09 fail-closed), or errored -- because it is the only signal
+	// that lets a future sweep tell "never tried" apart from "tried and
+	// failed." This is deliberately a separate, minimal write from UpsertArtist:
+	// D-09 already forbids calling UpsertArtist on a Matched: false outcome (no
+	// fields to write), but the attempt itself still needs to be recorded so
+	// the read query's cooldown predicate above has something to check.
+	RecordArtMatchAttempt(ctx context.Context, mbid string) error
 	// The partial-update merge happens inside this statement, not in Go: each
 	// axis is resolved by a CASE whose ELSE names the column itself, so the
 	// value carried forward for an untouched axis is read from the row version

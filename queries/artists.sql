@@ -18,3 +18,38 @@ ON CONFLICT (mbid) DO UPDATE
         image_url = COALESCE(EXCLUDED.image_url, artists.image_url),
         updated_at = now()
 RETURNING *;
+
+-- name: ListArtistsMissingImage :many
+-- Phase 13 (bug #3, D-06/D-07/D-12, grilling round Q4): the artists a
+-- backfill sweep must visit. Three halves make up this scope decision:
+--   - a NULL image_url is D-07's sweep predicate -- only artists with no
+--     art at all are candidates.
+--   - the watchlist join is D-06's: an artists row with no watchlist row is
+--     a legitimate state (Service.Add's own doc comment already documents
+--     this), and spending Deezer request budget on artists nobody is
+--     watching is waste, not coverage.
+--   - the art_match_attempted_at cooldown is D-12 (grilling round Q4):
+--     without it, a fail-closed artist (D-09) would be re-queried against
+--     Deezer on every single process restart forever, which matters
+--     specifically because this project's own purpose is demonstrating
+--     frequent, low-friction CI/CD redeploys.
+-- This query is read-only. Every write in the backfill goes through the
+-- existing UpsertArtist (image/deezer_id) and the new attempt-timestamp
+-- write below -- their semantics never overlap.
+SELECT a.*
+FROM artists a
+JOIN watchlist w ON w.artist_id = a.id
+WHERE a.image_url IS NULL
+  AND (a.art_match_attempted_at IS NULL OR a.art_match_attempted_at < now() - INTERVAL '24 hours')
+ORDER BY a.id ASC;
+
+-- name: RecordArtMatchAttempt :exec
+-- Phase 13 (bug #3, D-12, grilling round Q4): must be called for EVERY
+-- artist the backfill sweep visits, regardless of outcome -- matched,
+-- unmatched (D-09 fail-closed), or errored -- because it is the only signal
+-- that lets a future sweep tell "never tried" apart from "tried and
+-- failed." This is deliberately a separate, minimal write from UpsertArtist:
+-- D-09 already forbids calling UpsertArtist on a Matched: false outcome (no
+-- fields to write), but the attempt itself still needs to be recorded so
+-- the read query's cooldown predicate above has something to check.
+UPDATE artists SET art_match_attempted_at = now() WHERE mbid = $1;

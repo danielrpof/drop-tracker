@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -21,6 +22,8 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // testMBID derives a short, unique-per-test mbid from t.Name() so tests
@@ -1445,5 +1448,143 @@ func TestCheckConstraintRejectsUnknownValue(t *testing.T) {
 	_, err = pool.Exec(ctx, "UPDATE watchlist SET release_types = ARRAY['mixtape']::text[] WHERE id = $1", entry.ID)
 	if err == nil {
 		t.Fatal("raw UPDATE with an unknown release type succeeded, want a CHECK constraint violation")
+	}
+}
+
+// The two tests below cover Phase 13's ListArtistsMissingImage (D-06/D-07,
+// D-12 cooldown amended by grilling round Q4) and RecordArtMatchAttempt
+// (D-12), the sqlc queries the artist-art backfill sweep (sibling plan
+// 13-03) depends on. testutil.NewTestPool resets schema, not table
+// contents (TestService_List_EmptyReturnsNonNilSlice's own precedent), so
+// both tests scope every assertion to the ids they themselves seeded.
+
+// insertArtistForArtTest inserts a bare artists row with the given mbid,
+// image_url and art_match_attempted_at (attemptedAgo == 0 means NULL --
+// never attempted), returning its id.
+func insertArtistForArtTest(t *testing.T, pool *pgxpool.Pool, mbid string, imageURL *string, attemptedAgo time.Duration) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var artistID int64
+	if attemptedAgo == 0 {
+		if err := pool.QueryRow(ctx,
+			"INSERT INTO artists (mbid, name, image_url) VALUES ($1, $2, $3) RETURNING id",
+			mbid, "Art Test "+mbid, imageURL,
+		).Scan(&artistID); err != nil {
+			t.Fatalf("insert artist %s: %v", mbid, err)
+		}
+		return artistID
+	}
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO artists (mbid, name, image_url, art_match_attempted_at) VALUES ($1, $2, $3, now() - $4::interval) RETURNING id",
+		mbid, "Art Test "+mbid, imageURL, attemptedAgo.String(),
+	).Scan(&artistID); err != nil {
+		t.Fatalf("insert artist %s: %v", mbid, err)
+	}
+	return artistID
+}
+
+func TestListArtistsMissingImage_CooldownAndScope(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	base := testMBID(t)
+
+	mbidNeverAttempted1 := base + "-never-1"
+	mbidNeverAttempted2 := base + "-never-2"
+	mbidStaleAttempt := base + "-stale"
+	mbidWithinCooldown := base + "-cooldown"
+	mbidHasImage := base + "-has-image"
+	mbidNotWatchlisted := base + "-not-watchlisted"
+	allMBIDs := []string{mbidNeverAttempted1, mbidNeverAttempted2, mbidStaleAttempt, mbidWithinCooldown, mbidHasImage, mbidNotWatchlisted}
+	t.Cleanup(func() {
+		for _, m := range allMBIDs {
+			if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", m); err != nil {
+				t.Fatalf("cleanup: delete artists row %s: %v", m, err)
+			}
+		}
+	})
+
+	idNever1 := insertArtistForArtTest(t, pool, mbidNeverAttempted1, nil, 0)
+	idNever2 := insertArtistForArtTest(t, pool, mbidNeverAttempted2, nil, 0)
+	idStale := insertArtistForArtTest(t, pool, mbidStaleAttempt, nil, 25*time.Hour)
+	idCooldown := insertArtistForArtTest(t, pool, mbidWithinCooldown, nil, 1*time.Hour)
+	hasImage := "https://example.test/has-image.jpg"
+	idHasImage := insertArtistForArtTest(t, pool, mbidHasImage, &hasImage, 0)
+	idNotWatchlisted := insertArtistForArtTest(t, pool, mbidNotWatchlisted, nil, 0)
+
+	for _, id := range []int64{idNever1, idNever2, idStale, idCooldown, idHasImage} {
+		if _, err := pool.Exec(ctx, "INSERT INTO watchlist (artist_id) VALUES ($1)", id); err != nil {
+			t.Fatalf("insert watchlist row for artist %d: %v", id, err)
+		}
+	}
+	// idNotWatchlisted deliberately gets no watchlist row.
+
+	got, err := q.ListArtistsMissingImage(ctx)
+	if err != nil {
+		t.Fatalf("ListArtistsMissingImage: %v", err)
+	}
+
+	var gotIDs []int64
+	for _, a := range got {
+		switch a.ID {
+		case idNever1, idNever2, idStale, idCooldown, idHasImage, idNotWatchlisted:
+			gotIDs = append(gotIDs, a.ID)
+		}
+	}
+
+	wantIDs := []int64{idNever1, idNever2, idStale}
+	slices.Sort(wantIDs)
+	slices.Sort(gotIDs)
+	if !slices.Equal(gotIDs, wantIDs) {
+		t.Fatalf("scoped result ids = %v, want %v (never-attempted x2 plus the 25h-stale row, excluding within-cooldown/has-image/not-watchlisted)", gotIDs, wantIDs)
+	}
+
+	if !slices.IsSorted(artistIDs(got)) {
+		t.Fatalf("ListArtistsMissingImage result is not ascending by id")
+	}
+}
+
+// artistIDs extracts the id column from a []sqlc.Artist slice for an
+// ascending-order assertion.
+func artistIDs(artists []sqlc.Artist) []int64 {
+	ids := make([]int64, len(artists))
+	for i, a := range artists {
+		ids[i] = a.ID
+	}
+	return ids
+}
+
+func TestRecordArtMatchAttempt_SetsTimestampLeavesImageUntouched(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	wantImage := "https://example.test/record-attempt.jpg"
+	insertArtistForArtTest(t, pool, mbid, &wantImage, 0)
+
+	if err := q.RecordArtMatchAttempt(ctx, mbid); err != nil {
+		t.Fatalf("RecordArtMatchAttempt: %v", err)
+	}
+
+	var attemptedAt pgtype.Timestamptz
+	var imageURL *string
+	row := pool.QueryRow(ctx, "SELECT art_match_attempted_at, image_url FROM artists WHERE mbid = $1", mbid)
+	if err := row.Scan(&attemptedAt, &imageURL); err != nil {
+		t.Fatalf("query stored artist: %v", err)
+	}
+	if !attemptedAt.Valid {
+		t.Fatalf("art_match_attempted_at = NULL, want non-NULL")
+	}
+	if time.Since(attemptedAt.Time) > time.Minute {
+		t.Fatalf("art_match_attempted_at = %v, want approximately now", attemptedAt.Time)
+	}
+	if imageURL == nil || *imageURL != wantImage {
+		t.Fatalf("image_url = %v, want unchanged %q", imageURL, wantImage)
 	}
 }
