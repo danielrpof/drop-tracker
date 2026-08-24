@@ -181,3 +181,15 @@ Do not make direct repo edits outside a GSD workflow unless the user explicitly 
 > Profile not yet configured. Run `/gsd-profile-user` to generate your developer profile.
 > This section is managed by `generate-claude-profile` -- do not edit manually.
 <!-- GSD:profile-end -->
+
+## Codebase Questions — Query the Knowledge Graph First
+
+This repo ships a prebuilt graphify knowledge graph in `graphify-out/` (`graph.json`, `GRAPH_REPORT.md`, `graph.html`; everything but `cache/` is committed). For any question about architecture, file relationships, or where a behavior lives, query the graph before grepping or reading files one by one — one query returns targeted context instead of spending tokens on exploratory reads.
+
+- Ask a question: `/graphify query "<question>"` (`--dfs` to trace a single path, `--budget <n>` to cap answer size)
+- Connect two concepts: `/graphify path "<A>" "<B>"`
+- Explain one node: `/graphify explain "<name>"`
+
+Use the graph to narrow the search, then read the specific files it points at before editing anything. If it looks stale relative to recent commits, refresh with `/graphify . --update`.
+
+*Hand-maintained section — it sits outside the GSD marker blocks above so `generate-claude-md` never overwrites it. Keep it last.*
