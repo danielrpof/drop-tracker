@@ -164,7 +164,9 @@ func Backfill(ctx context.Context, logger *slog.Logger, store Store, m *Matcher,
 			// two nil fields, which would touch updated_at for no reason),
 			// but the attempt IS a considered decision (D-12) and must be
 			// recorded so the cooldown predicate has something to check.
-			stats.Unmatched++
+			// A failed RecordArtMatchAttempt counts as Errored, not also
+			// Unmatched (WR-02, 13-REVIEW.md) -- each artist increments
+			// exactly one of Stats' three counters, per its own doc comment.
 			if err := store.RecordArtMatchAttempt(ctx, a.Mbid); err != nil {
 				stats.Errored++
 				logger.Error("artist art backfill: record attempt failed (unmatched)",
@@ -172,6 +174,8 @@ func Backfill(ctx context.Context, logger *slog.Logger, store Store, m *Matcher,
 					slog.String("artist_name", a.Name),
 					slog.String("error", err.Error()),
 				)
+			} else {
+				stats.Unmatched++
 			}
 			stats.Visited++
 			continue
