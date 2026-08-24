@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-18)
 Phase: 12
 Plan: Not started
 Status: All phases complete
-Last activity: 2026-08-24 - Completed quick task 260824-23o: Fix code-review finding #2: factor RunMusicBrainzCycle/RunDeezerCycle's duplicated bounded-fan-out logic in internal/poller/poller.go into a shared runCycle method
+Last activity: 2026-08-24 - Completed quick task 260824-2fw: Fix code-review finding #3: extract shared trimAndCap helper for handleAddWatchlist's repeated field validation in internal/httpserver/watchlist.go
 
 ## Performance Metrics
 
@@ -189,6 +189,7 @@ None yet.
 | 260823-t7n | Prevent graphify knowledge graph from being bloated with stale/completed planning docs: add .graphifyignore excluding archival planning content and note the convention in CLAUDE.md's graphify section | 2026-08-23 | e2006ab | [260823-t7n-prevent-graphify-knowledge-graph-from-be](./quick/260823-t7n-prevent-graphify-knowledge-graph-from-be/) |
 | 260824-1gy | Fix code-review finding: extract shared rate-limited HTTP client seam from musicbrainz/deezer clients into internal/httpclient | 2026-08-24 | 0d0050f | [260824-1gy-fix-code-review-finding-extract-shared-r](./quick/260824-1gy-fix-code-review-finding-extract-shared-r/) |
 | 260824-23o | Fix code-review finding #2: factor RunMusicBrainzCycle/RunDeezerCycle's duplicated bounded-fan-out logic in internal/poller/poller.go into a shared runCycle method | 2026-08-24 | f65f959 | [260824-23o-fix-code-review-finding-2-factor-runmusi](./quick/260824-23o-fix-code-review-finding-2-factor-runmusi/) |
+| 260824-2fw | Fix code-review finding #3: extract shared trimAndCap helper for handleAddWatchlist's repeated field validation in internal/httpserver/watchlist.go | 2026-08-24 | ba8f3d9 | [260824-2fw-fix-code-review-finding-3-extract-shared](./quick/260824-2fw-fix-code-review-finding-3-extract-shared/) |
 
 ### Roadmap Evolution
 
