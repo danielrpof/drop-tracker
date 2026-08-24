@@ -201,22 +201,24 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 	// -- no match, upstream error, timeout -- without ever failing the add
 	// (D-09): a Match error is logged and the add proceeds with no art.
 	if s.matcher != nil && p.ImageURL == nil {
-		matchCtx, cancel := context.WithTimeout(ctx, matchTimeout)
-
 		// D-10: register on the shared ActivityGate for exactly the
 		// duration of this match call, so a concurrently-running backfill
 		// sweep (artistart.Backfill, sibling plan) can detect it and yield.
 		// gate is optional -- nil simply means no coordination to perform.
-		var end func()
-		if s.activityGate != nil {
-			end = s.activityGate.Begin()
-		}
-
-		res, matchErr := s.matcher.Match(matchCtx, p.MBID, p.Name)
-		cancel()
-		if end != nil {
-			end()
-		}
+		// cancel/end run via defer inside this closure (not as plain
+		// statements after the call) so a panic inside Match still releases
+		// both, without extending the gate's active window past the match
+		// itself into the rest of Add -- an un-deferred end() would leave
+		// the ActivityGate permanently active (WR-03, 13-REVIEW.md).
+		res, matchErr := func() (artistart.Result, error) {
+			matchCtx, cancel := context.WithTimeout(ctx, matchTimeout)
+			defer cancel()
+			if s.activityGate != nil {
+				end := s.activityGate.Begin()
+				defer end()
+			}
+			return s.matcher.Match(matchCtx, p.MBID, p.Name)
+		}()
 
 		switch {
 		case matchErr != nil:
