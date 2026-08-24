@@ -200,7 +200,26 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 			continue
 		}
 
-		newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
+		// D-01: source a release date and release-group MBID for this
+		// genuinely-new recording via one per-recording lookup. This first
+		// pass takes the first release carrying both a non-empty Date and a
+		// non-empty ReleaseGroup.MBID; Task 2 replaces this provisional
+		// pick with D-02's precision-aware earliest-date rule.
+		releases, err := d.recordings.ReleasesForRecording(ctx, rec.MBID)
+		if err != nil {
+			return fmt.Errorf("detection: detect guest features: %w", err)
+		}
+		var releaseGroupMBID, releaseDate string
+		// range only -- releases is externally-supplied (T-04-12, ASVS V5).
+		for _, r := range releases {
+			if r.Date != "" && r.ReleaseGroup.MBID != "" {
+				releaseGroupMBID = r.ReleaseGroup.MBID
+				releaseDate = r.Date
+				break
+			}
+		}
+
+		params := sqlc.InsertEventParams{
 			ArtistID:   entry.ArtistID,
 			Source:     sourceMusicBrainz,
 			EventType:  eventTypeGuestFeature,
@@ -208,7 +227,16 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 			Title:      rec.Title,
 			ArtistName: displayArtistName(rec, entry.Name),
 			NotifiedAt: notifiedAt,
-		})
+		}
+		if releaseGroupMBID != "" {
+			coverArt := coverArtURLForReleaseGroup(releaseGroupMBID)
+			groupMBID := releaseGroupMBID
+			params.ReleaseGroupMbid = &groupMBID
+			params.ReleaseDate = nullableString(releaseDate)
+			params.CoverArtUrl = &coverArt
+		}
+
+		newly, err := d.insertEvent(ctx, params)
 		if err != nil {
 			return fmt.Errorf("detection: detect guest features: %w", err)
 		}
@@ -379,7 +407,7 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 		default: // advanced && hadBaseline
 			groupMBID := g.MBID
 			coverArt := coverArtURLForReleaseGroup(groupMBID)
-			trackCount := int32(maxCount) //nolint:gosec // maxCount sums MusicBrainz media.TrackCount fields; a real release is always orders of magnitude under int32 range (worst case on a malformed upstream value is a wrong stored number, not a security defect)
+			trackCount := int32(maxCount)                 //nolint:gosec // maxCount sums MusicBrainz media.TrackCount fields; a real release is always orders of magnitude under int32 range (worst case on a malformed upstream value is a wrong stored number, not a security defect)
 			previousTrackCount := int32(previousBaseline) //nolint:gosec // previousBaseline is read back from advanceGroupBaseline's own previously-stored int32 column, never a fresh unbounded external value
 			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
 				ArtistID:           entry.ArtistID,

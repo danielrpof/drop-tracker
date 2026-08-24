@@ -23,9 +23,12 @@ import (
 // poller.ReleaseGroupSource/AlbumSource and this package's own reliance on
 // sqlc.Querier (an interface, not a concrete *sqlc.Queries) rather than
 // *musicbrainz.Client directly, so a test can substitute a stub with no real
-// HTTP client.
+// HTTP client. ReleasesForRecording (D-01) is called once per
+// newly-detected, previously-unseen recording, only on insert -- never for a
+// recording already in the seen store.
 type RecordingSource interface {
 	RecordingsByArtist(ctx context.Context, mbid string) ([]musicbrainz.Recording, error)
+	ReleasesForRecording(ctx context.Context, mbid string) ([]musicbrainz.RecordingRelease, error)
 }
 
 // ReleaseDetailSource is the narrow seam DetectMusicBrainz's deluxe-change

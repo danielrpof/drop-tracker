@@ -38,14 +38,27 @@ import (
 // shared by every test in this package (and deezer_test.go, same package)
 // that constructs a Detector -- the zero value returns no recordings and no
 // error, a no-op for guest-feature detection, which is what every
-// new_release-focused test in this file needs.
+// new_release-focused test in this file needs. releasesForRecording is
+// likewise omitted (nil map, no-op) by default -- ReleasesForRecording then
+// returns a nil slice and a nil error for every mbid, so the 30+ existing
+// call sites that construct fakeRecordingSource{} unchanged keep seeing no
+// per-recording lookup result, exactly as before this field existed.
 type fakeRecordingSource struct {
-	recordings []musicbrainz.Recording
-	err        error
+	recordings           []musicbrainz.Recording
+	err                  error
+	releasesForRecording map[string][]musicbrainz.RecordingRelease
+	releasesErr          error
 }
 
 func (f fakeRecordingSource) RecordingsByArtist(ctx context.Context, mbid string) ([]musicbrainz.Recording, error) {
 	return f.recordings, f.err
+}
+
+func (f fakeRecordingSource) ReleasesForRecording(ctx context.Context, mbid string) ([]musicbrainz.RecordingRelease, error) {
+	if f.releasesErr != nil {
+		return nil, f.releasesErr
+	}
+	return f.releasesForRecording[mbid], nil
 }
 
 // mkCredit builds an ArtistCreditEntry field-by-field rather than as a
@@ -868,6 +881,68 @@ func TestDetectMusicBrainz_GuestFeature(t *testing.T) {
 	}
 	if previousTrackCount != nil {
 		t.Errorf("previous_track_count = %v, want NULL", *previousTrackCount)
+	}
+}
+
+// TestDetectMusicBrainz_GuestFeatureStoresReleaseDateAndCoverArt proves
+// D-01's end-to-end wiring: a previously-unseen guest-feature recording
+// whose ReleasesForRecording lookup returns one dated release produces an
+// event row carrying release_date, release_group_mbid and cover_art_url.
+// Like every other DetectMusicBrainz test in this file, the artist's first
+// cycle is a seed cycle (isSeedMode); that only affects notified_at, not
+// the release_date/cover_art_url wiring this test asserts on.
+func TestDetectMusicBrainz_GuestFeatureStoresReleaseDateAndCoverArt(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Dated Guest Feature Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Dated Guest Feature Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	recordingMBID := mbid + "-rec1"
+	recordings := []musicbrainz.Recording{
+		{
+			MBID:  recordingMBID,
+			Title: "Feature Track",
+			ArtistCredit: []musicbrainz.ArtistCreditEntry{
+				mkCredit("primary-mbid-0000", "Primary Artist"),
+				mkCredit(mbid, "Dated Guest Feature Artist"),
+			},
+		},
+	}
+	releasesForRecording := map[string][]musicbrainz.RecordingRelease{
+		recordingMBID: {
+			{
+				MBID:  "rel-1",
+				Title: "Some Album",
+				Date:  "2026-03-04",
+				ReleaseGroup: musicbrainz.RecordingReleaseGroup{
+					MBID:  "rg-1",
+					Title: "Some Album",
+				},
+			},
+		},
+	}
+
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings, releasesForRecording: releasesForRecording}, &fakeReleaseDetailSource{})
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+
+	var releaseGroupMbid, releaseDate, coverArtURL *string
+	row := pool.QueryRow(ctx, `SELECT release_group_mbid, release_date, cover_art_url
+		FROM events WHERE artist_id = $1 AND event_type = 'guest_feature' AND external_id = $2`, artistID, recordingMBID)
+	if err := row.Scan(&releaseGroupMbid, &releaseDate, &coverArtURL); err != nil {
+		t.Fatalf("query guest_feature row: %v", err)
+	}
+	if releaseGroupMbid == nil || *releaseGroupMbid != "rg-1" {
+		t.Errorf("release_group_mbid = %v, want %q", releaseGroupMbid, "rg-1")
+	}
+	if releaseDate == nil || *releaseDate != "2026-03-04" {
+		t.Errorf("release_date = %v, want %q", releaseDate, "2026-03-04")
+	}
+	wantCoverArt := "https://coverartarchive.org/release-group/rg-1/front"
+	if coverArtURL == nil || *coverArtURL != wantCoverArt {
+		t.Errorf("cover_art_url = %v, want %q", coverArtURL, wantCoverArt)
 	}
 }
 

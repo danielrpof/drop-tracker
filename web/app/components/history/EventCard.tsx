@@ -132,13 +132,16 @@ function guestFeatureHref(event: EventItem): string | null {
 }
 
 // GuestFeatureBody shows the recording title (event.title is the recording
-// title for a guest_feature row) linked out to the source.
+// title for a guest_feature row) linked out to the source, plus a release
+// date line (OQ-01) using the identical `?? "Release date unknown"`
+// fallback expression NewReleaseBody already uses -- no new copy invented.
+// Both the linked and unlinked title branches render the date line.
 function GuestFeatureBody({ event }: { event: EventItem }) {
   const href = guestFeatureHref(event)
-  if (!href) {
-    return <p className="text-label text-muted-foreground">{event.title}</p>
-  }
-  return (
+  const dateLabel = event.release_date ?? "Release date unknown"
+  const titleLine = !href ? (
+    <p className="text-label text-muted-foreground">{event.title}</p>
+  ) : (
     <p className="text-label text-muted-foreground">
       Featured on{" "}
       <a
@@ -150,6 +153,12 @@ function GuestFeatureBody({ event }: { event: EventItem }) {
         {event.title}
       </a>
     </p>
+  )
+  return (
+    <>
+      {titleLine}
+      <p className="text-label text-muted-foreground">{dateLabel}</p>
+    </>
   )
 }
 

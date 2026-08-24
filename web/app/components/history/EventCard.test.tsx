@@ -125,6 +125,30 @@ describe("EventCard", () => {
     ).toHaveAttribute("href", "https://www.deezer.com/track/abc%20def%2Fg%23h")
   })
 
+  it("renders the release date on a guest_feature card when release_date is set", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Feature Track",
+      release_date: "2026-03-04",
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.getByText("2026-03-04")).toBeInTheDocument()
+  })
+
+  it("falls back to 'Release date unknown' on a guest_feature card when release_date is null", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Feature Track",
+      release_date: null,
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.getByText("Release date unknown")).toBeInTheDocument()
+  })
+
   it("leaves an ordinary UUID-shaped external_id's href unchanged", () => {
     const event = buildEvent({
       event_type: "guest_feature",
