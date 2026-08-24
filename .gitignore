@@ -32,3 +32,8 @@ Thumbs.db
 
 # GSD planning tool cache (local research API-response cache, not source)
 .planning/research/.cache/
+
+# graphify local extraction cache (regenerable, speeds up --update only)
+graphify-out/cache/
+# graphify machine-local state (interpreter path, scan root) and internal labels cache
+graphify-out/.graphify_*

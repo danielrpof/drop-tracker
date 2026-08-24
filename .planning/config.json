@@ -88,5 +88,8 @@
     "source_grounding_authority": "grep"
   },
   "mode": "yolo",
-  "granularity": "standard"
+  "granularity": "standard",
+  "graphify": {
+    "enabled": true
+  }
 }
