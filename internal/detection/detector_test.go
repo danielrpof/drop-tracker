@@ -192,7 +192,7 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 	}
 
 	rows, err := pool.Query(ctx, `SELECT external_id, release_group_mbid, title, artist_name,
-		release_date, cover_art_url, event_type, source, release_type
+		release_date, cover_art_url, event_type, source, release_type, watched_artist_name
 		FROM events WHERE artist_id = $1 ORDER BY external_id`, artistID)
 	if err != nil {
 		t.Fatalf("query events: %v", err)
@@ -204,12 +204,13 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 		releaseDate, coverArtURL                        *string
 		eventType, source                               string
 		releaseType                                     *string
+		watchedArtistName                               *string
 	}
 	var got []row
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.externalID, &r.releaseGroupMbid, &r.title, &r.artistName,
-			&r.releaseDate, &r.coverArtURL, &r.eventType, &r.source, &r.releaseType); err != nil {
+			&r.releaseDate, &r.coverArtURL, &r.eventType, &r.source, &r.releaseType, &r.watchedArtistName); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
 		got = append(got, r)
@@ -255,6 +256,9 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 		}
 		if got[i].releaseType == nil || *got[i].releaseType != "album" {
 			t.Fatalf("row %d release_type = %v, want %q (lowercased/trimmed PrimaryType %q)", i, got[i].releaseType, "album", "Album")
+		}
+		if got[i].watchedArtistName == nil || *got[i].watchedArtistName != "Test Artist" {
+			t.Fatalf("row %d watched_artist_name = %v, want %q (equal to artist_name for new_release)", i, got[i].watchedArtistName, "Test Artist")
 		}
 	}
 }
@@ -847,9 +851,10 @@ func TestDetectMusicBrainz_GuestFeature(t *testing.T) {
 	var releaseGroupMbid, releaseDate, coverArtURL *string
 	var releaseType *string
 	var previousTrackCount *int32
-	row := pool.QueryRow(ctx, `SELECT event_type, source, external_id, release_group_mbid, release_date, cover_art_url, title, artist_name, release_type, previous_track_count
+	var watchedArtistName *string
+	row := pool.QueryRow(ctx, `SELECT event_type, source, external_id, release_group_mbid, release_date, cover_art_url, title, artist_name, release_type, previous_track_count, watched_artist_name
 		FROM events WHERE artist_id = $1 AND event_type = 'guest_feature'`, artistID)
-	if err := row.Scan(&eventType, &source, &externalID, &releaseGroupMbid, &releaseDate, &coverArtURL, &title, &artistName, &releaseType, &previousTrackCount); err != nil {
+	if err := row.Scan(&eventType, &source, &externalID, &releaseGroupMbid, &releaseDate, &coverArtURL, &title, &artistName, &releaseType, &previousTrackCount, &watchedArtistName); err != nil {
 		t.Fatalf("query guest_feature row: %v", err)
 	}
 	if eventType != "guest_feature" {
@@ -881,6 +886,12 @@ func TestDetectMusicBrainz_GuestFeature(t *testing.T) {
 	}
 	if previousTrackCount != nil {
 		t.Errorf("previous_track_count = %v, want NULL", *previousTrackCount)
+	}
+	if watchedArtistName == nil || *watchedArtistName != "Guest Feature Artist" {
+		t.Errorf("watched_artist_name = %v, want %q (the watchlist entry's own name, not the primary credit)", watchedArtistName, "Guest Feature Artist")
+	}
+	if artistName == *watchedArtistName {
+		t.Errorf("artist_name (%q) and watched_artist_name (%q) must differ on a guest_feature row -- that difference IS the fix", artistName, *watchedArtistName)
 	}
 }
 

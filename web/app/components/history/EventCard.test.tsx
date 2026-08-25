@@ -21,6 +21,7 @@ function buildEvent(overrides: Partial<EventItem> = {}): EventItem {
     release_group_mbid: null,
     title: "Test Title",
     artist_name: "Test Artist",
+    watched_artist_name: "Test Artist",
     release_date: "2026-01-01",
     cover_art_url: null,
     track_count: null,
@@ -205,6 +206,57 @@ describe("EventCard", () => {
     render(<EventCard event={event} />)
 
     expect(screen.getByText("Release date unknown")).toBeInTheDocument()
+  })
+
+  it("names the watchlisted artist on a guest_feature card whose watched artist differs from the primary credit", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Feature Track",
+      artist_name: "Lil Durk",
+      watched_artist_name: "Lil Baby",
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.getByText(/Lil Baby is on your watchlist/)).toBeInTheDocument()
+  })
+
+  it("renders no watchlist note on a guest_feature card when watched_artist_name equals artist_name", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Feature Track",
+      artist_name: "Lil Durk",
+      watched_artist_name: "Lil Durk",
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.queryByText(/is on your watchlist/)).not.toBeInTheDocument()
+  })
+
+  it("renders no watchlist note on a new_release card when watched_artist_name equals artist_name", () => {
+    const event = buildEvent({
+      event_type: "new_release",
+      title: "Fresh Drop",
+      artist_name: "Test Artist",
+      watched_artist_name: "Test Artist",
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.queryByText(/is on your watchlist/)).not.toBeInTheDocument()
+  })
+
+  it("renders no watchlist note and does not crash on a pre-migration row with watched_artist_name null", () => {
+    const event = buildEvent({
+      event_type: "guest_feature",
+      title: "Feature Track",
+      artist_name: "Lil Durk",
+      watched_artist_name: null,
+    })
+
+    expect(() => render(<EventCard event={event} />)).not.toThrow()
+    expect(screen.queryByText(/is on your watchlist/)).not.toBeInTheDocument()
   })
 
   it("leaves an ordinary UUID-shaped external_id's href unchanged", () => {

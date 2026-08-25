@@ -32,6 +32,7 @@ function makeEvent(overrides: Partial<EventItem> = {}): EventItem {
     release_group_mbid: null,
     title: "Default Title",
     artist_name: "Default Artist",
+    watched_artist_name: "Default Artist",
     release_date: "2026-01-01",
     cover_art_url: null,
     track_count: null,
