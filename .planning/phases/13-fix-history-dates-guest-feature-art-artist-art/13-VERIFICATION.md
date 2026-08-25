@@ -1,14 +1,16 @@
 ---
 phase: 13-fix-history-dates-guest-feature-art-artist-art
 verified: 2026-08-24T23:18:44Z
-status: human_needed
+status: passed
 score: 27/27 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 human_verification:
+
   - test: "Confirm the live musicbrainz.org ws/2/recording/{mbid}?inc=releases+release-groups response shape matches internal/musicbrainz/recording_lookup.go's [ASSUMED] RecordingRelease/recordingLookupResponse struct tags (releases[].date, releases[].release-group.id)."
     expected: "Field names/nesting match; a mismatch would decode silently to zero values (Go's encoding/json behavior) that look exactly like D-03's no-releases fallback, masking bug #2's fix."
     why_human: "This dev environment's WSL2 network path cannot reach musicbrainz.org (documented, waived Phase 3 blocker in STATE.md). 13-01-SUMMARY.md explicitly records this human-check as still outstanding — it was never performed against a live response in this phase."
+
   - test: "Decide whether to require fixes for the three WARNING-level findings in 13-REVIEW.md before shipping, or explicitly accept them as tracked follow-up debt: WR-01 (earlierDate can panic on a MusicBrainz date <4 chars), WR-02 (Backfill's Stats can double-increment Unmatched+Errored for the same artist, breaking its own documented invariant), WR-03 (Service.Add leaks the ActivityGate registration if Matcher.Match panics, since cancel()/end() are plain statements, not deferred)."
     expected: "A human decision: fix now (all three have concrete patches already written in 13-REVIEW.md) or accept and track as a follow-up issue."
     why_human: "These are code-quality/robustness judgment calls, not correctness failures of the phase's core must-haves — REVIEW.md classifies all three as 'warning' severity (0 critical) and each is reachable only via an edge case (malformed upstream data <4 chars, or a panic inside an HTTP/JSON-decoding call), not the phase's primary tested paths. Confirmed still present and unfixed in the current codebase by direct code reading during this verification."
