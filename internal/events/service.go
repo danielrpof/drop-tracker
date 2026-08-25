@@ -49,27 +49,29 @@ type Event struct {
 }
 
 // ListParams carries the optional filter/pagination axes for List. A nil
-// ArtistID/EventType/Cursor means "no filter on this axis" -- mirrors
-// watchlist.PreferencesParams's nil-means-untouched convention. A PageSize
-// of zero or less is clamped to DefaultPageSize by List.
+// ArtistID/EventType means "no filter on this axis" -- mirrors
+// watchlist.PreferencesParams's nil-means-untouched convention. Cursor nil
+// still means "first page" (quick task 260825-g6i's composite Cursor
+// replaces the old single-bigint one, but keeps the same nil convention). A
+// PageSize of zero or less is clamped to DefaultPageSize by List.
 type ListParams struct {
 	ArtistID  *int64
 	EventType *string
-	Cursor    *int64
+	Cursor    *Cursor
 	PageSize  int32
 }
 
 // Page is one page of the history feed: Events is always non-nil (D-05).
-// NextCursor is set to the last returned row's id only when the page came
-// back completely full -- the client's unambiguous "no more pages" signal
-// when it is nil. HasOlderEvents (DATA-02, D-06) answers a question the page
-// itself cannot: whether this request's artist/event-type scope has any
-// event older than the retention window, so the frontend can distinguish
-// "no events ever" from "events exist but every one aged out" -- both cases
-// look identical from Events alone.
+// NextCursor is set to the last returned row's (release_date, id) position
+// only when the page came back completely full -- the client's unambiguous
+// "no more pages" signal when it is nil. HasOlderEvents (DATA-02, D-06)
+// answers a question the page itself cannot: whether this request's
+// artist/event-type scope has any event older than the retention window,
+// so the frontend can distinguish "no events ever" from "events exist but
+// every one aged out" -- both cases look identical from Events alone.
 type Page struct {
 	Events         []Event
-	NextCursor     *int64
+	NextCursor     *Cursor
 	HasOlderEvents bool
 }
 
@@ -125,12 +127,26 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 
 	cutoffParam := pgtype.Timestamptz{Time: cutoff, Valid: true}
 
+	// cursorID/cursorReleaseDate are set or cleared together: cursorID nil
+	// is what switches the whole composite-keyset predicate off in
+	// queries/events.sql, so a nil p.Cursor must never leave cursorID set
+	// while cursorReleaseDate is nil (or vice versa) -- both come from the
+	// same p.Cursor read below.
+	var cursorID *int64
+	var cursorReleaseDate *string
+	if p.Cursor != nil {
+		id := p.Cursor.ID
+		cursorID = &id
+		cursorReleaseDate = p.Cursor.ReleaseDate
+	}
+
 	rows, err := s.q.ListEvents(ctx, sqlc.ListEventsParams{
-		ArtistID:  p.ArtistID,
-		EventType: p.EventType,
-		Cursor:    p.Cursor,
-		Cutoff:    cutoffParam,
-		PageSize:  pageSize,
+		ArtistID:          p.ArtistID,
+		EventType:         p.EventType,
+		CursorID:          cursorID,
+		CursorReleaseDate: cursorReleaseDate,
+		Cutoff:            cutoffParam,
+		PageSize:          pageSize,
 	})
 	if err != nil {
 		return Page{}, fmt.Errorf("list events: %w", err)
@@ -155,10 +171,10 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 		out = append(out, toEvent(row))
 	}
 
-	var nextCursor *int64
+	var nextCursor *Cursor
 	if len(rows) == int(pageSize) {
-		last := out[len(out)-1].ID
-		nextCursor = &last
+		lastRow := out[len(out)-1]
+		nextCursor = &Cursor{ReleaseDate: lastRow.ReleaseDate, ID: lastRow.ID}
 	}
 
 	return Page{Events: out, NextCursor: nextCursor, HasOlderEvents: hasOlderEvents}, nil

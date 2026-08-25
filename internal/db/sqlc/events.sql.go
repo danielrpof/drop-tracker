@@ -206,18 +206,30 @@ SELECT id, artist_id, source, event_type, external_id, release_group_mbid,
 FROM events
 WHERE ($1::bigint IS NULL OR artist_id = $1::bigint)
   AND ($2::text IS NULL OR event_type = $2::text)
-  AND ($3::bigint IS NULL OR id < $3::bigint)
-  AND created_at >= $4::timestamptz
-ORDER BY id DESC
-LIMIT $5
+  AND (
+        $3::bigint IS NULL
+        OR CASE
+             WHEN $4::text IS NULL
+               THEN release_date IS NULL
+                    AND id < $3::bigint
+             ELSE release_date IS NULL
+                  OR release_date < $4::text
+                  OR (release_date = $4::text
+                      AND id < $3::bigint)
+           END
+      )
+  AND created_at >= $5::timestamptz
+ORDER BY release_date DESC NULLS LAST, id DESC
+LIMIT $6
 `
 
 type ListEventsParams struct {
-	ArtistID  *int64             `json:"artist_id"`
-	EventType *string            `json:"event_type"`
-	Cursor    *int64             `json:"cursor"`
-	Cutoff    pgtype.Timestamptz `json:"cutoff"`
-	PageSize  int32              `json:"page_size"`
+	ArtistID          *int64             `json:"artist_id"`
+	EventType         *string            `json:"event_type"`
+	CursorID          *int64             `json:"cursor_id"`
+	CursorReleaseDate *string            `json:"cursor_release_date"`
+	Cutoff            pgtype.Timestamptz `json:"cutoff"`
+	PageSize          int32              `json:"page_size"`
 }
 
 type ListEventsRow struct {
@@ -241,20 +253,40 @@ type ListEventsRow struct {
 
 // Phase 6's HIST-01 history feed backing query (D-05): one global
 // chronological read across all watched artists, newest first -- not a
-// per-artist drill-down. Ordered and keyset-paginated on id DESC, not
-// created_at: this file's own ListUnnotified comment already documents why
-// created_at alone is not a unique order -- a seed cycle inserts many rows
-// sharing one created_at timestamp, so ordering by it alone would make page
-// boundaries non-deterministic across a "load more" click (06-RESEARCH.md
-// Pattern 2, Pitfall 2). id (BIGSERIAL) is already unique and monotonic and
-// needs no secondary tiebreak column.
+// per-artist drill-down.
 //
-// artist_id, event_type and cursor are all optional sqlc.narg filters, each
-// cast on both sides of its "IS NULL OR" predicate so sqlc's type inference
-// has no ambiguity. "IS NULL OR" keeps one static SQL string sqlc can
-// type-check, instead of building WHERE clauses in Go (06-RESEARCH.md
-// Anti-Patterns). cursor is absent on the first page and set to the previous
-// page's last row's id on subsequent pages.
+// Ordering is release chronology (quick task 260825-g6i), not detection
+// order: a newly-watched artist's seed-mode backfill inserts a whole
+// back-catalogue in one cycle, giving old releases the freshest ids and
+// interleaving them with genuinely new drops if ordered by id alone.
+// release_date is TEXT holding MusicBrainz partial dates (YYYY, YYYY-MM,
+// YYYY-MM-DD), which are zero-padded and left-anchored, so lexicographic
+// ordering IS chronological ordering, and a year-only value sorts as the
+// start of that year. NULLS LAST is written explicitly and is load-bearing,
+// not decorative: Postgres defaults DESC to NULLS FIRST, so omitting it
+// would float every undated row to the top of "latest." id DESC survives as
+// the tiebreak because release_date is not unique (year-only precision
+// especially), and a non-unique primary sort key alone makes page
+// boundaries non-deterministic across a "load more" click -- the same
+// hazard this comment previously invoked against created_at alone
+// (06-RESEARCH.md Pattern 2, Pitfall 2).
+//
+// artist_id and event_type are optional sqlc.narg filters, each cast on
+// both sides of its "IS NULL OR" predicate so sqlc's type inference has no
+// ambiguity. "IS NULL OR" keeps one static SQL string sqlc can type-check,
+// instead of building WHERE clauses in Go (06-RESEARCH.md Anti-Patterns).
+//
+// cursor_id/cursor_release_date are the composite keyset position (quick
+// task 260825-g6i, replacing the single-bigint cursor): absent on the first
+// page, set to the previous page's last row's (release_date, id) on
+// subsequent pages. cursor_id IS NULL is what switches the whole predicate
+// off -- the two params are always set or cleared together by the caller.
+// The CASE exists because a NULLS-LAST tail needs a different "everything
+// after me" predicate than the dated head does: inside the tail, "after me"
+// means a strictly smaller id among other NULL rows; inside the dated head,
+// "after me" means an earlier release_date, or the same release_date with a
+// strictly smaller id, or (since the tail sorts after every dated row) any
+// NULL row at all.
 //
 // Phase 10 (DATA-02, D-01/D-04): this is the ONLY query in this file that
 // ever gets a retention cutoff. cutoff is sqlc.arg, not sqlc.narg -- it is
@@ -272,7 +304,8 @@ func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListE
 	rows, err := q.db.Query(ctx, listEvents,
 		arg.ArtistID,
 		arg.EventType,
-		arg.Cursor,
+		arg.CursorID,
+		arg.CursorReleaseDate,
 		arg.Cutoff,
 		arg.PageSize,
 	)

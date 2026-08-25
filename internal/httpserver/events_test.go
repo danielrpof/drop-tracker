@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -47,10 +48,11 @@ func (s stubEventsStore) List(ctx context.Context, p events.ListParams) (events.
 var _ events.Store = stubEventsStore{}
 
 // eventsResponseBody mirrors the GET /events response envelope by field
-// name (HIST-01, DATA-02).
+// name (HIST-01, DATA-02). NextCursor is the opaque encoded token string
+// (quick task 260825-g6i replaced the raw bigint cursor).
 type eventsResponseBody struct {
 	Events         []events.Event `json:"events"`
-	NextCursor     *int64         `json:"next_cursor"`
+	NextCursor     *string        `json:"next_cursor"`
 	HasOlderEvents bool           `json:"has_older_events"`
 }
 
@@ -396,7 +398,34 @@ func insertTestEventAt(t *testing.T, pool *pgxpool.Pool, artistID int64, externa
 	return id
 }
 
-func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
+// insertTestEventWithDate mirrors insertTestEvent but takes an explicit
+// release_date, following insertTestEventAt's own precedent for a helper
+// dedicated to one extra explicit column (quick task 260825-g6i's
+// chronology-order and boundary-paging tests need to seed rows at specific
+// release dates, including a NULL one via a nil releaseDate).
+func insertTestEventWithDate(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID string, releaseDate *string) int64 {
+	t.Helper()
+	var id int64
+	row := pool.QueryRow(context.Background(), `
+		INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date)
+		VALUES ($1, 'musicbrainz', 'new_release', $2, 'Title', 'Artist', $3)
+		RETURNING id`, artistID, externalID, releaseDate)
+	if err := row.Scan(&id); err != nil {
+		t.Fatalf("insert test event with date %v: %v", releaseDate, err)
+	}
+	return id
+}
+
+// TestListEvents_UndatedRowsPaginateByIDDesc proves the id-descending
+// tiebreak alone, in isolation: insertTestEvent never sets a release_date,
+// so every row in this fixture is NULL-dated and pagination inside the
+// undated tail falls back entirely on id DESC. Chronology-order paging
+// across dated rows (and the dated-to-undated boundary) is covered
+// separately by TestListEvents_OrderedByReleaseChronologyNewestFirst and
+// TestListEvents_KeysetPagesAcrossDatedAndUndatedBoundary below (quick task
+// 260825-g6i renamed this test from
+// TestListEvents_OrderedNewestFirstAndKeysetPaginates to say so).
+func TestListEvents_UndatedRowsPaginateByIDDesc(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	mbid := testMBID(t)
 	t.Cleanup(func() {
@@ -426,8 +455,8 @@ func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
 	if page1.Events[0].ID != ids[4] || page1.Events[1].ID != ids[3] {
 		t.Fatalf("page1 ids = [%d %d], want [%d %d] (newest first)", page1.Events[0].ID, page1.Events[1].ID, ids[4], ids[3])
 	}
-	if page1.NextCursor == nil || *page1.NextCursor != ids[3] {
-		t.Fatalf("page1 next_cursor = %v, want %d", page1.NextCursor, ids[3])
+	if page1.NextCursor == nil || page1.NextCursor.ID != ids[3] {
+		t.Fatalf("page1 next_cursor = %v, want ID %d", page1.NextCursor, ids[3])
 	}
 
 	// Page 2: cursor = page1's next_cursor -- must contain no row that
@@ -460,6 +489,252 @@ func TestListEvents_OrderedNewestFirstAndKeysetPaginates(t *testing.T) {
 	}
 	if page3.NextCursor != nil {
 		t.Fatalf("page3 next_cursor = %v, want nil (partial page)", page3.NextCursor)
+	}
+}
+
+// datePtr is a tiny literal-string-to-pointer helper used throughout the
+// chronology-order tests below, where every fixture row needs a *string
+// release date (or nil for an undated row).
+func datePtr(s string) *string { return &s }
+
+// TestListEvents_OrderedByReleaseChronologyNewestFirst proves the core
+// ordering change (quick task 260825-g6i): release chronology, newest
+// first, NULL last -- not detection/insertion order. Rows are inserted in
+// an order deliberately inverted from their release chronology, so a test
+// that passed under the old id-DESC ordering would fail here.
+func TestListEvents_OrderedByReleaseChronologyNewestFirst(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	// Insertion order is deliberately the inverse of release chronology.
+	id2026May := insertTestEventWithDate(t, pool, artistID, mbid+"-2026-05", datePtr("2026-05-01"))
+	id2019Jan := insertTestEventWithDate(t, pool, artistID, mbid+"-2019-01", datePtr("2019-01-01"))
+	id2026Nov := insertTestEventWithDate(t, pool, artistID, mbid+"-2026-11", datePtr("2026-11-20"))
+	idNull := insertTestEventWithDate(t, pool, artistID, mbid+"-null", nil)
+	id2019Jun := insertTestEventWithDate(t, pool, artistID, mbid+"-2019-06", datePtr("2019-06"))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+	page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistID, PageSize: events.MaxPageSize})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(page.Events) != 5 {
+		t.Fatalf("events = %d, want 5", len(page.Events))
+	}
+
+	wantOrder := []int64{id2026Nov, id2026May, id2019Jun, id2019Jan, idNull}
+	var gotOrder []int64
+	for _, e := range page.Events {
+		gotOrder = append(gotOrder, e.ID)
+	}
+	if len(gotOrder) != len(wantOrder) {
+		t.Fatalf("got %d ids, want %d", len(gotOrder), len(wantOrder))
+	}
+	for i := range wantOrder {
+		if gotOrder[i] != wantOrder[i] {
+			t.Fatalf("order[%d] = id %d, want id %d (full got order: %v, want order: %v)", i, gotOrder[i], wantOrder[i], gotOrder, wantOrder)
+		}
+	}
+}
+
+// TestListEvents_KeysetPagesAcrossDatedAndUndatedBoundary proves the
+// composite keyset cursor pages a mixed dated/undated feed exhaustively --
+// no row skipped, no row repeated, including across the boundary between
+// the last dated row and the first undated one, and between two rows
+// sharing an identical release_date (tiebroken by id DESC).
+func TestListEvents_KeysetPagesAcrossDatedAndUndatedBoundary(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+
+	var allIDs []int64
+	allIDs = append(allIDs, insertTestEventWithDate(t, pool, artistID, mbid+"-a", datePtr("2026-01-01")))
+	allIDs = append(allIDs, insertTestEventWithDate(t, pool, artistID, mbid+"-b", datePtr("2025-06-15")))
+	// Two rows sharing an identical release_date -- tiebroken by id DESC
+	// between themselves.
+	allIDs = append(allIDs, insertTestEventWithDate(t, pool, artistID, mbid+"-c1", datePtr("2024-03-03")))
+	allIDs = append(allIDs, insertTestEventWithDate(t, pool, artistID, mbid+"-c2", datePtr("2024-03-03")))
+	allIDs = append(allIDs, insertTestEventWithDate(t, pool, artistID, mbid+"-d", nil))
+	allIDs = append(allIDs, insertTestEventWithDate(t, pool, artistID, mbid+"-e", nil))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+
+	seen := make(map[int64]bool)
+	var cursor *events.Cursor
+	for i := 0; i < len(allIDs)+2; i++ { // extra iterations guard against an infinite loop if pagination breaks
+		page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistID, PageSize: 2, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("List (page %d): %v", i, err)
+		}
+		if len(page.Events) == 0 {
+			break
+		}
+		for _, e := range page.Events {
+			if seen[e.ID] {
+				t.Fatalf("event id %d appeared on two pages", e.ID)
+			}
+			seen[e.ID] = true
+		}
+		cursor = page.NextCursor
+		if cursor == nil {
+			break
+		}
+	}
+
+	if len(seen) != len(allIDs) {
+		t.Fatalf("total distinct events paged through = %d, want %d", len(seen), len(allIDs))
+	}
+	for _, id := range allIDs {
+		if !seen[id] {
+			t.Fatalf("event id %d never appeared across any page", id)
+		}
+	}
+}
+
+// TestHasOlderEvents_UnaffectedByChronologyOrderingChange proves the
+// retention query's own behavior is unchanged by this task's ORDER BY
+// rewrite: HasOlderEvents does not participate in ListEvents' ordering at
+// all, so an identical fixture must produce an identical answer before and
+// after.
+func TestHasOlderEvents_UnaffectedByChronologyOrderingChange(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+	insertTestEventAt(t, pool, artistID, mbid+"-aged", time.Now().AddDate(0, 0, -120))
+
+	q := sqlc.New(pool)
+	hasOlder, err := q.HasOlderEvents(context.Background(), sqlc.HasOlderEventsParams{
+		ArtistID: &artistID,
+		Cutoff:   pgtype.Timestamptz{Time: time.Now().AddDate(0, 0, -90), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("HasOlderEvents: %v", err)
+	}
+	if !hasOlder {
+		t.Fatal("HasOlderEvents = false, want true for an aged-out row")
+	}
+}
+
+// TestHandleListEvents_CursorRejection proves the HTTP boundary's decode
+// failure path (T-g6i-01, T-g6i-05): a malformed, oversized or truncated
+// cursor token is rejected with 400 and the fixed "invalid cursor" message
+// -- never a 500, never a stack trace, never raw driver or parser text.
+func TestHandleListEvents_CursorRejection(t *testing.T) {
+	oversized := strings.Repeat("a", 10000)
+
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{"garbage token", "cursor=" + url.QueryEscape("!!!not-a-token!!!")},
+		{"oversized token", "cursor=" + oversized},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := stubEventsStore{listFunc: func(context.Context, events.ListParams) (events.Page, error) {
+				t.Fatal("store.List was called for a rejected cursor")
+				return events.Page{}, nil
+			}}
+			srv := httpserver.New(noopPinger{}, stubStore{}, stub, nil, discardLogger())
+			ts := httptest.NewServer(srv.Router())
+			defer ts.Close()
+
+			resp, err := http.Get(ts.URL + "/events?" + tc.query)
+			if err != nil {
+				t.Fatalf("GET /events?%s: %v", tc.query, err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+			data, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+			var eb errorBody
+			if err := json.Unmarshal(data, &eb); err != nil {
+				t.Fatalf("decode response body: %v", err)
+			}
+			if eb.Error != "invalid cursor" {
+				t.Fatalf("error = %q, want %q", eb.Error, "invalid cursor")
+			}
+		})
+	}
+}
+
+// TestHandleListEvents_CursorRoundTripsThroughHTTP proves the full-page
+// next_cursor/cursor round trip through the HTTP boundary: a full page's
+// next_cursor is a JSON string; an exhausted page's is JSON null; feeding
+// the returned string straight back as ?cursor= yields the next page with
+// no overlap.
+func TestHandleListEvents_CursorRoundTripsThroughHTTP(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	artistID := insertTestArtist(t, pool, mbid)
+	insertTestEventWithDate(t, pool, artistID, mbid+"-a", datePtr("2026-01-01"))
+	insertTestEventWithDate(t, pool, artistID, mbid+"-b", datePtr("2025-06-15"))
+	lastID := insertTestEventWithDate(t, pool, artistID, mbid+"-c", datePtr("2024-01-01"))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(noopPinger{}, stubStore{}, svc, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(fmt.Sprintf("%s/events?artist_id=%d&limit=2", ts.URL, artistID))
+	if err != nil {
+		t.Fatalf("GET /events: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var page1 eventsResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&page1); err != nil {
+		t.Fatalf("decode page1: %v", err)
+	}
+	if page1.NextCursor == nil {
+		t.Fatal("page1 next_cursor = nil, want a non-nil token (the page came back full)")
+	}
+
+	resp2, err := http.Get(fmt.Sprintf("%s/events?artist_id=%d&limit=2&cursor=%s", ts.URL, artistID, url.QueryEscape(*page1.NextCursor)))
+	if err != nil {
+		t.Fatalf("GET /events (page 2): %v", err)
+	}
+	defer func() { _ = resp2.Body.Close() }()
+
+	var page2 eventsResponseBody
+	if err := json.NewDecoder(resp2.Body).Decode(&page2); err != nil {
+		t.Fatalf("decode page2: %v", err)
+	}
+	if len(page2.Events) != 1 || page2.Events[0].ID != lastID {
+		t.Fatalf("page2 events = %+v, want exactly one event with id %d", page2.Events, lastID)
+	}
+	if page2.NextCursor != nil {
+		t.Fatalf("page2 next_cursor = %v, want nil (exhausted, partial page)", page2.NextCursor)
 	}
 }
 
@@ -609,7 +884,7 @@ func TestListEvents_RetentionPagesNeverRepeatAnID(t *testing.T) {
 	svc := events.NewService(sqlc.New(pool), 90)
 
 	seen := make(map[int64]bool)
-	var cursor *int64
+	var cursor *events.Cursor
 	for i := 0; i < len(inWindowIDs)+2; i++ { // extra iterations guard against an infinite loop if pagination breaks
 		page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistID, PageSize: 2, Cursor: cursor})
 		if err != nil {
@@ -761,7 +1036,7 @@ func TestListEvents_Filters(t *testing.T) {
 
 	t.Run("a cursor page shares no row with its predecessor", func(t *testing.T) {
 		seen := make(map[int64]bool)
-		var cursor *int64
+		var cursor *events.Cursor
 		total := 0
 		for i := 0; i < len(watchlist.EventTypes)+1; i++ { // one extra iteration guards against an infinite loop if pagination breaks
 			page, err := svc.List(context.Background(), events.ListParams{ArtistID: &artistA, PageSize: 1, Cursor: cursor})
