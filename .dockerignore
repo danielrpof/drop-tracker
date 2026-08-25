@@ -48,6 +48,9 @@ internal/webassets/build/client/
 .vscode/
 .idea/
 
+# Claude Code project state (session data, agent worktrees) — never a build input
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
