@@ -75,6 +75,10 @@ type Querier interface {
 	// existing eleven columns, as $12/$13, so every pre-existing positional
 	// parameter keeps its number -- D-20's write-once guarantee applies to
 	// these two snapshot columns exactly as it does to the original nine.
+	// watched_artist_name (quick/260825-g6i) is appended as $14, after
+	// release_type/$13, for the same reason: every pre-existing positional
+	// parameter keeps its number, and D-20's write-once guarantee applies to
+	// this column identically.
 	InsertEvent(ctx context.Context, arg InsertEventParams) (int64, error)
 	// Phase 13 (bug #3, D-06/D-07/D-12, grilling round Q4): the artists a
 	// backfill sweep must visit. Three halves make up this scope decision:

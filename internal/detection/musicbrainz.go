@@ -116,19 +116,21 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 
 			mbid := g.MBID
 			coverArt := coverArtURLForReleaseGroup(mbid)
+			watchedName := entry.Name
 			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
-				ArtistID:         entry.ArtistID,
-				Source:           sourceMusicBrainz,
-				EventType:        eventTypeNewRelease,
-				ExternalID:       mbid,
-				ReleaseGroupMbid: &mbid,
-				Title:            g.Title,
-				ArtistName:       entry.Name,
-				ReleaseDate:      nullableString(g.FirstReleaseDate),
-				CoverArtUrl:      &coverArt,
-				TrackCount:       nil,
-				ReleaseType:      releaseTypeForStorage(g.PrimaryType),
-				NotifiedAt:       notifiedAt,
+				ArtistID:          entry.ArtistID,
+				Source:            sourceMusicBrainz,
+				EventType:         eventTypeNewRelease,
+				ExternalID:        mbid,
+				ReleaseGroupMbid:  &mbid,
+				Title:             g.Title,
+				ArtistName:        entry.Name,
+				ReleaseDate:       nullableString(g.FirstReleaseDate),
+				CoverArtUrl:       &coverArt,
+				TrackCount:        nil,
+				ReleaseType:       releaseTypeForStorage(g.PrimaryType),
+				NotifiedAt:        notifiedAt,
+				WatchedArtistName: &watchedName,
 			})
 			if err != nil {
 				return fmt.Errorf("detection: detect musicbrainz: %w", err)
@@ -257,15 +259,24 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 		releaseDate := earliestReleaseDate(releases)
 		releaseGroupMBID, coverArt := guestFeatureArt(releases)
 
+		// artist_name is the recording's primary credited artist (the artist
+		// this track is billed to on MusicBrainz); watched_artist_name is
+		// the watchlist entry that caused this row to be inserted (the
+		// artist the user is actually tracking). These are two different
+		// facts about the same event, not a redundancy -- a guest_feature
+		// row's watched artist is, by definition, usually not the primary
+		// credit.
+		watchedName := entry.Name
 		params := sqlc.InsertEventParams{
-			ArtistID:    entry.ArtistID,
-			Source:      sourceMusicBrainz,
-			EventType:   eventTypeGuestFeature,
-			ExternalID:  rec.MBID,
-			Title:       rec.Title,
-			ArtistName:  displayArtistName(rec, entry.Name),
-			ReleaseDate: nullableString(releaseDate),
-			NotifiedAt:  notifiedAt,
+			ArtistID:          entry.ArtistID,
+			Source:            sourceMusicBrainz,
+			EventType:         eventTypeGuestFeature,
+			ExternalID:        rec.MBID,
+			Title:             rec.Title,
+			ArtistName:        displayArtistName(rec, entry.Name),
+			ReleaseDate:       nullableString(releaseDate),
+			NotifiedAt:        notifiedAt,
+			WatchedArtistName: &watchedName,
 		}
 		if releaseGroupMBID != "" {
 			groupMBID := releaseGroupMBID
@@ -448,6 +459,7 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 			coverArt := coverArtURLForReleaseGroup(groupMBID)
 			trackCount := int32(maxCount)                 //nolint:gosec // maxCount sums MusicBrainz media.TrackCount fields; a real release is always orders of magnitude under int32 range (worst case on a malformed upstream value is a wrong stored number, not a security defect)
 			previousTrackCount := int32(previousBaseline) //nolint:gosec // previousBaseline is read back from advanceGroupBaseline's own previously-stored int32 column, never a fresh unbounded external value
+			watchedName := entry.Name
 			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
 				ArtistID:           entry.ArtistID,
 				Source:             sourceMusicBrainz,
@@ -461,6 +473,7 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 				TrackCount:         &trackCount,
 				PreviousTrackCount: &previousTrackCount,
 				NotifiedAt:         notifiedAt,
+				WatchedArtistName:  &watchedName,
 			})
 			if err != nil {
 				// Known, accepted edge (see this method's doc comment): the

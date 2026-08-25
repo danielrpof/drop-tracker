@@ -75,19 +75,21 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 		// casing for non-"album" record types (single/ep/compilation) is an
 		// open upstream assumption carried from Phase 3 (03-RESEARCH.md
 		// Assumption A2), not something this line guarantees.
+		watchedName := entry.Name
 		newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
-			ArtistID:         entry.ArtistID,
-			Source:           sourceDeezer,
-			EventType:        eventTypeNewRelease,
-			ExternalID:       externalID,
-			ReleaseGroupMbid: nil,
-			Title:            a.Title,
-			ArtistName:       entry.Name,
-			ReleaseDate:      nullableString(a.ReleaseDate),
-			CoverArtUrl:      nullableString(a.Cover),
-			TrackCount:       nil,
-			ReleaseType:      nullableString(a.RecordType),
-			NotifiedAt:       notifiedAt,
+			ArtistID:          entry.ArtistID,
+			Source:            sourceDeezer,
+			EventType:         eventTypeNewRelease,
+			ExternalID:        externalID,
+			ReleaseGroupMbid:  nil,
+			Title:             a.Title,
+			ArtistName:        entry.Name,
+			ReleaseDate:       nullableString(a.ReleaseDate),
+			CoverArtUrl:       nullableString(a.Cover),
+			TrackCount:        nil,
+			ReleaseType:       nullableString(a.RecordType),
+			NotifiedAt:        notifiedAt,
+			WatchedArtistName: &watchedName,
 		})
 		if err != nil {
 			return fmt.Errorf("detection: detect deezer: %w", err)

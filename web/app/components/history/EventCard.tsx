@@ -131,16 +131,41 @@ function guestFeatureHref(event: EventItem): string | null {
   return null
 }
 
+// watchlistNote computes the "<X> is on your watchlist" suffix for a
+// guest_feature card from a plain value comparison, never from
+// event.event_type -- the detection layer already distinguishes
+// watched_artist_name (the watchlist entry that caused this row) from
+// artist_name (the recording's primary credited artist); the UI must not
+// re-derive that distinction as a hardcoded event-type branch. Returns null
+// when watched_artist_name is absent, empty, or equal to artist_name --
+// pre-migration rows (watched_artist_name: null) and any row where the two
+// names coincide render no note, exactly like today.
+function watchlistNote(event: EventItem): string | null {
+  const watched = event.watched_artist_name
+  if (!watched || watched === event.artist_name) {
+    return null
+  }
+  return watched
+}
+
 // GuestFeatureBody shows the recording title (event.title is the recording
 // title for a guest_feature row) linked out to the source, plus a release
 // date line (OQ-01) using the identical `?? "Release date unknown"`
 // fallback expression NewReleaseBody already uses -- no new copy invented.
-// Both the linked and unlinked title branches render the date line.
+// Both the linked and unlinked title branches render the date line, and,
+// when watchlistNote returns a value, an em-dash-separated note naming the
+// watchlisted artist that actually caused this row -- rendered as a plain
+// JSX text node so React escapes it (T-g6i-04; dangerouslySetInnerHTML
+// stays absent repo-wide).
 function GuestFeatureBody({ event }: { event: EventItem }) {
   const href = guestFeatureHref(event)
   const dateLabel = event.release_date ?? "Release date unknown"
+  const note = watchlistNote(event)
   const titleLine = !href ? (
-    <p className="text-label text-muted-foreground">{event.title}</p>
+    <p className="text-label text-muted-foreground">
+      {event.title}
+      {note && ` — ${note} is on your watchlist`}
+    </p>
   ) : (
     <p className="text-label text-muted-foreground">
       Featured on{" "}
@@ -152,6 +177,7 @@ function GuestFeatureBody({ event }: { event: EventItem }) {
       >
         {event.title}
       </a>
+      {note && ` — ${note} is on your watchlist`}
     </p>
   )
   return (

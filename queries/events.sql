@@ -9,12 +9,16 @@
 -- existing eleven columns, as $12/$13, so every pre-existing positional
 -- parameter keeps its number -- D-20's write-once guarantee applies to
 -- these two snapshot columns exactly as it does to the original nine.
+-- watched_artist_name (quick/260825-g6i) is appended as $14, after
+-- release_type/$13, for the same reason: every pre-existing positional
+-- parameter keeps its number, and D-20's write-once guarantee applies to
+-- this column identically.
 INSERT INTO events (
     artist_id, source, event_type, external_id, release_group_mbid,
     title, artist_name, release_date, cover_art_url, track_count, notified_at,
-    previous_track_count, release_type
+    previous_track_count, release_type, watched_artist_name
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 )
 ON CONFLICT (event_type, source, external_id) DO NOTHING;
 
@@ -118,8 +122,8 @@ UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL;
 -- those four is the exact regression Phase 10's success criteria 3-5 exist
 -- to catch -- do not "fix" them to also filter by retention.
 SELECT id, artist_id, source, event_type, external_id, release_group_mbid,
-       title, artist_name, release_date, cover_art_url, track_count,
-       previous_track_count, release_type, notified_at, created_at
+       title, artist_name, watched_artist_name, release_date, cover_art_url,
+       track_count, previous_track_count, release_type, notified_at, created_at
 FROM events
 WHERE (sqlc.narg('artist_id')::bigint IS NULL OR artist_id = sqlc.narg('artist_id')::bigint)
   AND (sqlc.narg('event_type')::text IS NULL OR event_type = sqlc.narg('event_type')::text)

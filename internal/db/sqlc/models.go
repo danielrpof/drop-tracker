@@ -36,6 +36,7 @@ type Event struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	PreviousTrackCount *int32             `json:"previous_track_count"`
 	ReleaseType        *string            `json:"release_type"`
+	WatchedArtistName  *string            `json:"watched_artist_name"`
 }
 
 type Watchlist struct {

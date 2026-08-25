@@ -38,6 +38,7 @@ type Event struct {
 	ReleaseGroupMBID   *string    `json:"release_group_mbid"`
 	Title              string     `json:"title"`
 	ArtistName         string     `json:"artist_name"`
+	WatchedArtistName  *string    `json:"watched_artist_name"`
 	ReleaseDate        *string    `json:"release_date"`
 	CoverArtURL        *string    `json:"cover_art_url"`
 	TrackCount         *int32     `json:"track_count"`
@@ -177,6 +178,7 @@ func toEvent(row sqlc.ListEventsRow) Event {
 		ReleaseGroupMBID:   row.ReleaseGroupMbid,
 		Title:              row.Title,
 		ArtistName:         row.ArtistName,
+		WatchedArtistName:  row.WatchedArtistName,
 		ReleaseDate:        row.ReleaseDate,
 		CoverArtURL:        row.CoverArtUrl,
 		TrackCount:         row.TrackCount,

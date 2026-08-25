@@ -138,9 +138,9 @@ const insertEvent = `-- name: InsertEvent :execrows
 INSERT INTO events (
     artist_id, source, event_type, external_id, release_group_mbid,
     title, artist_name, release_date, cover_art_url, track_count, notified_at,
-    previous_track_count, release_type
+    previous_track_count, release_type, watched_artist_name
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 )
 ON CONFLICT (event_type, source, external_id) DO NOTHING
 `
@@ -159,6 +159,7 @@ type InsertEventParams struct {
 	NotifiedAt         pgtype.Timestamptz `json:"notified_at"`
 	PreviousTrackCount *int32             `json:"previous_track_count"`
 	ReleaseType        *string            `json:"release_type"`
+	WatchedArtistName  *string            `json:"watched_artist_name"`
 }
 
 // 0 rows affected means the dedup key (event_type, source, external_id)
@@ -171,6 +172,10 @@ type InsertEventParams struct {
 // existing eleven columns, as $12/$13, so every pre-existing positional
 // parameter keeps its number -- D-20's write-once guarantee applies to
 // these two snapshot columns exactly as it does to the original nine.
+// watched_artist_name (quick/260825-g6i) is appended as $14, after
+// release_type/$13, for the same reason: every pre-existing positional
+// parameter keeps its number, and D-20's write-once guarantee applies to
+// this column identically.
 func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertEvent,
 		arg.ArtistID,
@@ -186,6 +191,7 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64
 		arg.NotifiedAt,
 		arg.PreviousTrackCount,
 		arg.ReleaseType,
+		arg.WatchedArtistName,
 	)
 	if err != nil {
 		return 0, err
@@ -195,8 +201,8 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64
 
 const listEvents = `-- name: ListEvents :many
 SELECT id, artist_id, source, event_type, external_id, release_group_mbid,
-       title, artist_name, release_date, cover_art_url, track_count,
-       previous_track_count, release_type, notified_at, created_at
+       title, artist_name, watched_artist_name, release_date, cover_art_url,
+       track_count, previous_track_count, release_type, notified_at, created_at
 FROM events
 WHERE ($1::bigint IS NULL OR artist_id = $1::bigint)
   AND ($2::text IS NULL OR event_type = $2::text)
@@ -223,6 +229,7 @@ type ListEventsRow struct {
 	ReleaseGroupMbid   *string            `json:"release_group_mbid"`
 	Title              string             `json:"title"`
 	ArtistName         string             `json:"artist_name"`
+	WatchedArtistName  *string            `json:"watched_artist_name"`
 	ReleaseDate        *string            `json:"release_date"`
 	CoverArtUrl        *string            `json:"cover_art_url"`
 	TrackCount         *int32             `json:"track_count"`
@@ -285,6 +292,7 @@ func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListE
 			&i.ReleaseGroupMbid,
 			&i.Title,
 			&i.ArtistName,
+			&i.WatchedArtistName,
 			&i.ReleaseDate,
 			&i.CoverArtUrl,
 			&i.TrackCount,
@@ -337,7 +345,7 @@ func (q *Queries) ListExternalIDs(ctx context.Context, arg ListExternalIDsParams
 }
 
 const listUnnotified = `-- name: ListUnnotified :many
-SELECT id, artist_id, source, event_type, external_id, release_group_mbid, title, artist_name, release_date, cover_art_url, track_count, notified_at, created_at, previous_track_count, release_type FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC
+SELECT id, artist_id, source, event_type, external_id, release_group_mbid, title, artist_name, release_date, cover_art_url, track_count, notified_at, created_at, previous_track_count, release_type, watched_artist_name FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC
 `
 
 // D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
@@ -370,6 +378,7 @@ func (q *Queries) ListUnnotified(ctx context.Context) ([]Event, error) {
 			&i.CreatedAt,
 			&i.PreviousTrackCount,
 			&i.ReleaseType,
+			&i.WatchedArtistName,
 		); err != nil {
 			return nil, err
 		}

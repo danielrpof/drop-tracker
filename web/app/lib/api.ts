@@ -18,6 +18,7 @@ export interface EventItem {
   release_group_mbid: string | null
   title: string
   artist_name: string
+  watched_artist_name: string | null
   release_date: string | null
   cover_art_url: string | null
   track_count: number | null
