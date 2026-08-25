@@ -4,14 +4,15 @@
 
 drop-tracker starts from an empty repo and builds outward from the data layer: a Postgres schema, config, and health-checked service skeleton first, then a fully tested watchlist CRUD API, then rate-limited MusicBrainz/Deezer clients with live search, then the detection engine that diffs poll results into new-release/guest-feature/deluxe events, then Discord notifications for those events, then the React UI that ties watchlist management and release history together, and finally the single-image containerization and full GitHub Actions CI/CD pipeline (lint, test, security scan, SBOM, semantic versioning, ghcr.io publish) that is the actual point of the project. Each phase produces something a user (or operator) can directly observe working before the next phase builds on it.
 
-v1.1 picked up from a shipped, working v1.0 and closed four peer-reviewed gaps without changing what the app does for its user: the React frontend gained the component test suite it never had, the Full Pipeline started enforcing coverage floors on both languages instead of merely running tests, the events table gained a retention window that hides stale history from display while leaving every detection-critical row in place, and the poller stopped walking the watchlist one artist at a time.
+v1.1 picked up from a shipped, working v1.0 and closed four peer-reviewed gaps without changing what the app does for its user: the React frontend gained the component test suite it never had, the Full Pipeline started enforcing coverage floors on both languages instead of merely running tests, the events table gained a retention window that hides stale history from display while leaving every detection-critical row in place, and the poller stopped walking the watchlist one artist at a time. v1.2 then closed the two items left in the backlog plus a round of History-tab display bugs found in everyday use — search popularity ranking, artist-art backfill, and missing release dates/album art on History cards — without adding new capability.
 
 ## Milestones
 
 - ✅ **v1.0 MVP** — Phases 1-7 (shipped 2026-08-12)
 - ✅ **v1.1 Hardening & Scale Readiness** — Phases 8-11.1 (shipped 2026-08-17)
+- ✅ **v1.2 Cleanup & Display Fixes** — Phases 12-13 (shipped 2026-08-24)
 
-Full phase-by-phase detail for both is archived at `.planning/milestones/v1.0-ROADMAP.md` and `.planning/milestones/v1.1-ROADMAP.md`. Accomplishment summaries: `.planning/MILESTONES.md`.
+Full phase-by-phase detail for all three is archived at `.planning/milestones/v1.0-ROADMAP.md`, `.planning/milestones/v1.1-ROADMAP.md`, and `.planning/milestones/v1.2-ROADMAP.md`. Accomplishment summaries: `.planning/MILESTONES.md`.
 
 ## Phases
 
@@ -46,27 +47,13 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 </details>
 
-### Phase 12: Cleanup: CoverArt Reset & Search Popularity Ranking
+<details>
+<summary>✅ v1.2 Cleanup & Display Fixes (Phases 12-13) — SHIPPED 2026-08-24</summary>
 
-**Goal:** Close two loose ends left after v1.1 closes: (1) `CoverArt.tsx`'s image-load-error state never resets when `src` changes on a retained component instance, so a component that once failed to load keeps showing the placeholder forever even if a later `src` would succeed — flagged in `.planning/v1.1-MILESTONE-AUDIT.md` as pre-existing, non-blocking tech debt; (2) promoted from backlog Phase 999.1 — search results aren't ranked by popularity and same-named artists (e.g. multiple "Drake"s) are hard to disambiguate, since MusicBrainz's search API doesn't rank by popularity and its `disambiguation` field is often blank.
-**Requirements**: TBD — no REQ-IDs mapped; `12-CONTEXT.md`'s locked decisions D-01 through D-10 are the authoritative scope and are traced through the plans' `requirements` fields
-**Depends on:** Phase 11
-**Plans:** 3/3 plans complete
+- [x] **Phase 12: Cleanup: CoverArt Reset & Search Popularity Ranking** - Fixed the shared `CoverArt` component's stale-placeholder bug and added Deezer-fan-count popularity ranking plus a MusicBrainz country-code disambiguation fallback to artist search (completed 2026-08-19)
+- [x] **Phase 13: Fix History Dates, Guest-Feature Art & Artist Art** - History cards now show release dates and guest-feature album art, and MusicBrainz artists get real artist art via a fail-closed MusicBrainz→Deezer matcher wired into add-time and a startup backfill sweep (completed 2026-08-24)
 
-Context:
-
-- CoverArt fix: affects both History and Watchlist rows (shared component). Reset the error state on `src` change, likely via a `useEffect` keyed on `src` or a `key` prop forcing remount.
-- Popularity/disambiguation (ex-999.1, captured during Phase 6 UAT 06-04): the Watchlist search UI already renders `disambiguation` when present (`SearchResultsColumns.tsx`) — the gap is upstream ranking, not the UI. Likely needs a popularity signal (Deezer search results carry fan-count data not currently captured by `internal/deezer`) and/or better MusicBrainz result ranking in `internal/httpserver/search.go`.
-
-Plans:
-**Wave 1**
-
-- [x] 12-01-PLAN.md — CoverArt error-state reset on `src` change plus its regression test (D-01, D-02) — wave 1
-- [x] 12-02-PLAN.md — Deezer fan-count capture and stable descending popularity sort inside the client (D-03, D-04) — wave 1
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 12-03-PLAN.md — MusicBrainz country fallback end-to-end, plus preserved-order and no-fan-count-on-the-wire guardrails (D-05 through D-10) — wave 2
+</details>
 
 ## Progress
 
@@ -74,24 +61,8 @@ Plans:
 | --------- | ------ | ------ | --------- |
 | v1.0 MVP | 1-7 | Complete | 2026-08-12 |
 | v1.1 Hardening & Scale Readiness | 8-11.1 | Complete | 2026-08-17 |
-
-### Phase 13: Fix History Dates, Guest-Feature Art & Artist Art
-
-**Goal:** Resolve three outstanding display/data bugs users are still hitting after Phase 12: (1) History tab entries (single/feature/deluxe) don't show a release date next to each item; (2) guest-feature release cards don't show album art even though new-release cards do; (3) artist art from MusicBrainz still doesn't render, despite Deezer artists being linkable to MusicBrainz artists so Deezer pictures could be used. Absorbs backlog Phase 999.2 (Deezer artist-art backfill) where it overlaps with bug 3. Must actually resolve these — no repeat phases for the same unfixed behavior.
-**Requirements**: D-01 through D-09 (13-CONTEXT.md locked decisions — no REQUIREMENTS.md IDs are mapped to this phase)
-**Depends on:** Phase 12
-**Plans:** 3/3 plans complete
-
-Plans:
-**Wave 1**
-
-- [x] 13-01-PLAN.md — Guest-feature release date & cover art, end-to-end through the History card (D-01–D-05, plus guest-feature date rendering and per-recording lookup error isolation)
-- [x] 13-02-PLAN.md — artistart matcher package: close-name match, shared-album-title tie-break, fail-closed policy, and the ListArtistsMissingImage query (D-06, D-08, D-09)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 13-03-PLAN.md — Add-time artist-art wiring and the one-time startup backfill sweep (D-06, D-07, D-09)
+| v1.2 Cleanup & Display Fixes | 12-13 | Complete | 2026-08-24 |
 
 ## Backlog
 
-*(none currently — Phase 999.2 was absorbed into Phase 13)*
+*(none currently)*

@@ -10,16 +10,30 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 ## Current State
 
-**Shipped:** v1.1 Hardening & Scale Readiness (2026-08-17), plus two follow-on cleanup phases (12, 13; 2026-08-24)
+**Shipped:** v1.2 Cleanup & Display Fixes (2026-08-24)
 
 v1.0's four peer-reviewed gaps are closed without changing user-facing behavior: the frontend has a real Vitest + RTL test suite, CI now blocks merges on coverage regressions (80% backend / 70% frontend), event history has a configurable retention window with zero data loss to detection state, and polling runs several artists at a time per source through a bounded, race-safe worker pool. A follow-on tech-debt phase (11.1) closed everything the milestone audit flagged, including a real accessibility bug in the History filter UI.
 
-Two further cleanup phases then closed the backlog and outstanding display bugs: Phase 12 fixed the `CoverArt.tsx` error-state-never-resets bug and added Deezer-fan-count-based search popularity ranking with MusicBrainz country-fallback (absorbing backlog Phase 999.1). Phase 13 fixed three more user-facing display/data bugs — History cards with no release date, guest-feature cards with no album art, and MusicBrainz artist art never rendering — the last via a new hand-rolled `internal/artistart` matcher (strict close-name + guarded tie-break, fail-closed by default) wired into both add-time and a cooldown-bounded startup backfill sweep (absorbing backlog Phase 999.2).
+v1.2 then closed the backlog and outstanding display bugs: Phase 12 fixed the `CoverArt.tsx` error-state-never-resets bug and added Deezer-fan-count-based search popularity ranking with MusicBrainz country-fallback (absorbing backlog Phase 999.1). Phase 13 fixed three more user-facing display/data bugs — History cards with no release date, guest-feature cards with no album art, and MusicBrainz artist art never rendering — the last via a new hand-rolled `internal/artistart` matcher (strict close-name + guarded tie-break, fail-closed by default) wired into both add-time and a cooldown-bounded startup backfill sweep (absorbing backlog Phase 999.2).
 
 ## Next Milestone Goals
 
-Not yet scoped — run `/gsd-new-milestone` to define v1.2. Candidates carried in ROADMAP.md's Backlog:
-- v2 requirements tracked in the outgoing REQUIREMENTS.md archive: VPS SSH deploy (DPLY-01), producer watchlist entities (WLST-07), PR coverage-diff comments (CICD-13), Playwright E2E suite (TEST-03)
+Not yet scoped — run `/gsd-new-milestone` to define v1.3. Candidates carried in ROADMAP.md's Backlog (currently empty) and the outgoing v1.1 REQUIREMENTS.md archive:
+- VPS SSH deploy (DPLY-01), producer watchlist entities (WLST-07), PR coverage-diff comments (CICD-13), Playwright E2E suite (TEST-03)
+
+<details>
+<summary>Previous Milestone: v1.2 Cleanup & Display Fixes (shipped 2026-08-24)</summary>
+
+**Goal:** Close the two remaining backlog items plus a round of History-tab display bugs found in everyday use, without adding new capability.
+
+**Target features:**
+- `CoverArt.tsx` stale-placeholder fix, shared across History/Watchlist/search rows
+- Deezer fan-count-based search popularity ranking, MusicBrainz country-code disambiguation fallback (absorbed backlog Phase 999.1)
+- History-card release dates for guest-feature and deluxe-change events
+- Guest-feature release cards render album art
+- MusicBrainz artist art via a fail-closed `internal/artistart` matcher, wired into add-time and a startup backfill sweep (absorbed backlog Phase 999.2)
+
+</details>
 
 <details>
 <summary>Previous Milestone: v1.1 Hardening & Scale Readiness (shipped 2026-08-17)</summary>
@@ -146,4 +160,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-24 after Phase 13*
+*Last updated: 2026-08-24 after v1.2 milestone*

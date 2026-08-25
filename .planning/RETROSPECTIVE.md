@@ -41,6 +41,46 @@
 
 ---
 
+## Milestone: v1.2 — Cleanup & Display Fixes
+
+**Shipped:** 2026-08-24
+**Phases:** 2 (12-13) | **Plans:** 6 | **Sessions:** not tracked
+
+### What Was Built
+- `CoverArt.tsx`'s stale-placeholder bug fixed via a `useEffect([src])` reset, fixing History, Watchlist, and search-result rows from one shared-component change
+- Deezer fan-count-based search popularity ranking (`Client.SearchArtists`, stable descending sort) and a MusicBrainz `country`-code disambiguation fallback for search results, absorbing backlog Phase 999.1
+- History cards for guest-feature and deluxe-change events now render a release date, sourced via a new per-recording MusicBrainz lookup with a precision-aware earliest-date rule and a per-cycle rate cap
+- Guest-feature release cards render album art, matching new-release cards
+- A new hand-rolled `internal/artistart` matcher (strict close-name equality + guarded shared-album-title tie-break, fail-closed on ambiguity) resolves MusicBrainz artist art from Deezer, wired into both add-time and a cooldown-bounded startup backfill sweep coordinated by a shared `ActivityGate` — absorbing backlog Phase 999.2
+
+### What Worked
+- Fixing a bug in one shared component (`CoverArt.tsx`) automatically fixed all three consumers (History, Watchlist, search) with zero call-site changes — no need to touch or re-test each caller
+- Fail-closed design for the MusicBrainz→Deezer artist-art matcher (reject on any ambiguity rather than guess) traded a small number of missing photos for zero misattributed ones, matching the phase's own threat model
+- Code-review warnings found during Phase 13's UAT verification (a date-parsing panic, a stats double-count, an `ActivityGate` leak on panic) were fixed in place immediately with regression tests instead of deferred to a follow-up phase, continuing the pattern v1.1 identified as worth doing more of
+
+### What Was Inefficient
+- Phases 12 and 13 ran as ad-hoc post-v1.1 cleanup with no REQUIREMENTS.md and no milestone version assigned until close time — `/gsd-complete-milestone` was first invoked with a stale "1.1" argument (already shipped/tagged) and had to be redirected to v1.2 mid-workflow. Assigning the next milestone version when this cleanup work started, rather than only at close, would have avoided the confusion.
+- The milestone-close CLI (`gsd-tools.cjs query milestone.complete`) couldn't detect Phase 12/13 as belonging to a milestone (they weren't grouped under a `### v1.2 ...` heading in ROADMAP.md) and returned 0 phases/plans/accomplishments — the archive, MILESTONES.md entry, and phase-directory move all had to be done manually. Grouping ad-hoc phases under a milestone heading in ROADMAP.md as soon as a version is decided (not just at close) would let the automation work correctly.
+- Windows dev-machine limitations (`go test -race` unusable, MusicBrainz TLS failure over WSL2) recurred again as a known, already-documented cost rather than something newly discovered.
+
+### Patterns Established
+- `useEffect([dep]) → reset` is the standard fix for a retained component whose failure/error state derives from a prop that can change without a remount
+- `slices.SortStableFunc` (not `SortFunc`) is the standard choice for any popularity/relevance-style sort where ties are common and the pre-sort order carries meaning
+- A shared `ActivityGate` priority-yielding primitive is the standard way to coordinate two independent consumers (an interactive path and a background sweep) against one external rate budget, instead of giving the background consumer its own budget
+- Fail-closed strict-match + guarded-tie-break is the standard shape for any cross-source identity matching where a wrong match is worse than no match
+
+### Key Lessons
+1. Assign and record a milestone version (even provisionally) as soon as post-ship cleanup work starts, and group it under that version's heading in ROADMAP.md — waiting until `/gsd-complete-milestone` runs to decide the version number causes both human confusion and automation misdetection.
+2. Fail-closed is worth the cost for any feature that attaches identity data (a photo, a name) from a second source with imperfect matching — a wrong result is worse than a missing one.
+3. Closing code-review/UAT-surfaced warnings immediately, in the same phase, continues to beat deferring them — this is the second milestone running where that held true.
+
+### Cost Observations
+- Model mix: not tracked this milestone
+- Sessions: not tracked
+- Notable: no cost/efficiency telemetry captured for v1.2, consistent with v1.1
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -49,6 +89,7 @@
 |-----------|----------|--------|------------|
 | v1.0 | not tracked | 7 | Initial MVP; milestone never formally closed via `/gsd-complete-milestone` |
 | v1.1 | not tracked | 5 (08-11.1) | First milestone closed via the full `/gsd-complete-milestone` workflow; added a dedicated tech-debt-closure phase pattern |
+| v1.2 | not tracked | 2 (12-13) | Ad-hoc post-v1.1 cleanup phases (no REQUIREMENTS.md, version assigned only at close) closed via `/gsd-complete-milestone`; required manual archive/MILESTONES.md correction since the phases weren't pre-grouped under a milestone heading |
 
 ### Cumulative Quality
 
@@ -56,7 +97,10 @@
 |-----------|-------|----------|--------------------|
 | v1.0 | not measured | not enforced | — |
 | v1.1 | backend 83.5%+, frontend 70%+ (both CI-enforced) | 80% backend / 70% frontend gate | buffered-channel semaphore (no worker-pool lib), hand-rolled accessible combobox (no UI lib) |
+| v1.2 | backend/frontend suites extended, gates held at 80%/70% throughout | 80% backend / 70% frontend gate (unchanged) | `internal/artistart` fail-closed matcher + `ActivityGate` primitive (stdlib-only, no new deps) |
 
 ### Top Lessons (Verified Across Milestones)
 
 1. Close out a milestone's archival step promptly after shipping — letting phase directories accumulate un-archived corrupts the next milestone's close (v1.1).
+2. Assign a milestone version and group phases under it in ROADMAP.md as soon as post-ship work starts, not just when `/gsd-complete-milestone` runs — otherwise both humans and the close automation lose track of which phases belong to which version (v1.2).
+3. Fixing code-review/UAT-surfaced warnings inline, in the same phase they're found, beats deferring them — held true across both v1.1 and v1.2.
