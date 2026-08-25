@@ -3,7 +3,7 @@ status: testing
 phase: 13-fix-history-dates-guest-feature-art-artist-art
 source: [13-VERIFICATION.md]
 started: 2026-08-24T23:18:44Z
-updated: 2026-08-24T23:18:44Z
+updated: 2026-08-24T23:59:59Z
 ---
 
 ## Current Test
@@ -22,14 +22,20 @@ result: [pending]
 
 ### 2. Accept-or-fix decision on the three code-review warnings
 expected: Review WR-01/WR-02/WR-03 in `13-REVIEW.md` (all confirmed still present by verification) and decide whether to apply the drafted fixes now or explicitly accept them as tracked follow-up debt. WR-01: `earlierDate` can panic on a MusicBrainz date shorter than 4 characters. WR-02: `Backfill`'s `Stats` can double-increment `Unmatched`+`Errored` for the same artist. WR-03: `Service.Add` leaks the `ActivityGate` registration if `Matcher.Match` panics.
-result: [pending]
+result: pass
+decision: "fix now"
+resolution: |
+  All three fixed with RED-then-GREEN regression tests, verified via full go build/vet/lint/test (all clean):
+  - WR-01: internal/detection/musicbrainz.go, filter dates <4 chars before earlierDate. Test a77041e, fix 1029f5b.
+  - WR-02: internal/artistart/backfill.go, count failed RecordArtMatchAttempt as Errored only. Test 5ca9f4a, fix abf0cdc.
+  - WR-03: internal/watchlist/service.go, scope ActivityGate/cancel cleanup to a deferred closure. Test df9406d, fix 722fe8e.
 
 ## Summary
 
 total: 2
-passed: 0
+passed: 1
 issues: 0
-pending: 2
+pending: 1
 skipped: 0
 blocked: 0
 

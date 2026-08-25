@@ -37,6 +37,11 @@ findings:
   info: 1
   total: 4
 status: issues_found
+resolution:
+  WR-01: "fixed in 1029f5b (test in a77041e)"
+  WR-02: "fixed in abf0cdc (test in 5ca9f4a)"
+  WR-03: "fixed in 722fe8e (test in df9406d)"
+  IN-01: "addressed as a side effect of WR-02's fix -- attemptErrByMbid is now exercised for the unmatched branch"
 ---
 
 # Phase 13: Code Review Report
@@ -53,6 +58,8 @@ Phase 13 adds three related pieces: (1) a guest-feature per-recording release lo
 The implementation is unusually well-documented and heavily tested (`go vet` is clean, `go test ./internal/artistart/... ./internal/musicbrainz/...` passes). Most of the fail-closed/D-09 logic, the tie-break, the ActivityGate concurrency, and the cooldown query are exercised by targeted tests. However, direct code tracing surfaced one precision-based date-comparison helper that can panic on malformed (but plausible, given MusicBrainz's community-editable nature) upstream data, an accounting bug in `Backfill`'s `Stats` that violates its own documented invariant, and a cleanup-on-panic gap in the add-time art-match's `ActivityGate` registration. None of these are exercised by the existing test suite — the `stubStore.upsertErrByMbid`/`attemptErrByMbid` fields built specifically to test the affected `Backfill` branches are defined but never populated by any test.
 
 ## Warnings
+
+**Resolution (2026-08-24):** All three warnings below were fixed at the user's request during UAT (`fixnow`). Each fix follows RED→GREEN: a regression test reproducing the exact defect, then the minimal patch. See `resolution` in this file's frontmatter for commit hashes.
 
 ### WR-01: `earlierDate` can panic on a MusicBrainz date shorter than 4 characters
 
