@@ -10,15 +10,15 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 ## Current State
 
-**Shipped:** v1.1 Hardening & Scale Readiness (2026-08-17)
+**Shipped:** v1.1 Hardening & Scale Readiness (2026-08-17), plus two follow-on cleanup phases (12, 13; 2026-08-24)
 
 v1.0's four peer-reviewed gaps are closed without changing user-facing behavior: the frontend has a real Vitest + RTL test suite, CI now blocks merges on coverage regressions (80% backend / 70% frontend), event history has a configurable retention window with zero data loss to detection state, and polling runs several artists at a time per source through a bounded, race-safe worker pool. A follow-on tech-debt phase (11.1) closed everything the milestone audit flagged, including a real accessibility bug in the History filter UI.
+
+Two further cleanup phases then closed the backlog and outstanding display bugs: Phase 12 fixed the `CoverArt.tsx` error-state-never-resets bug and added Deezer-fan-count-based search popularity ranking with MusicBrainz country-fallback (absorbing backlog Phase 999.1). Phase 13 fixed three more user-facing display/data bugs — History cards with no release date, guest-feature cards with no album art, and MusicBrainz artist art never rendering — the last via a new hand-rolled `internal/artistart` matcher (strict close-name + guarded tie-break, fail-closed by default) wired into both add-time and a cooldown-bounded startup backfill sweep (absorbing backlog Phase 999.2).
 
 ## Next Milestone Goals
 
 Not yet scoped — run `/gsd-new-milestone` to define v1.2. Candidates carried in ROADMAP.md's Backlog:
-- Phase 999.1: Search-result popularity sorting and same-name artist disambiguation (captured during Phase 6 UAT)
-- Phase 999.2: Deezer artist-art backfill for MusicBrainz-only-matched artists (captured 2026-08-12)
 - v2 requirements tracked in the outgoing REQUIREMENTS.md archive: VPS SSH deploy (DPLY-01), producer watchlist entities (WLST-07), PR coverage-diff comments (CICD-13), Playwright E2E suite (TEST-03)
 
 <details>
@@ -57,6 +57,8 @@ Not yet scoped — run `/gsd-new-milestone` to define v1.2. Candidates carried i
 - ✓ Events table retention — soft-delete/filter; `EVENT_RETENTION_DAYS` (default 90) hides aged-out rows from `GET /events` and the History UI while detection-state queries (dedup keys, deluxe-change baselines, seed-mode signal) stay unfiltered against the full table — Phase 10
 - ✓ Bounded worker-pool concurrent per-artist polling — env-configurable pool size (`MusicBrainzPollWorkers`/`DeezerPollWorkers`, default 3/5) for both MusicBrainz and Deezer poll cycles, still respecting existing rate limiters and overlap guards; deluxe-change baseline detection made race-safe with a single atomic CTE; connection pool `MaxConns` sized against the combined worker ceiling rather than `runtime.NumCPU()` — Phase 11
 - ✓ v1.1 tech-debt cleanup (13 locked decisions closing residual items from `.planning/v1.1-MILESTONE-AUDIT.md`) — frontend test-coverage gaps filled, History filter dropdown legibility fixed (native `<select>` replaced with a hand-rolled combobox after a CSS-only fix was found not to work on Windows Chromium), `prettier --check` now gates CI, notification-loss window made log-observable, `PoolConfig`'s two parse errors differentiated, boot test hardened, coverage-filter regex anchored, Postgres port revert (5433→5432) committed with full history, and Phases 08/09/10's Nyquist `VALIDATION.md` files reconciled out of `draft` — Phase 11.1
+- ✓ `CoverArt.tsx` error-state reset on `src` change, plus Deezer-fan-count-based search popularity ranking and MusicBrainz country fallback (absorbing backlog Phase 999.1) — Phase 12
+- ✓ History-card release dates (single/feature/deluxe), guest-feature album art via a new per-recording MusicBrainz lookup, and MusicBrainz/Deezer artist art via a hand-rolled `internal/artistart` matcher wired into both add-time and a cooldown-bounded startup backfill sweep (absorbing backlog Phase 999.2) — Phase 13
 
 ### Active
 
@@ -79,8 +81,8 @@ Not yet scoped — run `/gsd-new-milestone` to define v1.2. Candidates carried i
 - MusicBrainz and Deezer clients should be real, testable HTTP clients — tests mock the external calls with `httptest.Server`, not fake/stub business logic.
 - musicbrainz.org's TLS handshake fails with an `unexpected eof`/server `decode_error` alert from this developer's WSL2 network path specifically — reproduced identically with plain `curl` (bypassing drop-tracker's Go client entirely), confirmed environmental (not a code defect) during Phase 03 UAT. Deezer is unaffected. If a future phase's live testing hits the same MusicBrainz-only TLS failure on this machine, this is already a known, accepted limitation — see `.planning/phases/03-external-clients-search/03-VERIFICATION.md` Acknowledged Gaps and Broken Windows Ledger entry #3 (waived).
 - Config/settings library (pydantic-settings equivalent — e.g. envconfig/viper) and exact structured-logging setup are implementation details left to phase research/planning rather than locked here.
-- Current codebase size (as of v1.1 close, 2026-08-17): ~23,200 LOC Go across 72 files, ~3,500 LOC TypeScript/TSX across 33 files (`web/app/`, excludes generated build output). Backend coverage 83.5%+, frontend coverage 70%+, both CI-enforced.
-- One pre-existing, non-blocking UI bug noted at v1.1 close (v1.1-MILESTONE-AUDIT.md, not introduced by any v1.1 phase): `CoverArt.tsx`'s image-load-error state never resets when `src` changes on a retained component instance, so a component that once failed to load keeps showing the placeholder even if a later `src` would succeed. Affects both History and Watchlist rows. Left open deliberately rather than fixed outside its own scoped phase — candidate for a small future cleanup phase.
+- Current codebase size (as of Phase 13 close, 2026-08-24): ~26,900 LOC Go across 82 files, ~4,000 LOC TypeScript/TSX across 38 files (`web/app/`, excludes generated build output).
+- The `CoverArt.tsx` image-load-error-never-resets bug (noted at v1.1 close as pre-existing, non-blocking tech debt) was fixed in Phase 12.
 - Windows dev-machine limitations remain (`go test -race` unusable — ThreadSanitizer allocation failure under memory pressure; musicbrainz.org TLS handshake fails over WSL2). Both are documented, waived, environmental, not code defects. See `.planning/WINDOWS.md`.
 
 ## Constraints
@@ -123,6 +125,8 @@ Not yet scoped — run `/gsd-new-milestone` to define v1.2. Candidates carried i
 | Connection pool `MaxConns` sized against `MusicBrainzPollWorkers + DeezerPollWorkers` (+ headroom), not `runtime.NumCPU()` default | Bounded concurrency raises the number of simultaneous DB connections polling can need; the old default sizing was blind to the new worker-count knob | Validated Phase 11 (gap closure 11-05) — `poolMaxConnsForWorkers` clamps and computes explicitly, still honoring an operator's own `pool_max_conns` override |
 | Hand-rolled accessible combobox to replace the native `<select>` for History filters | A CSS-only contrast fix for the native dropdown was disproven on Windows Chromium during Phase 11.1 UAT — the underlying legibility bug needed a real component fix, not styling | Validated Phase 11.1 — `aria-activedescendant`-wired combobox verified live in-browser on the failing platform |
 | Blocking `prettier --check` added to the existing `frontend-test` CI job, not a new job | Formatting drift (40 files) had accumulated silently with no CI signal; reusing the job that already runs on every push avoids adding pipeline surface for a lint-adjacent check | Validated Phase 11.1 — `web/` tree reformatted once, gate now fails the build on any future drift |
+| Strict close-name equality + guarded-containment title tie-break for MusicBrainz→Deezer artist-art matching, fail-closed on any ambiguity, popularity (`NbFan`) explicitly excluded as a signal | A wrong-artist photo misrepresents identity and is worse than no photo — the primary risk this plan's own threat model (T-13-06) identified; unguarded fuzzy matching or "take the most popular candidate" would silently violate that | Validated Phase 13 — `internal/artistart/match.go`, `NbFan` asserted absent from executable code by grep criterion, extensive fail-closed test coverage |
+| Shared `ActivityGate` priority-yielding primitive instead of a second rate budget for coordinating add-time matching and the backfill sweep | A second independent rate budget would let combined outbound traffic exceed MusicBrainz's real ~1 req/sec external ceiling; yielding priority to interactive adds keeps total traffic bounded by the existing single limiter | Validated Phase 13 — `internal/artistart/activity.go`, atomic-counter + `sync.Once`-guarded, proven via concurrent stress tests |
 
 ## Evolution
 
@@ -142,4 +146,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-17 after v1.1 milestone completion*
+*Last updated: 2026-08-24 after Phase 13*
