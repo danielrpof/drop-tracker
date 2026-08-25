@@ -218,7 +218,9 @@ describe("EventCard", () => {
 
     render(<EventCard event={event} />)
 
-    expect(screen.getByText(/Lil Baby is on your watchlist/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Lil Baby is on your watchlist/)
+    ).toBeInTheDocument()
   })
 
   it("renders no watchlist note on a guest_feature card when watched_artist_name equals artist_name", () => {
