@@ -155,8 +155,8 @@ function watchlistNote(event: EventItem): string | null {
 // Both the linked and unlinked title branches render the date line, and,
 // when watchlistNote returns a value, an em-dash-separated note naming the
 // watchlisted artist that actually caused this row -- rendered as a plain
-// JSX text node so React escapes it (T-g6i-04; dangerouslySetInnerHTML
-// stays absent repo-wide).
+// JSX text node only, so React escapes it (T-g6i-04). No raw-HTML
+// injection prop is used anywhere in this file.
 function GuestFeatureBody({ event }: { event: EventItem }) {
   const href = guestFeatureHref(event)
   const dateLabel = event.release_date ?? "Release date unknown"
