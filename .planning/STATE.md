@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-24)
 Phase: Milestone v1.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-08-24 — Milestone v1.2 completed and archived
+Last activity: 2026-08-25 - Completed quick task 260825-09r: Add MusicBrainz url-rels Deezer link (Tier 0) and alias-based strict-match retry (Tier 1) to artistart.Matcher
 
 ## Performance Metrics
 
@@ -196,6 +196,7 @@ None yet.
 | 260824-2fw | Fix code-review finding #3: extract shared trimAndCap helper for handleAddWatchlist's repeated field validation in internal/httpserver/watchlist.go | 2026-08-24 | ba8f3d9 | [260824-2fw-fix-code-review-finding-3-extract-shared](./quick/260824-2fw-fix-code-review-finding-3-extract-shared/) |
 | 260824-2q4 | Fix code-review finding #4: centralize frontend source-identity logic (isAddableSource/identityField) instead of inline musicbrainz/deezer string comparisons | 2026-08-24 | d8bdd3d | [260824-2q4-fix-code-review-finding-4-centralize-fro](./quick/260824-2q4-fix-code-review-finding-4-centralize-fro/) |
 | 260824-339 | Fix code-review findings #5 and #6: extract nilIfEmpty helper in internal/httpserver/search.go, and fix stale /watchlist route literal in web/app/routes/watchlist.test.tsx | 2026-08-24 | 50b554f | [260824-339-fix-code-review-findings-5-and-6-extract](./quick/260824-339-fix-code-review-findings-5-and-6-extract/) |
+| 260825-09r | Add MusicBrainz url-rels Deezer link (Tier 0) and alias-based strict-match retry (Tier 1) to artistart.Matcher | 2026-08-25 | ecd5024 | [260825-09r-add-musicbrainz-url-rels-deezer-link-tie](./quick/260825-09r-add-musicbrainz-url-rels-deezer-link-tie/) |
 
 ### Roadmap Evolution
 
