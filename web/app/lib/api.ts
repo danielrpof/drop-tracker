@@ -32,10 +32,15 @@ export interface EventItem {
 // envelope. has_older_events (DATA-02, D-06) is never null on the wire --
 // it mirrors the Go bool exactly -- and tells the History route whether
 // this scope has any event hidden by the retention window, distinct from
-// "no events ever."
+// "no events ever." next_cursor is an opaque token (quick task
+// 260825-g6i replaced the raw numeric cursor with an encoded feed
+// position that carries both a release date and an event id) -- the only
+// correct client behaviour is to send it back verbatim as the next
+// request's cursor; callers must not parse, compare, or arithmetically
+// manipulate it.
 export interface EventsPage {
   events: EventItem[]
-  next_cursor: number | null
+  next_cursor: string | null
   has_older_events: boolean
 }
 
@@ -138,12 +143,12 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listEvents(params?: {
   artistId?: number
   eventType?: string
-  cursor?: number
+  cursor?: string
 }): Promise<EventsPage> {
   const search = new URLSearchParams()
   if (params?.artistId != null) search.set("artist_id", String(params.artistId))
   if (params?.eventType) search.set("event_type", params.eventType)
-  if (params?.cursor != null) search.set("cursor", String(params.cursor))
+  if (params?.cursor != null) search.set("cursor", params.cursor)
   const qs = search.toString()
   return apiFetch<EventsPage>(`/events${qs ? `?${qs}` : ""}`)
 }

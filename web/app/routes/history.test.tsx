@@ -77,9 +77,15 @@ describe("History route", () => {
     const eventB = makeEvent({ id: 2, title: "Event Beta" })
     const eventC = makeEvent({ id: 3, title: "Event Charlie" })
 
+    // A realistic base64url token -- next_cursor is opaque (quick task
+    // 260825-g6i), so this must not be a plain integer literal. Not a
+    // secret -- it's a base64url-encoded {"d":"2026-01-01","i":100} cursor
+    // fixture, but its entropy trips gitleaks' generic-api-key heuristic.
+    const nextCursorToken = "eyJkIjoiMjAyNi0wMS0wMSIsImkiOjEwMH0" // gitleaks:allow
+
     const firstPage: EventsPage = {
       events: [eventA, eventB],
-      next_cursor: 100,
+      next_cursor: nextCursorToken,
       has_older_events: false,
     }
     mockListEvents.mockResolvedValueOnce(firstPage)
@@ -110,7 +116,44 @@ describe("History route", () => {
     expect(screen.getAllByText(eventB.title)).toHaveLength(1)
 
     expect(mockListEvents).toHaveBeenLastCalledWith(
-      expect.objectContaining({ cursor: 100 })
+      expect.objectContaining({ cursor: nextCursorToken })
+    )
+  })
+
+  it("forwards a next_cursor containing base64url characters (-, _) unmodified, never parsed or coerced", async () => {
+    mockListWatchlist.mockResolvedValue([])
+
+    // base64url uses "-" and "_" in place of standard base64's "+" and "/"
+    // -- this token is opaque and must survive verbatim, not be parsed,
+    // compared, or arithmetically manipulated by the client. Not a secret
+    // -- see nextCursorToken's comment above.
+    const dashUnderscoreToken = "eyJkIjoiMjAyNi0wOC0yNSIsImkiOjk5OTk5OX0-_" // gitleaks:allow
+
+    const eventA = makeEvent({ id: 1, title: "Event Alpha" })
+    const eventB = makeEvent({ id: 2, title: "Event Beta" })
+
+    mockListEvents.mockResolvedValueOnce({
+      events: [eventA],
+      next_cursor: dashUnderscoreToken,
+      has_older_events: false,
+    })
+
+    renderRoute(History, "/history")
+
+    await screen.findByText(eventA.title)
+
+    mockListEvents.mockResolvedValueOnce({
+      events: [eventB],
+      next_cursor: null,
+      has_older_events: false,
+    })
+
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }))
+
+    await screen.findByText(eventB.title)
+
+    expect(mockListEvents).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cursor: dashUnderscoreToken })
     )
   })
 

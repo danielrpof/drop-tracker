@@ -111,18 +111,22 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     })
 
     it("carries exactly the cursor parameter when called with only a cursor", async () => {
-      await listEvents({ cursor: 42 })
+      await listEvents({ cursor: "eyJpIjo0Mn0" })
 
-      expect(fetchMock.mock.calls[0][0]).toBe("/events?cursor=42")
+      expect(fetchMock.mock.calls[0][0]).toBe("/events?cursor=eyJpIjo0Mn0")
     })
 
     it("carries all three parameters with the wire-level names when called with all three", async () => {
-      await listEvents({ artistId: 7, eventType: "new_release", cursor: 42 })
+      await listEvents({
+        artistId: 7,
+        eventType: "new_release",
+        cursor: "eyJpIjo0Mn0",
+      })
 
       // The Go handler expects snake_case query params -- artistId/eventType
       // do not match artist_id/event_type verbatim.
       expect(fetchMock.mock.calls[0][0]).toBe(
-        "/events?artist_id=7&event_type=new_release&cursor=42"
+        "/events?artist_id=7&event_type=new_release&cursor=eyJpIjo0Mn0"
       )
     })
   })

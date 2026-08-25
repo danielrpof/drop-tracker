@@ -59,7 +59,7 @@ function emptyStateCopy(hasOlderEvents: boolean, isFiltered: boolean) {
 // fetchHistoryPage calls listEvents() with the active filters and an
 // optional cursor -- the one place history.tsx talks to the API, so both
 // the initial-fetch effect and "Load more" share identical param-building.
-function fetchHistoryPage(filters: HistoryFiltersValue, cursor: number | null) {
+function fetchHistoryPage(filters: HistoryFiltersValue, cursor: string | null) {
   return listEvents({
     artistId: filters.artistId ?? undefined,
     eventType: filters.eventType ?? undefined,
@@ -77,7 +77,7 @@ export default function History() {
     eventType: null,
   })
   const [events, setEvents] = useState<EventItem[]>([])
-  const [nextCursor, setNextCursor] = useState<number | null>(null)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
   // hasOlderEvents (DATA-02, D-06) distinguishes "no release activity ever"
   // from "release activity exists but every event is outside the retention
   // window" -- only the initial-fetch value drives the empty state, but
