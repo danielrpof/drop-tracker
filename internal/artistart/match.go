@@ -275,7 +275,46 @@ func (m *Matcher) lookupArtistDetail(ctx context.Context, mbid string) musicbrai
 // both of which exist to stop a *heuristic* from guessing wrong -- are not
 // the applicable guard on this path.
 func (m *Matcher) matchLinkedDeezerArtist(ctx context.Context, detail musicbrainz.ArtistDetail) (Result, bool) {
-	return Result{}, false
+	if m.artists == nil {
+		return Result{}, false
+	}
+
+	ids := make(map[string]struct{})
+	for _, rel := range detail.Relations {
+		relType := strings.ToLower(strings.TrimSpace(rel.Type))
+		if relType != "free streaming" && relType != "streaming" {
+			continue
+		}
+		id := deezerArtistIDFromURL(rel.URL.Resource)
+		if id == "" {
+			continue
+		}
+		ids[id] = struct{}{}
+	}
+
+	if len(ids) != 1 {
+		// Zero distinct ids: nothing to resolve. Two or more distinct ids:
+		// conflicting curated data is ambiguity, and D-09 says ambiguity
+		// resolves to no photo rather than to a guess (T-09r-03).
+		return Result{}, false
+	}
+	var deezerID string
+	for id := range ids {
+		deezerID = id
+	}
+
+	artist, err := m.artists.ArtistByID(ctx, deezerID)
+	if err != nil {
+		m.debug("artistart: deezer artist confirm fetch failed", "deezer_id", deezerID, "error", err)
+		return Result{}, false
+	}
+	if artist.ID == 0 {
+		// Unconfirmed (e.g. a pulled/renumbered Deezer artist page).
+		return Result{}, false
+	}
+	// Built from the *fetched* artist, not the URL-derived id, so a
+	// Deezer-side merge or redirect lands on the canonical id.
+	return resultFor(artist), true
 }
 
 // matchNameStrict holds D-08's original decision order -- normalized-name

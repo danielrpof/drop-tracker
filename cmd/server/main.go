@@ -154,8 +154,13 @@ func run(ctx context.Context) error {
 	// sites. It reuses these exact dzClient/mbClient instances (rather than
 	// constructing separate clients) so both call sites stay inside the
 	// process-wide rate limiters above -- no second outbound budget is
-	// opened.
-	artMatcher := artistart.NewMatcher(dzClient, dzClient, mbClient)
+	// opened. The WithArtistLinks option below is D-09r's key link: the
+	// matcher now also consults MusicBrainz's curated Deezer link (Tier 0)
+	// and alias list (Tier 1) before falling back to name search, still
+	// reusing these exact process-wide rate-limited clients. Omitting this
+	// option would silently disable both new tiers in production while
+	// leaving every unit test green.
+	artMatcher := artistart.NewMatcher(dzClient, dzClient, mbClient, artistart.WithArtistLinks(mbClient, dzClient), artistart.WithLogger(logger))
 
 	// artActivityGate (D-10, grilling round Q1) coordinates the add-time
 	// matcher and the backfill sweep below, both of which share the same
