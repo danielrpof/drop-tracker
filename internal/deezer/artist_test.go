@@ -60,7 +60,7 @@ func TestArtistByID_DecodesFixture(t *testing.T) {
 func TestArtistByID_RequestShapeNoQueryParams(t *testing.T) {
 	var gotPath, gotRawQuery string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
+		gotPath = r.URL.EscapedPath()
 		gotRawQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(drakeArtistByIDFixture))
