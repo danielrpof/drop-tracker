@@ -2,7 +2,11 @@ package musicbrainz
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
 )
 
 // ArtistRelationURL is the nested url object on an ArtistRelation entry.
@@ -41,8 +45,60 @@ type ArtistDetail struct {
 	Aliases   []ArtistAlias    `json:"aliases"`
 }
 
-// LookupArtist is a RED-phase placeholder -- not yet implemented. See
-// artist_lookup_test.go for the behavior this must satisfy.
+// LookupArtist looks up mbid's curated url-rels (D-09r Tier 0's Deezer
+// link source) and aliases (Tier 1's alias-retry source) in a single round
+// trip -- requesting both inc values together is the point: Tier 1's alias
+// retry must not cost a second MusicBrainz round trip against a ~1 req/sec
+// budget. Issues exactly one GET through the shared doRequest seam, so it
+// inherits the operator-configured limiter and mandatory User-Agent header
+// exactly like every other method in this package.
 func (c *Client) LookupArtist(ctx context.Context, mbid string) (ArtistDetail, error) {
-	return ArtistDetail{}, errors.New("musicbrainz: LookupArtist not yet implemented")
+	trimmed := strings.TrimSpace(mbid)
+	if trimmed == "" {
+		return ArtistDetail{}, ErrEmptyMBID
+	}
+	if err := ctx.Err(); err != nil {
+		return ArtistDetail{}, err
+	}
+
+	// url.PathEscape is required here, never raw concatenation of the
+	// caller-influenced mbid (ASVS V5, T-13-01) -- mbid ultimately
+	// originates from community-editable upstream data.
+	u, err := url.Parse(c.baseURL + "/artist/" + url.PathEscape(trimmed))
+	if err != nil {
+		return ArtistDetail{}, fmt.Errorf("musicbrainz: parse base url: %w", err)
+	}
+	q := url.Values{}
+	q.Set("inc", "url-rels+aliases")
+	q.Set("fmt", "json")
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return ArtistDetail{}, fmt.Errorf("musicbrainz: build request: %w", err)
+	}
+
+	resp, err := c.doRequest(ctx, req)
+	if err != nil {
+		return ArtistDetail{}, fmt.Errorf("musicbrainz: lookup artist: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		// Never echo the response body -- only the status code, which is
+		// operator-facing and carries no upstream text (T-13-02, V13).
+		return ArtistDetail{}, fmt.Errorf("musicbrainz: lookup artist: unexpected status %d", resp.StatusCode)
+	}
+
+	var detail ArtistDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		return ArtistDetail{}, fmt.Errorf("musicbrainz: decode artist lookup response: %w", err)
+	}
+	if detail.Relations == nil {
+		detail.Relations = []ArtistRelation{}
+	}
+	if detail.Aliases == nil {
+		detail.Aliases = []ArtistAlias{}
+	}
+	return detail, nil
 }
