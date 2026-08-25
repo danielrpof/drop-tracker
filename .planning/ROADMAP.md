@@ -80,7 +80,7 @@ Plans:
 **Goal:** Resolve three outstanding display/data bugs users are still hitting after Phase 12: (1) History tab entries (single/feature/deluxe) don't show a release date next to each item; (2) guest-feature release cards don't show album art even though new-release cards do; (3) artist art from MusicBrainz still doesn't render, despite Deezer artists being linkable to MusicBrainz artists so Deezer pictures could be used. Absorbs backlog Phase 999.2 (Deezer artist-art backfill) where it overlaps with bug 3. Must actually resolve these — no repeat phases for the same unfixed behavior.
 **Requirements**: D-01 through D-09 (13-CONTEXT.md locked decisions — no REQUIREMENTS.md IDs are mapped to this phase)
 **Depends on:** Phase 12
-**Plans:** 3/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**
