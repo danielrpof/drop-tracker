@@ -1571,6 +1571,144 @@ func TestDetectMusicBrainz_DeluxeChange_FirstComparisonEstablishesBaseline(t *te
 	}
 }
 
+// The three tests below (quick/260826-gj8) prove the recheck-window gate:
+// detectDeluxeChanges must not issue a ReleasesByReleaseGroup call for an
+// already-seen release-group whose FirstReleaseDate is older than
+// deluxeRecheckWindowDays, while a group inside the window (or with an
+// absent date) is still checked exactly as before. Each reuses
+// TestDetectMusicBrainz_DeluxeChange_FirstComparisonEstablishesBaseline's
+// two-cycle arrangement: cycle 1 discovers the group as a new_release
+// (D-04: no fetch that cycle regardless of date), cycle 2 is the first
+// cycle in which the deluxe pass would fetch it.
+
+func TestDetectMusicBrainz_DeluxeChange_SkipsGroupOutsideRecheckWindow(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Deluxe Window Outside Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Deluxe Window Outside Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	groupMBID := mbid + "-rg1"
+	// Years old -- well outside deluxeRecheckWindowDays (90 days).
+	groups := []musicbrainz.ReleaseGroup{{MBID: groupMBID, Title: "Album", PrimaryType: "Album", FirstReleaseDate: "2020-01-01"}}
+
+	releases := &fakeReleaseDetailSource{}
+	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", "2020-01-01", 12)})
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
+
+	// Cycle 1: discovers the group -- new_release only, no release-detail
+	// fetch this cycle regardless of date (D-04).
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("cycle 1 DetectMusicBrainz: %v", err)
+	}
+	if got := releases.calls(); got != 0 {
+		t.Fatalf("cycle 1 release-detail calls = %d, want 0 (D-04)", got)
+	}
+
+	// Cycle 2: the group is now already-seen, but its FirstReleaseDate is
+	// outside the recheck window -- the age gate must suppress the fetch
+	// that D-04 alone would otherwise have allowed.
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("cycle 2 DetectMusicBrainz: %v", err)
+	}
+	if got := releases.calls(); got != 0 {
+		t.Fatalf("cycle 2 release-detail calls = %d, want 0 (the age gate must suppress this fetch)", got)
+	}
+
+	var deluxeCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'deluxe_change'", artistID).Scan(&deluxeCount); err != nil {
+		t.Fatalf("count deluxe_change events: %v", err)
+	}
+	if deluxeCount != 0 {
+		t.Fatalf("deluxe_change event row count = %d, want 0", deluxeCount)
+	}
+
+	var trackCount *int32
+	if err := pool.QueryRow(ctx, "SELECT track_count FROM events WHERE artist_id = $1 AND event_type = 'new_release' AND external_id = $2", artistID, groupMBID).Scan(&trackCount); err != nil {
+		t.Fatalf("query baseline track_count: %v", err)
+	}
+	if trackCount != nil {
+		t.Fatalf("baseline track_count = %v, want NULL (no fetch occurred, so no baseline should have been established)", *trackCount)
+	}
+}
+
+func TestDetectMusicBrainz_DeluxeChange_ChecksGroupInsideRecheckWindow(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Deluxe Window Inside Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Deluxe Window Inside Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	groupMBID := mbid + "-rg1"
+	// 10 days ago, derived from the clock rather than a hardcoded literal so
+	// this fixture cannot silently rot into an outside-window case as time
+	// passes -- well inside deluxeRecheckWindowDays (90 days).
+	recentDate := time.Now().UTC().AddDate(0, 0, -10).Format(time.DateOnly)
+	groups := []musicbrainz.ReleaseGroup{{MBID: groupMBID, Title: "Album", PrimaryType: "Album", FirstReleaseDate: recentDate}}
+
+	releases := &fakeReleaseDetailSource{}
+	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", recentDate, 12)})
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
+
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("cycle 1 DetectMusicBrainz: %v", err)
+	}
+	if got := releases.calls(); got != 0 {
+		t.Fatalf("cycle 1 release-detail calls = %d, want 0 (D-04)", got)
+	}
+
+	// Cycle 2: the group is already-seen and inside the recheck window --
+	// the gate must not suppress this fetch, proving it did not break the
+	// normal path.
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("cycle 2 DetectMusicBrainz: %v", err)
+	}
+	if got := releases.calls(); got != 1 {
+		t.Fatalf("cycle 2 release-detail calls = %d, want 1 (inside the window, the fetch must still happen)", got)
+	}
+
+	var trackCount *int32
+	if err := pool.QueryRow(ctx, "SELECT track_count FROM events WHERE artist_id = $1 AND event_type = 'new_release' AND external_id = $2", artistID, groupMBID).Scan(&trackCount); err != nil {
+		t.Fatalf("query baseline track_count: %v", err)
+	}
+	if trackCount == nil || *trackCount != 12 {
+		t.Fatalf("baseline track_count = %v, want 12 (the fetch happened and established the baseline)", trackCount)
+	}
+}
+
+func TestDetectMusicBrainz_DeluxeChange_UndatedGroupIsStillChecked(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	mbid := testMBID(t)
+	artistID := insertTestArtist(t, pool, mbid, "Deluxe Window Undated Artist")
+
+	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Deluxe Window Undated Artist", ReleaseTypes: []string{"album", "single", "ep", "deluxe"}}
+	groupMBID := mbid + "-rg1"
+	// Deliberately empty FirstReleaseDate -- this is the assertion under
+	// test, not an omission. Do not "tidy" a date into this fixture: an
+	// undated group (MusicBrainz's actual value for many real release
+	// groups) must never be silently dropped from detection.
+	groups := []musicbrainz.ReleaseGroup{{MBID: groupMBID, Title: "Album", PrimaryType: "Album", FirstReleaseDate: ""}}
+
+	releases := &fakeReleaseDetailSource{}
+	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", "2020-01-01", 12)})
+	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
+
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("cycle 1 DetectMusicBrainz: %v", err)
+	}
+	if got := releases.calls(); got != 0 {
+		t.Fatalf("cycle 1 release-detail calls = %d, want 0 (D-04)", got)
+	}
+
+	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		t.Fatalf("cycle 2 DetectMusicBrainz: %v", err)
+	}
+	if got := releases.calls(); got != 1 {
+		t.Fatalf("cycle 2 release-detail calls = %d, want 1 (an undated group must still be checked)", got)
+	}
+}
+
 func TestDetectMusicBrainz_DeluxeChange_FiresOnIncrease(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	ctx := context.Background()
