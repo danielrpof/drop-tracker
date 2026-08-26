@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-24)
 Phase: Milestone v1.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-08-25 - Completed quick task 260825-g6i: Improve History tab: show which watchlist artist is featured on guest_feature events, and order the feed by release chronology instead of detection order
+Last activity: 2026-08-26 - Completed quick task 260826-gj8: Bound deluxe-change rechecks to release-groups released within a rolling window (or backoff schedule) so old catalog entries stop being re-fetched from MusicBrainz every poll cycle
 
 ## Performance Metrics
 
@@ -198,6 +198,7 @@ None yet.
 | 260824-339 | Fix code-review findings #5 and #6: extract nilIfEmpty helper in internal/httpserver/search.go, and fix stale /watchlist route literal in web/app/routes/watchlist.test.tsx | 2026-08-24 | 50b554f | [260824-339-fix-code-review-findings-5-and-6-extract](./quick/260824-339-fix-code-review-findings-5-and-6-extract/) |
 | 260825-09r | Add MusicBrainz url-rels Deezer link (Tier 0) and alias-based strict-match retry (Tier 1) to artistart.Matcher | 2026-08-25 | ecd5024 | [260825-09r-add-musicbrainz-url-rels-deezer-link-tie](./quick/260825-09r-add-musicbrainz-url-rels-deezer-link-tie/) |
 | 260825-g6i | Improve History tab: show which watchlist artist is featured on guest_feature events, and order the feed by release chronology instead of detection order | 2026-08-25 | f6a0f31 | [260825-g6i-improve-history-tab-show-which-watchlist](./quick/260825-g6i-improve-history-tab-show-which-watchlist/) |
+| 260826-gj8 | Bound deluxe-change rechecks to release-groups released within a rolling window (or backoff schedule) so old catalog entries stop being re-fetched from MusicBrainz every poll cycle | 2026-08-26 | 0b07d90 | [260826-gj8-bound-deluxe-change-rechecks-to-release-](./quick/260826-gj8-bound-deluxe-change-rechecks-to-release-/) |
 
 ### Roadmap Evolution
 
