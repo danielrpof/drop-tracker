@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -343,6 +344,18 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 // same cycle it was discovered, so it is skipped entirely, at zero request
 // cost.
 //
+// A second gate (quick/260826-gj8) sits directly behind the D-04 check: a
+// group that IS already-seen but whose FirstReleaseDate falls outside
+// deluxeRecheckWindowDays is also skipped, at zero request cost, via
+// withinDeluxeRecheckWindow. This exists because, without it, every
+// already-seen release-group in an artist's entire catalogue gets a fresh
+// ReleasesByReleaseGroup call every poll cycle forever -- the single
+// largest unbounded consumer of the shared, process-wide MusicBrainz
+// rate.Limiter, starving interactive artist search and detectGuestFeatures's
+// own capped budget. An empty, absent, or malformed FirstReleaseDate is
+// treated as "still check" (never suppressed) -- real production data must
+// never be dropped from detection because its date field was unusable.
+//
 // Both preference gates (deluxeDetectionEnabled, eventTypeMuted) are
 // checked before any fetch: an artist who has not opted into deluxe alerts,
 // or who has muted deluxe_change, costs zero release-detail requests.
@@ -412,14 +425,33 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 
 	detailFetchCount := 0
 	baselineEstablishedCount := 0
+	windowSkippedCount := 0
 	inserted := 0
 	pageCeilingReached := false
+
+	// Captured once per call, not once per group: every group in one pass
+	// must be judged against one cutoff, so a long-running pass cannot
+	// straddle midnight and judge two groups by two different rules --
+	// mirrors seedNotifiedAt's own single-capture-per-call reasoning.
+	cutoff := time.Now().UTC().AddDate(0, 0, -deluxeRecheckWindowDays).Format(time.DateOnly)
 
 	// range only -- freshGroups is externally-supplied (T-04-01, ASVS V5).
 	for _, g := range freshGroups {
 		if _, ok := preCycleSeen[g.MBID]; !ok {
 			// D-04: a group discovered this very cycle gets no release-detail
 			// fetch -- it is a new_release event and nothing else.
+			continue
+		}
+
+		if !withinDeluxeRecheckWindow(g.FirstReleaseDate, cutoff) {
+			// quick/260826-gj8: a group already outside the recheck window
+			// behaves exactly like the D-04 skip above -- no fetch, no
+			// baseline read or write, no event, and no per-group log line.
+			// This is safe precisely because it is a pure omission: the
+			// baseline is left untouched, so nothing about a skipped
+			// group's state drifts, and widening the window later resumes
+			// checking it with its old baseline intact.
+			windowSkippedCount++
 			continue
 		}
 
@@ -521,6 +553,7 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 		slog.String("event_type", eventTypeDeluxeChange),
 		slog.Int("detail_fetch_count", detailFetchCount),
 		slog.Int("baseline_established_count", baselineEstablishedCount),
+		slog.Int("window_skipped_count", windowSkippedCount),
 		slog.Int("inserted_count", inserted),
 		slog.Bool("page_ceiling_reached", pageCeilingReached),
 	)
