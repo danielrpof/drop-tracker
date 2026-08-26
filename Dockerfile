@@ -69,7 +69,22 @@ FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec4
 # the TLS handshake at runtime even though /health still reports healthy
 # (T-07-03). Never work around a certificate failure by disabling TLS
 # verification.
-RUN apk add --no-cache ca-certificates
+#
+# `apk upgrade` runs first, in the same layer: the base image above is
+# pinned by digest for reproducibility, and that pin is deliberately kept —
+# but Alpine publishes security patches to its package repository on its
+# own cadence, independently of when the alpine:3.24 image itself is
+# rebuilt, so a pinned digest necessarily drifts behind available fixes
+# over time. This landed because the pinned digest here ships
+# libssl3/libcrypto3 3.5.7-r0 while 3.5.8-r0 (CVE-2026-14456) was already
+# published in Alpine's live repo index; re-pinning to a newer digest was
+# checked first and was not possible, because `docker pull alpine:3.24`
+# still resolved to this identical digest. Upgrading at build time closes
+# that window while leaving the digest pin as the trust root. Tradeoff,
+# stated honestly: the exact package set is no longer byte-reproducible
+# across build dates — that is the accepted price of not shipping
+# known-fixed HIGH CVEs.
+RUN apk upgrade --no-cache && apk add --no-cache ca-certificates
 
 # Fixed numeric UID/GID (07-CONTEXT.md D-02) — deterministic across
 # rebuilds, referenceable later if a VPS/orchestrator SecurityContext is
