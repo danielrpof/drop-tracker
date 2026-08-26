@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-24)
 Phase: Milestone v1.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-08-26 - Completed quick task 260826-hea: Isolated TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier onto a dedicated Postgres schema so its real NotifyPending call can no longer mark the live dev app's pending Discord notifications as sent
+Last activity: 2026-08-26 - Completed quick task 260826-ia0: Fixed flaky timing tolerance in poller rate-limit tests (CI flake from run 32997261111 on commit 082a19a)
 
 ## Performance Metrics
 
@@ -201,6 +201,7 @@ None yet.
 | 260825-g6i | Improve History tab: show which watchlist artist is featured on guest_feature events, and order the feed by release chronology instead of detection order | 2026-08-25 | f6a0f31 | [260825-g6i-improve-history-tab-show-which-watchlist](./quick/260825-g6i-improve-history-tab-show-which-watchlist/) |
 | 260826-gj8 | Bound deluxe-change rechecks to release-groups released within a rolling window (or backoff schedule) so old catalog entries stop being re-fetched from MusicBrainz every poll cycle | 2026-08-26 | 0b07d90 | [260826-gj8-bound-deluxe-change-rechecks-to-release-](./quick/260826-gj8-bound-deluxe-change-rechecks-to-release-/) |
 | 260826-hea | Isolate TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier onto a dedicated Postgres schema so its real NotifyPending call can no longer mark the live dev app's pending Discord notifications as sent | 2026-08-26 | acef51e | [260826-hea-isolate-testdetectmusicbrainz-guestfeatu](./quick/260826-hea-isolate-testdetectmusicbrainz-guestfeatu/) |
+| 260826-ia0 | Fix flaky timing tolerance in poller rate-limit tests (TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit and TestDeezerCycle_ConcurrentPollingStaysInsideRateLimit) | 2026-08-26 | 9519de5 | [260826-ia0-fix-flaky-timing-tolerance-in-poller-rat](./quick/260826-ia0-fix-flaky-timing-tolerance-in-poller-rat/) |
 
 ### Roadmap Evolution
 
