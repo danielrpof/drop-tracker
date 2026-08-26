@@ -33,6 +33,25 @@ const (
 	// simply skipped this cycle (not inserted, not marked seen), exactly
 	// like a lookup error, so they are naturally retried next cycle.
 	maxNewGuestFeatureLookupsPerCycle = 20
+
+	// deluxeRecheckWindowDays bounds how far back detectDeluxeChanges will
+	// re-fetch release detail for an already-seen release-group. Without
+	// this gate, detectDeluxeChanges calls ReleasesByReleaseGroup for EVERY
+	// release-group in an artist's preCycleSeen set, every poll cycle
+	// (default 15m), forever, with no cap -- the single largest unbounded
+	// consumer of the shared, process-wide MusicBrainz rate.Limiter (1
+	// req/sec, burst 1). That same limiter serves interactive artist search
+	// (GET /search) and artist-art lookups, plus detectGuestFeatures's own
+	// capped budget (maxNewGuestFeatureLookupsPerCycle above) -- so
+	// unbounded deluxe traffic starves all three. A release-group that
+	// first came out more than this many days ago has effectively finished
+	// gaining deluxe/reissue editions, so re-checking it buys nothing while
+	// costing the limiter everything. The window is deliberately generous
+	// relative to the real-world deluxe-reissue cadence: guessing too short
+	// risks a permanently missed alert, while guessing too long only costs
+	// a bounded amount of extra traffic -- the asymmetry favors a large
+	// number.
+	deluxeRecheckWindowDays = 90
 )
 
 // DetectMusicBrainz diffs groups -- freshly fetched for entry via
@@ -617,6 +636,45 @@ func earlierDate(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// withinDeluxeRecheckWindow reports whether a release-group dated
+// firstReleaseDate is still recent enough to warrant a fresh
+// ReleasesByReleaseGroup fetch, given cutoff (the earliest date, formatted
+// the same way, that still falls inside deluxeRecheckWindowDays). Like
+// earliestReleaseDate/earlierDate above, this never parses a MusicBrainz
+// partial date into time.Time -- it compares strings only, at whatever
+// precision the date actually carries.
+//
+// Every ambiguous case resolves toward true (still check), mirroring
+// isGuestFeature's own "an unidentifiable primary credit errs toward an
+// extra alert rather than a silently missed feature" doctrine:
+//
+//   - A date shorter than 4 characters (empty, or malformed/community-edited
+//     data under a full year in length) is absent or unusable -- mirrors
+//     earliestReleaseDate's identical len<4 threshold and reason. Real
+//     production data must never be dropped from detection because its
+//     date field was empty or malformed, so this returns true.
+//   - Otherwise, the comparison truncates both operands to the shorter of
+//     the two -- min(len(firstReleaseDate), len(cutoff)) -- so a year-only
+//     or year-month date is judged on exactly the precision it carries and
+//     no month or day is ever invented for it. Because both operands are
+//     fixed-width, zero-padded numerals in this range, lexicographic and
+//     chronological ordering agree over that shared prefix, the same
+//     guarantee earlierDate's year comparison already relies on.
+//   - The comparison is >=, not >, deliberately: a group dated exactly on
+//     the cutoff day is still checked -- the boundary is inclusive.
+//   - A non-numeric garbage date (e.g. "abcd") or one longer/differently
+//     shaped than expected (e.g. an ISO-8601 timestamp) sorts above the
+//     cutoff under this comparison and is therefore checked too, which is
+//     the intended failure direction: tampered or unexpectedly-shaped
+//     upstream data can at worst cause an extra fetch, never a silent skip.
+func withinDeluxeRecheckWindow(firstReleaseDate, cutoff string) bool {
+	if len(firstReleaseDate) < 4 {
+		return true
+	}
+	n := min(len(firstReleaseDate), len(cutoff))
+	return firstReleaseDate[:n] >= cutoff[:n]
 }
 
 // guestFeatureArt returns the first non-empty release-group MBID found in
