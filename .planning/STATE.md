@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-24)
 Phase: Milestone v1.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-08-26 - Completed quick task 260826-gj8: Bound deluxe-change rechecks to release-groups released within a rolling window (or backoff schedule) so old catalog entries stop being re-fetched from MusicBrainz every poll cycle
+Last activity: 2026-08-26 - Completed quick task 260826-hea: Isolated TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier onto a dedicated Postgres schema so its real NotifyPending call can no longer mark the live dev app's pending Discord notifications as sent
 
 ## Performance Metrics
 
@@ -173,6 +173,7 @@ Recent decisions affecting current work:
 - [Phase 13]: Code review (13-REVIEW.md) surfaced 3 warning-severity findings (0 critical) -- WR-01 earlierDate panic on a MusicBrainz date <4 chars, WR-02 Backfill Stats double-increment on a failed RecordArtMatchAttempt, WR-03 ActivityGate leak if Matcher.Match panics (cancel/end not deferred). User chose "fix now" during UAT; all three fixed RED-then-GREEN with regression tests (commits a77041e/1029f5b, 5ca9f4a/abf0cdc, df9406d/722fe8e), full build/vet/lint/test clean after.
 - [Phase 13 UAT]: The one human-verification item that couldn't be checked in this sandbox (MusicBrainz ws/2/recording response shape vs. recording_lookup.go's [ASSUMED] struct tags -- WSL2 can't reach musicbrainz.org) was confirmed live by the user against a real recording (03dbaf8a-23ce-43d6-8e69-2778ec82ab61) -- releases[].date and releases[].release-group.id both match exactly. Assumption A1 (13-RESEARCH.md) closed.
 - [Phase 13 Security]: `/gsd-secure-phase 13` closed all 22 registered threats (21 from the plans' STRIDE registers + 1 new supply-chain finding: 13-01 added `@testing-library/dom` as a devDependency, undocumented by the plan's "zero npm packages" claim -- verified as the official first-party peer dependency of an already-approved package, dev-only, accepted as AR-13-05). The gsd-security-auditor subagent hit a session usage limit mid-run; verification was completed inline (ASVS L1 grep-depth) against the same threat register rather than retried. See 13-SECURITY.md.
+- [quick/260826-hea]: Isolated `TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier` onto its own `detection_notify_test` Postgres schema via `testutil.NewIsolatedTestPool`, the last test in the repo making a real `NotifyPending` call against the shared fixture's default schema (root-caused, left unfixed, in 260826-gj8). The RED-half sentinel probe against the unmodified test proved the bug is not hypothetical: it collaterally marked 45 genuine live-app pending Discord notifications as sent in one run; those rows were restored to `notified_at IS NULL` before proceeding. GREEN probe and full `internal/detection`/`internal/notifier` suites confirmed clean after the fix.
 
 ### Pending Todos
 
@@ -199,6 +200,7 @@ None yet.
 | 260825-09r | Add MusicBrainz url-rels Deezer link (Tier 0) and alias-based strict-match retry (Tier 1) to artistart.Matcher | 2026-08-25 | ecd5024 | [260825-09r-add-musicbrainz-url-rels-deezer-link-tie](./quick/260825-09r-add-musicbrainz-url-rels-deezer-link-tie/) |
 | 260825-g6i | Improve History tab: show which watchlist artist is featured on guest_feature events, and order the feed by release chronology instead of detection order | 2026-08-25 | f6a0f31 | [260825-g6i-improve-history-tab-show-which-watchlist](./quick/260825-g6i-improve-history-tab-show-which-watchlist/) |
 | 260826-gj8 | Bound deluxe-change rechecks to release-groups released within a rolling window (or backoff schedule) so old catalog entries stop being re-fetched from MusicBrainz every poll cycle | 2026-08-26 | 0b07d90 | [260826-gj8-bound-deluxe-change-rechecks-to-release-](./quick/260826-gj8-bound-deluxe-change-rechecks-to-release-/) |
+| 260826-hea | Isolate TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier onto a dedicated Postgres schema so its real NotifyPending call can no longer mark the live dev app's pending Discord notifications as sent | 2026-08-26 | acef51e | [260826-hea-isolate-testdetectmusicbrainz-guestfeatu](./quick/260826-hea-isolate-testdetectmusicbrainz-guestfeatu/) |
 
 ### Roadmap Evolution
 
@@ -216,8 +218,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-25T03:05:14.602Z
-Stopped at: Phase 13 complete, ready to plan next milestone
+Last session: 2026-08-26T18:01:00.000Z
+Stopped at: Completed quick task 260826-hea, ready to plan next milestone
 Resume file: None
 
 ## Operator Next Steps
