@@ -206,6 +206,44 @@ func TestGuestFeatureArt(t *testing.T) {
 	})
 }
 
+func TestWithinDeluxeRecheckWindow(t *testing.T) {
+	tests := []struct {
+		name             string
+		firstReleaseDate string
+		cutoff           string
+		want             bool
+	}{
+		{"after cutoff is checked", "2026-08-01", "2026-05-28", true},
+		{"one day after cutoff is checked", "2026-05-29", "2026-05-28", true},
+		{"exactly on the cutoff day is checked -- boundary is inclusive", "2026-05-28", "2026-05-28", true},
+		{"one day before cutoff is skipped", "2026-05-27", "2026-05-28", false},
+		{"years old is skipped", "2020-01-01", "2026-05-28", false},
+		{"year-month straddling the cutoff's own year-month is checked", "2026-05", "2026-05-28", true},
+		{"year-month before the cutoff's year-month is skipped", "2026-04", "2026-05-28", false},
+		{"year-only equal to the cutoff's year is checked", "2026", "2026-05-28", true},
+		{"year-only before the cutoff's year is skipped", "2025", "2026-05-28", false},
+		{"undated (MusicBrainz's value for an undated group) is checked", "", "2026-05-28", true},
+		{"malformed under-4-char date '20' is checked", "20", "2026-05-28", true},
+		{"malformed under-4-char date '9' is checked", "9", "2026-05-28", true},
+		{"non-numeric garbage is checked", "abcd", "2026-05-28", true},
+		{"longer-than-expected shape (full timestamp) is checked", "2026-05-28T00:00:00Z", "2026-05-28", true},
+		{
+			// Clock-crossing case: cutoff is in the previous calendar year.
+			// A year-only date for the cutoff's own year could resolve to
+			// December, so it must be checked, not skipped.
+			"year-only for a cutoff in the previous calendar year is checked", "2025", "2025-11-03", true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := withinDeluxeRecheckWindow(tt.firstReleaseDate, tt.cutoff); got != tt.want {
+				t.Fatalf("withinDeluxeRecheckWindow(%q, %q) = %v, want %v", tt.firstReleaseDate, tt.cutoff, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsGuestFeature_Positional(t *testing.T) {
 	const watched = "watched-mbid"
 	const other = "other-mbid"
