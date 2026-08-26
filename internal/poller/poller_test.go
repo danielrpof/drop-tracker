@@ -1964,6 +1964,30 @@ func TestMusicBrainzCycle_OverlapGuard_SkipsWhileInFlight(t *testing.T) {
 
 // --- PERF-02: rate ceiling and overlap guard under concurrency ---
 
+// This is subtracted from the theoretical first-to-last elapsed-span floor
+// asserted by TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit and
+// TestDeezerCycle_ConcurrentPollingStaysInsideRateLimit below.
+//
+// The exact theoretical multiple (7*20ms) is not safely attainable as a
+// zero-margin floor: both tests record their timestamps *after*
+// limiter.Wait returns, so the measured span also absorbs goroutine
+// scheduling and timer-wakeup granularity on both the first and last call --
+// latency the rate.Limiter's internal delay computation makes no guarantee
+// about reproducing to the nanosecond.
+//
+// Concrete evidence this is real, not hypothetical: GitHub Actions run
+// 32997261111 (job "test", commit 082a19a on main) measured a span of
+// 139.873132ms against the previous zero-margin 140ms floor -- ~0.13ms
+// (0.09%) short, on a loaded shared CI runner.
+//
+// The assertion's intent survives this tolerance: an unserialised or
+// broken limiter yields a span near zero, not one a couple of milliseconds
+// short of the floor, so this 2ms tolerance (1.4% of the 140ms floor)
+// cannot mask a real regression. This is empirically verified, not just
+// argued -- see the sentinel-probe evidence recorded in
+// 260826-ia0-SUMMARY.md.
+const rateLimitSpanJitterTolerance = 2 * time.Millisecond
+
 // rateLimitedReleaseGroupSource is a test-local ReleaseGroupSource double
 // that consults a real *rate.Limiter before recording its call, mirroring
 // fakeReleaseGroupSource's inFlight/maxInFlight idiom -- used only by
@@ -2093,7 +2117,7 @@ func TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit(t *testing.T) {
 	}
 	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i].Before(timestamps[j]) })
 	span := timestamps[len(timestamps)-1].Sub(timestamps[0])
-	wantMin := 7 * 20 * time.Millisecond
+	wantMin := 7*20*time.Millisecond - rateLimitSpanJitterTolerance
 	if span < wantMin {
 		t.Fatalf("elapsed span between first and last call = %s, want >= %s (the rate limiter must still serialise concurrent callers)", span, wantMin)
 	}
@@ -2126,7 +2150,7 @@ func TestDeezerCycle_ConcurrentPollingStaysInsideRateLimit(t *testing.T) {
 	}
 	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i].Before(timestamps[j]) })
 	span := timestamps[len(timestamps)-1].Sub(timestamps[0])
-	wantMin := 7 * 20 * time.Millisecond
+	wantMin := 7*20*time.Millisecond - rateLimitSpanJitterTolerance
 	if span < wantMin {
 		t.Fatalf("elapsed span between first and last call = %s, want >= %s (the rate limiter must still serialise concurrent callers)", span, wantMin)
 	}
