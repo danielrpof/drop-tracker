@@ -6,6 +6,14 @@ package detection_test
 // test shares one database (testutil.NewTestPool), so each derives a
 // unique artist mbid from t.Name() rather than a hardcoded literal, and
 // registers a t.Cleanup that deletes the rows it created.
+//
+// One exception: TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier
+// uses testutil.NewIsolatedTestPool instead. It makes a real NotifyPending
+// call, whose ListUnnotified query is a deliberately global, unfiltered
+// scan (D-06) -- correct production behavior, but one that would otherwise
+// reach both other packages' rows in the shared fixture AND the live
+// docker-compose app's real pending Discord notifications sitting in that
+// same default schema.
 
 import (
 	"bytes"
@@ -1163,9 +1171,11 @@ func TestDetectMusicBrainz_GuestFeature_Muted(t *testing.T) {
 // layer), and a real NotifyPending call against a real discord.Client only
 // ever delivers the sibling new_release event from the same detection
 // cycle -- the muted recording's distinguishing title never appears in any
-// request the notifier issues.
+// request the notifier issues. Uses the isolated pool (not the shared
+// fixture) since its real NotifyPending call would otherwise sweep up the
+// live dev app's own pending notifications sitting in the default schema.
 func TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "detection_notify_test")
 	ctx := context.Background()
 	mbid := testMBID(t)
 	artistID := insertTestArtist(t, pool, mbid, "Muted Guest Artist Notifier")
