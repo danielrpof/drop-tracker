@@ -80,7 +80,14 @@ Decimal phases appear between their surrounding integers in numeric order.
 4. The session cookie carries `HttpOnly`, `Secure`, `SameSite=Lax` and a bounded lifetime when inspected in devtools, and repeated wrong-passphrase attempts from one client are throttled (rejected with `429`) rather than answered at full speed indefinitely.
 5. With no passphrase configured, every route behaves exactly as it did in v1.2 — `make test-integration`, `pnpm test`, and `docker compose up` all pass untouched with no passphrase anywhere.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 14-01-PLAN.md — Tracer: end-to-end 401 → login → 200 gate slice, inert path, and the full session-cookie contract (wave 1)
+- [ ] 14-02-PLAN.md — Brute-force defense: per-IP throttle, fixed delay, global counter with Discord alert, and auth audit logging (wave 2)
+- [ ] 14-03-PLAN.md — SPA gate: auth store, `apiFetch` 401 interceptor, PassphraseScreen, and the Log out control (wave 2)
+- [ ] 14-04-PLAN.md — Hardening: CSRF header enforcement, no-referrer policy, weak-passphrase boot WARN, and `.env.example` (wave 3)
+
 **UI hint**: yes
 
 _Notes:_ Joint backend + frontend slice — a Go `internal/authgate` package plus chi middleware on a protected route `Group`, and the SPA's `401`-interception login form and logout. Splitting the server contract from the SPA handling would leave a half-phase that renders a broken app. Open decisions for discuss/spec: session signing key separate secret vs. derived from the passphrase, session TTL default, whether the SPA shell stays public (recommended) or is also gated, and passphrase minimum-entropy enforcement at boot. Relevant pitfalls: PITFALLS.md 14-23.
