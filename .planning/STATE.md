@@ -1,19 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Cleanup & Display Fixes
-status: Awaiting next milestone
-stopped_at: Phase 13 complete, ready to plan next milestone
-last_updated: "2026-08-25T03:38:43.244Z"
-last_activity: 2026-08-24
-last_activity_desc: Milestone v1.2 completed and archived
+milestone: v1.3
+milestone_name: Continuous Deployment
+status: planning
+last_updated: "2026-08-27T17:36:04.242Z"
+last_activity: 2026-08-27
 progress:
   total_phases: 0
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
-current_phase: 13
-current_phase_name: fix-history-dates-guest-feature-art-artist-art
+  percent: 0
 ---
 
 # Project State
@@ -27,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-08-24)
 
 ## Current Position
 
-Phase: Milestone v1.2 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-08-26 - Completed quick task 260826-iu0: Fixed Trivy build-scan CI failure by upgrading runtime-stage Alpine packages at build time to clear CVE-2026-14456 (libssl3/libcrypto3)
+Status: Defining requirements
+Last activity: 2026-08-27 — Milestone v1.3 started
 
 ## Performance Metrics
 

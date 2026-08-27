@@ -16,10 +16,17 @@ v1.0's four peer-reviewed gaps are closed without changing user-facing behavior:
 
 v1.2 then closed the backlog and outstanding display bugs: Phase 12 fixed the `CoverArt.tsx` error-state-never-resets bug and added Deezer-fan-count-based search popularity ranking with MusicBrainz country-fallback (absorbing backlog Phase 999.1). Phase 13 fixed three more user-facing display/data bugs — History cards with no release date, guest-feature cards with no album art, and MusicBrainz artist art never rendering — the last via a new hand-rolled `internal/artistart` matcher (strict close-name + guarded tie-break, fail-closed by default) wired into both add-time and a cooldown-bounded startup backfill sweep (absorbing backlog Phase 999.2).
 
-## Next Milestone Goals
+## Current Milestone: v1.3 Continuous Deployment
 
-Not yet scoped — run `/gsd-new-milestone` to define v1.3. Candidates carried in ROADMAP.md's Backlog (currently empty) and the outgoing v1.1 REQUIREMENTS.md archive:
-- VPS SSH deploy (DPLY-01), producer watchlist entities (WLST-07), PR coverage-diff comments (CICD-13), Playwright E2E suite (TEST-03)
+**Goal:** Ship the app automatically to a self-hosted VPS on every merge to main, behind a passphrase gate, and close the last CI reporting gap.
+
+**Target features:**
+- GitHub Actions deploy job: after the release job publishes the versioned image to ghcr.io, SSH to the VPS, `docker compose pull` + `up -d` the new pinned tag, poll `/health`, auto-rollback to the previous image on failure (DPLY-01)
+- Instance passphrase gate — chi middleware, one env-var passphrase + session cookie, applied to all routes except `/health` — protects the watchlist and Discord webhook on a public URL
+- Boot-time migrations remain the migration path; the `/health` deploy gate + rollback catches a bad migration; migrations must stay backward-compatible (expand/contract) so a rollback is safe
+- PR comment reporting backend + frontend coverage diff vs. the main baseline (CICD-13)
+
+**Considered and rejected this cycle:** a multi-user profile system (accounts, per-user watchlists, cross-device sync). Self-host-per-person plus the existing server-side Postgres already delivers data isolation and cross-device access once DPLY-01 lands; multi-user auth stays out of scope (see below).
 
 <details>
 <summary>Previous Milestone: v1.2 Cleanup & Display Fixes (shipped 2026-08-24)</summary>
@@ -76,11 +83,14 @@ Not yet scoped — run `/gsd-new-milestone` to define v1.3. Candidates carried i
 
 ### Active
 
-- [ ] VPS SSH-based deploy step (added once the app is feature-stable — not part of initial phases)
+- [ ] VPS SSH-based deploy step, automated on merge to main, with `/health`-gated auto-rollback (v1.3 — DPLY-01)
+- [ ] Instance passphrase gate protecting all routes except `/health` on a public deployment (v1.3)
+- [ ] PR coverage-diff comment for backend + frontend vs. the main baseline (v1.3 — CICD-13)
 
 ### Out of Scope
 
 - Python implementation — considered, rejected in favor of Go for portfolio differentiation and better fit with the CI/CD/DevOps practice goal
+- Multi-user auth / accounts / per-user profiles / cross-device real-time sync — evaluated in v1.3 scoping and rejected; single-operator self-host per person plus server-side Postgres already covers isolation and multi-device access, and OAuth/session/RBAC is an orthogonal complexity spike that doesn't showcase the CI/CD practice goal
 - Producer tracking — mentioned as a future watchlist entity, not part of initial scope
 - Prometheus/Grafana observability stack — deferred; structured logging only for v1, metrics endpoint can be added later without a redesign
 - Kubernetes/Helm deployment — deferred in favor of a simpler VPS SSH deploy once the app is stable; revisit if more DevOps surface is wanted later
@@ -160,4 +170,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-24 after v1.2 milestone*
+*Last updated: 2026-08-27 at start of v1.3 Continuous Deployment milestone*
