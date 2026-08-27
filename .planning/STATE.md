@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Continuous Deployment
 status: planning
-last_updated: "2026-08-27T17:36:04.242Z"
+last_updated: "2026-08-27T18:20:00.000Z"
 last_activity: 2026-08-27
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,17 +17,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-24)
+See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** No active phase — Phase 13 was the last phase planned; ROADMAP.md Backlog is empty.
+**Current focus:** v1.3 roadmap created — Phases 14-17. Next phase to plan is Phase 14 (Instance Passphrase Gate).
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 14 — Instance Passphrase Gate (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-08-27 — Milestone v1.3 started
+Status: Roadmap created, awaiting phase planning
+Last activity: 2026-08-27 — v1.3 roadmap written (4 phases, 21/21 requirements mapped)
 
 ## Performance Metrics
 
@@ -171,6 +171,14 @@ Recent decisions affecting current work:
 - [Phase 13 UAT]: The one human-verification item that couldn't be checked in this sandbox (MusicBrainz ws/2/recording response shape vs. recording_lookup.go's [ASSUMED] struct tags -- WSL2 can't reach musicbrainz.org) was confirmed live by the user against a real recording (03dbaf8a-23ce-43d6-8e69-2778ec82ab61) -- releases[].date and releases[].release-group.id both match exactly. Assumption A1 (13-RESEARCH.md) closed.
 - [Phase 13 Security]: `/gsd-secure-phase 13` closed all 22 registered threats (21 from the plans' STRIDE registers + 1 new supply-chain finding: 13-01 added `@testing-library/dom` as a devDependency, undocumented by the plan's "zero npm packages" claim -- verified as the official first-party peer dependency of an already-approved package, dev-only, accepted as AR-13-05). The gsd-security-auditor subagent hit a session usage limit mid-run; verification was completed inline (ASVS L1 grep-depth) against the same threat register rather than retried. See 13-SECURITY.md.
 - [quick/260826-hea]: Isolated `TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier` onto its own `detection_notify_test` Postgres schema via `testutil.NewIsolatedTestPool`, the last test in the repo making a real `NotifyPending` call against the shared fixture's default schema (root-caused, left unfixed, in 260826-gj8). The RED-half sentinel probe against the unmodified test proved the bug is not hypothetical: it collaterally marked 45 genuine live-app pending Discord notifications as sent in one run; those rows were restored to `notified_at IS NULL` before proceeding. GREEN probe and full `internal/detection`/`internal/notifier` suites confirmed clean after the fix.
+- [v1.3 Roadmap]: 4 phases derived from the 21 v1.3 requirements — Instance Passphrase Gate (14), PR Coverage-Diff Comment (15), Rollback-Safe Migrations (16), Automated VPS Deploy with Health-Gated Rollback (17). Phase numbering continues from v1.2's Phase 13; it does not reset.
+- [v1.3 Roadmap]: Research (SUMMARY.md) and PITFALLS.md both proposed a 3-phase split with deploy + migration-safety + VPS provisioning as one final phase. Split into 4 instead: migration safety (MGRT-01/02) was pulled out as its own Phase 16 placed *before* the deploy job. Rationale — PITFALLS.md #8 (a non-backward-compatible migration bricking rollback) is the milestone's highest-cost failure mode and is cross-cutting: the expand/contract rule binds every migration from now on, not just those written during the deploy phase. Building the safety precondition last, inside the heaviest phase, would put it after the thing it protects. It is also CI-only, so it needs no VPS and can be verified independently.
+- [v1.3 Roadmap]: VPS provisioning (DPLY-07) and the HTTPS reverse proxy (DPLY-08) deliberately stayed *inside* Phase 17 rather than becoming a separate provisioning phase. Splitting them would have straddled DPLY-04 ("production compose file **and rollout script** are versioned in the repo; secrets and pinned tag live only on the VPS") across two phases — the runbook and the rollout artifacts are one interlocking deliverable.
+- [v1.3 Roadmap]: Exposure ordering is the binding constraint on phase order — Phase 14 (passphrase gate) must be merged before Phase 17 makes the instance publicly reachable, so the instance is never briefly public-and-open. PITFALLS.md's fallback (network-layer allowlist until the gate ships) is not needed given this ordering.
+- [v1.3 Roadmap]: Phases 15, 16, and 17 all edit `.github/workflows/full-pipeline.yml` — the same shared-file hazard the repo already documented for `frontend-test` (Phase 08 → Phase 09). Sequencing 15 → 16 → 17 keeps the edits serialized. Phase 17 additionally requires a small change to the existing `release` job to expose `outputs.version`.
+- [v1.3 Roadmap]: Phase 14 is a joint backend + frontend slice, not split. Server-side `401` contract and SPA `401`-interception are one feature (PITFALLS.md #23) — splitting them would leave a half-phase that renders a visibly broken app.
+- [v1.3 Roadmap]: Phase 17 flagged as needing a discuss/spec pass before planning. Open decisions: TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel — blocks the first deploy), documented-and-accepted swap-gap downtime vs. mitigation, and post-deploy image-prune policy. Phase 14's open decisions: signing key separate secret vs. derived from the passphrase, session TTL default, whether the SPA shell stays public (recommended) or is also gated, passphrase minimum-entropy enforcement at boot. Phase 15's open decision: baseline storage (Actions cache vs. orphan branch).
+- [v1.3 Roadmap]: OPS-04 (VPS Postgres backup + restore runbook) stays in Future Requirements but is recorded in the roadmap as a **recommended prerequisite** for Phase 17 — it is the recovery path if a rollback ever needs the schema restored alongside the image.
 
 ### Pending Todos
 
@@ -179,6 +187,7 @@ None yet.
 ### Blockers/Concerns
 
 - ⚠️ [Phase 03] musicbrainz.org's TLS handshake fails from this developer's WSL2 network path (confirmed environmental via plain curl, not app code) -- Deezer unaffected. If future live testing on this machine needs real MusicBrainz data, expect the same failure; see PROJECT.md Context and Broken Windows Ledger entry #3 (waived).
+- ⚠️ [Phase 17, v1.3] No VPS is provisioned yet, and the TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel) is undecided. Both block Phase 17's first real deploy and its rollback drill. Resolve in Phase 17's discuss/spec pass before planning.
 
 ### Quick Tasks Completed
 
@@ -206,6 +215,8 @@ None yet.
 - Phase 11.1 inserted after Phase 11: Address tech debt: v1.1 cleanup (URGENT)
 - Phase 12 added: Cleanup: CoverArt Reset & Search Popularity Ranking — bundles the deferred CoverArt.tsx image-reset bug with backlog Phase 999.1 (search popularity/disambiguation), which was promoted and folded into this phase
 - Phase 13 added: Fix History Dates, Guest-Feature Art & Artist Art — bundles three post-Phase-12 display/data bugs (History tab missing release dates, guest-feature cards missing album art, MusicBrainz artist art not rendering) with backlog Phase 999.2 (Deezer artist-art backfill), which was absorbed where it overlaps with the artist-art bug
+- v1.3 milestone opened (2026-08-27): Phases 14-17 added — Instance Passphrase Gate, PR Coverage-Diff Comment, Rollback-Safe Migrations, Automated VPS Deploy with Health-Gated Rollback. Phase numbering continued from 13 rather than resetting.
+- Phase 16 (Rollback-Safe Migrations) split out of the research-recommended single deploy phase so the N-1 schema-compatibility guarantee is in force before anything can auto-roll-back.
 
 ## Deferred Items
 
@@ -213,14 +224,20 @@ Items acknowledged and carried forward from previous milestone close:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| *(none)* | | | |
+| Operations | OPS-04 — VPS Postgres backup + restore runbook | Future requirement; recommended prerequisite for Phase 17 | v1.3 roadmap |
+| Operations | OPS-05 — ghcr.io image-retention / cleanup job | Future requirement | v1.3 roadmap |
+| Deployment | DPLY-09 — near-zero-downtime deploy (connection draining / second container) | Future requirement | v1.3 roadmap |
+| Access Gate | GATE-08 — session signing-key rotation without logging everyone out | Future requirement | v1.3 roadmap |
+| CI/CD | CICD-15 — patch/diff-level coverage in the PR comment | Future requirement | v1.3 roadmap |
 
 ## Session Continuity
 
-Last session: 2026-08-26T18:01:00.000Z
-Stopped at: Completed quick task 260826-hea, ready to plan next milestone
+Last session: 2026-08-27T18:20:00.000Z
+Stopped at: v1.3 roadmap created (Phases 14-17, 21/21 requirements mapped); ready to plan Phase 14
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Review `.planning/ROADMAP.md` — 4 phases, 21/21 v1.3 requirements mapped
+- Plan the first phase with `/gsd-plan-phase 14`
+- Before planning Phase 17, run its discuss/spec pass — the TLS reverse-proxy choice blocks the first deploy

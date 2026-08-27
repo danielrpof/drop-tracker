@@ -48,7 +48,7 @@ Deferred, tracked, not in the v1.3 roadmap.
 
 ### Deployment / Operations
 
-- **OPS-04**: Documented Postgres backup + restore runbook for the VPS (recovery path for an irreversible migration)
+- **OPS-04**: Documented Postgres backup + restore runbook for the VPS (recovery path for an irreversible migration) — flagged in the roadmap as a **recommended prerequisite** for Phase 17's rollback story
 - **OPS-05**: ghcr.io image-retention / cleanup job so old tags don't accumulate
 - **DPLY-09**: Near-zero-downtime deploy (reverse-proxy connection draining or a second short-lived container) instead of the accepted brief swap gap
 
@@ -73,17 +73,47 @@ Deferred, tracked, not in the v1.3 roadmap.
 
 ## Traceability
 
-Populated during roadmap creation.
+Mapped during roadmap creation (2026-08-27). See `.planning/ROADMAP.md` for each phase's goal and success criteria.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| _pending roadmap_ | | |
+| GATE-01 | Phase 14 | Pending |
+| GATE-02 | Phase 14 | Pending |
+| GATE-03 | Phase 14 | Pending |
+| GATE-04 | Phase 14 | Pending |
+| GATE-05 | Phase 14 | Pending |
+| GATE-06 | Phase 14 | Pending |
+| GATE-07 | Phase 14 | Pending |
+| CICD-13 | Phase 15 | Pending |
+| CICD-14 | Phase 15 | Pending |
+| MGRT-01 | Phase 16 | Pending |
+| MGRT-02 | Phase 16 | Pending |
+| DPLY-01 | Phase 17 | Pending |
+| DPLY-02 | Phase 17 | Pending |
+| DPLY-03 | Phase 17 | Pending |
+| DPLY-04 | Phase 17 | Pending |
+| DPLY-05 | Phase 17 | Pending |
+| DPLY-06 | Phase 17 | Pending |
+| DPLY-07 | Phase 17 | Pending |
+| DPLY-08 | Phase 17 | Pending |
 
 **Coverage:**
+
 - v1.3 requirements: 21 total
-- Mapped to phases: 0 ⚠️
-- Unmapped: 21 ⚠️
+- Mapped to phases: 21 ✓
+- Unmapped: 0 ✓
+
+**By phase:**
+
+| Phase | Requirements | Count |
+|-------|--------------|-------|
+| 14 — Instance Passphrase Gate | GATE-01 … GATE-07 | 7 |
+| 15 — PR Coverage-Diff Comment | CICD-13, CICD-14 | 2 |
+| 16 — Rollback-Safe Migrations | MGRT-01, MGRT-02 | 2 |
+| 17 — Automated VPS Deploy with Health-Gated Rollback | DPLY-01 … DPLY-08 | 8 |
+
+No orphaned requirements; no requirement mapped to more than one phase.
 
 ---
 *Requirements defined: 2026-08-27*
-*Last updated: 2026-08-27 after v1.3 scoping*
+*Last updated: 2026-08-27 after v1.3 roadmap creation (traceability populated)*
