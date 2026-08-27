@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
@@ -102,7 +100,7 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 	if err != nil {
 		return err
 	}
-	notifiedAt := seedNotifiedAt(seedMode)
+	notify := newNotifyGate(seedMode, d.notifyMaxReleaseAgeDays, time.Now().UTC())
 
 	preCycleSeenGroups, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceMusicBrainz, eventTypeNewRelease)
 	if err != nil {
@@ -149,7 +147,7 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 				CoverArtUrl:       &coverArt,
 				TrackCount:        nil,
 				ReleaseType:       releaseTypeForStorage(g.PrimaryType),
-				NotifiedAt:        notifiedAt,
+				NotifiedAt:        notify.notifiedAt(g.FirstReleaseDate),
 				WatchedArtistName: &watchedName,
 			})
 			if err != nil {
@@ -170,11 +168,11 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 		)
 	}
 
-	if err := d.detectGuestFeatures(ctx, logger, entry, seedMode, notifiedAt); err != nil {
+	if err := d.detectGuestFeatures(ctx, logger, entry, seedMode, notify); err != nil {
 		return err
 	}
 
-	return d.detectDeluxeChanges(ctx, logger, entry, groups, preCycleSeenGroups, notifiedAt)
+	return d.detectDeluxeChanges(ctx, logger, entry, groups, preCycleSeenGroups, notify)
 }
 
 // detectGuestFeatures diffs entry's recordings-by-artist-credit browse
@@ -197,7 +195,7 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 // returns every recording the artist is credited on, in ANY position, not
 // just guest appearances -- treating the raw fetch as the guest-feature set
 // would massively over-notify.
-func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, seedMode bool, notifiedAt pgtype.Timestamptz) error {
+func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, seedMode bool, notify notifyGate) error {
 	if eventTypeMuted(entry, eventTypeGuestFeature) {
 		logger.Info("detection result",
 			slog.String("artist_mbid", entry.MBID),
@@ -295,7 +293,7 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 			Title:             rec.Title,
 			ArtistName:        displayArtistName(rec, entry.Name),
 			ReleaseDate:       nullableString(releaseDate),
-			NotifiedAt:        notifiedAt,
+			NotifiedAt:        notify.notifiedAt(releaseDate),
 			WatchedArtistName: &watchedName,
 		}
 		if releaseGroupMBID != "" {
@@ -415,7 +413,7 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 // slice are merely delayed. This failure mode is a pre-existing pattern
 // shared with the sibling detection passes, not something introduced by
 // the atomic-CTE rewrite above.
-func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, freshGroups []musicbrainz.ReleaseGroup, preCycleSeen map[string]struct{}, notifiedAt pgtype.Timestamptz) error {
+func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, freshGroups []musicbrainz.ReleaseGroup, preCycleSeen map[string]struct{}, notify notifyGate) error {
 	if !deluxeDetectionEnabled(entry) {
 		return nil
 	}
@@ -432,7 +430,7 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 	// Captured once per call, not once per group: every group in one pass
 	// must be judged against one cutoff, so a long-running pass cannot
 	// straddle midnight and judge two groups by two different rules --
-	// mirrors seedNotifiedAt's own single-capture-per-call reasoning.
+	// mirrors newNotifyGate's own single-capture-per-call reasoning.
 	cutoff := time.Now().UTC().AddDate(0, 0, -deluxeRecheckWindowDays).Format(time.DateOnly)
 
 	// range only -- freshGroups is externally-supplied (T-04-01, ASVS V5).
@@ -511,6 +509,24 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 			trackCount := int32(maxCount)                 //nolint:gosec // maxCount sums MusicBrainz media.TrackCount fields; a real release is always orders of magnitude under int32 range (worst case on a malformed upstream value is a wrong stored number, not a security defect)
 			previousTrackCount := int32(previousBaseline) //nolint:gosec // previousBaseline is read back from advanceGroupBaseline's own previously-stored int32 column, never a fresh unbounded external value
 			watchedName := entry.Name
+			// KNOWN NARROWING (accepted, tracked): this pass is already
+			// bounded by withinDeluxeRecheckWindow (deluxeRecheckWindowDays,
+			// 90) on the GROUP's first-release date, but notifiedAt below
+			// applies the much tighter notify window (7 days by default) to
+			// the WINNING RELEASE's own date. So a deluxe edition of an
+			// album released 8-90 days ago is delivered only if MusicBrainz
+			// dates the deluxe release itself recently; if an editor dates
+			// it to match the original album, the alert is recorded in
+			// history but never sent.
+			//
+			// Left as-is deliberately rather than exempting deluxe_change
+			// from the gate: zero deluxe_change rows have ever been created
+			// in production, so this narrows nothing observable today, and
+			// widening it is a product decision (arguably a track-count
+			// INCREASE is itself the freshness signal here, making a
+			// release-date gate a category error for this event type)
+			// rather than part of the backlog-flood fix. Revisit if
+			// deluxe_change ever starts firing and alerts go missing.
 			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
 				ArtistID:           entry.ArtistID,
 				Source:             sourceMusicBrainz,
@@ -523,7 +539,7 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 				CoverArtUrl:        &coverArt,
 				TrackCount:         &trackCount,
 				PreviousTrackCount: &previousTrackCount,
-				NotifiedAt:         notifiedAt,
+				NotifiedAt:         notify.notifiedAt(winner.Date),
 				WatchedArtistName:  &watchedName,
 			})
 			if err != nil {

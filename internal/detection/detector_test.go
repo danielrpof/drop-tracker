@@ -163,6 +163,21 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// todayReleaseDate is the FirstReleaseDate a fixture release-group must
+// carry for its inserted row to be left PENDING (notified_at NULL).
+//
+// Since the freshness gate shipped
+// (.planning/debug/resolved/backlog-songs-trigger-discord.md), seed mode is
+// no longer the only thing that suppresses a row: notifyGate also
+// pre-acks any row whose release date is undated, partial, or older than
+// the configured window. An undated fixture group -- which is what these
+// tests used to build -- is therefore suppressed on EVERY cycle, seed or
+// not, so a test asserting "this non-seed row stayed pending" needs a
+// genuinely fresh date to still be testing seed-mode semantics rather than
+// accidentally re-testing the freshness gate. Freshness itself is covered
+// by notifygate_test.go.
+var todayReleaseDate = time.Now().UTC().Format(time.DateOnly)
+
 // insertTestArtist inserts a minimal artists row directly (this package
 // must not depend on internal/watchlist.Service, which is a consumer of
 // internal/detection's own seam, not a dependency of it) and registers its
@@ -653,8 +668,10 @@ func TestDetector_SecondCycleLeavesNotifiedAtNull(t *testing.T) {
 		t.Fatalf("seed DetectMusicBrainz: %v", err)
 	}
 
+	// rg4 is dated today so the freshness gate leaves it pending; this test
+	// is about seed-vs-non-seed semantics, not about freshness.
 	nextGroups := append(append([]musicbrainz.ReleaseGroup{}, seedGroups...),
-		musicbrainz.ReleaseGroup{MBID: mbid + "-rg4", Title: "Album Four", PrimaryType: "Album"})
+		musicbrainz.ReleaseGroup{MBID: mbid + "-rg4", Title: "Album Four", PrimaryType: "Album", FirstReleaseDate: todayReleaseDate})
 	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nextGroups); err != nil {
 		t.Fatalf("second DetectMusicBrainz: %v", err)
 	}
@@ -748,8 +765,11 @@ func TestDetector_ReAddDoesNotReSeed(t *testing.T) {
 		t.Fatalf("re-insert watchlist row: %v", err)
 	}
 
+	// rg2 is dated today so the freshness gate leaves it pending: this test
+	// asserts a re-add does not RE-SEED, which is only observable on a row
+	// that would otherwise be deliverable.
 	nextGroups := append(append([]musicbrainz.ReleaseGroup{}, seedGroups...),
-		musicbrainz.ReleaseGroup{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album"})
+		musicbrainz.ReleaseGroup{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album", FirstReleaseDate: todayReleaseDate})
 	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nextGroups); err != nil {
 		t.Fatalf("post-re-add DetectMusicBrainz: %v", err)
 	}
@@ -1187,8 +1207,12 @@ func TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier(t *testin
 		MutedEventTypes: []string{"guest_feature"},
 	}
 	seedGroups := []musicbrainz.ReleaseGroup{{MBID: mbid + "-seed-rg", Title: "Seed Album", PrimaryType: "Album"}}
+	// "Allowed Release" is dated today so the freshness gate leaves it
+	// pending and the notifier actually delivers it -- this test's whole
+	// point is that exactly ONE request reaches Discord, so the sibling
+	// new_release row must be genuinely deliverable.
 	groups := append(append([]musicbrainz.ReleaseGroup{}, seedGroups...),
-		musicbrainz.ReleaseGroup{MBID: mbid + "-rg1", Title: "Allowed Release", PrimaryType: "Album"})
+		musicbrainz.ReleaseGroup{MBID: mbid + "-rg1", Title: "Allowed Release", PrimaryType: "Album", FirstReleaseDate: todayReleaseDate})
 	recordings := []musicbrainz.Recording{
 		{
 			MBID:  mbid + "-rec1",

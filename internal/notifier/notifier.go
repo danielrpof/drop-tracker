@@ -30,6 +30,17 @@ import (
 // decision's band rather than at its lower (safer) end.
 const defaultSpacing = 400 * time.Millisecond
 
+// defaultMaxReleaseAgeDays mirrors detection.DefaultNotifyMaxReleaseAgeDays
+// -- deliberately restated here rather than imported, following the same
+// reasoning format.go already records for re-declaring detection's event
+// type constants: this package must not take a compile-time dependency on
+// internal/detection just to share a policy number. main.go passes
+// cfg.NotifyMaxReleaseAgeDays to both packages, so in the running process
+// the two windows are the same value by construction; this constant only
+// decides what a Notifier built without options uses. Keep the two in step
+// if either is ever changed.
+const defaultMaxReleaseAgeDays = 7
+
 // dbOpTimeout bounds each individual database call inside NotifyPending.
 //
 // The ctx NotifyPending receives is the poll cycle's own context, derived
@@ -102,17 +113,35 @@ func (NoOp) NotifyPending(ctx context.Context, logger *slog.Logger) error { retu
 // uncoordinated MusicBrainz/Deezer cycle could otherwise race the same
 // pending rows.
 type Notifier struct {
-	q         sqlc.Querier
-	sender    Sender
-	spacing   time.Duration
-	notifying atomic.Bool
+	q          sqlc.Querier
+	sender     Sender
+	spacing    time.Duration
+	maxAgeDays int
+	notifying  atomic.Bool
+}
+
+// Option customises a Notifier at construction, mirroring
+// detection.Option's variadic-option shape so both halves of the freshness
+// gate are configured the same way from main.go.
+type Option func(*Notifier)
+
+// WithMaxReleaseAgeDays overrides defaultMaxReleaseAgeDays. Zero is a
+// meaningful, accepted value ("only releases dated today are delivered")
+// and is deliberately NOT treated as "unset"; a negative value is rejected
+// at config-parse time, not silently clamped here.
+func WithMaxReleaseAgeDays(days int) Option {
+	return func(n *Notifier) { n.maxAgeDays = days }
 }
 
 // New builds a Notifier backed by q for the outbox, sender for delivery, and
 // spacing between consecutive sends within one pass, mirroring
 // detection.New's constructor shape.
-func New(q sqlc.Querier, sender Sender, spacing time.Duration) *Notifier {
-	return &Notifier{q: q, sender: sender, spacing: spacing}
+func New(q sqlc.Querier, sender Sender, spacing time.Duration, opts ...Option) *Notifier {
+	n := &Notifier{q: q, sender: sender, spacing: spacing, maxAgeDays: defaultMaxReleaseAgeDays}
+	for _, opt := range opts {
+		opt(n)
+	}
+	return n
 }
 
 // Select returns the Sink cmd/server/main.go should wire into poller.New:
@@ -121,12 +150,65 @@ func New(q sqlc.Querier, sender Sender, spacing time.Duration) *Notifier {
 // webhookURL logs one Info line stating Discord notifications are disabled
 // and returns NoOp{}; otherwise it returns a real Notifier over
 // discord.NewClient(webhookURL, httpClient) and defaultSpacing.
-func Select(webhookURL string, q sqlc.Querier, httpClient *http.Client, logger *slog.Logger) Sink {
+func Select(webhookURL string, q sqlc.Querier, httpClient *http.Client, logger *slog.Logger, opts ...Option) Sink {
 	if webhookURL == "" {
 		logger.Info("discord notifications disabled: DISCORD_WEBHOOK_URL not set")
 		return NoOp{}
 	}
-	return New(q, discord.NewClient(webhookURL, httpClient), defaultSpacing)
+	return New(q, discord.NewClient(webhookURL, httpClient), defaultSpacing, opts...)
+}
+
+// suppresses reports whether ev must be acked without ever being sent to
+// Discord, because ev's own release date puts it outside the freshness
+// window. It is the delivery-side half of the same gate
+// detection.notifyGate applies at insert time, and the two MUST agree:
+// this predicate is the exact negation of detection.onOrAfterCutoff.
+//
+// Two distinct jobs justify a second gate rather than trusting the insert
+// -side one alone. First, it drains the pre-existing pending backlog: rows
+// already sitting in the outbox when this fix ships were inserted by the
+// old code, which had no freshness gate at all, so without this they would
+// all still be delivered on the very next pass -- the exact flood being
+// fixed. Second, it is defence in depth for the AND-gate root cause
+// (.planning/debug/resolved/backlog-songs-trigger-discord.md): the bug
+// needed BOTH a row reaching the outbox in a deliverable state AND a
+// delivery path that never consults release age. Closing only the insert
+// side would leave the delivery path just as defenceless against the next
+// insert path that forgets the gate.
+//
+// An absent or partial (year-only, year-month) release date SUPPRESSES.
+// That is the deliberately conservative reading, and it is the opposite of
+// this codebase's usual "err toward an extra alert" doctrine
+// (isGuestFeature, withinDeluxeRecheckWindow), so it is worth stating why:
+// 64% of guest_feature rows carry no release date at all, and an undated
+// row is not evidence of freshness -- it is absence of evidence. Treating
+// it as deliverable would re-flood Discord with hundreds of undated
+// back-catalogue rows on the first pass after this ships, which is the
+// very failure being fixed. The cost is bounded and small: of the 249
+// back-catalogue notifications that prompted this gate, only 5 were
+// undated.
+func (n *Notifier) suppresses(ev sqlc.Event) bool {
+	cutoff := time.Now().UTC().AddDate(0, 0, -n.maxAgeDays).Format(time.DateOnly)
+	return staleReleaseDate(ev.ReleaseDate, cutoff)
+}
+
+// staleReleaseDate is suppresses' clock-free core, split out for the same
+// reason detection splits onOrAfterCutoff off notifyGate.notifiedAt: it
+// makes the predicate table-testable against a FIXED cutoff, so the two
+// halves of the freshness gate can be pinned to one shared table of cases
+// instead of each drifting behind its own wall-clock-relative test.
+//
+// releaseDate is *string because that is how sqlc models the nullable
+// events.release_date column; nil means SQL NULL (undated), which
+// suppresses -- see suppresses' doc comment for why undated is the
+// conservative direction here. Compared as strings, never parsed, matching
+// detection.onOrAfterCutoff exactly; this function must remain that
+// function's precise negation.
+func staleReleaseDate(releaseDate *string, cutoff string) bool {
+	if releaseDate == nil {
+		return true
+	}
+	return len(*releaseDate) != len(time.DateOnly) || *releaseDate < cutoff
 }
 
 // listUnnotified calls q.ListUnnotified under a dbOpTimeout deadline derived
@@ -185,7 +267,21 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 		return fmt.Errorf("notifier: list unnotified: %w", err)
 	}
 
+	suppressed := 0
 	for i, ev := range events {
+		// Ack without sending, and without consuming a spacing wait -- a
+		// suppressed row costs no Discord request, so pacing it would only
+		// slow the first post-fix pass (which has a large backlog to clear)
+		// for no rate-limit benefit. MarkNotified failing here is a hard
+		// return for the same reason it is on the send path below: leaving
+		// the row pending would re-suppress it forever on every future pass.
+		if n.suppresses(ev) {
+			if _, err := markNotified(ctx, n.q, ev.ID); err != nil {
+				return fmt.Errorf("notifier: mark suppressed event: %w", err)
+			}
+			suppressed++
+			continue
+		}
 		embed := formatEmbed(ev)
 		if err := n.sender.Send(ctx, embed); err != nil {
 			logger.Error("notify send failed",
@@ -223,6 +319,22 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 				return ctx.Err()
 			}
 		}
+	}
+
+	// One summary line per pass, not one line per row: the first pass after
+	// the freshness gate ships suppresses a multi-hundred-row backlog, and
+	// per-row logging would bury every other line in the process. Emitted
+	// only when something was actually suppressed, so a steady-state pass
+	// stays quiet. Without this, over-suppression -- the one real risk this
+	// gate carries -- would be completely invisible in production: a
+	// wrongly-suppressed row is indistinguishable from a row that was never
+	// detected at all.
+	if suppressed > 0 {
+		logger.Info("notify pass suppressed stale events",
+			slog.Int("suppressed_count", suppressed),
+			slog.Int("pending_count", len(events)),
+			slog.Int("max_release_age_days", n.maxAgeDays),
+		)
 	}
 
 	return nil

@@ -154,7 +154,7 @@ type Querier interface {
 	// D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
 	// created_at ASC, id ASC for a deterministic total order (a plain
 	// created_at ordering alone is not unique -- a seed cycle's rows share one
-	// timestamp, see seedNotifiedAt). This is also the instrument plan 04-02's
+	// timestamp, see notifyGate). This is also the instrument plan 04-02's
 	// own tests use to prove seeded rows are excluded (D-13).
 	ListUnnotified(ctx context.Context) ([]Event, error)
 	// Both watchlist and artists have a column named id -- every selected

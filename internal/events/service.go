@@ -119,7 +119,7 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 
 	// The retention cutoff (DATA-02, D-01/D-04): events created before this
 	// instant are hidden from the feed, but Valid is always explicitly true
-	// -- following seedNotifiedAt's precedent (internal/detection/detector.go)
+	// -- following notifyGate's precedent (internal/detection/detector.go)
 	// -- because a zero-value pgtype.Timestamptz marshals as SQL NULL, and
 	// "created_at >= NULL" is never true, which would silently return an
 	// empty feed for every request instead of erroring (T-10-02).

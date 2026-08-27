@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/deezer"
@@ -47,7 +48,7 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 	if err != nil {
 		return err
 	}
-	notifiedAt := seedNotifiedAt(seedMode)
+	notify := newNotifyGate(seedMode, d.notifyMaxReleaseAgeDays, time.Now().UTC())
 
 	seen, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceDeezer, eventTypeNewRelease)
 	if err != nil {
@@ -88,7 +89,7 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 			CoverArtUrl:       nullableString(a.Cover),
 			TrackCount:        nil,
 			ReleaseType:       nullableString(a.RecordType),
-			NotifiedAt:        notifiedAt,
+			NotifiedAt:        notify.notifiedAt(a.ReleaseDate),
 			WatchedArtistName: &watchedName,
 		})
 		if err != nil {

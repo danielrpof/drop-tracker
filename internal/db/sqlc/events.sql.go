@@ -384,7 +384,7 @@ SELECT id, artist_id, source, event_type, external_id, release_group_mbid, title
 // D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
 // created_at ASC, id ASC for a deterministic total order (a plain
 // created_at ordering alone is not unique -- a seed cycle's rows share one
-// timestamp, see seedNotifiedAt). This is also the instrument plan 04-02's
+// timestamp, see notifyGate). This is also the instrument plan 04-02's
 // own tests use to prove seeded rows are excluded (D-13).
 func (q *Queries) ListUnnotified(ctx context.Context) ([]Event, error) {
 	rows, err := q.db.Query(ctx, listUnnotified)

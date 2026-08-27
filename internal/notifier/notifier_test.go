@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -123,18 +124,34 @@ func insertTestArtist(t *testing.T, pool *pgxpool.Pool, suffix string) int64 {
 	return artistID
 }
 
+// todayDate is the release_date the pending-row fixtures below stamp.
+//
+// Every test in this file exercises DELIVERY mechanics -- spacing, retry,
+// the CAS guard, mark-notified failure handling -- and needs its rows to
+// actually reach the Sender. Since the freshness gate shipped
+// (.planning/debug/resolved/backlog-songs-trigger-discord.md), "notified_at
+// IS NULL" is no longer sufficient for that: notifier.suppresses acks and
+// skips any row whose release_date is undated, partial, or older than the
+// configured window. An undated fixture row (which is what these helpers
+// used to insert) is now silently suppressed, so every send assertion here
+// would fail against correct code. Suppression itself is covered by
+// suppress_test.go; these fixtures deliberately opt out of it.
+var todayDate = time.Now().UTC().Format(time.DateOnly)
+
 // insertPendingEvent inserts a new_release events row with notified_at NULL
-// -- exactly the outbox state NotifyPending is meant to drain.
+// and a release_date of today -- exactly the outbox state NotifyPending is
+// meant to drain and actually deliver. See todayDate for why the date
+// matters.
 func insertPendingEvent(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID string) int64 {
 	t.Helper()
 	ctx := context.Background()
 
 	var eventID int64
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name)
-		 VALUES ($1, 'musicbrainz', 'new_release', $2, 'Test Title', 'Test Artist')
+		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date)
+		 VALUES ($1, 'musicbrainz', 'new_release', $2, 'Test Title', 'Test Artist', $3)
 		 RETURNING id`,
-		artistID, externalID,
+		artistID, externalID, todayDate,
 	).Scan(&eventID); err != nil {
 		t.Fatalf("insert pending event: %v", err)
 	}
@@ -152,10 +169,10 @@ func insertPendingEventTitled(t *testing.T, pool *pgxpool.Pool, artistID int64, 
 
 	var eventID int64
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name)
-		 VALUES ($1, 'musicbrainz', 'new_release', $2, $3, 'Test Artist')
+		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date)
+		 VALUES ($1, 'musicbrainz', 'new_release', $2, $3, 'Test Artist', $4)
 		 RETURNING id`,
-		artistID, externalID, title,
+		artistID, externalID, title, todayDate,
 	).Scan(&eventID); err != nil {
 		t.Fatalf("insert pending event: %v", err)
 	}
@@ -192,6 +209,117 @@ func TestNotifyPending_ZeroPendingRows_NoRequestNoMarkNoError(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&sender.calls); got != 0 {
 		t.Fatalf("sender.calls = %d, want 0", got)
+	}
+}
+
+// insertPendingEventDated inserts a pending new_release row carrying an
+// explicit release_date, so a test can drive the freshness gate. releaseDate
+// == "" inserts SQL NULL (an undated row), which is what 64% of real
+// guest_feature rows look like.
+func insertPendingEventDated(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID, title, releaseDate string) int64 {
+	t.Helper()
+
+	var date *string
+	if releaseDate != "" {
+		date = &releaseDate
+	}
+
+	var eventID int64
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date)
+		 VALUES ($1, 'musicbrainz', 'new_release', $2, $3, 'Test Artist', $4)
+		 RETURNING id`,
+		artistID, externalID, title, date,
+	).Scan(&eventID); err != nil {
+		t.Fatalf("insert dated pending event: %v", err)
+	}
+	return eventID
+}
+
+// TestNotifyPending_StaleRowsAckedWithoutSending is the delivery-side
+// regression test for
+// .planning/debug/resolved/backlog-songs-trigger-discord.md.
+//
+// It models the exact production state at the moment the fix ships: an
+// outbox already full of back-catalogue rows inserted by the old,
+// ungated code. Those rows must be ACKED (so they never come back on a
+// later pass) but must NEVER produce a Discord request -- the flood being
+// fixed was 242 such rows in a single day, reaching back to 2015. The
+// genuinely-fresh row in the same batch must still be delivered, which is
+// what stops this from being satisfied by a gate that simply suppresses
+// everything.
+func TestNotifyPending_StaleRowsAckedWithoutSending(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, logBuf := newTestLogger()
+
+	// Drain anything already pending, so the counts below reflect only this
+	// test's own rows (ListUnnotified is global -- D-06).
+	if err := notifier.New(q, &fakeSender{}, time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("drain NotifyPending: %v", err)
+	}
+	logBuf.Reset()
+
+	artistID := insertTestArtist(t, pool, "stale")
+	backlogID := insertPendingEventDated(t, pool, artistID, "stale-old", "Ancient Album", "2015-05-21")
+	undatedID := insertPendingEventDated(t, pool, artistID, "stale-undated", "Undated Album", "")
+	partialID := insertPendingEventDated(t, pool, artistID, "stale-partial", "Year Only Album", "2015")
+	freshID := insertPendingEventDated(t, pool, artistID, "stale-fresh", "Todays Album", todayDate)
+
+	var mu sync.Mutex
+	var titles []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		titles = append(titles, string(body))
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	n := notifier.New(q, discord.NewClient(ts.URL, ts.Client()), time.Millisecond)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v", err)
+	}
+
+	mu.Lock()
+	gotBodies := append([]string(nil), titles...)
+	mu.Unlock()
+
+	if len(gotBodies) != 1 {
+		t.Fatalf("Discord received %d requests, want exactly 1 (only today's release); bodies: %v", len(gotBodies), gotBodies)
+	}
+	if !strings.Contains(gotBodies[0], "Todays Album") {
+		t.Fatalf("the single delivered request was not today's release: %s", gotBodies[0])
+	}
+	for _, stale := range []string{"Ancient Album", "Undated Album", "Year Only Album"} {
+		for _, b := range gotBodies {
+			if strings.Contains(b, stale) {
+				t.Errorf("a stale row (%q) was delivered to Discord: %s", stale, b)
+			}
+		}
+	}
+
+	// Every row must be acked, stale ones included -- an unacked stale row
+	// would be re-selected and re-suppressed on every future pass forever.
+	for _, tc := range []struct {
+		name string
+		id   int64
+	}{
+		{"2015 backlog", backlogID},
+		{"undated", undatedID},
+		{"year-only", partialID},
+		{"today's release", freshID},
+	} {
+		if !isNotified(t, pool, tc.id) {
+			t.Errorf("%s row was left pending, want acked", tc.name)
+		}
+	}
+
+	// The suppression must be observable in the logs: a silently-dropped row
+	// is otherwise indistinguishable from one that was never detected.
+	if logs := logBuf.String(); !strings.Contains(logs, "notify pass suppressed stale events") {
+		t.Errorf("no suppression summary line was logged; logs: %s", logs)
 	}
 }
 

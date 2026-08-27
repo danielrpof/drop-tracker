@@ -33,6 +33,7 @@ type Config struct {
 	MusicBrainzUserAgent       string  `env:"MUSICBRAINZ_USER_AGENT" envDefault:"drop-tracker/0.1.0 (+https://github.com/danielrpof/drop-tracker)"`
 	MusicBrainzRateLimitPerSec float64 `env:"MUSICBRAINZ_RATE_LIMIT_PER_SEC" envDefault:"1"`
 	DeezerRateLimitPer5s       int     `env:"DEEZER_RATE_LIMIT_PER_5S" envDefault:"50"`
+	NotifyMaxReleaseAgeDays    int     `env:"NOTIFY_MAX_RELEASE_AGE_DAYS" envDefault:"7"`
 
 	// Phase 10 — how many days of events history GET /events shows (DATA-01,
 	// D-01/D-04). A plain int day-count, deliberately not the time.Duration
@@ -81,6 +82,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.DeezerPollWorkers <= 0 {
 		return nil, fmt.Errorf("DEEZER_POLL_WORKERS must be a positive integer, got %d", cfg.DeezerPollWorkers)
+	}
+	if cfg.NotifyMaxReleaseAgeDays < 0 {
+		return nil, fmt.Errorf("NOTIFY_MAX_RELEASE_AGE_DAYS must be non-negative, got %d", cfg.NotifyMaxReleaseAgeDays)
 	}
 	return cfg, nil
 }
