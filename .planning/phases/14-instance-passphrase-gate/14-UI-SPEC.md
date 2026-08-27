@@ -1,7 +1,7 @@
 ---
 phase: 14
 slug: instance-passphrase-gate
-status: draft
+status: approved
 shadcn_initialized: true
 preset: base-maia
 created: 2026-08-27
@@ -117,24 +117,92 @@ Dark theme only. Values are the locked Phase 6 `.dark` token set in `web/app/app
 
 ## UI Considerations
 
-Applicable state considerations resolved: **6 covered, 1 backstop, 1 unresolved**
+Post-verification state probe: **40 applicable considerations** across 6 surfaces —
+E1 `<PassphraseScreen>`, E2 passphrase input, E3 Unlock button, E4 inline error slot,
+E5 Log out control, E6 post-login transition. Resolved: **22 explicit**, **3 backstop**,
+**15 dismissed (N/A, reason recorded)**; plus **1 unresolved** planner assumption.
 
-| Category | Element(s) | Status | Resolution / Reason |
-|----------|------------|--------|---------------------|
-| empty | passphrase form — first paint | ✅ covered | The gated app's first paint renders `<PassphraseScreen>` with the documented heading + body copy — never a blank screen, bare spinner, or generic error (success criterion 2, PITFALLS #23). |
-| loading | initial auth flash before first 401 | ✅ covered | `authStore` is optimistically `authed=true` (D-16); the routed page renders for the moment between mount and the first `401`, then `<PassphraseScreen>` replaces it. This brief flash is explicitly accepted (D-16) — no boot-time `GET /session` check, no full-screen spinner is added. |
-| loading | submit in flight | ✅ covered | While `POST /session` is pending, the Unlock button is `disabled` and shows the `Unlocking…` label (see Copywriting Contract); the input is `disabled`; no spinner overlay. |
-| error | wrong passphrase (401) | ✅ covered | Documented incorrect-passphrase copy renders inline below the field as `text-destructive text-label`; entered value retained; field keeps focus; button returns to `Unlock` and re-enables once the field is edited. |
-| error | throttled (429) | ✅ covered | Documented 429 copy renders in the same inline error slot; the Unlock button stays disabled until the user edits the field, discouraging immediate re-submit. |
-| error | network failure / 5xx | 🧪 backstop | Documented network-error copy renders in the same inline slot. Held-out UI-state test: simulate `fetch` reject / 503 from `POST /session` and assert the network copy (not the 401 copy) appears and the form stays usable. |
-| populated | authenticated app after login | ✅ covered | On success `authStore.markAuthenticated()` → `<App>` re-renders → `<Outlet/>` remounts → each route's `useEffect` re-fetches (D-16). Nav now shows the **Log out** control. |
-| overflow / long-text | passphrase input value | ✅ covered | Single-line `type="password"` field; long values scroll horizontally within the fixed-height input (`h-9`), never wrap or grow the card. `max-w-sm` card width is fixed regardless of copy or error length (error text wraps to 2–3 lines within the card). |
-| zero-one-many | — | ⚠ unresolved | **Log out control visibility when the gate is unconfigured.** With no `INSTANCE_PASSPHRASE` set there is no `/session` endpoint, so a rendered Log out button would 404. Recommendation: render the Log out control only after a successful login has occurred in the current session (track a third `authStore` signal), OR never render it while `authed` is still the optimistic default. Planner to confirm the `authStore` shape; treated as an assumption until then. |
+### E1 — `<PassphraseScreen>` (full-screen gate)
+
+| Category | Status | Resolution / Reason |
+|----------|--------|---------------------|
+| empty | ✅ explicit | First paint of a gated instance renders `<PassphraseScreen>` with the documented heading + body copy — never a blank screen, bare spinner, or generic error (success criterion 2, PITFALLS #23). |
+| loading | ✅ explicit | Optimistic `authed=true` (D-16): the routed page renders for the moment between mount and the first `401`, then `<PassphraseScreen>` replaces it. No boot-time `GET /session`, no full-screen spinner. Flash explicitly accepted (D-16). |
+| populated | ✅ explicit | Happy path: card centered in viewport (`min-h-screen flex items-center justify-center p-8`), `w-full max-w-sm`, `rounded-md bg-card p-8`, inner `flex flex-col gap-6` — heading block → field → Unlock button. |
+| overflow | ✅ explicit | On short viewports the flex-centered card scrolls within `min-h-screen` rather than clipping; `max-w-sm` width stays fixed. |
+| long-text | ✅ explicit | All copy strings are fixed (not data-derived); body + error text wrap within the fixed-width card, which grows vertically. No truncation. |
+| error | ⊘ dismissed | The gate form loads no data and is static markup — no independent load-failure state. Submit-failure states are covered under E4. |
+| partial | ⊘ dismissed | No data-backed fields; the form is a single input with empty/typed states only. |
+| zero-one-many | ⊘ dismissed | Single fixed form; no collection or repeated items. |
+
+### E2 — Passphrase input
+
+| Category | Status | Resolution / Reason |
+|----------|--------|---------------------|
+| empty | ✅ explicit | Empty field: no placeholder, `autofocus` on mount. Submitting empty is permitted and handled server-side as a `401` — no separate client-side "required" message. |
+| loading | ✅ explicit | During in-flight `POST /session` the input is `disabled`; the entered value stays visible. |
+| error | ✅ explicit | On any error the entered value is retained (never cleared) and the field keeps focus so the user can fix a typo. D-13 secret-safety: the value is never echoed to any message, toast, log, or DOM node. |
+| populated | ✅ explicit | Typed state shows masked characters (`type="password"`), `text-body` size, focus ring `--ring` indigo. |
+| overflow | ✅ explicit | Long values scroll horizontally within the fixed `h-9` input; never wrap, never grow the card. |
+| long-text | ✅ explicit | A very long passphrase scrolls horizontally in the input and submits in full; no truncation of the value. |
+| partial | ⊘ dismissed | Single scalar value; no partial state. |
+| zero-one-many | ⊘ dismissed | Single-value field; no multiplicity. |
+
+### E3 — Unlock submit button
+
+| Category | Status | Resolution / Reason |
+|----------|--------|---------------------|
+| empty | ✅ explicit | Shown enabled with label `Unlock` regardless of field content — no disabled-until-typed gate. |
+| loading | ✅ explicit | In flight: label `Unlocking…`, `disabled`, width unchanged (no layout shift), no spinner overlay. |
+| error | ✅ explicit | After `401`/`429` the button stays `disabled` until the field is edited, then reverts to `Unlock`. After a network/5xx error it re-enables immediately so the user can retry. |
+| long-text | ✅ explicit | Button is sized to the wider label (`Unlocking…`) so the idle↔submitting swap causes no reflow. |
+| partial | ⊘ dismissed | No data. |
+| overflow | ⊘ dismissed | Fixed-width button; label set is two fixed strings. |
+
+### E4 — Inline error slot
+
+| Category | Status | Resolution / Reason |
+|----------|--------|---------------------|
+| empty | ✅ explicit | Default state: the slot renders nothing. It collapses when empty; the card grows vertically when an error appears (accepted — the card is vertically centered, so it stays balanced). |
+| populated | ✅ explicit | Populated = one error line (occasionally 2–3 wrapped lines) directly below the input, above the button. |
+| overflow | ✅ explicit | Error text wraps to 2–3 lines within the `max-w-sm` card; the card grows vertically. No horizontal overflow, no truncation. |
+| long-text | ✅ explicit | All three error strings are fixed and pre-measured to wrap within 3 lines at `max-w-sm`; no ellipsis. |
+| error | 🧪 backstop | Three mutually-exclusive strings by outcome — `401` → wrong-passphrase copy, `429` → throttle copy, network/5xx → connection copy — rendered `text-destructive text-label` below the field; a new attempt clears the previous. Held-out UI-state test (network path, least exercised): simulate a `fetch` reject / `503` from `POST /session` and assert the network copy (not the 401 copy) shows and the form stays usable. |
+| loading | ⊘ dismissed | The slot reflects the submit result synchronously; it has no async load of its own. |
+| partial | ⊘ dismissed | Single string; no partial state. |
+| zero-one-many | ⊘ dismissed | At most one message at a time; never a list. |
+
+### E5 — Log out control
+
+| Category | Status | Resolution / Reason |
+|----------|--------|---------------------|
+| populated | ✅ explicit | When authenticated, the nav shows `Log out` — `<Button variant="ghost" size="sm">` with a leading lucide `LogOut` icon, `ml-auto` right-aligned. |
+| loading | ✅ explicit | No distinct loading state: the button is not disabled during the brief `DELETE /session`; on resolve `<App>` re-renders to `<PassphraseScreen>`. A double-click is harmless (idempotent delete). |
+| error | 🧪 backstop | `DELETE /session` failure is not specified. Held-out UI-state test: simulate a `500`/reject and assert the client still clears local auth state and shows `<PassphraseScreen>` (recommended — a stale httpOnly cookie just yields a `401` on the next fetch), and/or surfaces a `Couldn't log out` toast. Planner to confirm. |
+| empty | ⊘ dismissed | Static control; presence is governed by auth state, not data. |
+| overflow | ⊘ dismissed | Fixed label + icon; nav is `p-8` with `ml-auto`, no dynamic width. |
+| long-text | ⊘ dismissed | Fixed label `Log out`. |
+
+### E6 — Post-login transition
+
+| Category | Status | Resolution / Reason |
+|----------|--------|---------------------|
+| loading | ✅ explicit | After `authStore.markAuthenticated()`, `<Outlet/>` remounts and each route's `useEffect` re-fetches; during that fetch the route shows its own existing Phase 6 loading state — this phase adds no new transitional screen. |
+| error | 🧪 backstop | If a post-login route fetch returns `401` again (race), `<App>` falls back to `<PassphraseScreen>`. Held-out test: assert a post-`markAuthenticated()` `401` re-shows the gate rather than leaving a broken authed shell. Other fetch errors use each route's existing Phase 6 error handling. |
+| overflow | ⊘ dismissed | The transition is a re-render, not a content surface. |
+| long-text | ⊘ dismissed | No text content in the transition; focus moves to the routed page `<h1>`. |
+
+### Unresolved — planner must treat as assumption
+
+| Item | Detail |
+|------|--------|
+| ⚠ Log out control visibility when the gate is unconfigured | With no `INSTANCE_PASSPHRASE` set there is no `/session` endpoint, so a rendered Log out button would `404`. Recommendation: render Log out only after a successful login in the current session (a third `authStore` signal), OR never render it while `authed` is still the optimistic default. Planner to confirm the `authStore` shape; treated as an assumption until then. |
 
 <!-- Status vocabulary:
-     ✅ covered   → plain truth string lifted into must_haves.truths
-     🧪 backstop  → { statement, verification: backstop }; no evidence at verify → human_needed
-     ⚠ unresolved → explicit planner assumption, surfaced not dropped -->
+     ✅ explicit    → plain truth string lifted into must_haves.truths
+     🧪 backstop    → { statement, verification: backstop }; no evidence at verify → human_needed
+     ⊘ dismissed   → not applicable to this surface; reason recorded, not lifted
+     ⚠ unresolved  → explicit planner assumption, surfaced not dropped -->
 
 ---
 
@@ -151,11 +219,11 @@ No third-party registry is declared for this phase. The registry vetting gate is
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** APPROVED by gsd-ui-checker (2026-08-27) — 6/6 dimensions PASS, no recommendations.
