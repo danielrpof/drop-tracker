@@ -19,15 +19,15 @@ Automate shipping the app to a self-hosted VPS on every merge to main, put a pas
 - [ ] **DPLY-04**: The production compose file and rollout script are versioned in the repo; the real secrets (`.env`) and the pinned image tag live only on the VPS and are never committed
 - [ ] **DPLY-05**: The deploy verifies the SSH host key against a pinned fingerprint (no blind accept); all deploy secrets are supplied via GitHub Actions secrets scoped to a `production` environment
 - [ ] **DPLY-06**: The deploy job runs only on push to main — never on pull requests, and never on forks
-- [ ] **DPLY-07**: A documented, repeatable VPS provisioning runbook/wizard covers Docker install, directory layout, prod compose + `.env` placement, SSH key + host-fingerprint capture, GitHub secrets, and the TLS reverse proxy
+- [ ] **DPLY-07**: A documented, repeatable VPS provisioning runbook/wizard covers Docker install, directory layout, prod compose + `.env` placement, SSH key + host-fingerprint capture, GitHub secrets, the TLS reverse proxy, a firewall allowlist during provisioning (so the instance is never public-and-pre-gate), setting `TRUST_PROXY_HEADERS=true` only once the proxy is live and the container port is unpublished, the passphrase-rotation revoke-all procedure, and a Postgres backup + restore procedure (recovery path when an image rollback also needs the schema restored)
 - [ ] **DPLY-08**: The deployed instance is reachable over HTTPS via a reverse proxy on the VPS
 
 ### Access Gate
 
 - [ ] **GATE-01**: When a passphrase is configured, all data/API routes require a valid session cookie and return `401` without one; `/health`, the session-login endpoint, and the static SPA shell stay publicly reachable
-- [ ] **GATE-02**: A user authenticates by submitting the correct passphrase once; a signed, stateless session cookie then keeps that browser authenticated across requests and across app restarts/redeploys
+- [x] **GATE-02**: A user authenticates by submitting the correct passphrase once; a signed, stateless session cookie then keeps that browser authenticated across requests and across app restarts/redeploys
 - [ ] **GATE-03**: The session cookie is HMAC-signed, `HttpOnly`, `Secure`, `SameSite=Lax`, and has a bounded lifetime; passphrase comparison is constant-time
-- [ ] **GATE-04**: The login endpoint is rate-limited per client IP to bound brute-force attempts
+- [ ] **GATE-04**: The login endpoint is rate-limited per client IP to bound brute-force attempts (client IP comes from `X-Forwarded-For` only when `TRUST_PROXY_HEADERS` is set — the Phase 17 topology; otherwise the direct peer address, so a pre-proxy deploy can't be spoofed). The throttle rejection is undelayed and login-handler concurrency is bounded so a distributed flood can't exhaust goroutines/connections
 - [ ] **GATE-05**: The SPA detects a `401` from the API, presents a passphrase login form, and resumes normal operation after a successful login
 - [ ] **GATE-06**: A user can log out, invalidating the session on that browser
 - [ ] **GATE-07**: When no passphrase is configured the gate is inert — every route behaves exactly as it did before v1.3, so local dev, docker-compose, and the existing test suite need no passphrase
@@ -48,7 +48,7 @@ Deferred, tracked, not in the v1.3 roadmap.
 
 ### Deployment / Operations
 
-- **OPS-04**: Documented Postgres backup + restore runbook for the VPS (recovery path for an irreversible migration) — flagged in the roadmap as a **recommended prerequisite** for Phase 17's rollback story
+- **OPS-04**: Automated, scheduled Postgres backups with off-box retention for the VPS. The *basic* backup + restore procedure is folded into DPLY-07 (Phase 17) as the recovery path for an irreversible migration; OPS-04 remains for scheduling, off-box copies, and retention policy beyond a manual runbook
 - **OPS-05**: ghcr.io image-retention / cleanup job so old tags don't accumulate
 - **DPLY-09**: Near-zero-downtime deploy (reverse-proxy connection draining or a second short-lived container) instead of the accepted brief swap gap
 
@@ -78,7 +78,7 @@ Mapped during roadmap creation (2026-08-27). See `.planning/ROADMAP.md` for each
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | GATE-01 | Phase 14 | Pending |
-| GATE-02 | Phase 14 | Pending |
+| GATE-02 | Phase 14 | Complete |
 | GATE-03 | Phase 14 | Pending |
 | GATE-04 | Phase 14 | Pending |
 | GATE-05 | Phase 14 | Pending |

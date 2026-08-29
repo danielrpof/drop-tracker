@@ -6,7 +6,7 @@ drop-tracker starts from an empty repo and builds outward from the data layer: a
 
 v1.1 picked up from a shipped, working v1.0 and closed four peer-reviewed gaps without changing what the app does for its user: the React frontend gained the component test suite it never had, the Full Pipeline started enforcing coverage floors on both languages instead of merely running tests, the events table gained a retention window that hides stale history from display while leaving every detection-critical row in place, and the poller stopped walking the watchlist one artist at a time. v1.2 then closed the two items left in the backlog plus a round of History-tab display bugs found in everyday use — search popularity ranking, artist-art backfill, and missing release dates/album art on History cards — without adding new capability.
 
-**v1.3 Continuous Deployment** takes the last step the pipeline was always pointed at: the published image stops being the end of the line and starts being deployed. Because a deployed instance is a *public* instance, the milestone is sequenced defensively rather than by excitement — the passphrase gate that protects the watchlist and the Discord webhook lands first, so the instance is never briefly public-and-open; the PR coverage-diff comment (a self-contained CI reporting gap) lands second; the N-1 schema-compatibility check that makes image rollback actually safe lands third, *before* anything can auto-roll-back; and only then does the SSH deploy job with health-gated auto-rollback go live on a provisioned, HTTPS-fronted VPS.
+**v1.3 Continuous Deployment** takes the last step the pipeline was always pointed at: the published image stops being the end of the line and starts being deployed. Because a deployed instance is a *public* instance, the milestone is sequenced defensively rather than by excitement — the passphrase gate that protects the watchlist and the Discord webhook lands first, so the instance is never briefly public-and-open (with a VPS firewall allowlist during provisioning as belt-and-suspenders — the app gate is the load-bearing control, not the only one); the PR coverage-diff comment (a self-contained CI reporting gap) lands second; the N-1 schema-compatibility check that makes image rollback actually safe lands third, *before* anything can auto-roll-back; and only then does the SSH deploy job with health-gated auto-rollback go live on a provisioned, HTTPS-fronted VPS.
 
 ## Milestones
 
@@ -80,12 +80,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 4. The session cookie carries `HttpOnly`, `Secure`, `SameSite=Lax` and a bounded lifetime when inspected in devtools, and repeated wrong-passphrase attempts from one client are throttled (rejected with `429`) rather than answered at full speed indefinitely.
 5. With no passphrase configured, every route behaves exactly as it did in v1.2 — `make test-integration`, `pnpm test`, and `docker compose up` all pass untouched with no passphrase anywhere.
 
-**Plans**: 4 plans
+**Plans**: 1/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 14-01-PLAN.md — Tracer: end-to-end 401 → login → 200 gate slice, inert path, and the full session-cookie contract (wave 1)
+- [x] 14-01-PLAN.md — Tracer: end-to-end 401 → login → 200 gate slice, inert path, and the full session-cookie contract (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -98,7 +98,7 @@ Plans:
 
 **UI hint**: yes
 
-_Notes:_ Joint backend + frontend slice — a Go `internal/authgate` package plus chi middleware on a protected route `Group`, and the SPA's `401`-interception login form and logout. Splitting the server contract from the SPA handling would leave a half-phase that renders a broken app. Open decisions for discuss/spec: session signing key separate secret vs. derived from the passphrase, session TTL default, whether the SPA shell stays public (recommended) or is also gated, and passphrase minimum-entropy enforcement at boot. Relevant pitfalls: PITFALLS.md 14-23.
+_Notes:_ Joint backend + frontend slice — a Go `internal/authgate` package plus chi middleware on a protected route `Group`, and the SPA's `401`-interception login form and logout. Splitting the server contract from the SPA handling would leave a half-phase that renders a broken app. All discuss/spec decisions are resolved in `14-CONTEXT.md` (D-01…D-18): derived signing key, hardcoded 30d/90d timings, public SPA shell, warn-only passphrase strength, `gateActive`-gated Log out (D-18). Adds **two** env vars: `INSTANCE_PASSPHRASE` (the gate) and `TRUST_PROXY_HEADERS` (default `false`; gates `middleware.RealIP` so a pre-proxy or misconfigured deploy can't be `X-Forwarded-For`-spoofed — D-14). Rotating `INSTANCE_PASSPHRASE` is the only revoke-all lever (D-10) — Phase 17's runbook documents it. Login hardening: undelayed 429, `maxConcurrentLogins` semaphore, alert-only global counter (D-12). Relevant pitfalls: PITFALLS.md 14-23. **Validation contract (`14-VALIDATION.md`) content is authored but the formal `/gsd-validate-phase 14` step is still pending — run it before execution.**
 
 ### Phase 15: PR Coverage-Diff Comment
 
@@ -148,7 +148,18 @@ _Notes:_ Split out of the deploy phase deliberately. Pitfall 8 is the milestone'
 
 **Plans**: TBD
 
-_Notes:_ The heaviest phase of the milestone — 17 of PITFALLS.md's 27 catalogued pitfalls land here. Requires a small change to the existing `release` job to expose `outputs.version`. The deploy job needs `needs: [release]` + a `push`/`refs/heads/main` guard + its own `concurrency` group with `cancel-in-progress: false` + a `production` GitHub Environment holding the SSH secrets. Rollback must target the previous image **pinned locally on the VPS**, never re-pulled from ghcr.io. The `/health` poll runs inside the SSH session against `127.0.0.1`, not from the runner. **Needs a discuss/spec pass before planning** — open decisions: TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel, which blocks the first deploy), whether the accepted brief swap-gap downtime is documented-and-accepted or mitigated, and post-deploy image-prune policy. A VPS Postgres backup runbook (OPS-04, currently Future) is a **recommended prerequisite** — it is the recovery path if a rollback ever needs the schema restored too. Relevant pitfalls: PITFALLS.md 1-13, 19, 22.
+_Notes:_ The heaviest phase of the milestone — 17 of PITFALLS.md's 27 catalogued pitfalls land here. Requires a small change to the existing `release` job to expose `outputs.version`. The deploy job needs `needs: [release]` + a `push`/`refs/heads/main` guard + its own `concurrency` group with `cancel-in-progress: false` + a `production` GitHub Environment holding the SSH secrets. Rollback must target the previous image **pinned locally on the VPS**, never re-pulled from ghcr.io. The `/health` poll runs inside the SSH session against `127.0.0.1`, not from the runner. **Needs a discuss/spec pass before planning** — decisions to lock: whether the accepted brief swap-gap downtime is documented-and-accepted or mitigated, and post-deploy image-prune policy.
+
+**Provisioning runbook (DPLY-07) must now also cover** (added during the Phase 14 plan-hardening review):
+
+- A **VPS firewall allowlist** in front of the instance during provisioning, so it is never both publicly reachable *and* pre-gate/pre-proxy — belt-and-suspenders alongside the passphrase gate.
+- Set `TRUST_PROXY_HEADERS=true` on the box **only after** the reverse proxy is confirmed live and the container port is unpublished (D-14). It stays unset/false at every earlier step.
+- The **passphrase-rotation = revoke-all** procedure (D-10): rotate `INSTANCE_PASSPHRASE`, redeploy — every session invalidated.
+- A **Postgres backup + restore procedure** (folds in the basics of OPS-04, previously Future): it is the recovery path when an image rollback also needs the schema restored (PITFALLS #8, the milestone's highest-cost failure). Schedule this as part of Phase 16 or 17 work, not "someday".
+
+**TLS reverse-proxy choice — recommended: Caddy on-VPS** over Cloudflare Tunnel. Caddy keeps the "self-hosted, minimal external dependency" ethos and puts no third party in the request path; automatic HTTPS via ACME; health-gated upstream cutover is available if DPLY-09 (near-zero-downtime) is ever pursued. Confirm at the Phase 17 discuss. This choice blocks the first deploy, so lock it early — before Phase 15 planning.
+
+Relevant pitfalls: PITFALLS.md 1-13, 19, 22.
 
 ## Progress
 
@@ -157,7 +168,7 @@ Phases execute in numeric order: 14 → 15 → 16 → 17
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 14. Instance Passphrase Gate | 0/? | Not started | - |
+| 14. Instance Passphrase Gate | 1/4 | In Progress|  |
 | 15. PR Coverage-Diff Comment | 0/? | Not started | - |
 | 16. Rollback-Safe Migrations | 0/? | Not started | - |
 | 17. Automated VPS Deploy with Health-Gated Rollback | 0/? | Not started | - |

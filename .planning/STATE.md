@@ -4,17 +4,17 @@ milestone: v1.3
 milestone_name: Continuous Deployment
 current_phase: 14
 current_phase_name: Instance Passphrase Gate
-status: planned
-stopped_at: Phase 14 planned (4 plans, verification passed)
-last_updated: "2026-08-27T23:59:19.278Z"
-last_activity: 2026-08-27
-last_activity_desc: Phase 14 planned — 4 plans in 3 waves, plan-checker passed, decision+requirement coverage 100%
-state_head: fc2f5e87d3a1b3df37d27eb2dd004c694434dcee
+status: executing
+stopped_at: Completed 14-01-PLAN.md
+last_updated: "2026-08-29T16:16:38.577Z"
+last_activity: 2026-08-29
+last_activity_desc: Phase 14 execution started
+state_head: 40b4dc77d90cc72e63fb8900dbc467c44adb2420
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 1
 ---
 
 # Project State
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** v1.3 roadmap created — Phases 14-17. Next phase to plan is Phase 14 (Instance Passphrase Gate).
+**Current focus:** Phase 14 — Instance Passphrase Gate
 
 ## Current Position
 
-Phase: 14 (Instance Passphrase Gate) — READY TO EXECUTE
-Plan: 4 plans, 3 waves (14-01 tracer → 14-02 ∥ 14-03 → 14-04)
-Status: Planned — plan-checker VERIFICATION PASSED; requirement + decision coverage 100%. One blocking checkpoint:decision in 14-01 Task 1 (cookie name, D-09 vs localhost).
-Last activity: 2026-08-27 — Phase 14 planned (4 plans, verification passed)
+Phase: 14 (Instance Passphrase Gate) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-08-29 — Phase 14 execution started
 
 ## Performance Metrics
 
@@ -94,6 +94,7 @@ Last activity: 2026-08-27 — Phase 14 planned (4 plans, verification passed)
 | Phase 05 P02 | 45min | 2 tasks | 7 files |
 | Phase 05 P03 | 40min | 2 tasks | 2 files |
 | Phase 11.1 P04 | 240min | 4 tasks | 4 files |
+| Phase 14 P01 | 55min | 4 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -178,11 +179,15 @@ Recent decisions affecting current work:
 - [v1.3 Roadmap]: 4 phases derived from the 21 v1.3 requirements — Instance Passphrase Gate (14), PR Coverage-Diff Comment (15), Rollback-Safe Migrations (16), Automated VPS Deploy with Health-Gated Rollback (17). Phase numbering continues from v1.2's Phase 13; it does not reset.
 - [v1.3 Roadmap]: Research (SUMMARY.md) and PITFALLS.md both proposed a 3-phase split with deploy + migration-safety + VPS provisioning as one final phase. Split into 4 instead: migration safety (MGRT-01/02) was pulled out as its own Phase 16 placed *before* the deploy job. Rationale — PITFALLS.md #8 (a non-backward-compatible migration bricking rollback) is the milestone's highest-cost failure mode and is cross-cutting: the expand/contract rule binds every migration from now on, not just those written during the deploy phase. Building the safety precondition last, inside the heaviest phase, would put it after the thing it protects. It is also CI-only, so it needs no VPS and can be verified independently.
 - [v1.3 Roadmap]: VPS provisioning (DPLY-07) and the HTTPS reverse proxy (DPLY-08) deliberately stayed *inside* Phase 17 rather than becoming a separate provisioning phase. Splitting them would have straddled DPLY-04 ("production compose file **and rollout script** are versioned in the repo; secrets and pinned tag live only on the VPS") across two phases — the runbook and the rollout artifacts are one interlocking deliverable.
-- [v1.3 Roadmap]: Exposure ordering is the binding constraint on phase order — Phase 14 (passphrase gate) must be merged before Phase 17 makes the instance publicly reachable, so the instance is never briefly public-and-open. PITFALLS.md's fallback (network-layer allowlist until the gate ships) is not needed given this ordering.
+- [v1.3 Roadmap]: Exposure ordering is the binding constraint on phase order — Phase 14 (passphrase gate) must be merged before Phase 17 makes the instance publicly reachable, so the instance is never briefly public-and-open. PITFALLS.md's network-layer allowlist is kept as **belt-and-suspenders during Phase 17 provisioning** (added to DPLY-07) — the app gate is the load-bearing control, the firewall is the backstop while the proxy + gate are being brought up.
 - [v1.3 Roadmap]: Phases 15, 16, and 17 all edit `.github/workflows/full-pipeline.yml` — the same shared-file hazard the repo already documented for `frontend-test` (Phase 08 → Phase 09). Sequencing 15 → 16 → 17 keeps the edits serialized. Phase 17 additionally requires a small change to the existing `release` job to expose `outputs.version`.
 - [v1.3 Roadmap]: Phase 14 is a joint backend + frontend slice, not split. Server-side `401` contract and SPA `401`-interception are one feature (PITFALLS.md #23) — splitting them would leave a half-phase that renders a visibly broken app.
-- [v1.3 Roadmap]: Phase 17 flagged as needing a discuss/spec pass before planning. Open decisions: TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel — blocks the first deploy), documented-and-accepted swap-gap downtime vs. mitigation, and post-deploy image-prune policy. Phase 14's open decisions: signing key separate secret vs. derived from the passphrase, session TTL default, whether the SPA shell stays public (recommended) or is also gated, passphrase minimum-entropy enforcement at boot. Phase 15's open decision: baseline storage (Actions cache vs. orphan branch).
-- [v1.3 Roadmap]: OPS-04 (VPS Postgres backup + restore runbook) stays in Future Requirements but is recorded in the roadmap as a **recommended prerequisite** for Phase 17 — it is the recovery path if a rollback ever needs the schema restored alongside the image.
+- [v1.3 Roadmap]: Phase 17 flagged as needing a discuss/spec pass before planning. Open decisions: documented-and-accepted swap-gap downtime vs. mitigation, and post-deploy image-prune policy. TLS reverse-proxy choice is **recommended Caddy on-VPS** (self-hosted ethos, no third party in the request path) — lock at the Phase 17 discuss but before Phase 15 planning since it blocks the first deploy. Phase 14's decisions are all resolved (D-01…D-18). Phase 15's open decision: baseline storage (Actions cache vs. orphan branch).
+- [v1.3 Roadmap]: Phase 14 plan-hardening pass (2026-08-27) — added `TRUST_PROXY_HEADERS` env var gating `middleware.RealIP` (D-14 was a comment-only "accept"; now fail-safe by default); undelayed 429 + `maxConcurrentLogins` semaphore on the login handler (D-12); `gateActive` Log out signal locked as D-18 (was a UAT assumption); 90-day cap clarified as per-authentication (D-06); `14-VALIDATION.md` content authored (formal `/gsd-validate-phase 14` still pending).
+- [v1.3 Roadmap]: OPS-04 (VPS Postgres backup) — the **basic backup + restore procedure is folded into DPLY-07** (Phase 17 runbook) as the schema-recovery path for a rollback that outran an irreversible migration (PITFALLS #8). OPS-04 remains in Future for *scheduled* backups + off-box retention. Schedule the basic procedure as Phase 16 or 17 work, not "someday".
+- [Phase 14]: [14-01] Session cookie name = "dt_session" (Task 1 option-a): bare name with explicit Secure/HttpOnly/SameSite=Lax/Path=/ attributes, not D-09's literal __Host- prefix. __Host- is rejected by Chrome on http://localhost (research A1); every guarantee it enforces is set and asserted in our own code. Operator-approved deviation from D-09.
+- [Phase 14]: [14-01] internal/authgate is a stateless HMAC-SHA256 signed-cookie gate: key = SHA256(domain-prefix || INSTANCE_PASSPHRASE) (D-01, rotation is revoke-all), no server-side session store (survives restart, D-08), gate is group-scoped chi middleware after the 4 existing middlewares (D-05), inert when INSTANCE_PASSPHRASE empty (GATE-07).
+- [Phase 14]: [14-01] Phase 14 adds two env vars not one: INSTANCE_PASSPHRASE + TRUST_PROXY_HEADERS (default false, gates middleware.RealIP per D-14). Session timings stay hardcoded (D-07). .env.example edited by operator (denied to agent tools, Phase 11.1-04 limitation).
 
 ### Pending Todos
 
@@ -236,9 +241,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-27T20:44:55.192Z
-Stopped at: Phase 14 UI-SPEC approved
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/14-instance-passphrase-gate/14-UI-SPEC.md
+Last session: 2026-08-29T16:16:28.262Z
+Stopped at: Completed 14-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
