@@ -94,6 +94,18 @@ func run(ctx context.Context) error {
 
 	logger := logging.New(cfg)
 
+	// D-11 boot-time weak-passphrase WARN: if INSTANCE_PASSPHRASE is set and
+	// looks weak (too short, or a known default -- including the .env.example
+	// placeholder) log exactly one WARN and start normally anyway. The gate is
+	// only as strong as this value, but a passphrase-policy edge case must
+	// never keep the process from starting: fail-closed enforcement was
+	// considered and rejected. This sits after logging.New and before
+	// migrations, matching the established config -> logging -> migrations boot
+	// order. The reason string carries no part of the passphrase.
+	if reason, weak := authgate.IsWeakPassphrase(cfg.InstancePassphrase); weak {
+		logger.Warn("INSTANCE_PASSPHRASE looks weak; the instance gate is only as strong as this value", "reason", reason)
+	}
+
 	if err := db.RunMigrations(ctx, cfg.DatabaseURL, logger); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
