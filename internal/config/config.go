@@ -54,6 +54,25 @@ type Config struct {
 	// differently under the same pool size.
 	MusicBrainzPollWorkers int `env:"MUSICBRAINZ_POLL_WORKERS" envDefault:"3"`
 	DeezerPollWorkers      int `env:"DEEZER_POLL_WORKERS" envDefault:"5"`
+
+	// Phase 14 — instance passphrase gate (GATE-01..07). Both optional and
+	// deliberately NOT added to Load()'s validation block: an empty
+	// InstancePassphrase means the gate is fully disabled and every route
+	// behaves exactly as it did in v1.2 (GATE-07), and caarlos0/env parses an
+	// unset bool as false. The boot-time weak-passphrase WARN lives in
+	// cmd/server/main.go per D-11 — config never refuses to start over a
+	// passphrase-policy edge case.
+	//
+	// TrustProxyHeaders gates chi middleware.RealIP per D-14: set it true ONLY
+	// when the app is reachable exclusively through a reverse proxy that sets
+	// X-Forwarded-For (the Phase 17 VPS topology, container port unpublished).
+	// It must stay false for local dev, docker-compose, CI, and any pre-proxy
+	// deploy so a spoofed X-Forwarded-For cannot bypass the login throttle or
+	// forge an audit line. This is why the phase adds two env vars rather than
+	// the one D-07 originally targeted — a code comment cannot enforce the
+	// proxy invariant the throttle depends on.
+	InstancePassphrase string `env:"INSTANCE_PASSPHRASE"`
+	TrustProxyHeaders  bool   `env:"TRUST_PROXY_HEADERS"`
 }
 
 // Load parses Config from the process environment. On failure it returns

@@ -16,6 +16,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/danielrpof/drop-tracker/internal/artistart"
+	"github.com/danielrpof/drop-tracker/internal/authgate"
 	"github.com/danielrpof/drop-tracker/internal/config"
 	"github.com/danielrpof/drop-tracker/internal/db"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
@@ -181,10 +182,17 @@ func run(ctx context.Context) error {
 	// every List call actually applies.
 	eventsStore := events.NewService(sqlc.New(pool), cfg.EventRetentionDays)
 
+	// WithAuthGate engages the instance passphrase gate (GATE-01..06) when
+	// INSTANCE_PASSPHRASE is set; with it empty the option is inert and every
+	// route behaves exactly as v1.2 (GATE-07). Without this argument the gate
+	// would never engage in production. TrustProxyHeaders defaults false so
+	// middleware.RealIP stays off unless the operator opts in behind a trusted
+	// reverse proxy (D-14). Plan 14-02 replaces NoOpAlerter with the
+	// Discord-backed brute-force alert selector.
 	srv := httpserver.New(pool, store, eventsStore, []httpserver.SearchSource{
 		httpserver.NewMusicBrainzSource(mbClient),
 		httpserver.NewDeezerSource(dzClient),
-	}, logger)
+	}, logger, httpserver.WithAuthGate(cfg.InstancePassphrase, cfg.TrustProxyHeaders, authgate.NoOpAlerter()))
 
 	// notif is the poller.Notifier plan 05-01's Select wires in: it owns
 	// D-10's gate (empty DISCORD_WEBHOOK_URL -> notifier.NoOp, so poller.New's
