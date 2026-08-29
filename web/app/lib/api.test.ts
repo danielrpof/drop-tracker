@@ -131,3 +131,138 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     })
   })
 })
+
+// The 401 interceptor, the CSRF header, and the two session wrappers all
+// touch the module-level authStore singleton, so this block resets the
+// module registry per case and re-imports both modules fresh. It still
+// stubs the runtime's own fetch (never mocks ~/lib/api -- the comment at
+// the top of this file explains why that must not happen here).
+describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrappers)", () => {
+  let api: typeof import("~/lib/api")
+  let authStore: (typeof import("~/lib/authStore"))["authStore"]
+  let fetchSpy: ReturnType<typeof vi.fn>
+
+  beforeEach(async () => {
+    vi.resetModules()
+    api = await import("~/lib/api")
+    ;({ authStore } = await import("~/lib/authStore"))
+    fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function jsonResponse(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    })
+  }
+
+  it("flips the shared store to unauthenticated and still rejects with an ApiError carrying status 401", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "unauthenticated" }), { status: 401 })
+    )
+
+    const err = await api.listWatchlist().then(
+      () => {
+        throw new Error("expected listWatchlist() to reject")
+      },
+      (e: unknown) => e
+    )
+
+    expect(err).toBeInstanceOf(api.ApiError)
+    expect((err as InstanceType<typeof api.ApiError>).status).toBe(401)
+    expect(authStore.isAuthed()).toBe(false)
+    expect(authStore.isGateActive()).toBe(true)
+  })
+
+  it("leaves the store untouched on a 200 response", async () => {
+    const listener = vi.fn()
+    authStore.subscribe(listener)
+    fetchSpy.mockResolvedValueOnce(jsonResponse([]))
+
+    await api.listWatchlist()
+
+    expect(authStore.isAuthed()).toBe(true)
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it("carries the X-Requested-With: drop-tracker header on POST, PATCH and DELETE but not GET", async () => {
+    // A fresh Response per call -- a single Response body can only be read once.
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({ id: 1 })))
+
+    await api.addWatchlist({ mbid: "m", name: "n" })
+    await api.updateWatchlistPreferences(1, { releaseTypes: ["album"] })
+
+    fetchSpy.mockImplementationOnce(() =>
+      Promise.resolve(new Response(null, { status: 204 }))
+    )
+    await api.removeWatchlist(1)
+
+    fetchSpy.mockImplementationOnce(() => Promise.resolve(jsonResponse([])))
+    await api.listWatchlist()
+
+    const headerFor = (i: number) =>
+      new Headers((fetchSpy.mock.calls[i][1] as RequestInit).headers).get(
+        "X-Requested-With"
+      )
+
+    expect(headerFor(0)).toBe("drop-tracker") // POST
+    expect(headerFor(1)).toBe("drop-tracker") // PATCH
+    expect(headerFor(2)).toBe("drop-tracker") // DELETE
+    expect(headerFor(3)).toBeNull() // GET
+  })
+
+  it("createSession POSTs the passphrase in the JSON body of /session and resolves on 204", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    await expect(api.createSession("open-sesame")).resolves.toBeUndefined()
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/session")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({ passphrase: "open-sesame" })
+  })
+
+  it("createSession does not flip auth state itself", async () => {
+    authStore.markUnauthenticated()
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    await api.createSession("open-sesame")
+
+    expect(authStore.isAuthed()).toBe(false)
+  })
+
+  it("deleteSession issues a DELETE to /session and resolves on 204", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    await expect(api.deleteSession()).resolves.toBeUndefined()
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/session")
+    expect(init.method).toBe("DELETE")
+  })
+
+  it("converges on one consistent unauthenticated state when several endpoint calls fail with 401 at once (GATE-05 concurrency)", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify({ error: "unauthenticated" }), { status: 401 })
+    )
+
+    const results = await Promise.allSettled([
+      api.listWatchlist(),
+      api.listEvents(),
+      api.listWatchlist(),
+    ])
+
+    expect(results.map((r) => r.status)).toEqual([
+      "rejected",
+      "rejected",
+      "rejected",
+    ])
+    expect(authStore.isAuthed()).toBe(false)
+    expect(authStore.isGateActive()).toBe(true)
+  })
+})

@@ -6,6 +6,8 @@
 // 06-04 never need to edit this file -- only import from it (06-01-PLAN.md
 // Step 6).
 
+import { authStore } from "~/lib/authStore"
+
 // ---- Wire types --------------------------------------------------------
 
 // EventItem mirrors internal/events.Event's JSON shape exactly.
@@ -109,7 +111,29 @@ export class ApiError extends Error {
 // every caller gets the same error shape regardless of which endpoint
 // failed.
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init)
+  // D-15 CSRF: every non-GET request to a gated route must carry a custom
+  // header a cross-site attacker cannot set without a CORS preflight the
+  // server denies. Injected here once so it covers every wrapper --
+  // including removeWatchlist/deleteSession, which otherwise send no
+  // headers at all -- rather than per wrapper. Server-side enforcement
+  // (RequireCSRFHeader) lands in plan 14-04.
+  const method = init?.method ?? "GET"
+  const headers =
+    method === "GET"
+      ? init?.headers
+      : { ...init?.headers, "X-Requested-With": "drop-tracker" }
+
+  const res = await fetch(path, { ...init, headers })
+
+  // D-16 global 401 interceptor: this is the ONLY place client code flips
+  // auth state on a 401. Any gated endpoint that returns 401 (initial load,
+  // mid-session expiry, a race right after login) funnels through here, so
+  // <App> renders <PassphraseScreen> without per-wrapper handling. The
+  // ApiError still carries status 401 so a caller that cares can branch.
+  if (res.status === 401) {
+    authStore.markUnauthenticated()
+    throw new ApiError(401, "unauthenticated")
+  }
 
   if (res.status === 204) {
     return undefined as T
@@ -217,4 +241,26 @@ export async function searchArtists(
 ): Promise<SearchResponse> {
   const qs = new URLSearchParams({ q: query })
   return apiFetch<SearchResponse>(`/search?${qs.toString()}`, { signal })
+}
+
+// ---- Session (instance passphrase gate) ---------------------------------
+
+// createSession logs the browser in: POST /session with the passphrase in
+// the JSON body only (Pitfall 14 -- the value never touches a path, a query
+// string, or a GET). It relies on apiFetch's 204 handling to resolve with
+// no value. It deliberately does NOT call authStore.markAuthenticated()
+// itself -- PassphraseScreen does that only after this promise resolves, so
+// a rejected login can never flip auth state (GATE-05).
+export async function createSession(passphrase: string): Promise<void> {
+  await apiFetch<void>("/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ passphrase }),
+  })
+}
+
+// deleteSession logs the browser out: DELETE /session, which responds 204 +
+// Set-Cookie Max-Age=0 (GATE-06, D-10 -- client-local logout only).
+export async function deleteSession(): Promise<void> {
+  await apiFetch<void>("/session", { method: "DELETE" })
 }
