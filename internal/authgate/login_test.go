@@ -82,6 +82,11 @@ func loginReq(t *testing.T, passphrase, remoteAddr string) *http.Request {
 	}
 	r := httptest.NewRequest(http.MethodPost, "/session", bytes.NewReader(body))
 	r.RemoteAddr = remoteAddr
+	// The SPA client attaches this header to every non-GET request; plan
+	// 14-04's RequireCSRFHeader now enforces it at the top of HandleLogin, so
+	// the helper sends it like the client does. Tests that specifically
+	// exercise a missing header build their own request.
+	r.Header.Set("X-Requested-With", "drop-tracker")
 	return r
 }
 
@@ -355,6 +360,100 @@ func TestLoginThrottle_ParallelSameAddressConsistent(t *testing.T) {
 	}
 	if allowed > 5 {
 		t.Fatalf("allowed %d comparison-path responses, want <= burst 5", allowed)
+	}
+}
+
+// --- plan 14-04 Task 1: CSRF header enforcement on POST /session ---
+
+// noCSRFLoginReq builds a POST /session request WITHOUT the custom header, to
+// exercise the RequireCSRFHeader rejection at the top of HandleLogin.
+func noCSRFLoginReq(t *testing.T, passphrase, remoteAddr string) *http.Request {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"passphrase": passphrase})
+	if err != nil {
+		t.Fatalf("marshal login body: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/session", bytes.NewReader(body))
+	r.RemoteAddr = remoteAddr
+	return r
+}
+
+func TestLoginCSRF_RejectedBeforeComparisonAndCounter(t *testing.T) {
+	defer SetLoginDelayForTest(time.Millisecond, 0)()
+	defer SetLoginBurstForTest(5)()
+	defer SetLoginRateForTest(rate.Every(time.Hour))()
+	defer SetGlobalCounterForTest(time.Minute, 3, time.Minute)()
+
+	fa := &recordingAlerter{}
+	const pass = "the-correct-instance-passphrase"
+	m := NewManager(pass, fa, wbLogger())
+	defer m.Close()
+
+	// even with the CORRECT passphrase, a missing header is 403 and no cookie.
+	rec := httptest.NewRecorder()
+	m.HandleLogin(rec, noCSRFLoginReq(t, pass, "198.51.100.5:1"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("code = %d, want 403", rec.Code)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode 403 body: %v", err)
+	}
+	if body.Error != "missing required header" {
+		t.Fatalf("403 error field = %q, want %q", body.Error, "missing required header")
+	}
+	if got := rec.Result().Cookies(); len(got) != 0 {
+		t.Fatalf("403 response set %d cookies, want 0 (comparison must not have run)", len(got))
+	}
+
+	// the global failed-attempt counter never moved, and no per-IP token was
+	// spent -- five subsequent header-carrying wrong attempts from the same IP
+	// are all answered by the handler (401), none throttled.
+	if m.counter.count != 0 {
+		t.Fatalf("counter.count = %d, want 0 -- a CSRF reject must not feed the brute-force counter", m.counter.count)
+	}
+	for i := 1; i <= 5; i++ {
+		rec := httptest.NewRecorder()
+		m.HandleLogin(rec, loginReq(t, "wrong", "198.51.100.5:1"))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d after a CSRF reject: code = %d, want 401 (no limiter token was consumed)", i, rec.Code)
+		}
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if fa.calls() != 0 {
+		t.Fatalf("Alert fired %d times off a CSRF-blocked request", fa.calls())
+	}
+}
+
+func TestLoginCSRF_HeaderPresentProceeds(t *testing.T) {
+	defer SetLoginDelayForTest(time.Millisecond, 0)()
+	defer SetLoginBurstForTest(5)()
+	defer SetLoginRateForTest(rate.Every(time.Hour))()
+
+	const pass = "the-correct-instance-passphrase"
+	m := NewManager(pass, nil, wbLogger())
+	defer m.Close()
+
+	rec := httptest.NewRecorder()
+	m.HandleLogin(rec, loginReq(t, pass, "198.51.100.6:1")) // loginReq carries the header
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("code = %d, want 204 -- a header-carrying login must proceed normally", rec.Code)
+	}
+}
+
+func TestLogoutCSRF_MissingHeaderRejected(t *testing.T) {
+	m := NewManager("the-correct-instance-passphrase", nil, wbLogger())
+	defer m.Close()
+
+	r := httptest.NewRequest(http.MethodDelete, "/session", nil)
+	r.RemoteAddr = "198.51.100.8:1"
+	rec := httptest.NewRecorder()
+	m.HandleLogout(rec, r)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("DELETE /session without the custom header: code = %d, want 403", rec.Code)
 	}
 }
 

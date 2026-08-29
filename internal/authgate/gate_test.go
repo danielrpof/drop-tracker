@@ -117,9 +117,28 @@ func sessionCookie(t *testing.T, resp *http.Response) *http.Cookie {
 func login(t *testing.T, ts *httptest.Server, passphrase string) *http.Response {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"passphrase": passphrase})
-	resp, err := http.Post(ts.URL+"/session", "application/json", bytes.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/session", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// The real SPA client (web/app/lib/api.ts) attaches this header to every
+	// non-GET request; plan 14-04's RequireCSRFHeader now enforces it on
+	// /session too, so the test helper must send it like the client does.
+	req.Header.Set("X-Requested-With", "drop-tracker")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST /session: %v", err)
+	}
+	return resp
+}
+
+// deleteSession issues DELETE /session carrying the custom header the SPA
+// client sends on every non-GET request (plan 14-03 / 14-04, D-15).
+func deleteSession(t *testing.T, ts *httptest.Server) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/session", nil)
+	req.Header.Set("X-Requested-With", "drop-tracker")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /session: %v", err)
 	}
 	return resp
 }
@@ -177,11 +196,7 @@ func TestGate_EndToEnd_401_Login_200_Logout(t *testing.T) {
 	_ = aResp.Body.Close()
 
 	// 5. DELETE /session -> 204 + Set-Cookie Max-Age=0
-	dReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/session", nil)
-	dResp, err := http.DefaultClient.Do(dReq)
-	if err != nil {
-		t.Fatalf("DELETE /session: %v", err)
-	}
+	dResp := deleteSession(t, ts)
 	if dResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE /session status = %d, want 204", dResp.StatusCode)
 	}
@@ -545,11 +560,7 @@ func TestGate_AbsoluteCapRejectsUnexpiredToken(t *testing.T) {
 func TestGate_LogoutClearsCookie(t *testing.T) {
 	ts, _ := newGatedServer(t, discardLogger())
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/session", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("DELETE /session: %v", err)
-	}
+	resp := deleteSession(t, ts)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", resp.StatusCode)
@@ -575,5 +586,154 @@ func TestGate_MintedCookieSurvivesNewManager(t *testing.T) {
 	k2 := authgate.DeriveKey(testPassphrase)
 	if _, _, ok := authgate.Verify(k2, raw, now.Add(time.Hour)); !ok {
 		t.Fatal("cookie minted under a first derived key did not verify under a second derived key from the same passphrase")
+	}
+}
+
+// --- plan 14-04 Task 1: CSRF header enforcement + Referrer-Policy ---
+
+// validCookie mints a fresh 30-day session cookie for the gated test server.
+func validCookie(key [32]byte) *http.Cookie {
+	now := time.Now()
+	raw := authgate.Sign(key, authgate.Token{IssuedAt: now, Expiry: now.Add(30 * 24 * time.Hour)})
+	return &http.Cookie{Name: "dt_session", Value: raw}
+}
+
+// TestGate_RequireCSRFHeader_StateChangingMethods proves D-15 server-side: an
+// authenticated POST/PATCH/DELETE to a gated route without the custom header
+// is 403 with the fixed body, and the same request WITH the header reaches its
+// handler (never 403). It also pins that the check is registered after
+// Authenticate -- an unauthenticated non-GET still gets 401, not 403.
+func TestGate_RequireCSRFHeader_StateChangingMethods(t *testing.T) {
+	ts, key := newGatedServer(t, discardLogger())
+
+	cases := []struct {
+		method, path string
+	}{
+		{http.MethodPost, "/watchlist"},
+		{http.MethodPatch, "/watchlist/1"},
+		{http.MethodDelete, "/watchlist/1"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" without header -> 403", func(t *testing.T) {
+			req, _ := http.NewRequest(tc.method, ts.URL+tc.path, strings.NewReader("{}"))
+			req.Header.Set("Content-Type", "application/json")
+			req.AddCookie(validCookie(key))
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+			}
+			var body struct {
+				Error string `json:"error"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&body)
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("%s %s without header: status = %d, want 403", tc.method, tc.path, resp.StatusCode)
+			}
+			if body.Error != "missing required header" {
+				t.Fatalf("403 body error = %q, want %q", body.Error, "missing required header")
+			}
+		})
+
+		t.Run(tc.method+" with header -> reaches handler", func(t *testing.T) {
+			req, _ := http.NewRequest(tc.method, ts.URL+tc.path, strings.NewReader("{}"))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Requested-With", "drop-tracker")
+			req.AddCookie(validCookie(key))
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusForbidden {
+				t.Fatalf("%s %s WITH header returned 403 -- the CSRF check rejected a compliant request", tc.method, tc.path)
+			}
+		})
+
+		t.Run(tc.method+" unauthenticated -> 401 not 403", func(t *testing.T) {
+			req, _ := http.NewRequest(tc.method, ts.URL+tc.path, strings.NewReader("{}"))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("%s %s unauthenticated: status = %d, want 401 (Authenticate runs before RequireCSRFHeader)", tc.method, tc.path, resp.StatusCode)
+			}
+		})
+	}
+}
+
+// TestGate_RequireCSRFHeader_SafeMethods proves a gated GET and HEAD carrying
+// a valid cookie but no custom header reach their handler -- the CSRF check
+// applies to state-changing methods only.
+func TestGate_RequireCSRFHeader_SafeMethods(t *testing.T) {
+	ts, key := newGatedServer(t, discardLogger())
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		req, _ := http.NewRequest(method, ts.URL+"/events", nil)
+		req.AddCookie(validCookie(key))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s /events: %v", method, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusForbidden {
+			t.Fatalf("%s /events with a valid cookie and no custom header returned 403 -- safe methods must not be CSRF-checked", method)
+		}
+		if method == http.MethodGet && resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /events: status = %d, want 200", resp.StatusCode)
+		}
+	}
+}
+
+// TestGate_CSRFHeaderOnLogin proves POST /session without the custom header is
+// 403 before any passphrase comparison runs.
+func TestGate_CSRFHeaderOnLogin(t *testing.T) {
+	ts, _ := newGatedServer(t, discardLogger())
+
+	body, _ := json.Marshal(map[string]string{"passphrase": testPassphrase})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/session", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /session: %v", err)
+	}
+	var decoded struct {
+		Error string `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&decoded)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("POST /session without the custom header: status = %d, want 403", resp.StatusCode)
+	}
+	if decoded.Error != "missing required header" {
+		t.Fatalf("403 body error = %q, want %q", decoded.Error, "missing required header")
+	}
+	// No dt_session cookie despite the correct passphrase -- the comparison
+	// never ran.
+	for _, c := range resp.Cookies() {
+		if c.Name == "dt_session" {
+			t.Fatal("POST /session set a cookie even though the CSRF check should reject it before the comparison")
+		}
+	}
+}
+
+// TestGate_ReferrerPolicyOnGatedResponse asserts every gated response carries
+// Referrer-Policy: no-referrer.
+func TestGate_ReferrerPolicyOnGatedResponse(t *testing.T) {
+	ts, _ := newGatedServer(t, discardLogger())
+
+	for _, path := range []string{"/health", "/watchlist"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		_ = resp.Body.Close()
+		if got := resp.Header.Get("Referrer-Policy"); got != "no-referrer" {
+			t.Fatalf("GET %s: Referrer-Policy = %q, want %q", path, got, "no-referrer")
+		}
 	}
 }

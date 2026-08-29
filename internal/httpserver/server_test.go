@@ -307,6 +307,53 @@ func assertInert(t *testing.T, srv *httpserver.Server) {
 	}
 }
 
+// TestInertPath_NoCSRFRejection proves T-14-04-08: the CSRF middleware lives
+// inside the gated conditional, so an inert server never returns 403 for a
+// missing custom header on any route -- v1.2 behaviour is byte-for-byte intact.
+func TestInertPath_NoCSRFRejection(t *testing.T) {
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	for _, r := range gatedRoutes {
+		req, _ := http.NewRequest(r.method, ts.URL+r.path, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", r.method, r.path, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusForbidden {
+			t.Fatalf("%s %s returned 403 on an inert server -- CSRF middleware must not be installed", r.method, r.path)
+		}
+	}
+}
+
+// TestReferrerPolicy_OnEveryResponse proves T-14-04-03: Referrer-Policy:
+// no-referrer is set on every response, gated or inert.
+func TestReferrerPolicy_OnEveryResponse(t *testing.T) {
+	build := map[string]func() *httpserver.Server{
+		"inert": func() *httpserver.Server {
+			return httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger())
+		},
+		"gated": func() *httpserver.Server { return newGatedServer(t, "a-real-passphrase", false) },
+	}
+	for name, mk := range build {
+		t.Run(name, func(t *testing.T) {
+			ts := httptest.NewServer(mk().Router())
+			defer ts.Close()
+			resp, err := http.Get(ts.URL + "/health")
+			if err != nil {
+				t.Fatalf("GET /health: %v", err)
+			}
+			_ = resp.Body.Close()
+			if got := resp.Header.Get("Referrer-Policy"); got != "no-referrer" {
+				t.Fatalf("%s server: Referrer-Policy = %q, want %q", name, got, "no-referrer")
+			}
+		})
+	}
+}
+
 // TestGatedServer_TrustProxyHeaders_RealIPWiring proves D-14: middleware.RealIP
 // is wired only when trustProxyHeaders is true. It is observed through the
 // access log's client IP field -- RealIP rewrites r.RemoteAddr from
