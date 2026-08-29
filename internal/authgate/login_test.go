@@ -481,3 +481,96 @@ func TestGlobalAlert_FailingAlerterDoesNotChangeLoginResponse(t *testing.T) {
 	}
 	waitFor(t, 2*time.Second, func() bool { return fa.calls() >= 1 })
 }
+
+// --- Task 3: structured audit lines + secret-never-logged guard (D-13) ---
+//
+// Modelled on internal/httpserver/server_test.go's TestNoDSNInLogs: capture
+// the slog buffer, drive every login outcome through the handler, and fail if
+// the passphrase literal appears anywhere. The passphrase used here could not
+// plausibly be a substring of any other log content, so the assertion cannot
+// pass by accident.
+//
+// NOTE: the httplog.Options block in internal/httpserver/server.go logs no
+// request/response body and not the Cookie header at the pinned version
+// (14-RESEARCH.md Pitfall 6). LogRequestHeaders must never be widened to
+// include the cookie header; this test stands as the regression guard.
+
+const distinctivePassphrase = "Zq9-improbable-log-substring-7f3a2b1c5d"
+
+func TestAudit_NoPassphraseInLogsAcrossOutcomes(t *testing.T) {
+	defer SetLoginDelayForTest(time.Millisecond, 0)()
+	defer SetLoginBurstForTest(2)()
+	defer SetLoginRateForTest(rate.Every(time.Hour))()
+
+	sb := &syncBuf{}
+	logger := slog.New(slog.NewJSONHandler(sb, nil))
+	m := NewManager(distinctivePassphrase, nil, logger)
+	defer m.Close()
+
+	const addr = "198.51.100.77:6001"
+
+	rec := httptest.NewRecorder()
+	m.HandleLogin(rec, loginReq(t, distinctivePassphrase, addr)) // success
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("success attempt: code = %d, want 204", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	m.HandleLogin(rec, loginReq(t, "definitely-not-it", addr)) // failure
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("failure attempt: code = %d, want 401", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	m.HandleLogin(rec, loginReq(t, distinctivePassphrase, addr)) // throttled (burst 2 spent)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("third attempt: code = %d, want 429", rec.Code)
+	}
+
+	if got := sb.String(); strings.Contains(got, distinctivePassphrase) {
+		t.Fatalf("captured log buffer contains the passphrase:\n%s", got)
+	}
+}
+
+func TestAudit_OneLinePerOutcomeWithSourceIP(t *testing.T) {
+	defer SetLoginDelayForTest(time.Millisecond, 0)()
+	defer SetLoginBurstForTest(2)()
+	defer SetLoginRateForTest(rate.Every(time.Hour))()
+
+	sb := &syncBuf{}
+	logger := slog.New(slog.NewJSONHandler(sb, nil))
+	m := NewManager(distinctivePassphrase, nil, logger)
+	defer m.Close()
+
+	const addr = "203.0.113.88:7002"
+
+	m.HandleLogin(httptest.NewRecorder(), loginReq(t, distinctivePassphrase, addr)) // success  -> Info
+	m.HandleLogin(httptest.NewRecorder(), loginReq(t, "wrong", addr))               // failure  -> Warn
+	m.HandleLogin(httptest.NewRecorder(), loginReq(t, "wrong", addr))               // throttle -> Warn
+	m.HandleLogout(httptest.NewRecorder(), loginReq(t, "", addr))                   // logout   -> Info
+
+	var audit []map[string]any
+	for _, line := range nonEmptyLines(sb.String()) {
+		var f map[string]any
+		if err := json.Unmarshal([]byte(line), &f); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		if _, ok := f["outcome"]; ok {
+			audit = append(audit, f)
+		}
+	}
+
+	if len(audit) != 4 {
+		t.Fatalf("got %d audit lines, want exactly 4 (success, failure, throttle, logout):\n%s", len(audit), sb.String())
+	}
+	wantLevels := map[string]string{"success": "INFO", "failure": "WARN", "throttled": "WARN", "logout": "INFO"}
+	for _, f := range audit {
+		outcome, _ := f["outcome"].(string)
+		if src, _ := f["source_ip"].(string); src == "" {
+			t.Fatalf("audit line for outcome %q has no source_ip: %v", outcome, f)
+		}
+		if want, ok := wantLevels[outcome]; ok && f["level"] != want {
+			t.Fatalf("audit line for outcome %q level = %v, want %s", outcome, f["level"], want)
+		}
+	}
+}
