@@ -15,9 +15,10 @@ const minPassphraseRunes = 16
 // envExamplePlaceholder is the exact INSTANCE_PASSPHRASE value .env.example
 // ships as its placeholder (plan 14-04 Task 3). It is listed in knownDefaults
 // below so an operator who copies the example file verbatim trips the boot
-// WARN instead of running a reachable instance on a guessable secret. Kept as
-// a named constant so weak_test.go can assert the two never drift apart.
-const envExamplePlaceholder = "changeme"
+// WARN instead of running a reachable instance on a guessable secret (it is
+// also shorter than the length floor, so the WARN fires either way). Kept as a
+// named constant so weak_test.go can assert the two never drift apart.
+const envExamplePlaceholder = "caliber"
 
 // knownDefaults is the case-insensitive denylist of values that must never
 // guard a real instance: obvious placeholders plus the .env.example
@@ -25,6 +26,7 @@ const envExamplePlaceholder = "changeme"
 // configured value (D-11).
 var knownDefaults = []string{
 	envExamplePlaceholder,
+	"changeme",
 	"change-me",
 	"change_me",
 	"changeit",
