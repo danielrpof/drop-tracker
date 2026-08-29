@@ -86,6 +86,57 @@ func (m *Manager) Close() {
 	})
 }
 
+// csrfHeaderName and csrfHeaderValue are a byte-for-byte contract with the
+// SPA client: web/app/lib/api.ts (plan 14-03) attaches exactly
+// "X-Requested-With: drop-tracker" to every non-GET request it makes. Changing
+// either literal here without changing the client in the same commit silently
+// breaks every state-changing request in the app -- the client keeps sending
+// the old header, RequireCSRFHeader stops recognising it, and every write
+// 403s. This works as a CSRF control because a cross-site attacker can force a
+// form POST but cannot set a custom request header without a CORS preflight,
+// and this server sends no CORS headers at all, so the preflight is denied
+// (D-15). SameSite=Lax on the session cookie and this header are two
+// independent controls that cover each other.
+const (
+	csrfHeaderName  = "X-Requested-With"
+	csrfHeaderValue = "drop-tracker"
+)
+
+// hasCSRFHeader reports whether r carries the exact custom header the SPA
+// client attaches to every non-GET request. See the csrfHeaderName /
+// csrfHeaderValue contract note above.
+func hasCSRFHeader(r *http.Request) bool {
+	return r.Header.Get(csrfHeaderName) == csrfHeaderValue
+}
+
+// RequireCSRFHeader is a gate middleware, shaped like Authenticate. It passes
+// straight through for the safe methods -- GET, HEAD and OPTIONS -- and for
+// every other method requires csrfHeaderName to be present with
+// csrfHeaderValue, rejecting otherwise with 403 and the fixed body
+// {"error":"missing required header"} via the same writeJSONError helper the
+// rest of the package uses.
+//
+// It is registered inside httpserver's protected chi Group via a second
+// pr.Use, AFTER the Authenticate registration, so a request is authenticated
+// before it is judged on the header (an unauthenticated non-GET still gets
+// 401, not 403). Both registrations live inside the same gated conditional
+// branch, so the inert path installs neither and no request is ever rejected
+// with 403 for a missing header (GATE-07).
+func (m *Manager) RequireCSRFHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !hasCSRFHeader(r) {
+			writeJSONError(w, http.StatusForbidden, "missing required header")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Authenticate is the gate middleware, shaped exactly like httpserver's
 // echoRequestID closure. It reads the session cookie by name, verifies it
 // against time.Now(), and on any failure writes the fixed body

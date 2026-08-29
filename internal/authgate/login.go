@@ -217,6 +217,17 @@ func loginDelay() {
 // the configured value, either SHA-256 digest, the derived key or the cookie
 // (the standing precedent is internal/db/migrate.go's redactError helpers).
 func (m *Manager) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	// D-15 login-CSRF: reject a POST that lacks the SPA client's custom header
+	// before the semaphore acquire, the per-IP limiter, the body read and the
+	// comparison. SameSite=Lax alone does not cover this case -- a login POST
+	// is exactly what an attacker wants to force. A rejection here consumes no
+	// limiter token and never touches the global failed-attempt counter.
+	if !hasCSRFHeader(r) {
+		m.logger.Warn("authgate login", "outcome", "csrf_blocked", "source_ip", clientIP(r))
+		writeJSONError(w, http.StatusForbidden, "missing required header")
+		return
+	}
+
 	select {
 	case m.loginSlots <- struct{}{}:
 		defer func() { <-m.loginSlots }()
@@ -297,6 +308,14 @@ func (m *Manager) dispatchAlert() {
 // Max-Age=0, which is what net/http emits for a delete. It emits one D-13
 // audit line carrying the resolved source address.
 func (m *Manager) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	// D-15: the same custom-header check as HandleLogin, for symmetry -- a
+	// forced cross-site DELETE /session would log a victim out, a minor
+	// nuisance rather than a real attack, but the check is free here.
+	if !hasCSRFHeader(r) {
+		m.logger.Warn("authgate logout", "outcome", "csrf_blocked", "source_ip", clientIP(r))
+		writeJSONError(w, http.StatusForbidden, "missing required header")
+		return
+	}
 	setSessionCookie(w, "", -1)
 	m.logger.Info("authgate logout", "outcome", "logout", "source_ip", clientIP(r))
 	w.WriteHeader(http.StatusNoContent)

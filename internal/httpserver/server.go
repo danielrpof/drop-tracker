@@ -133,6 +133,16 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 		r.Use(middleware.RealIP)
 	}
 
+	// Referrer-Policy: no-referrer on every response -- gated or inert
+	// (Pitfall 14 hardening). It stops any URL the app is reached at from
+	// leaking to a third-party origin through a Referer header; defence in
+	// depth, since the passphrase already never enters a URL (POST body only).
+	// Registered as its own middleware rather than folded into echoRequestID
+	// so the four existing r.Use lines below stay byte-for-byte unchanged
+	// (plan 14-04). Set before next so it is present even on a panic path,
+	// which middleware.Recoverer handles downstream.
+	r.Use(securityResponseHeaders)
+
 	r.Use(middleware.RequestID)
 	r.Use(echoRequestID)
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
@@ -161,6 +171,10 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 		r.Delete("/session", gate.HandleLogout)
 		r.Group(func(pr chi.Router) {
 			pr.Use(gate.Authenticate)
+			// Second middleware, AFTER Authenticate: an unauthenticated
+			// non-GET still gets 401, not 403. Both live inside this gated
+			// branch, so the inert path installs neither (GATE-07, D-15).
+			pr.Use(gate.RequireCSRFHeader)
 			registerDataRoutes(pr, s)
 		})
 	} else {
@@ -187,6 +201,18 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	r.Patch("/watchlist/{id}", s.handleUpdateWatchlist)
 	r.Delete("/watchlist/{id}", s.handleRemoveWatchlist)
 	r.Get("/events", s.handleListEvents)
+}
+
+// securityResponseHeaders sets response headers that apply to every route in
+// both the gated and inert configurations. Currently just Referrer-Policy:
+// no-referrer (Pitfall 14 hardening). The header is set before next so it is
+// present on the response even when a downstream handler panics and
+// middleware.Recoverer writes the 500.
+func securityResponseHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // echoRequestID writes chi's per-request correlation ID (already stamped
