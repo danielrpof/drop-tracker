@@ -5,28 +5,42 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 )
 
 // Manager bundles everything the gate needs at request time: the
 // passphrase-derived HMAC key, the SHA-256 digest of the passphrase for the
-// constant-time login comparison, the brute-force Alerter seam, and the
-// logger for D-13 audit lines. It never retains the passphrase string
-// itself beyond deriving those two digests in NewManager.
-//
-// Throttling state (per-IP limiter map, global failed-attempt counter,
-// concurrency semaphore) is added to this struct in plan 14-02.
+// constant-time login comparison, the brute-force Alerter seam, the logger for
+// D-13 audit lines, and the plan 14-02 brute-force-defense state -- the per-IP
+// limiter map (throttle), the process-wide failed-attempt counter, and the
+// login-concurrency semaphore (loginSlots). It never retains the passphrase
+// string itself beyond deriving those two digests in NewManager.
 type Manager struct {
 	key      [32]byte
 	passHash [32]byte
 	alerter  Alerter
 	logger   *slog.Logger
+
+	throttle   *loginThrottle
+	counter    *globalCounter
+	loginSlots chan struct{}
+
+	sweepTicker *time.Ticker
+	sweepDone   chan struct{}
+	closeOnce   sync.Once
 }
 
 // NewManager derives the signing key and the passphrase digest once and
 // returns a Manager ready to authenticate requests and handle /session. A
 // nil logger falls back to slog.Default() so the gate can never panic on an
 // audit line.
+//
+// It also builds the per-IP limiter map, the global counter and the
+// loginSlots semaphore -- loginSlots is sized from the maxConcurrentLogins var
+// at construction, so a test that shrinks it first gets the small buffer --
+// and starts the limiter-map sweeper as a goroutine driven by a time.Ticker at
+// limiterSweepInterval. Call Close to stop that goroutine.
 func NewManager(passphrase string, alerter Alerter, logger *slog.Logger) *Manager {
 	if alerter == nil {
 		alerter = noopAlerter{}
@@ -34,12 +48,42 @@ func NewManager(passphrase string, alerter Alerter, logger *slog.Logger) *Manage
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Manager{
-		key:      DeriveKey(passphrase),
-		passHash: sha256.Sum256([]byte(passphrase)),
-		alerter:  alerter,
-		logger:   logger,
+	m := &Manager{
+		key:         DeriveKey(passphrase),
+		passHash:    sha256.Sum256([]byte(passphrase)),
+		alerter:     alerter,
+		logger:      logger,
+		throttle:    newLoginThrottle(),
+		counter:     &globalCounter{},
+		loginSlots:  make(chan struct{}, maxConcurrentLogins),
+		sweepTicker: time.NewTicker(limiterSweepInterval),
+		sweepDone:   make(chan struct{}),
 	}
+	go m.sweepLoop()
+	return m
+}
+
+// sweepLoop evicts idle per-IP limiter entries on every tick until Close.
+func (m *Manager) sweepLoop() {
+	for {
+		select {
+		case <-m.sweepTicker.C:
+			m.throttle.sweep(time.Now())
+		case <-m.sweepDone:
+			return
+		}
+	}
+}
+
+// Close stops the limiter-map sweeper goroutine. It is idempotent. The process
+// exit would reclaim the goroutine anyway; Close exists so the test suite is
+// free of goroutines that outlive their server. cmd/server/main.go defers it
+// via httpserver.Server.Close.
+func (m *Manager) Close() {
+	m.closeOnce.Do(func() {
+		m.sweepTicker.Stop()
+		close(m.sweepDone)
+	})
 }
 
 // Authenticate is the gate middleware, shaped exactly like httpserver's

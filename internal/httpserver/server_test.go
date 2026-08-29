@@ -227,10 +227,12 @@ func TestNoDSNInLogs(t *testing.T) {
 // existing 5-argument httpserver.New call sites are deliberately untouched.
 func newGatedServer(t *testing.T, passphrase string, trustProxyHeaders bool) *httpserver.Server {
 	t.Helper()
-	return httpserver.New(
+	srv := httpserver.New(
 		noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger(),
 		httpserver.WithAuthGate(passphrase, trustProxyHeaders, nil),
 	)
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 // gatedRoutes is the exact v1.2 route set that must move behind the gate.
@@ -319,6 +321,7 @@ func TestGatedServer_TrustProxyHeaders_RealIPWiring(t *testing.T) {
 			noopPinger{}, stubStore{}, stubEventsStore{}, nil, logger,
 			httpserver.WithAuthGate("a-real-passphrase", trust, nil),
 		)
+		t.Cleanup(srv.Close)
 		ts := httptest.NewServer(srv.Router())
 		t.Cleanup(ts.Close)
 		return ts, buf

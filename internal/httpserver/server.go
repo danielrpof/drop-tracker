@@ -33,6 +33,7 @@ type Server struct {
 	events    events.Store
 	sources   []SearchSource
 	router    http.Handler
+	gate      *authgate.Manager
 }
 
 // serverConfig collects the optional settings New applies before building
@@ -113,6 +114,7 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	if cfg.gatePassphrase != "" {
 		gate = authgate.NewManager(cfg.gatePassphrase, cfg.gateAlerter, logger)
 	}
+	s.gate = gate
 
 	r := chi.NewRouter()
 
@@ -203,4 +205,15 @@ func echoRequestID(next http.Handler) http.Handler {
 // Router returns the wired http.Handler.
 func (s *Server) Router() http.Handler {
 	return s.router
+}
+
+// Close releases resources held by optional subsystems -- currently only the
+// auth gate's per-IP limiter-map sweeper goroutine (plan 14-02). It is safe to
+// call on a server built without a gate (the 5-argument New path) and safe to
+// call more than once. cmd/server/main.go defers it; tests that build a gated
+// server wire it into t.Cleanup so no sweeper goroutine outlives its server.
+func (s *Server) Close() {
+	if s.gate != nil {
+		s.gate.Close()
+	}
 }

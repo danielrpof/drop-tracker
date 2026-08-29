@@ -96,6 +96,7 @@ func newGatedServer(t *testing.T, logger *slog.Logger) (*httptest.Server, [32]by
 		stubPinger{}, stubStore{}, stubEventsStore{}, nil, logger,
 		httpserver.WithAuthGate(testPassphrase, false, fakeAlerter{}),
 	)
+	t.Cleanup(srv.Close)
 	ts := httptest.NewServer(srv.Router())
 	t.Cleanup(ts.Close)
 	return ts, authgate.DeriveKey(testPassphrase)
