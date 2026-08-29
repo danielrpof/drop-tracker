@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -216,4 +217,140 @@ func TestNoDSNInLogs(t *testing.T) {
 			t.Fatalf("captured log output leaked %q:\n%s", leak, logOutput)
 		}
 	}
+}
+
+// --- Phase 14 instance passphrase gate (GATE-01, GATE-07, D-14) ---
+
+// newGatedServer builds a Server with the passphrase gate enabled, mirroring
+// newCapturingServer's construction shape. Most callers pass
+// trustProxyHeaders=false; the one X-Forwarded-For test passes true. The
+// existing 5-argument httpserver.New call sites are deliberately untouched.
+func newGatedServer(t *testing.T, passphrase string, trustProxyHeaders bool) *httpserver.Server {
+	t.Helper()
+	return httpserver.New(
+		noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger(),
+		httpserver.WithAuthGate(passphrase, trustProxyHeaders, nil),
+	)
+}
+
+// gatedRoutes is the exact v1.2 route set that must move behind the gate.
+var gatedRoutes = []struct {
+	method, path string
+}{
+	{http.MethodGet, "/search"},
+	{http.MethodPost, "/watchlist"},
+	{http.MethodGet, "/watchlist"},
+	{http.MethodPatch, "/watchlist/1"},
+	{http.MethodDelete, "/watchlist/1"},
+	{http.MethodGet, "/events"},
+}
+
+// TestInertPath_FiveArgConstructor proves GATE-07: a server built through the
+// existing five-argument New answers every one of the seven v1.2 routes at
+// its own handler, none returns 401, and the two session paths are not
+// registered (they fall through to the SPA NotFound handler, HTML not JSON).
+func TestInertPath_FiveArgConstructor(t *testing.T) {
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger())
+	assertInert(t, srv)
+}
+
+// TestInertPath_EmptyPassphraseIsIndistinguishable closes the GATE-07
+// adjacency edge: WithAuthGate with an empty passphrase must produce the
+// identical inert route table -- no gate, no /session, no RealIP.
+func TestInertPath_EmptyPassphraseIsIndistinguishable(t *testing.T) {
+	srv := newGatedServer(t, "", false)
+	assertInert(t, srv)
+}
+
+func assertInert(t *testing.T, srv *httpserver.Server) {
+	t.Helper()
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	// /health -> 200 JSON
+	hResp, err := http.Get(ts.URL + "/health")
+	if err != nil {
+		t.Fatalf("GET /health: %v", err)
+	}
+	_ = hResp.Body.Close()
+	if hResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /health status = %d, want 200", hResp.StatusCode)
+	}
+
+	// six data routes -> never 401
+	for _, r := range gatedRoutes {
+		req, _ := http.NewRequest(r.method, ts.URL+r.path, strings.NewReader("{}"))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", r.method, r.path, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.Fatalf("%s %s returned 401 on an ungated server", r.method, r.path)
+		}
+	}
+
+	// /session paths not registered -> fall through to the SPA shell (HTML)
+	for _, m := range []string{http.MethodPost, http.MethodDelete} {
+		req, _ := http.NewRequest(m, ts.URL+"/session", strings.NewReader("{}"))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s /session: %v", m, err)
+		}
+		ct := resp.Header.Get("Content-Type")
+		_ = resp.Body.Close()
+		if strings.Contains(ct, "application/json") {
+			t.Fatalf("%s /session returned JSON (Content-Type %q) -- a session route is registered on an ungated server", m, ct)
+		}
+	}
+}
+
+// TestGatedServer_TrustProxyHeaders_RealIPWiring proves D-14: middleware.RealIP
+// is wired only when trustProxyHeaders is true. It is observed through the
+// access log's client IP field -- RealIP rewrites r.RemoteAddr from
+// X-Forwarded-For before httplog reads it.
+func TestGatedServer_TrustProxyHeaders_RealIPWiring(t *testing.T) {
+	const spoofIP = "203.0.113.9"
+
+	newWithLog := func(trust bool) (*httptest.Server, *syncBuffer) {
+		buf := &syncBuffer{}
+		logger := logging.NewWithWriter(&config.Config{LogLevel: "info", LogFormat: "json"}, buf)
+		srv := httpserver.New(
+			noopPinger{}, stubStore{}, stubEventsStore{}, nil, logger,
+			httpserver.WithAuthGate("a-real-passphrase", trust, nil),
+		)
+		ts := httptest.NewServer(srv.Router())
+		t.Cleanup(ts.Close)
+		return ts, buf
+	}
+
+	t.Run("trustProxyHeaders=true rewrites the client IP from X-Forwarded-For", func(t *testing.T) {
+		ts, buf := newWithLog(true)
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/health", nil)
+		req.Header.Set("X-Forwarded-For", spoofIP)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET /health: %v", err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if !strings.Contains(buf.String(), spoofIP) {
+			t.Fatalf("access log does not carry the proxy-supplied IP %s (RealIP not wired):\n%s", spoofIP, buf.String())
+		}
+	})
+
+	t.Run("trustProxyHeaders=false keeps the direct peer address", func(t *testing.T) {
+		ts, buf := newWithLog(false)
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/health", nil)
+		req.Header.Set("X-Forwarded-For", spoofIP)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET /health: %v", err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if strings.Contains(buf.String(), spoofIP) {
+			t.Fatalf("access log carries the spoofed X-Forwarded-For %s even though trustProxyHeaders=false:\n%s", spoofIP, buf.String())
+		}
+	})
 }
