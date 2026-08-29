@@ -80,7 +80,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 4. The session cookie carries `HttpOnly`, `Secure`, `SameSite=Lax` and a bounded lifetime when inspected in devtools, and repeated wrong-passphrase attempts from one client are throttled (rejected with `429`) rather than answered at full speed indefinitely.
 5. With no passphrase configured, every route behaves exactly as it did in v1.2 — `make test-integration`, `pnpm test`, and `docker compose up` all pass untouched with no passphrase anywhere.
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -94,7 +94,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 14-04-PLAN.md — Hardening: CSRF header enforcement, no-referrer policy, weak-passphrase boot WARN, and `.env.example` (wave 3)
+- [x] 14-04-PLAN.md — Hardening: CSRF header enforcement, no-referrer policy, weak-passphrase boot WARN, and `.env.example` (wave 3)
 
 **UI hint**: yes
 
@@ -168,7 +168,7 @@ Phases execute in numeric order: 14 → 15 → 16 → 17
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 14. Instance Passphrase Gate | 3/4 | In Progress|  |
+| 14. Instance Passphrase Gate | 4/4 | In Progress|  |
 | 15. PR Coverage-Diff Comment | 0/? | Not started | - |
 | 16. Rollback-Safe Migrations | 0/? | Not started | - |
 | 17. Automated VPS Deploy with Health-Gated Rollback | 0/? | Not started | - |
