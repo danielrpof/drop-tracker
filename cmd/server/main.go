@@ -187,12 +187,19 @@ func run(ctx context.Context) error {
 	// route behaves exactly as v1.2 (GATE-07). Without this argument the gate
 	// would never engage in production. TrustProxyHeaders defaults false so
 	// middleware.RealIP stays off unless the operator opts in behind a trusted
-	// reverse proxy (D-14). Plan 14-02 replaces NoOpAlerter with the
-	// Discord-backed brute-force alert selector.
+	// reverse proxy (D-14). The third argument is the D-12 brute-force alert
+	// sink, selected by the same disabled-case gate notifier.Select uses -- an
+	// empty DISCORD_WEBHOOK_URL yields the inert no-op Alerter and logs one
+	// Info line, a set URL yields the Discord-backed one over the same webhook
+	// this process already uses for release notifications.
 	srv := httpserver.New(pool, store, eventsStore, []httpserver.SearchSource{
 		httpserver.NewMusicBrainzSource(mbClient),
 		httpserver.NewDeezerSource(dzClient),
-	}, logger, httpserver.WithAuthGate(cfg.InstancePassphrase, cfg.TrustProxyHeaders, authgate.NoOpAlerter()))
+	}, logger, httpserver.WithAuthGate(cfg.InstancePassphrase, cfg.TrustProxyHeaders, authgate.SelectAlerter(cfg.DiscordWebhookURL, logger)))
+	// Close stops the gate's per-IP limiter-map sweeper goroutine (plan 14-02);
+	// a no-op when the gate is disabled. Deferred here so it runs on every
+	// return path from run().
+	defer srv.Close()
 
 	// notif is the poller.Notifier plan 05-01's Select wires in: it owns
 	// D-10's gate (empty DISCORD_WEBHOOK_URL -> notifier.NoOp, so poller.New's

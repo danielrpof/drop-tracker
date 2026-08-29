@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,6 +24,20 @@ import (
 
 	"golang.org/x/time/rate"
 )
+
+// waitFor polls cond until it holds or timeout elapses, failing the test on
+// timeout. Used to observe the fire-and-forget alert goroutine.
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("condition not met within %s", timeout)
+}
 
 // --- shared whitebox test helpers (also used by alerter_test.go) ---
 
@@ -341,4 +356,128 @@ func TestLoginThrottle_ParallelSameAddressConsistent(t *testing.T) {
 	if allowed > 5 {
 		t.Fatalf("allowed %d comparison-path responses, want <= burst 5", allowed)
 	}
+}
+
+// --- Task 2: global failed-attempt counter ---
+
+func TestGlobalCounter_ThresholdCooldownAndWindowReset(t *testing.T) {
+	defer SetGlobalCounterForTest(time.Minute, 3, 10*time.Minute)()
+
+	var c globalCounter
+	base := time.Now()
+
+	if c.recordFailure(base) {
+		t.Fatal("failure 1 must not alert")
+	}
+	if c.recordFailure(base) {
+		t.Fatal("failure 2 must not alert")
+	}
+	if !c.recordFailure(base) {
+		t.Fatal("failure 3 crosses the threshold -> alert")
+	}
+	if c.recordFailure(base) {
+		t.Fatal("failure 4 inside the cooldown must not alert again")
+	}
+
+	// window (1m) elapses -> fresh count; cooldown (10m) elapsed by +11m.
+	t2 := base.Add(11 * time.Minute)
+	if c.recordFailure(t2) {
+		t.Fatal("post-window failure 1 must not alert (count restarted)")
+	}
+	if c.recordFailure(t2) {
+		t.Fatal("post-window failure 2 must not alert")
+	}
+	if !c.recordFailure(t2) {
+		t.Fatal("post-window failure 3 re-crosses the threshold -> alert once more")
+	}
+}
+
+func TestGlobalCounter_StaleWindowStartsFreshCount(t *testing.T) {
+	defer SetGlobalCounterForTest(time.Minute, 3, 10*time.Minute)()
+
+	var c globalCounter
+	base := time.Now()
+	c.recordFailure(base)
+	c.recordFailure(base)
+	if c.count != 2 {
+		t.Fatalf("count = %d, want 2", c.count)
+	}
+	c.recordFailure(base.Add(2 * time.Minute)) // window elapsed
+	if c.count != 1 {
+		t.Fatalf("count after a stale-window failure = %d, want 1 (reset, not accumulated)", c.count)
+	}
+}
+
+func TestGlobalAlert_FiresOncePerCooldown(t *testing.T) {
+	defer SetLoginDelayForTest(time.Millisecond, 0)()
+	defer SetLoginBurstForTest(1000)()
+	defer SetLoginRateForTest(rate.Every(time.Hour))()
+	defer SetGlobalCounterForTest(time.Minute, 3, time.Minute)()
+
+	fa := &recordingAlerter{}
+	m := NewManager("the-correct-instance-passphrase", fa, wbLogger())
+	defer m.Close()
+
+	for i := 0; i < 10; i++ {
+		rec := httptest.NewRecorder()
+		m.HandleLogin(rec, loginReq(t, "wrong", fmt.Sprintf("172.16.0.%d:1", i)))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: code %d, want 401", i, rec.Code)
+		}
+	}
+
+	waitFor(t, 2*time.Second, func() bool { return fa.calls() >= 1 })
+	time.Sleep(100 * time.Millisecond) // let any spurious second call land
+	if n := fa.calls(); n != 1 {
+		t.Fatalf("Alert called %d times across a burst that crosses the threshold, want exactly 1 per cooldown", n)
+	}
+	if msg := fa.message(); strings.Contains(msg, "wrong") {
+		t.Fatalf("alert message leaks the submitted value: %q", msg)
+	}
+}
+
+func TestGlobalAlert_ThrottledRequestsDoNotIncrementCounter(t *testing.T) {
+	defer SetLoginDelayForTest(time.Millisecond, 0)()
+	defer SetLoginBurstForTest(2)()
+	defer SetLoginRateForTest(rate.Every(time.Hour))()
+	defer SetGlobalCounterForTest(time.Minute, 3, time.Minute)()
+
+	fa := &recordingAlerter{}
+	m := NewManager("the-correct-instance-passphrase", fa, wbLogger())
+	defer m.Close()
+
+	for i := 0; i < 8; i++ {
+		rec := httptest.NewRecorder()
+		m.HandleLogin(rec, loginReq(t, "wrong", "172.16.9.9:1"))
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	if n := fa.calls(); n != 0 {
+		t.Fatalf("Alert fired %d times; a throttle storm (2 real failures < threshold 3) must not trip it", n)
+	}
+	if got := m.counter.count; got != 2 {
+		t.Fatalf("counter.count = %d, want 2 -- the six 429s must not increment it", got)
+	}
+}
+
+func TestGlobalAlert_FailingAlerterDoesNotChangeLoginResponse(t *testing.T) {
+	defer SetLoginDelayForTest(time.Millisecond, 0)()
+	defer SetLoginBurstForTest(1000)()
+	defer SetLoginRateForTest(rate.Every(time.Hour))()
+	defer SetGlobalCounterForTest(time.Minute, 3, time.Minute)()
+
+	fa := &recordingAlerter{err: errors.New("webhook unreachable")}
+	m := NewManager("the-correct-instance-passphrase", fa, wbLogger())
+	defer m.Close()
+
+	var last int
+	for i := 0; i < 5; i++ {
+		rec := httptest.NewRecorder()
+		m.HandleLogin(rec, loginReq(t, "wrong", fmt.Sprintf("172.16.5.%d:1", i)))
+		last = rec.Code
+	}
+	if last != http.StatusUnauthorized {
+		t.Fatalf("login response code = %d, want 401 even though the Alerter returns an error", last)
+	}
+	waitFor(t, 2*time.Second, func() bool { return fa.calls() >= 1 })
 }
