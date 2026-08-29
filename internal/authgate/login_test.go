@@ -382,7 +382,7 @@ func TestLoginCSRF_RejectedBeforeComparisonAndCounter(t *testing.T) {
 	defer SetLoginDelayForTest(time.Millisecond, 0)()
 	defer SetLoginBurstForTest(5)()
 	defer SetLoginRateForTest(rate.Every(time.Hour))()
-	defer SetGlobalCounterForTest(time.Minute, 3, time.Minute)()
+	defer SetGlobalCounterForTest(time.Minute, 100, time.Minute)()
 
 	fa := &recordingAlerter{}
 	const pass = "the-correct-instance-passphrase"
