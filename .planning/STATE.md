@@ -5,16 +5,16 @@ milestone_name: Continuous Deployment
 current_phase: 14
 current_phase_name: Instance Passphrase Gate
 status: executing
-stopped_at: Completed 14-02-PLAN.md
-last_updated: "2026-08-29T16:38:34.043Z"
+stopped_at: Completed 14-03-PLAN.md
+last_updated: "2026-08-29T17:03:00.945Z"
 last_activity: 2026-08-29
 last_activity_desc: Phase 14 execution started
-state_head: 0c113c972da0a8b2015bdf1fb18f9b84c0f7131f
+state_head: 0dcb40242d783d2546584041ae2e8de8dd29e56f
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: 14 (Instance Passphrase Gate) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-08-29 — Phase 14 execution started
 
@@ -96,6 +96,7 @@ Last activity: 2026-08-29 — Phase 14 execution started
 | Phase 11.1 P04 | 240min | 4 tasks | 4 files |
 | Phase 14 P01 | 55min | 4 tasks | 12 files |
 | Phase 14 P02 | 45 min | 3 tasks | 10 files |
+| Phase 14 P03 | 12 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -189,6 +190,8 @@ Recent decisions affecting current work:
 - [Phase 14]: [14-01] Session cookie name = "dt_session" (Task 1 option-a): bare name with explicit Secure/HttpOnly/SameSite=Lax/Path=/ attributes, not D-09's literal __Host- prefix. __Host- is rejected by Chrome on http://localhost (research A1); every guarantee it enforces is set and asserted in our own code. Operator-approved deviation from D-09.
 - [Phase 14]: [14-01] internal/authgate is a stateless HMAC-SHA256 signed-cookie gate: key = SHA256(domain-prefix || INSTANCE_PASSPHRASE) (D-01, rotation is revoke-all), no server-side session store (survives restart, D-08), gate is group-scoped chi middleware after the 4 existing middlewares (D-05), inert when INSTANCE_PASSPHRASE empty (GATE-07).
 - [Phase 14]: [14-01] Phase 14 adds two env vars not one: INSTANCE_PASSPHRASE + TRUST_PROXY_HEADERS (default false, gates middleware.RealIP per D-14). Session timings stay hardcoded (D-07). .env.example edited by operator (denied to agent tools, Phase 11.1-04 limitation).
+- [Phase 14]: [14-03] SPA gate: authStore is a plain pub/sub module (authed optimistic-true, gateActive=D-18) poked by a single apiFetch 401 interceptor; X-Requested-With: drop-tracker injected centrally on every non-GET (D-15 client half); PassphraseScreen + gateActive-gated Log out. GATE-05/06 complete.
+- [Phase 14]: [14-03] Frontend test pattern: singleton-store tests reset via vi.resetModules()+dynamic import; a test needing the real ApiError class uses a partial mock of ~/lib/api (importOriginal spread + vi.fn spies) instead of a bare automock which breaks instanceof/err.status.
 
 ### Pending Todos
 
@@ -242,8 +245,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-29T16:38:34.024Z
-Stopped at: Completed 14-02-PLAN.md
+Last session: 2026-08-29T17:02:51.976Z
+Stopped at: Completed 14-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

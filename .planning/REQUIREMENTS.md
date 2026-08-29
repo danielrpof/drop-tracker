@@ -28,8 +28,8 @@ Automate shipping the app to a self-hosted VPS on every merge to main, put a pas
 - [x] **GATE-02**: A user authenticates by submitting the correct passphrase once; a signed, stateless session cookie then keeps that browser authenticated across requests and across app restarts/redeploys
 - [ ] **GATE-03**: The session cookie is HMAC-signed, `HttpOnly`, `Secure`, `SameSite=Lax`, and has a bounded lifetime; passphrase comparison is constant-time
 - [x] **GATE-04**: The login endpoint is rate-limited per client IP to bound brute-force attempts (client IP comes from `X-Forwarded-For` only when `TRUST_PROXY_HEADERS` is set — the Phase 17 topology; otherwise the direct peer address, so a pre-proxy deploy can't be spoofed). The throttle rejection is undelayed and login-handler concurrency is bounded so a distributed flood can't exhaust goroutines/connections
-- [ ] **GATE-05**: The SPA detects a `401` from the API, presents a passphrase login form, and resumes normal operation after a successful login
-- [ ] **GATE-06**: A user can log out, invalidating the session on that browser
+- [x] **GATE-05**: The SPA detects a `401` from the API, presents a passphrase login form, and resumes normal operation after a successful login
+- [x] **GATE-06**: A user can log out, invalidating the session on that browser
 - [ ] **GATE-07**: When no passphrase is configured the gate is inert — every route behaves exactly as it did before v1.3, so local dev, docker-compose, and the existing test suite need no passphrase
 
 ### Migration Safety
@@ -81,8 +81,8 @@ Mapped during roadmap creation (2026-08-27). See `.planning/ROADMAP.md` for each
 | GATE-02 | Phase 14 | Complete |
 | GATE-03 | Phase 14 | Pending |
 | GATE-04 | Phase 14 | Complete |
-| GATE-05 | Phase 14 | Pending |
-| GATE-06 | Phase 14 | Pending |
+| GATE-05 | Phase 14 | Complete |
+| GATE-06 | Phase 14 | Complete |
 | GATE-07 | Phase 14 | Pending |
 | CICD-13 | Phase 15 | Pending |
 | CICD-14 | Phase 15 | Pending |
