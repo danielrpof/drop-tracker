@@ -1,7 +1,15 @@
-import { screen, waitForElementToBeRemoved } from "@testing-library/react"
+import {
+  act,
+  render,
+  screen,
+  waitForElementToBeRemoved,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { createRoutesStub } from "react-router"
 import { describe, expect, it, vi } from "vitest"
 
+import App from "~/root"
+import { authStore } from "~/lib/authStore"
 import { listWatchlist, removeWatchlist, type WatchlistEntry } from "~/lib/api"
 import { renderRoute } from "~/lib/test/routeStub"
 
@@ -120,5 +128,65 @@ describe("Watchlist route", () => {
     await screen.findByText("Drake")
 
     expect(mockListWatchlist).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("Watchlist route under the passphrase gate (GATE-05 / UI-SPEC E6)", () => {
+  function renderUnderApp() {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: App,
+        children: [{ index: true, Component: Watchlist }],
+      },
+    ])
+    return render(<Stub initialEntries={["/"]} />)
+  }
+
+  it("re-runs the route's list fetch after the store flips unauthenticated then authenticated", async () => {
+    mockListWatchlist.mockResolvedValue([entry])
+
+    renderUnderApp()
+    await screen.findByText("Drake")
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+
+    // A 401 elsewhere flips the store: App swaps to the passphrase screen.
+    await act(async () => {
+      authStore.markUnauthenticated()
+    })
+    await screen.findByRole("heading", { name: "Enter the instance passphrase" })
+
+    // Logging back in remounts <Outlet/>, so Watchlist's mount effect
+    // re-fetches with no retry-queue machinery (D-16).
+    await act(async () => {
+      authStore.markAuthenticated()
+    })
+    await screen.findByText("Drake")
+    expect(mockListWatchlist).toHaveBeenCalledTimes(2)
+  })
+
+  // 14-UI-SPEC E6 held-out backstop check: a post-login route fetch that
+  // returns 401 again must re-show the gate, not a broken authed shell.
+  // ~/lib/api is mocked here, so this mock stands in for the real apiFetch
+  // 401 interceptor that flips the store (proven for real in api.test.ts).
+  it("re-shows the passphrase gate when a post-login route fetch returns 401", async () => {
+    mockListWatchlist.mockResolvedValueOnce([entry])
+
+    renderUnderApp()
+    await screen.findByText("Drake")
+
+    mockListWatchlist.mockImplementation(() => {
+      authStore.markUnauthenticated()
+      return Promise.reject(new Error("401"))
+    })
+
+    await act(async () => {
+      authStore.markUnauthenticated()
+    })
+    await act(async () => {
+      authStore.markAuthenticated()
+    })
+
+    await screen.findByRole("heading", { name: "Enter the instance passphrase" })
   })
 })

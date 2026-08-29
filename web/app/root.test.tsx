@@ -1,8 +1,19 @@
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import type { ComponentType } from "react"
 import { createRoutesStub } from "react-router"
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import App, { ErrorBoundary } from "./root"
+
+// deleteSession is a controllable spy; the auth store is driven directly.
+// sonner is stubbed so the Log out toasts are assertable and the real
+// Toaster (imported transitively via ~/components/ui/sonner) is inert.
+vi.mock("~/lib/api")
+vi.mock("sonner", () => ({
+  Toaster: () => null,
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
 // isRouteErrorResponse (react-router) duck-types on these four fields --
 // there is no public constructor for the real ErrorResponseImpl class, so a
@@ -93,5 +104,132 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: "Watchlist" }).className).toContain(
       "border-transparent"
     )
+  })
+})
+
+describe("App — instance passphrase gate", () => {
+  let GatedApp: ComponentType
+  let authStore: (typeof import("~/lib/authStore"))["authStore"]
+  let mockDeleteSession: ReturnType<typeof vi.fn>
+  let toastError: ReturnType<typeof vi.fn>
+
+  beforeEach(async () => {
+    // Fresh module registry so App and the test share one authStore instance.
+    vi.resetModules()
+    ;({ authStore } = await import("~/lib/authStore"))
+    mockDeleteSession = vi.mocked((await import("~/lib/api")).deleteSession)
+    toastError = vi.mocked((await import("sonner")).toast.error)
+    ;({ default: GatedApp } = await import("./root"))
+  })
+
+  function renderAppAt(path: string) {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: GatedApp,
+        children: [
+          { index: true, Component: () => <div>Watchlist page</div> },
+          { path: "history", Component: () => <div>History page</div> },
+        ],
+      },
+    ])
+    return render(<Stub initialEntries={[path]} />)
+  }
+
+  function logoutButton() {
+    return screen.getByRole("button", { name: /log out/i })
+  }
+
+  it("renders the passphrase screen and no nav when the store is unauthenticated", () => {
+    authStore.markUnauthenticated()
+
+    renderAppAt("/")
+
+    expect(
+      screen.getByRole("heading", { name: "Enter the instance passphrase" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument()
+    expect(screen.queryByText("Watchlist page")).not.toBeInTheDocument()
+  })
+
+  it("renders the nav and the routed page when the store is authenticated", () => {
+    renderAppAt("/")
+
+    expect(screen.getByRole("navigation")).toBeInTheDocument()
+    expect(screen.getByText("Watchlist page")).toBeInTheDocument()
+  })
+
+  it("does not render the Log out control when the gate is not active", () => {
+    renderAppAt("/")
+
+    expect(
+      screen.queryByRole("button", { name: /log out/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("renders the Log out control once the gate is active", () => {
+    authStore.markAuthenticated() // sets gateActive true, authed stays true
+
+    renderAppAt("/")
+
+    expect(logoutButton()).toBeInTheDocument()
+  })
+
+  it("returns to the passphrase screen after a successful logout", async () => {
+    authStore.markAuthenticated()
+    mockDeleteSession.mockResolvedValueOnce(undefined)
+
+    renderAppAt("/")
+    await userEvent.click(logoutButton())
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Enter the instance passphrase",
+      })
+    ).toBeInTheDocument()
+    expect(mockDeleteSession).toHaveBeenCalled()
+  })
+
+  // 14-UI-SPEC E5 held-out backstop check: a failing DELETE /session must
+  // still clear local auth state (a stale HttpOnly cookie just yields a 401
+  // next fetch) and surface a failure toast.
+  it("still returns to the passphrase screen and shows a failure toast when logout fails (E5 backstop)", async () => {
+    authStore.markAuthenticated()
+    mockDeleteSession.mockRejectedValueOnce(new Error("500"))
+
+    renderAppAt("/")
+    await userEvent.click(logoutButton())
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Enter the instance passphrase",
+      })
+    ).toBeInTheDocument()
+    expect(toastError).toHaveBeenCalledWith("Couldn't log out.")
+  })
+
+  it("is harmless to click Log out twice — the control is never disabled and the delete is idempotent", async () => {
+    authStore.markAuthenticated()
+    let resolve: () => void = () => {}
+    mockDeleteSession.mockReturnValue(
+      new Promise<void>((r) => {
+        resolve = r
+      })
+    )
+
+    renderAppAt("/")
+    const button = logoutButton()
+    await userEvent.click(button)
+    await userEvent.click(button)
+
+    expect(button).toBeEnabled()
+    expect(mockDeleteSession).toHaveBeenCalledTimes(2)
+
+    resolve()
+    expect(
+      await screen.findByRole("heading", {
+        name: "Enter the instance passphrase",
+      })
+    ).toBeInTheDocument()
   })
 })
