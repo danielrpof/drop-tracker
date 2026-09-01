@@ -88,7 +88,7 @@ A Go-based release tracker for hip-hop, reggaeton, and R&B: users maintain a wat
 
 | Tool | Purpose | Notes |
 |------|---------|-------|
-| `golangci-lint` | Aggregated linting | Latest **v2.12.2** (v2 config format — v1 config schema is legacy/deprecated, don't copy old `.golangci.yml` examples that predate v2). Pin the exact version in CI via `golangci-lint-action@v9.3.0`'s `version:` input for reproducibility. |
+| `golangci-lint` | Aggregated linting | Latest **v2.13.2** (v2 config format — v1 config schema is legacy/deprecated, don't copy old `.golangci.yml` examples that predate v2). Pin the exact version in CI via `golangci-lint-action@v9.3.0`'s `version:` input for reproducibility. |
 | `go vet` | Compiler-adjacent static analysis | Runs as part of `go build`/`go test` implicitly, but also run explicitly in CI as its own fast-fail step before the slower `golangci-lint` pass — this matches the PROJECT.md pipeline description. |
 | `sqlc` (CLI) | SQL → Go codegen | `sqlc generate` as a `make` target and a CI check (`sqlc diff` / regenerate-and-git-diff) to catch drift between `.sql` queries and committed generated code. |
 | `Trivy` (`aquasecurity/trivy-action`) | Container image + filesystem/dependency vuln scanning | Latest **v0.36.0** (wraps Trivy v0.70.0). Run twice in CI: `scan-type: fs` against the repo (catches vulnerable `go.sum` deps) and `image-ref:` against the built image (catches OS package + base-image CVEs). Gate on `severity: CRITICAL,HIGH` with `exit-code: 1`. |
@@ -150,14 +150,14 @@ A Go-based release tracker for hip-hop, reggaeton, and R&B: users maintain a wat
 |-----------|------------------|-------|
 | `sqlc` v1.31.1 | `pgx/v5` v5.10.0 | sqlc's Postgres codegen defaults to producing `pgx/v5`-shaped code when `sql_package: "pgx/v5"` is set in `sqlc.yaml`; confirm this setting explicitly rather than relying on the default, since sqlc also supports plain `database/sql` output. |
 | `golang-migrate/migrate` v4.19.1 | Postgres via `pgx` or `lib/pq` under the hood | golang-migrate's own Postgres driver historically wraps `lib/pq`-style connection strings (`postgres://...`) — this is independent of which driver your *application* code uses (pgx), since migrate runs as a separate CLI/step, not in-process. |
-| `golangci-lint` v2.12.2 | `golangci-lint-action` v9.3.0 | v9.x of the action is built for v2 config schema; if you ever pin an older golangci-lint version, also check the action's version compatibility table, since v1-targeting action versions (v6 and earlier) won't understand v2 config. |
+| `golangci-lint` v2.13.2 | `golangci-lint-action` v9.3.0 | v9.x of the action is built for v2 config schema; if you ever pin an older golangci-lint version, also check the action's version compatibility table, since v1-targeting action versions (v6 and earlier) won't understand v2 config. |
 | `go-chi/chi/v5` | `go-chi/httplog/v3` | Both maintained under the `go-chi` GitHub org and designed together; httplog v3 expects to sit alongside chi's own `middleware.RequestID`/`middleware.Recoverer`. |
 | Go toolchain | `sqlc`, `golangci-lint`, `chi` | All three track recent Go releases; pin your `go.mod` `go` directive to a specific minor version (e.g. `go 1.23`) and match your Docker builder-stage base image (`golang:1.23-alpine` or similar) to avoid drift between local dev, CI, and the build container. |
 
 ## Sources
 
 - pkg.go.dev — `github.com/go-chi/chi/v5` (v5.3.1), `github.com/caarlos0/env/v11` (v11.4.1), `github.com/robfig/cron/v3` (v3.0.1), `github.com/jackc/pgx/v5` (v5.10.0) — versions verified directly, confidence MEDIUM
-- GitHub Releases — `golang-migrate/migrate` (v4.19.1), `sqlc-dev/sqlc` (v1.31.1), `gitleaks/gitleaks` (v8.30.1), `golangci/golangci-lint` (v2.12.2), `golangci/golangci-lint-action` (v9.3.0), `aquasecurity/trivy-action` (v0.36.0), `anchore/sbom-action` (v0.24.0) — versions verified directly, confidence MEDIUM
+- GitHub Releases — `golang-migrate/migrate` (v4.19.1), `sqlc-dev/sqlc` (v1.31.1), `gitleaks/gitleaks` (v8.30.1), `golangci/golangci-lint` (v2.13.2), `golangci/golangci-lint-action` (v9.3.0), `aquasecurity/trivy-action` (v0.36.0), `anchore/sbom-action` (v0.24.0) — versions verified directly, confidence MEDIUM
 - `musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting`, `wiki.musicbrainz.org/MusicBrainz_API` — rate limits, User-Agent requirement, pagination — confidence MEDIUM
 - Deezer developer docs / community references (`support.deezer.com`, `deezer-python.readthedocs.io`) — rate limits, pagination, auth — confidence MEDIUM (no single canonical current official Deezer API rate-limit doc found; corroborated across multiple independent sources)
 - Discord webhook ecosystem guides (multiple independent 2026-dated sources) on payload schema, embed limits, 30 req/min rate limit — confidence MEDIUM
