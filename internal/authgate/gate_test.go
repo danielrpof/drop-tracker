@@ -737,3 +737,89 @@ func TestGate_ReferrerPolicyOnGatedResponse(t *testing.T) {
 		}
 	}
 }
+
+// --- plan 14-07 Task 1: the X-Instance-Gated response marker (G-14-3) ---
+//
+// The wire literal is pinned inline here, not read from a package symbol: the
+// point is that these tests pin the byte-for-byte contract independently of
+// whatever const the implementation later declares.
+
+// TestGate_InstanceGatedMarker_PresentOnAuthenticatedSuccess proves the
+// positive half of the G-14-3 fix: a request that passes gate.Authenticate
+// with a valid cookie gets a 200 whose response carries X-Instance-Gated: 1,
+// so the SPA can discover the instance is gated from an ordinary
+// authenticated response instead of needing a 401 or a typed login.
+func TestGate_InstanceGatedMarker_PresentOnAuthenticatedSuccess(t *testing.T) {
+	ts, _ := newGatedServer(t, discardLogger())
+
+	lResp := login(t, ts, testPassphrase)
+	cookie := sessionCookie(t, lResp)
+	_ = lResp.Body.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/watchlist", nil)
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authenticated GET /watchlist: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated GET /watchlist status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Instance-Gated"); got != "1" {
+		t.Fatalf("X-Instance-Gated = %q, want %q on an authenticated gated 200", got, "1")
+	}
+}
+
+// TestGate_InstanceGatedMarker_AbsentOnUnauthenticatedAndUngated is the
+// negative matrix. The marker means "this response passed the gate" and
+// nothing else, so it must be absent on a 401, on an exempt route, and --
+// the single most important assertion, D-18's ungated guarantee -- on every
+// response from a server built with no gate at all.
+func TestGate_InstanceGatedMarker_AbsentOnUnauthenticatedAndUngated(t *testing.T) {
+	gated, _ := newGatedServer(t, discardLogger())
+
+	t.Run("gated 401 carries nothing", func(t *testing.T) {
+		resp, err := http.Get(gated.URL + "/watchlist")
+		if err != nil {
+			t.Fatalf("GET /watchlist: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", resp.StatusCode)
+		}
+		if got := resp.Header.Get("X-Instance-Gated"); got != "" {
+			t.Fatalf("X-Instance-Gated = %q on a gated 401, want empty string", got)
+		}
+	})
+
+	t.Run("gated exempt route carries nothing", func(t *testing.T) {
+		resp, err := http.Get(gated.URL + "/health")
+		if err != nil {
+			t.Fatalf("GET /health: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if got := resp.Header.Get("X-Instance-Gated"); got != "" {
+			t.Fatalf("X-Instance-Gated = %q on the exempt /health route, want empty string", got)
+		}
+	})
+
+	t.Run("ungated instance carries nothing (D-18)", func(t *testing.T) {
+		srv := httpserver.New(stubPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger())
+		ts := httptest.NewServer(srv.Router())
+		defer ts.Close()
+
+		resp, err := http.Get(ts.URL + "/watchlist")
+		if err != nil {
+			t.Fatalf("GET /watchlist: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("ungated GET /watchlist status = %d, want 200", resp.StatusCode)
+		}
+		if got := resp.Header.Get("X-Instance-Gated"); got != "" {
+			t.Fatalf("X-Instance-Gated = %q on an ungated instance, want empty string (D-18)", got)
+		}
+	})
+}

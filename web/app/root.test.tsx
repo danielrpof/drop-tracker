@@ -1,8 +1,8 @@
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ComponentType } from "react"
 import { createRoutesStub } from "react-router"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import App, { ErrorBoundary } from "./root"
 
@@ -143,6 +143,10 @@ describe("App — instance passphrase gate", () => {
     return render(<Stub initialEntries={[path]} />)
   }
 
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   function logoutButton() {
     return screen.getByRole("button", { name: /log out/i })
   }
@@ -204,6 +208,47 @@ describe("App — instance passphrase gate", () => {
       },
     ])
     render(<Stub initialEntries={["/"]} />)
+
+    expect(logoutButton()).toBeInTheDocument()
+  })
+
+  it("renders the Log out control on a clean authed load once the gate signal latches — no 401, no login (G-14-3 regression, deterministic)", async () => {
+    renderAppAt("/")
+
+    expect(
+      screen.queryByRole("button", { name: /log out/i })
+    ).not.toBeInTheDocument()
+
+    await act(async () => {
+      authStore.markGateActive()
+    })
+
+    expect(logoutButton()).toBeInTheDocument()
+  })
+
+  it("latches the Log out control end-to-end: a 200 carrying X-Instance-Gated flows through apiFetch into the nav (G-14-3 regression, end-to-end)", async () => {
+    const realApi = await vi.importActual<typeof import("~/lib/api")>("~/lib/api")
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Instance-Gated": "1",
+          },
+        })
+      )
+    )
+
+    renderAppAt("/")
+    expect(
+      screen.queryByRole("button", { name: /log out/i })
+    ).not.toBeInTheDocument()
+
+    await act(async () => {
+      await realApi.listWatchlist()
+    })
 
     expect(logoutButton()).toBeInTheDocument()
   })

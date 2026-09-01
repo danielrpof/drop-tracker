@@ -189,3 +189,86 @@ describe("authStore — gateActive survives a browser-session reload (D-18)", ()
     expect(listener).toHaveBeenCalledTimes(2)
   })
 })
+
+describe("authStore — markGateActive latches a gated authed load (G-14-3)", () => {
+  it("sets isGateActive() true, persists the flag, notifies once, and never touches authed", () => {
+    const listener = vi.fn()
+    authStore.subscribe(listener)
+
+    authStore.markGateActive()
+
+    expect(authStore.isGateActive()).toBe(true)
+    // authed is the "gated response" signal, never the "caller is authorized"
+    // signal — markGateActive must leave the optimistic auth flag alone (D-16).
+    expect(authStore.isAuthed()).toBe(true)
+    expect(sessionStorage.getItem(GATE_ACTIVE_STORAGE_KEY)).toBe(
+      GATE_ACTIVE_STORAGE_VALUE
+    )
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("never resurrects a dead session: after markUnauthenticated(), markGateActive() leaves authed false", () => {
+    authStore.markUnauthenticated()
+    authStore.markGateActive()
+
+    expect(authStore.isAuthed()).toBe(false)
+    expect(authStore.isGateActive()).toBe(true)
+  })
+
+  it("is a one-shot latch: calling it twice notifies subscribers exactly once", () => {
+    const listener = vi.fn()
+    authStore.subscribe(listener)
+
+    authStore.markGateActive()
+    authStore.markGateActive()
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(authStore.isGateActive()).toBe(true)
+  })
+
+  it("persists across a reload: a later import reports isGateActive() true with no further call", async () => {
+    authStore.markGateActive()
+
+    const reloaded = await reimportStore()
+    expect(reloaded.isGateActive()).toBe(true)
+  })
+
+  it("does not back-port the one-shot latch to markUnauthenticated — it still notifies on every call", () => {
+    const listener = vi.fn()
+    authStore.subscribe(listener)
+
+    authStore.markUnauthenticated()
+    authStore.markUnauthenticated()
+
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it("is safe when sessionStorage is undefined: no throw, gate still flips, still notifies", async () => {
+    vi.stubGlobal("sessionStorage", undefined)
+    const reloaded = await reimportStore()
+    const listener = vi.fn()
+    reloaded.subscribe(listener)
+
+    expect(() => reloaded.markGateActive()).not.toThrow()
+    expect(reloaded.isGateActive()).toBe(true)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("is safe when sessionStorage getItem/setItem throw: no throw, gate still flips, still notifies", async () => {
+    vi.stubGlobal("sessionStorage", {
+      getItem: () => {
+        throw new Error("storage access denied")
+      },
+      setItem: () => {
+        throw new Error("storage access denied")
+      },
+    })
+    const reloaded = await reimportStore()
+    const listener = vi.fn()
+    reloaded.subscribe(listener)
+
+    expect(() => reloaded.markGateActive()).not.toThrow()
+    expect(reloaded.isGateActive()).toBe(true)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+})

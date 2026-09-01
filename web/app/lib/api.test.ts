@@ -143,6 +143,13 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
   let fetchSpy: ReturnType<typeof vi.fn>
 
   beforeEach(async () => {
+    // Load-bearing, not hygiene, and it MUST be the first statement — before
+    // the module-registry reset and before the dynamic imports, since
+    // authStore reads sessionStorage at import time. The gate-active latch
+    // WRITES to the session store, jsdom keeps one store per test file, and a
+    // registry reset does not clear it — so a case that latches the gate
+    // would otherwise leak into the cases that assert it stays inactive.
+    sessionStorage.clear()
     vi.resetModules()
     api = await import("~/lib/api")
     ;({ authStore } = await import("~/lib/authStore"))
@@ -154,10 +161,14 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
     vi.unstubAllGlobals()
   })
 
-  function jsonResponse(body: unknown, status = 200) {
+  function jsonResponse(
+    body: unknown,
+    status = 200,
+    headers: Record<string, string> = {}
+  ) {
     return new Response(JSON.stringify(body), {
       status,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...headers },
     })
   }
 
@@ -263,6 +274,67 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
       "rejected",
     ])
     expect(authStore.isAuthed()).toBe(false)
+    expect(authStore.isGateActive()).toBe(true)
+  })
+
+  // --- plan 14-07 Task 1: apiFetch latches the X-Instance-Gated marker (G-14-3) ---
+
+  const GATED = { "X-Instance-Gated": "1" }
+
+  it("latches gateActive from a 200 carrying X-Instance-Gated and leaves authed true", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse([], 200, GATED))
+
+    await api.listWatchlist()
+
+    expect(authStore.isGateActive()).toBe(true)
+    expect(authStore.isAuthed()).toBe(true)
+  })
+
+  it("does not latch gateActive from a 200 with no marker (an ungated instance's response)", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse([]))
+
+    await api.listWatchlist()
+
+    expect(authStore.isGateActive()).toBe(false)
+  })
+
+  it("latches gateActive from a 204 carrying the marker — the latch runs before the no-content return", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(null, { status: 204, headers: { "X-Instance-Gated": "1" } })
+    )
+
+    await api.removeWatchlist(1)
+
+    expect(authStore.isGateActive()).toBe(true)
+  })
+
+  it("latches gateActive from a non-OK response carrying the marker before the ApiError is thrown", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ error: "boom" }, 500, { "X-Instance-Gated": "1" })
+    )
+
+    await expect(api.listWatchlist()).rejects.toBeInstanceOf(api.ApiError)
+    expect(authStore.isGateActive()).toBe(true)
+  })
+
+  it("latches once: two successive marker-carrying responses notify a subscriber exactly once", async () => {
+    const listener = vi.fn()
+    authStore.subscribe(listener)
+    fetchSpy.mockResolvedValue(jsonResponse([], 200, GATED))
+
+    await api.listWatchlist()
+    await api.listWatchlist()
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("never clears gateActive: a later response with no marker leaves the latched flag true", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse([], 200, GATED))
+    await api.listWatchlist()
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse([]))
+    await api.listWatchlist()
+
     expect(authStore.isGateActive()).toBe(true)
   })
 })
