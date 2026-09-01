@@ -8,17 +8,54 @@
 //   - `authed`   — starts `true` (optimistic; there is no boot-time
 //     `GET /session` check, D-16). The first API `401` flips it `false`,
 //     which makes `<App>` render `<PassphraseScreen>` instead of the routed
-//     page. A successful login flips it back to `true`.
+//     page. A successful login flips it back to `true`. `authed` is
+//     deliberately volatile and is NEVER written to web storage: a
+//     persisted copy would be a client-side authorization cache, which is
+//     the exact failure mode D-16 exists to avoid.
 //
-//   - `gateActive` — starts `false`, set `true` the first time the app
-//     observes a `401` OR completes a login in this browser session. This
-//     implements locked decision **D-18** (which resolved 14-UI-SPEC's one
-//     open item): the **Log out** control renders only when `gateActive` is
-//     `true`, so an instance with no `/session` route registered never
-//     shows a control that would call a route that does not exist.
+//   - `gateActive` — set `true` the first time the app observes a `401` OR
+//     completes a login in this browser session. This implements locked
+//     decision **D-18** (which resolved 14-UI-SPEC's one open item): the
+//     **Log out** control renders only when `gateActive` is `true`, so an
+//     instance with no `/session` route registered never shows a control
+//     that would call a route that does not exist.
+//
+//     "In this browser session" (D-18) is `sessionStorage`, not a
+//     module-level `let`. `gateActive` is SEEDED from the browser session
+//     store at module load and WRITTEN THROUGH by both `mark*` functions,
+//     so a full document reload while the `dt_session` cookie is still
+//     valid — loader fetch returns 200, no `401` fires, no login happens —
+//     still renders the Log out control for a user who is still logged in.
+//     That reload re-runs only the module initialiser, which is why seeding
+//     it from storage repairs every downstream consumer (`useGateActive` →
+//     the `{gateActive && <LogoutButton />}` branch in `root.tsx`) with no
+//     change to `root.tsx` at all. This closes gap G-14-2.
+//
+//     A per-tab, session-scoped store is the correct primitive. A
+//     cross-session store (`localStorage`) is NOT: a signal that outlived
+//     the browser session would show a Log out control in a brand-new
+//     session on an instance whose passphrase had since been removed, and
+//     that control would call a route that is not registered. `gateActive`
+//     is also monotonic within a session — once recorded it is never
+//     cleared by a logout, a `401`, or a reload; only ending the browser
+//     session clears it.
+//
 //     `gateActive` is presentation-only — it is NEVER an access-control
 //     signal. The server `401` remains the sole enforcement (a plan
-//     prohibition).
+//     prohibition, carried forward verbatim from 14-03).
+//
+// Every sessionStorage access is guarded in BOTH directions, and a later
+// reader must not simplify either away:
+//   - a `typeof` check, because `react-router build` runs with `ssr: false`
+//     but still evaluates `root.tsx` — and transitively this module —
+//     inside Node to emit `index.html`, where `sessionStorage` does not
+//     exist; a bare module-scope dereference there is a build-time
+//     `ReferenceError` that breaks the Docker image build (the Dockerfile
+//     builds `web/` itself);
+//   - a `try`/`catch`, because a browser can deny or throw on storage
+//     access (private mode, disabled storage); an unguarded read at module
+//     scope would white-screen the whole SPA, since `root.tsx` imports this
+//     module.
 //
 // Both `mark*` functions set `gateActive` to `true`, because either signal
 // proves the instance is gated. They are convergent and safe to call
@@ -28,8 +65,46 @@
 // so an idempotent repeat is observable but harmless.
 import { useSyncExternalStore } from "react"
 
+// The single sessionStorage key this module owns. Named after the
+// `dt_session` cookie so the two Phase 14 browser-side artefacts read as
+// one family. GATE_ACTIVE_STORAGE_VALUE is the one fixed literal ever
+// written under it — kept beside the key so the write and the comparison
+// cannot drift apart.
+const GATE_ACTIVE_STORAGE_KEY = "dt_gate_active"
+const GATE_ACTIVE_STORAGE_VALUE = "1"
+
+// readPersistedGateActive is the ONLY place the session store is read, used
+// exactly once by the module initialiser below. It returns `false` for
+// every failure mode and never throws, logs, or re-raises.
+function readPersistedGateActive(): boolean {
+  if (typeof sessionStorage === "undefined") {
+    return false
+  }
+  try {
+    return sessionStorage.getItem(GATE_ACTIVE_STORAGE_KEY) === GATE_ACTIVE_STORAGE_VALUE
+  } catch {
+    return false
+  }
+}
+
+// persistGateActive is the ONLY place the session store is written, called
+// by both `mark*` functions. It swallows every failure and never throws.
+function persistGateActive(): void {
+  if (typeof sessionStorage === "undefined") {
+    return
+  }
+  try {
+    sessionStorage.setItem(GATE_ACTIVE_STORAGE_KEY, GATE_ACTIVE_STORAGE_VALUE)
+  } catch {
+    // Storage denied or full — the in-memory boolean still carries the
+    // gate for this page load; only cross-reload durability is lost.
+  }
+}
+
 let authed = true
-let gateActive = false
+// The G-14-2 fix: seed from the browser session store instead of a literal
+// `false`, so a document reload observes what a previous page load learned.
+let gateActive = readPersistedGateActive()
 
 const listeners = new Set<() => void>()
 
@@ -46,12 +121,14 @@ export const authStore = {
   markAuthenticated(): void {
     authed = true
     gateActive = true
+    persistGateActive()
     notify()
   },
 
   markUnauthenticated(): void {
     authed = false
     gateActive = true
+    persistGateActive()
     notify()
   },
 
@@ -65,9 +142,10 @@ export const authStore = {
 
 // useAuthed / useGateActive expose the two signals to React via
 // useSyncExternalStore. `authStore.isAuthed` / `authStore.isGateActive` are
-// reused as both the client and the server snapshot: the server snapshot is
-// simply the optimistic default before any subscription, which is exactly
-// what these getters return on a fresh load.
+// reused as both the client and the server snapshot: they return the cached
+// module boolean and must keep doing so — a snapshot getter that re-read an
+// external store on every call would break the hook's contract. The session
+// store is read once, at module load, and on nothing else.
 export function useAuthed(): boolean {
   return useSyncExternalStore(
     authStore.subscribe,
