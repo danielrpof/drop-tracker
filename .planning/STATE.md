@@ -4,17 +4,17 @@ milestone: v1.3
 milestone_name: Continuous Deployment
 current_phase: 14
 current_phase_name: Instance Passphrase Gate
-status: verifying
-stopped_at: Completed 14-04-PLAN.md
-last_updated: "2026-08-29T17:23:04.012Z"
-last_activity: 2026-08-29
+status: executing
+stopped_at: Completed 14-05-PLAN.md
+last_updated: "2026-09-01T02:19:17.562Z"
+last_activity: 2026-09-01
 last_activity_desc: Phase 14 execution started
-state_head: cc9391ab151f7c08572114c9efd6a73062c1141c
+state_head: 2599980d78fc7999c8f4e782b0c0b83719b90f96
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # Project State
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: 14 (Instance Passphrase Gate) — EXECUTING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
-Last activity: 2026-08-29 — Phase 14 execution started
+Plan: 5 of 5 (all plans complete; G-14-1 gap-closure plan 14-05 done)
+Status: Phase 14 execution complete — ready for /gsd-verify-work
+Last activity: 2026-09-01 — Completed 14-05-PLAN.md (G-14-1 closed: compose env wiring + boot gate-status log + operator .env reconciled)
 
 ## Performance Metrics
 
@@ -98,6 +98,7 @@ Last activity: 2026-08-29 — Phase 14 execution started
 | Phase 14 P02 | 45 min | 3 tasks | 10 files |
 | Phase 14 P03 | 12 min | 3 tasks | 9 files |
 | Phase 14 P04 | 11 min | 3 tasks | 10 files |
+| Phase 14 P05 | 20 min | 4 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -193,6 +194,7 @@ Recent decisions affecting current work:
 - [Phase 14]: [14-01] Phase 14 adds two env vars not one: INSTANCE_PASSPHRASE + TRUST_PROXY_HEADERS (default false, gates middleware.RealIP per D-14). Session timings stay hardcoded (D-07). .env.example edited by operator (denied to agent tools, Phase 11.1-04 limitation).
 - [Phase 14]: [14-03] SPA gate: authStore is a plain pub/sub module (authed optimistic-true, gateActive=D-18) poked by a single apiFetch 401 interceptor; X-Requested-With: drop-tracker injected centrally on every non-GET (D-15 client half); PassphraseScreen + gateActive-gated Log out. GATE-05/06 complete.
 - [Phase 14]: [14-03] Frontend test pattern: singleton-store tests reset via vi.resetModules()+dynamic import; a test needing the real ApiError class uses a partial mock of ~/lib/api (importOriginal spread + vi.fn spies) instead of a bare automock which breaks instanceof/err.status.
+- [Phase 14]: [Phase 14]: [14-05] G-14-1 closed. docker-compose.yml app.environment: forwards INSTANCE_PASSPHRASE/TRUST_PROXY_HEADERS as ${VAR:-default} interpolations (env_file: .env still primary); cmd/server logInstanceGateStatus emits one secret-free Info line per boot (active/inert), sourced from cfg.InstancePassphrase not a second os.Getenv; TestDockerComposeWiresGateEnvVars makes a dropped gate env entry a CI failure. docker compose config banned as a verify step (inlines env_file secrets). Operator reconciled the live .env (denied to agent tools).
 
 ### Pending Todos
 
@@ -246,8 +248,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-29T17:23:03.993Z
-Stopped at: Completed 14-04-PLAN.md
+Last session: 2026-09-01T02:18:56.014Z
+Stopped at: Completed 14-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
