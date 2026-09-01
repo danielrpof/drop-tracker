@@ -2,42 +2,42 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Continuous Deployment
-current_phase: 14
-current_phase_name: Instance Passphrase Gate
-status: executing
-stopped_at: Completed 14-07-PLAN.md
-last_updated: "2026-09-01T17:56:01.551Z"
+current_phase: 15
+current_phase_name: PR Coverage-Diff Comment
+status: planning
+stopped_at: Phase 14 complete, ready to plan Phase 15
+last_updated: "2026-09-01T18:48:44.848Z"
 last_activity: 2026-09-01
-last_activity_desc: Phase 14 execution started
-state_head: be5f8e95741d5437e1949bf65e6495f4cfb4c1fe
+last_activity_desc: Phase 14 complete, transitioned to Phase 15
+state_head: 256e056feb796e32b226324a432d230f17f304bf
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-27)
+See: .planning/PROJECT.md (updated 2026-09-01)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 14 — Instance Passphrase Gate
+**Current focus:** Phase 15 — PR Coverage-Diff Comment
 
 ## Current Position
 
-Phase: 14 (Instance Passphrase Gate) — EXECUTING
-Plan: 2 of 7
-Status: Ready to execute
-Last activity: 2026-09-01 — Phase 14 execution started
+Phase: 15 — PR Coverage-Diff Comment
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-01 — Phase 14 complete, transitioned to Phase 15
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 57
+- Total plans completed: 64
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -58,6 +58,7 @@ Last activity: 2026-09-01 — Phase 14 execution started
 | 11.1 | 5 | - | - |
 | 12 | 3 | - | - |
 | 13 | 3 | - | - |
+| 14 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -201,6 +202,8 @@ Recent decisions affecting current work:
 - [Phase 14]: [14-07] G-14-3 closed: gate.Authenticate sets X-Instance-Gated: 1 on its proven-valid-cookie path (before next.ServeHTTP, never on the 401 returns); apiFetch latches it via new authStore.markGateActive() — a one-way latch that never reads/writes authed (D-16) and never clears. Marker registered only in server.go's gate != nil branch, so D-18's ungated guarantee now holds structurally. root.tsx and internal/httpserver/server.go unmodified.
 - [Phase 14]: [14-07] D-18's gateActive trigger set is now three: an observed 401, a completed login, or an observed gated response (X-Instance-Gated marker). The third strengthens the ungated guarantee (marker only exists on the gated code path) rather than weakening it. Recorded in SUMMARY, not by editing 14-CONTEXT.md.
 - [Phase 14]: [14-07] WR-01 retired: the typeof sessionStorage probe moved inside the existing try in readPersistedGateActive/persistGateActive, covered by a jsdom test that redefines the global with a throwing getter. One catch now covers all three storage failure modes (absent, throwing methods, throwing accessor).
+- [Phase 14 UAT, closed 2026-09-01]: All 5 UAT tests pass. Test 5 (G-14-3 re-run: carried-cookie fresh gated session renders the Log out control on first authed view, survives refresh/tab-nav/add-artist, absent on an ungated instance) confirmed by the operator in a real browser against `docker compose up --build`. G-14-1/G-14-2/G-14-3 all resolved. Phase 14 marked complete, transitioned to Phase 15.
+- [Phase 14 Security]: `/gsd-secure-phase 14` (State B, ASVS L1, block_on high) — 67 threats across the 7 plans' STRIDE registers, 66 closed, `threats_open: 0`. No auditor spawn (short-circuit: register authored at plan time + L1). One below-threshold open item recorded as T-14-CACHE-01 (14-REVIEW WR-01): gated authenticated 2xx responses set no `Cache-Control: no-store` / `Vary: Cookie` — medium, non-blocking, recommendation logged for the same middleware that stamps `X-Instance-Gated`. See 14-SECURITY.md.
 
 ### Pending Todos
 
@@ -254,12 +257,13 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-01T17:56:01.442Z
-Stopped at: Completed 14-07-PLAN.md
+Last session: 2026-09-01T18:48:00Z
+Stopped at: Phase 14 complete (UAT 5/5, security cleared), ready to plan Phase 15
 Resume file: None
 
 ## Operator Next Steps
 
-- Review `.planning/ROADMAP.md` — 4 phases, 21/21 v1.3 requirements mapped
-- Plan the first phase with `/gsd-plan-phase 14`
+- `/clear` then `/gsd-plan-phase 15` (or `/gsd-discuss-phase 15` first) — PR Coverage-Diff Comment. Open decision: baseline storage (Actions cache vs. orphan branch).
+- Phase 15's edit target is `.github/workflows/full-pipeline.yml` — the same shared file Phases 16 and 17 touch; keep the 15 → 16 → 17 order.
 - Before planning Phase 17, run its discuss/spec pass — the TLS reverse-proxy choice blocks the first deploy
+- Non-blocking follow-up from Phase 14 security: consider `Cache-Control: no-store` on the gated response path (T-14-CACHE-01 / 14-REVIEW WR-01)

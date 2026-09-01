@@ -1,7 +1,7 @@
 ---
 phase: 14-instance-passphrase-gate
 verified: 2026-09-01T18:07:04Z
-status: human_needed
+status: passed
 score: 7/7 must-haves verified (GATE-01..GATE-07 in code + tests; G-14-1, G-14-2, G-14-3 all closed in code and covered by passing automated regressions)
 behavior_unverified: 0
 overrides_applied: 0
@@ -16,6 +16,7 @@ re_verification:
   regressions: []
 behavior_unverified_items: []
 human_verification:
+
   - test: "Re-run 14-UAT.md Test 5 in a real browser against `docker compose up --build` with the gate ACTIVE (boot log `logInstanceGateStatus` confirms). Follow Test 5's new `G-14-3 re-run` sub-block FIRST: from a session that has already unlocked, either close the tab and open a new one OR delete only the `dt_gate_active` Session Storage entry in devtools (do NOT use the Log out control, do NOT clear cookies — the `dt_session` cookie must survive). Open the app in that fresh tab: you must be let straight in with no passphrase form AND the Log out control must be present in the nav on that first authenticated view, once the first data request completes — with no passphrase typed and no reload. Then the positive check: unlock with the passphrase, full browser refresh (control persists, no re-login), navigate Watchlist <-> History, add an artist, refresh again (control persists for the browser session). Then the negative check: clear `dt_gate_active` (or close the tab) and load an instance with NO passphrase configured — the Log out control must be ABSENT."
     expected: "On a gated instance the Log out control is present on the first authenticated view of a carried-cookie session and survives refresh + tab-nav + add-artist for the browser session; on an ungated instance it is absent after the storage entry is cleared. Access to the watchlist never depends on the control being visible — the server 401 is the sole enforcement."
     why_human: "G-14-3 was operator-reported from a real browser session on the built Docker image. The automated suite proves the entire chain (Go marker contract; header -> apiFetch -> store -> rendered control end-to-end in jsdom), but 14-UAT.md Test 5 still records `result: issue` and reconciles against real-browser behaviour on the built image. Coverage item D7 is `human_judgment: true`."
@@ -27,7 +28,7 @@ gaps: []
 **Phase Goal:** A drop-tracker instance on a public URL only exposes its watchlist data, search proxy, and event history to someone who knows the instance passphrase — while local dev, docker-compose, and the existing test suites keep working with no passphrase configured at all. This must land before anything in this milestone makes the app publicly reachable, so the instance is never briefly public-and-open.
 
 **Verified:** 2026-09-01
-**Status:** human_needed
+**Status:** passed — canonicalized after 14-UAT.md Test 5 operator re-run PASS (2026-09-01); the only outstanding item was human UAT.
 **Re-verification:** Yes — after G-14-3 gap closure (plan 14-07)
 
 ## Re-verification Summary
@@ -166,7 +167,7 @@ No blocking gaps. All seven GATE requirement IDs are implemented, wired end-to-e
 
 **G-14-3 — the Log out control absent on a fresh gated session holding a carried-over valid cookie — is closed in code:** `gate.Authenticate` now stamps `X-Instance-Gated: 1` on every proven-valid-cookie response (and on neither 401 path), `apiFetch` latches that marker into a new one-way `authStore.markGateActive()` before its 401/204/!ok branches, `markGateActive` writes `gateActive` only and never touches `authed` or clears, the marker's only write site is inside `Authenticate` (registered solely in `server.go`'s `gate != nil` branch, so an ungated instance emits nothing structurally), `root.tsx` and `server.go` are unchanged, and an end-to-end regression drives a real marker-carrying 200 through the real `apiFetch` and store into React and asserts the control mounts. The prior 14-VERIFICATION residual WR-01 (`typeof` probe outside the `try`) is also fixed and now has automated jsdom coverage.
 
-Status is `human_needed` (not `passed`) because 14-UAT.md Test 5 — G-14-3's own reconciliation test — still records `result: issue` and must be re-run by a human in a real browser against the built Docker image (coverage D7, `human_judgment: true`). One WARNING-level code-review finding (CR-WR-01: gated responses carry the new marker and the data bodies with no `Cache-Control: no-store`) is a pre-existing caching/replay risk that 14-07 compounds; it does not block the Phase 14 goal (no shared cache in the current deployment, server-side 401 enforcement intact) but is **recommended for closure before Phase 17 makes the instance publicly reachable**.
+Status is now `passed`. It was `human_needed` pending the sole outstanding item — 14-UAT.md Test 5 (G-14-3's own reconciliation test, coverage D7, `human_judgment: true`) — which the operator re-ran in a real browser against `docker compose up --build` on 2026-09-01 with result PASS: on a gated instance a carried-cookie session with no typed login and no 401 renders the Log out control on its first authenticated view and it survives refresh / tab-nav / add-artist; on an ungated instance it is absent. All 5 UAT tests pass. `/gsd-secure-phase 14` cleared the phase with `threats_open: 0` (see 14-SECURITY.md). One WARNING-level code-review finding (CR-WR-01: gated responses carry the new marker and the data bodies with no `Cache-Control: no-store`) is a pre-existing caching/replay risk that 14-07 compounds; it does not block the Phase 14 goal (no shared cache in the current deployment, server-side 401 enforcement intact) but is **recommended for closure before Phase 17 makes the instance publicly reachable** — tracked as T-14-CACHE-01 in 14-SECURITY.md.
 
 ---
 

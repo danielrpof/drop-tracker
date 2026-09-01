@@ -80,11 +80,11 @@ v1.2 then closed the backlog and outstanding display bugs: Phase 12 fixed the `C
 - ✓ v1.1 tech-debt cleanup (13 locked decisions closing residual items from `.planning/v1.1-MILESTONE-AUDIT.md`) — frontend test-coverage gaps filled, History filter dropdown legibility fixed (native `<select>` replaced with a hand-rolled combobox after a CSS-only fix was found not to work on Windows Chromium), `prettier --check` now gates CI, notification-loss window made log-observable, `PoolConfig`'s two parse errors differentiated, boot test hardened, coverage-filter regex anchored, Postgres port revert (5433→5432) committed with full history, and Phases 08/09/10's Nyquist `VALIDATION.md` files reconciled out of `draft` — Phase 11.1
 - ✓ `CoverArt.tsx` error-state reset on `src` change, plus Deezer-fan-count-based search popularity ranking and MusicBrainz country fallback (absorbing backlog Phase 999.1) — Phase 12
 - ✓ History-card release dates (single/feature/deluxe), guest-feature album art via a new per-recording MusicBrainz lookup, and MusicBrainz/Deezer artist art via a hand-rolled `internal/artistart` matcher wired into both add-time and a cooldown-bounded startup backfill sweep (absorbing backlog Phase 999.2) — Phase 13
+- ✓ Instance passphrase gate — optional `INSTANCE_PASSPHRASE` enables an HMAC-SHA256 signed-cookie session gate over every route except `/health`, `POST`/`DELETE /session`, and the SPA shell; inert (no gate, no CSRF middleware) when unset so local dev, docker-compose, CI, and the test suites are unchanged (GATE-07); per-IP `rate.Limiter` + fixed comparison delay + a global brute-force counter that fires exactly one Discord alert (count + window only); React passphrase screen conforming to the phase UI-SPEC, plus a browser-session-scoped Log out control gated on a self-identifying `X-Instance-Gated` response marker — Phase 14
 
 ### Active
 
 - [ ] VPS SSH-based deploy step, automated on merge to main, with `/health`-gated auto-rollback (v1.3 — DPLY-01)
-- [ ] Instance passphrase gate protecting all routes except `/health` on a public deployment (v1.3)
 - [ ] PR coverage-diff comment for backend + frontend vs. the main baseline (v1.3 — CICD-13)
 
 ### Out of Scope
@@ -151,6 +151,9 @@ v1.2 then closed the backlog and outstanding display bugs: Phase 12 fixed the `C
 | Blocking `prettier --check` added to the existing `frontend-test` CI job, not a new job | Formatting drift (40 files) had accumulated silently with no CI signal; reusing the job that already runs on every push avoids adding pipeline surface for a lint-adjacent check | Validated Phase 11.1 — `web/` tree reformatted once, gate now fails the build on any future drift |
 | Strict close-name equality + guarded-containment title tie-break for MusicBrainz→Deezer artist-art matching, fail-closed on any ambiguity, popularity (`NbFan`) explicitly excluded as a signal | A wrong-artist photo misrepresents identity and is worse than no photo — the primary risk this plan's own threat model (T-13-06) identified; unguarded fuzzy matching or "take the most popular candidate" would silently violate that | Validated Phase 13 — `internal/artistart/match.go`, `NbFan` asserted absent from executable code by grep criterion, extensive fail-closed test coverage |
 | Shared `ActivityGate` priority-yielding primitive instead of a second rate budget for coordinating add-time matching and the backfill sweep | A second independent rate budget would let combined outbound traffic exceed MusicBrainz's real ~1 req/sec external ceiling; yielding priority to interactive adds keeps total traffic bounded by the existing single limiter | Validated Phase 13 — `internal/artistart/activity.go`, atomic-counter + `sync.Once`-guarded, proven via concurrent stress tests |
+| Optional single-secret instance gate (HMAC-signed cookie), not multi-user auth | v1.3 scoping rejected accounts/RBAC as orthogonal complexity; the deployment threat is "the instance is briefly public-and-open", which one shared passphrase closes. `INSTANCE_PASSPHRASE` unset ⇒ `gate == nil` ⇒ data routes registered flat with no middleware (GATE-07 inert path) | Validated Phase 14 — `internal/authgate`; structural route exemptions (never path-string matched); server 401 is the sole enforcement, all client auth/gate flags are presentation-only |
+| Client discovers "instance is gated" from a self-identifying `X-Instance-Gated: 1` response marker on gate-passing 2xx responses, latched one-way into `authStore.gateActive` | A browser session carrying a valid `dt_session` cookie sees no 401 and types no passphrase, so the SPA otherwise had no signal to render the Log out control (G-14-3). Marker's only write site is inside `Authenticate`, registered solely in the `gate != nil` branch, so an ungated instance emits nothing structurally (D-18) | Validated Phase 14 (gap closure 14-07) — Go marker matrix + jsdom header→apiFetch→store→rendered-control end-to-end; operator real-browser UAT PASS |
+| Config forwarded through docker-compose `env_file: .env` **and** `environment: ${INSTANCE_PASSPHRASE:-}`, with a secret-free boot-status log line | G-14-1: editing `.env.example` or a host-shell `export` silently did nothing — the container only ever read `.env`, so the gate shipped inert unnoticed | Validated Phase 14 (gap closure 14-05) — `logInstanceGateStatus` reports ACTIVE/INERT on every start, prints no secret; compose regression test |
 
 ## Evolution
 
@@ -170,4 +173,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-27 at start of v1.3 Continuous Deployment milestone*
+*Last updated: 2026-09-01 after Phase 14*
