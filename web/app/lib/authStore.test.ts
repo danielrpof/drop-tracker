@@ -188,6 +188,45 @@ describe("authStore — gateActive survives a browser-session reload (D-18)", ()
     expect(reloaded.isGateActive()).toBe(true)
     expect(listener).toHaveBeenCalledTimes(2)
   })
+
+  it("does not throw and leaves the gate inactive when the sessionStorage accessor itself throws (WR-01)", async () => {
+    // The third failure mode: not an absent store, not throwing methods, but a
+    // property GETTER that throws on access -- a sandboxed <iframe> without
+    // allow-same-origin, or a browser with storage disabled by policy. A bare
+    // `typeof sessionStorage` probe does not suppress this (typeof only
+    // suppresses ReferenceError for undeclared identifiers), so an unguarded
+    // module init would white-screen the whole SPA via root.tsx's top-level
+    // import.
+    const original = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "sessionStorage"
+    )
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      get() {
+        throw new Error("SecurityError: sessionStorage access denied")
+      },
+    })
+    try {
+      const reloaded = await reimportStore()
+      expect(reloaded.isGateActive()).toBe(false)
+
+      const listener = vi.fn()
+      reloaded.subscribe(listener)
+
+      expect(() => reloaded.markAuthenticated()).not.toThrow()
+      expect(() => reloaded.markUnauthenticated()).not.toThrow()
+
+      expect(reloaded.isGateActive()).toBe(true)
+      expect(listener).toHaveBeenCalledTimes(2)
+    } finally {
+      if (original) {
+        Object.defineProperty(globalThis, "sessionStorage", original)
+      } else {
+        delete (globalThis as { sessionStorage?: unknown }).sessionStorage
+      }
+    }
+  })
 })
 
 describe("authStore — markGateActive latches a gated authed load (G-14-3)", () => {
