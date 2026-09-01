@@ -401,6 +401,67 @@ func TestEnvExampleCompleteness(t *testing.T) {
 	}
 }
 
+// TestDockerComposeWiresGateEnvVars is the G-14-1 regression guard. The
+// instance passphrase gate silently did nothing through a whole Phase 14 UAT
+// round because the app container booted with an empty INSTANCE_PASSPHRASE
+// and nothing in docker-compose.yml forwarded a host-shell value or made the
+// gate<->config coupling visible in the file. This test fails, naming the
+// missing key, if either gate env entry is dropped from the app service's
+// environment mapping -- so the regression surfaces in CI instead of a UAT.
+//
+// It uses a bufio.Scanner line walk (the idiom envExampleKeys and
+// TestDotEnvIsNotTracked already use) rather than a YAML parser: this plan
+// ships zero new module dependencies.
+func TestDockerComposeWiresGateEnvVars(t *testing.T) {
+	path := filepath.Join(repoRoot(t), "docker-compose.yml")
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open docker-compose.yml: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	var passphraseLine, trustProxyLine string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "INSTANCE_PASSPHRASE:") {
+			passphraseLine = line
+		}
+		if strings.HasPrefix(line, "TRUST_PROXY_HEADERS:") {
+			trustProxyLine = line
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan docker-compose.yml: %v", err)
+	}
+
+	if passphraseLine == "" {
+		t.Errorf("docker-compose.yml has no non-comment `INSTANCE_PASSPHRASE:` entry in the app service " +
+			"environment mapping; a host-shell INSTANCE_PASSPHRASE will not reach the container (G-14-1 regression)")
+	} else if !strings.Contains(passphraseLine, "${INSTANCE_PASSPHRASE") {
+		t.Errorf("docker-compose.yml INSTANCE_PASSPHRASE entry %q does not reference the variable as a "+
+			"Compose interpolation (${INSTANCE_PASSPHRASE...})", passphraseLine)
+	}
+
+	if trustProxyLine == "" {
+		t.Errorf("docker-compose.yml has no non-comment `TRUST_PROXY_HEADERS:` entry in the app service " +
+			"environment mapping (G-14-1 regression)")
+	} else {
+		if !strings.Contains(trustProxyLine, "${TRUST_PROXY_HEADERS") {
+			t.Errorf("docker-compose.yml TRUST_PROXY_HEADERS entry %q does not reference the variable as a "+
+				"Compose interpolation (${TRUST_PROXY_HEADERS...})", trustProxyLine)
+		}
+		if !strings.Contains(trustProxyLine, ":-false}") {
+			t.Errorf("docker-compose.yml TRUST_PROXY_HEADERS entry %q does not carry a `false` default "+
+				"(:-false}); D-14's fail-safe direction must not be silently dropped", trustProxyLine)
+		}
+	}
+}
+
 func TestDotEnvIsNotTracked(t *testing.T) {
 	root := repoRoot(t)
 
