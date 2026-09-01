@@ -130,7 +130,7 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	// login throttle and audit log key on r.RemoteAddr -- the direct peer,
 	// which a client cannot spoof -- so a misconfigured deploy fails safe.
 	if gate != nil && cfg.trustProxyHeaders {
-		r.Use(middleware.RealIP)
+		r.Use(middleware.RealIP) //nolint:staticcheck // SA1019: chi deprecated middleware.RealIP over header-spoofing advisories; the advisory's own stated mitigation is to trust X-Forwarded-For / X-Real-IP only behind a proxy that sets them, which is exactly what the D-14 comment block directly above governs -- registration is gated behind TRUST_PROXY_HEADERS (default false) and Phase 17 enables it only together with the topology where the container port is never published. Removing RealIP is not the fix here: it is a Phase 17 prerequisite, and dropping it would leave the login throttle and audit log keyed on a proxy's own address once that topology lands.
 	}
 
 	// Referrer-Policy: no-referrer on every response -- gated or inert

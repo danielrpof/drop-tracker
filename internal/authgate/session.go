@@ -120,8 +120,8 @@ func unmarshalPayload(b []byte) (Token, bool) {
 		return Token{}, false
 	}
 	var t Token
-	t.IssuedAt = time.Unix(0, int64(binary.BigEndian.Uint64(b[0:8]))).UTC()
-	t.Expiry = time.Unix(0, int64(binary.BigEndian.Uint64(b[8:16]))).UTC()
+	t.IssuedAt = time.Unix(0, int64(binary.BigEndian.Uint64(b[0:8]))).UTC() //nolint:gosec // G115: exact inverse of marshalPayload's uint64(t.IssuedAt.UnixNano()) write; both sides are 64 bits so the two's-complement round-trip is total, not narrowing -- no value is unrepresentable and no truncation is possible. A forged/corrupted payload only reaches here after Verify's constant-time MAC comparison has passed, and the worst case is a nonsense timestamp that Verify then rejects via its absolute-cap and expiry checks. A signed decode is what the fixed-width wire format documented at payloadLen intends.
+	t.Expiry = time.Unix(0, int64(binary.BigEndian.Uint64(b[8:16]))).UTC()  //nolint:gosec // G115: exact inverse of marshalPayload's uint64(t.Expiry.UnixNano()) write; both sides are 64 bits so the two's-complement round-trip is total, not narrowing -- no value is unrepresentable and no truncation is possible. A forged/corrupted payload only reaches here after Verify's constant-time MAC comparison has passed, and the worst case is a nonsense timestamp that Verify then rejects via its absolute-cap and expiry checks. A signed decode is what the fixed-width wire format documented at payloadLen intends.
 	copy(t.Nonce[:], b[16:32])
 	return t, true
 }
