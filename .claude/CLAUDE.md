@@ -1,3 +1,22 @@
+<!-- Hand-maintained section — it sits above every GSD marker block below so `generate-claude-md` never overwrites it. Keep it first. -->
+
+## Definition of Done — run before every commit
+
+Every commit must clear the same gates CI enforces. Run them locally first, don't outsource the check to CI.
+
+**Format frontend first.** If anything under `web/` changed, run `corepack pnpm --dir web exec prettier --write "**/*.{ts,tsx}"` before staging. Prettier's output and `prettier-plugin-tailwindcss` class ordering cannot be reproduced by hand, so hand-formatted TSX fails CI's `frontend-test` job.
+
+1. `go vet ./...`
+2. `golangci-lint run`
+3. `make test` — integration suite; run `make db-up` first
+4. `make coverage-gate` — 80% backend floor
+5. `make sqlc-check` — local-only, no CI counterpart; CI will not catch sqlc drift
+6. Web changes only: `cd web && corepack pnpm exec prettier --check "**/*.{ts,tsx}"` and `corepack pnpm test`
+
+(Where bare `pnpm` is on PATH, drop the `corepack` prefix.)
+
+**Never bypass the hooks with `git commit --no-verify`.** The hooks (gitleaks, golangci-lint `--fix`, prettier `--write`) are the fast local mirror of CI — skipping them only relocates the failure somewhere slower and more public. Install them with `make hooks`.
+
 <!-- GSD:project-start source:PROJECT.md -->
 
 ## Project
