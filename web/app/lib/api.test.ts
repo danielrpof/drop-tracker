@@ -320,7 +320,8 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
   it("latches once: two successive marker-carrying responses notify a subscriber exactly once", async () => {
     const listener = vi.fn()
     authStore.subscribe(listener)
-    fetchSpy.mockResolvedValue(jsonResponse([], 200, GATED))
+    // A fresh Response per call -- a single Response body can only be read once.
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse([], 200, GATED)))
 
     await api.listWatchlist()
     await api.listWatchlist()
