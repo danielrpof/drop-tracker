@@ -1,137 +1,181 @@
 ---
 phase: 14-instance-passphrase-gate
-reviewed: 2026-08-31T00:00:00Z
+reviewed: 2026-09-01T00:00:00Z
 depth: standard
-files_reviewed: 3
+files_reviewed: 7
 files_reviewed_list:
+  - internal/authgate/gate.go
+  - internal/authgate/gate_test.go
+  - web/app/lib/api.ts
+  - web/app/lib/api.test.ts
   - web/app/lib/authStore.ts
   - web/app/lib/authStore.test.ts
   - web/app/root.test.tsx
 findings:
   critical: 0
-  warning: 1
-  info: 2
-  total: 3
+  warning: 2
+  info: 4
+  total: 6
 status: issues_found
 ---
 
 # Phase 14: Code Review Report
 
-**Reviewed:** 2026-08-31
+**Reviewed:** 2026-09-01
 **Depth:** standard
-**Scope:** Gap-closure delta 14-06 (closes G-14-2) — `8fac9ae~1..HEAD`
-**Files Reviewed:** 3
+**Files Reviewed:** 7
 **Status:** issues_found
 
 ## Summary
 
-The 14-06 change adds `sessionStorage`-backed persistence of the presentation-only
-`gateActive` flag so a full document reload (valid cookie, no 401, no login) still
-renders the **Log out** control. The design is sound and the checked invariants hold:
+Plan 14-07 adds a self-identifying `X-Instance-Gated: 1` response marker in
+`gate.Authenticate` and a monotonic one-shot client latch (`markGateActive`)
+that `apiFetch` fires on the first marker-carrying response. The core
+correctness properties hold up under scrutiny:
 
-- `isGateActive` / `isAuthed` snapshot getters return the cached module boolean and
-  do **not** re-read storage — `useSyncExternalStore`'s stable-snapshot contract is
-  respected (authStore.ts:118-119, 145-148).
-- `authed` is never written to storage; only `gateActive` is persisted, via the
-  single `persistGateActive` writer called from both `mark*` functions.
-- The Node SPA-prerender path (`react-router build`, `ssr: false`) cannot hit a
-  `ReferenceError`: `typeof sessionStorage === "undefined"` on an *undeclared* global
-  is safe in Node and returns `"undefined"`, so `readPersistedGateActive()` returns
-  `false` at module init.
-- `gateActive` seeded `true` while `authed` stays optimistically `true` does not
-  leak a Log out button onto `<PassphraseScreen>` — `LogoutButton` renders only
-  inside the `authed` nav branch (root.tsx:105-118).
-- Test isolation is correct: `sessionStorage.clear()` is the first statement in both
-  `beforeEach` hooks, ahead of `vi.resetModules()` and the dynamic re-import, and
-  `afterEach` restores stubbed globals.
+- **Monotonic / one-shot:** `markGateActive` early-returns on `gateActive`,
+  so it flips state and notifies at most once per browser session. Verified
+  against `authStore.test.ts` and `api.test.ts`.
+- **Never resurrects a session after a 401:** `markGateActive` never reads or
+  writes `authed`. In every interleaving of a stale marker-bearing 200 and a
+  401 (either order, concurrent), `authed` ends up `false` and stays there.
+  The marker is never emitted on the two 401 return paths in `Authenticate`.
+- **sessionStorage throw-safety (WR-01 residual):** both `readPersistedGateActive`
+  and `persistGateActive` now put the `typeof` probe inside the `try`, so a
+  single `catch` covers the undeclared-identifier, throwing-method, and
+  throwing-accessor cases. `authStore.test.ts` exercises all three.
+- **Ungated instance never emits the marker:** confirmed structurally --
+  `server.go:173` registers `gate.Authenticate` only inside the
+  `WithAuthGate` branch, and the marker is set only inside that middleware.
 
-One incomplete guard is worth fixing (WR-01) plus two minor test-quality notes.
+Two WARNING-level gaps concern caching/replay of the new header and one
+latch durability edge. Nothing rises to BLOCKER.
 
 ## Warnings
 
-### WR-01: `typeof sessionStorage` access sits outside the try/catch and can throw at module load
+### WR-01: Gated responses carry the new marker with no `Cache-Control: no-store`
 
-**File:** `web/app/lib/authStore.ts:80-88` (and the same shape at `92-102`)
-**Issue:**
-`readPersistedGateActive()` runs unguarded at module-init time (line 107) and its
-first statement is `if (typeof sessionStorage === "undefined")`. `typeof` only
-suppresses errors for *unresolvable* references. When `window.sessionStorage` is a
-present-but-throwing getter — Firefox with `dom.storage.enabled=false`, an
-enterprise storage policy, or (most realistically) the SPA rendered inside an
-`<iframe sandbox>` without `allow-same-origin` — the getter throws `SecurityError`
-and `typeof` propagates it. Because the `try`/`catch` starts *after* this line, the
-exception escapes `readPersistedGateActive`, escapes the module initializer, and
-fails the `import` of `authStore` — which `root.tsx` imports at the top level,
-white-screening the whole SPA.
+**File:** `internal/authgate/gate.go:200` (and absent server-wide -- `grep`
+finds zero `Cache-Control` / `Vary` in any `.go` file)
 
-This is exactly the failure mode the file's own header comment claims to prevent
-("a browser can deny or throw on storage access (private mode, disabled storage);
-an unguarded read at module scope would white-screen the whole SPA"). The current
-code only covers the `getItem`/`setItem`-throws and quota-exceeded cases, not the
-property-access-throws case named in that comment. Not a BLOCKER because default
-browser configs — including standard incognito/private mode — expose a working
-`sessionStorage`, so the common paths are covered.
+**Issue:** `Authenticate` now stamps `X-Instance-Gated: 1` onto every
+cookie-authenticated 2xx/4xx (including `GET /watchlist`, `GET /events`,
+`GET /search`), but no gated response sets `Cache-Control: no-store` (or
+`private`) and none sets `Vary: Cookie`. A shared/intermediary cache or a
+misconfigured reverse proxy/CDN in front of the single binary can store one
+user's authenticated `GET /watchlist` 200 -- body and the marker header --
+and replay it to a different client. The pre-existing risk is the watchlist
+body leak; 14-07 compounds it by also causing the recipient to latch
+`gateActive` (persisted to their `sessionStorage` for the session),
+permanently showing a "Log out" control they never earned. Because the marker
+is designed to be discovered from "an ordinary authenticated 200", these
+responses are exactly the ones most likely to look cacheable.
 
-**Fix:** wrap the whole body, including the `typeof` probe, in `try`/`catch`:
-```ts
-function readPersistedGateActive(): boolean {
-  try {
-    if (typeof sessionStorage === "undefined") return false
-    return sessionStorage.getItem(GATE_ACTIVE_STORAGE_KEY) === GATE_ACTIVE_STORAGE_VALUE
-  } catch {
-    return false
-  }
-}
+**Fix:** Set `no-store` on the gated path, ideally in the same middleware that
+sets the marker so the two cannot drift:
 
-function persistGateActive(): void {
-  try {
-    if (typeof sessionStorage === "undefined") return
-    sessionStorage.setItem(GATE_ACTIVE_STORAGE_KEY, GATE_ACTIVE_STORAGE_VALUE)
-  } catch {
-    // storage denied, full, or access throws — in-memory boolean still carries the gate
-  }
-}
+```go
+w.Header().Set(instanceGatedHeaderName, instanceGatedHeaderValue)
+w.Header().Set("Cache-Control", "no-store")
 ```
-Add a test that stubs `sessionStorage` with a *throwing getter* (via
-`Object.defineProperty` on the stub or `vi.stubGlobal` with a getter that throws),
-not just throwing `getItem`/`setItem`, and asserts module import + `mark*` do not throw.
+
+Or add a small middleware on the protected `chi.Group` in `server.go`
+alongside `pr.Use(gate.Authenticate)`.
+
+### WR-02: `markGateActive` never retries a failed `persistGateActive`
+
+**File:** `web/app/lib/authStore.ts:171-178`
+
+**Issue:** `markGateActive` early-returns whenever `gateActive` is already
+`true`, so it calls `persistGateActive()` exactly once -- on the transition.
+If that single `setItem` throws (private-mode quota, transient policy denial)
+the failure is swallowed and never retried, even though `markGateActive` runs
+on every subsequent API response and would be the natural place to re-attempt
+the write. By contrast `markAuthenticated` / `markUnauthenticated` call
+`persistGateActive()` unconditionally and therefore self-heal. The result:
+for a pure cookie-session user (no 401, no typed login) on a browser where
+`getItem` works but `setItem` intermittently throws, the "Log out" control
+disappears on every full document reload until the first API response
+re-latches it. Low severity (narrow condition, cosmetic), but it is a real
+regression from the always-retry behaviour of the other two `mark*` paths.
+
+**Fix:** Attempt the persist even when the in-memory flag is already set, and
+keep the guard only around `notify()` and the state assignment. Alternatively
+accept the edge and document it explicitly as a known limitation next to the
+method.
 
 ## Info
 
-### IN-01: No test pins the "snapshot must not re-read storage" contract
+### IN-01: Structural "ungated instance" guarantee is asserted only in prose + tests
 
-**File:** `web/app/lib/authStore.test.ts` (new `describe` block, lines 102-191)
-**Issue:**
-The review brief and the source comment (authStore.ts:145-148) both call out that
-`isGateActive()` must return the cached module boolean and never re-read
-`sessionStorage` on each call. Every new test either reloads the module or calls a
-`mark*` function; none asserts the negative — that writing `dt_gate_active` to
-`sessionStorage` *after* import leaves `isGateActive()` returning `false` until a
-reload or `mark*`. A future refactor that made the getter re-read storage would
-pass the entire suite.
-**Fix:** add a case:
+**File:** `internal/authgate/gate.go:118-130`, `:200`
+
+**Issue:** `Authenticate` sets the marker unconditionally whenever it runs.
+D-18's "an ungated instance emits no `X-Instance-Gated`" depends entirely on
+`server.go:173` keeping `pr.Use(gate.Authenticate)` inside the `WithAuthGate`
+branch. There is no type-level or assertion-level coupling; a future
+middleware-registration refactor that hoists `Authenticate` (or copies the
+`w.Header().Set`) would silently break D-18 with no compile or runtime error.
+`gate_test.go`'s `TestGate_InstanceGatedMarker_AbsentOnUnauthenticatedAndUngated`
+covers today's behaviour, which is the mitigation -- noted so a reviewer of a
+future refactor knows the guarantee is load-bearing.
+
+**Fix:** No change required now. If the middleware wiring is ever touched,
+keep the D-18 sub-test green and treat it as a gate.
+
+### IN-02: Latch silently no-ops if the API is ever served cross-origin
+
+**File:** `web/app/lib/api.ts:146`
+
+**Issue:** `res.headers.get("X-Instance-Gated")` returns `null` for a
+cross-origin response unless the server also sends
+`Access-Control-Expose-Headers: X-Instance-Gated`. This is fine today (single
+binary, same origin, no CORS per CLAUDE.md), but if the API is ever split out
+the latch fails closed -- no "Log out" control, no error. Worth a one-line
+comment next to the marker constant so a future split doesn't lose the
+behaviour quietly.
+
+**Fix:** Add a note to the `INSTANCE_GATED_HEADER` comment block:
+"same-origin only -- a cross-origin deployment must add
+`Access-Control-Expose-Headers: X-Instance-Gated`."
+
+### IN-03: Test matrix gaps on the marker's negative space
+
+**File:** `internal/authgate/gate_test.go:775-825`
+
+**Issue:** The negative matrix covers gated-401, gated-exempt-`/health`, and
+ungated. Two behaviours are unpinned:
+1. `POST` / `DELETE /session` (exempt, but non-GET) -- not asserted to omit
+   the marker.
+2. A CSRF 403 from `RequireCSRFHeader` does carry the marker (it runs after
+   `Authenticate`, which already stamped `w`). This is arguably correct -- the
+   caller is authenticated -- but no test documents the intended behaviour
+   either way, and on the client that 403 runs `markGateActive` with no 401
+   path.
+
+**Fix:** Add a sub-test asserting the marker is absent on `POST /session` /
+`DELETE /session`, and one asserting or documenting whether a post-Authenticate
+403 carries it.
+
+### IN-04: `apiFetch` reads a header on every response for a session-lifetime one-shot
+
+**File:** `web/app/lib/api.ts:146-148`
+
+**Issue:** Once `gateActive` latches, every subsequent `apiFetch` still does
+`res.headers.get(...)` + string compare + a call into `markGateActive` that
+early-returns. Negligible cost and out of v1 perf scope -- noted only because a
+`if (!authStore.isGateActive())` short-circuit at the call site would make the
+one-shot intent obvious at the point of use rather than only inside the store.
+
+**Fix:** Optional:
 ```ts
-it("does not re-read the session store after module load", () => {
-  sessionStorage.setItem(GATE_ACTIVE_STORAGE_KEY, GATE_ACTIVE_STORAGE_VALUE)
-  expect(authStore.isGateActive()).toBe(false) // still the load-time value
-})
+if (!authStore.isGateActive() && res.headers.get(INSTANCE_GATED_HEADER) === INSTANCE_GATED_VALUE) {
+  authStore.markGateActive()
+}
 ```
-
-### IN-02: `root.test.tsx` regression test hardcodes the storage key/value literals
-
-**File:** `web/app/root.test.tsx:191`
-**Issue:**
-`sessionStorage.setItem("dt_gate_active", "1")` uses bare literals, while
-`authStore.test.ts` deliberately introduced `GATE_ACTIVE_STORAGE_KEY` /
-`GATE_ACTIVE_STORAGE_VALUE` constants "so a change to what the implementation
-writes is caught here as well as there." The `root.tsx` test is now the one place
-the contract can silently drift.
-**Fix:** export the two constants from `authStore.ts` and import them in both test
-files (or at minimum add a matching `const` with a comment mirroring
-`authStore.test.ts`).
 
 ---
 
-_Reviewed: 2026-08-31_
+_Reviewed: 2026-09-01_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
