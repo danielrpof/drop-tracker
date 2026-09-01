@@ -80,7 +80,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 4. The session cookie carries `HttpOnly`, `Secure`, `SameSite=Lax` and a bounded lifetime when inspected in devtools, and repeated wrong-passphrase attempts from one client are throttled (rejected with `429`) rather than answered at full speed indefinitely.
 5. With no passphrase configured, every route behaves exactly as it did in v1.2 — `make test-integration`, `pnpm test`, and `docker compose up` all pass untouched with no passphrase anywhere.
 
-**Plans**: 5/5 plans executed (4/4 executed, 1 gap-closure plan pending)
+**Plans**: 6 plans (4 phase plans + 2 gap-closure plans) — 5 executed, 14-06 pending
 
 Plans:
 **Wave 1**
@@ -99,6 +99,10 @@ Plans:
 **Gap closure** *(UAT G-14-1 — gate never engaged: container booted with an empty `INSTANCE_PASSPHRASE`)*
 
 - [x] 14-05-PLAN.md — Close G-14-1: compose host-shell pass-through for the gate env vars, a secret-free boot log line reporting gate active/inert, a UAT Test 1 configuration precondition, and the operator `.env` reconciliation checkpoint
+
+**Gap closure** *(UAT G-14-2 — the Log out control disappears after a page reload while still logged in)*
+
+- [ ] 14-06-PLAN.md — Close G-14-2: back `gateActive` with `sessionStorage` so the Log out control survives a document reload for the browser session (D-18), with guarded access for private-mode and the SPA-mode Node prerender, plus a reload regression test and a UAT Test 5 precondition
 
 **UI hint**: yes
 
