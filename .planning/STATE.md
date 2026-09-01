@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-01)
 Phase: 15 — PR Coverage-Diff Comment
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-01 — Completed quick task 260901-lvn: add repo-root .gitattributes + LF renormalization (ends the prettier stat-dirty loop)
+Last activity: 2026-09-01 — Completed quick task 260901-muu: trimmed essay-style comments in 6 files (999→349 comment lines, no logic changes)
 
 ## Performance Metrics
 
@@ -238,6 +238,7 @@ None yet.
 | 260901-knc | Close frontend-formatting CI gap: add local prettier --write pre-commit hook (mirrors golangci-lint --fix pattern) + Definition of Done checklist at top of CLAUDE.md | 2026-09-01 | bf041b2 | [260901-knc-close-frontend-formatting-ci-gap-add-loc](./quick/260901-knc-close-frontend-formatting-ci-gap-add-loc/) |
 | 260901-lvn | Add repo-root .gitattributes pinning the tree to LF (overrides core.autocrlf) + forced re-checkout to clear 455 working-tree CRLF files; ends the prettier stat-dirty loop | 2026-09-01 | 1524333 | [260901-lvn-add-repo-root-gitattributes-and-renormal](./quick/260901-lvn-add-repo-root-gitattributes-and-renormal/) |
 | 20 | Add comment-conciseness rule to CLAUDE.md + CONVENTIONS.md (stop multi-paragraph comment essays; authStore.ts cited as anti-pattern) | 2026-09-01 | 5de010b | — |
+| 260901-muu | Trim essay-style comments in 6 most comment-dense files (authStore.ts + config/pool/detector/musicbrainz/notifier) — 999→349 comment lines, no logic changes, diff-gated comments-only | 2026-09-01 | eed828a | [260901-muu-trim-essay-style-code-comments-in-6-file](./quick/260901-muu-trim-essay-style-code-comments-in-6-file/) |
 
 ### Roadmap Evolution
 
