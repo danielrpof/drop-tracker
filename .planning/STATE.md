@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-01)
 Phase: 15 — PR Coverage-Diff Comment
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-01 — Completed quick task 260901-jre: fix CI pipeline blockers (golangci-lint + prettier)
+Last activity: 2026-09-01 — Completed quick task 260901-knc: close frontend-formatting CI gap (local prettier hook + CLAUDE.md Definition of Done)
 
 ## Performance Metrics
 
@@ -235,6 +235,7 @@ None yet.
 | 260826-ia0 | Fix flaky timing tolerance in poller rate-limit tests (TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit and TestDeezerCycle_ConcurrentPollingStaysInsideRateLimit) | 2026-08-26 | 9519de5 | [260826-ia0-fix-flaky-timing-tolerance-in-poller-rat](./quick/260826-ia0-fix-flaky-timing-tolerance-in-poller-rat/) |
 | 260826-iu0 | Fix Trivy build-scan CI failure: upgrade runtime-stage Alpine packages at build time to clear CVE-2026-14456 in libssl3/libcrypto3 | 2026-08-26 | 9afdfa2 | [260826-iu0-fix-trivy-build-scan-ci-failure-bump-run](./quick/260826-iu0-fix-trivy-build-scan-ci-failure-bump-run/) |
 | 260901-jre | Fix commit pipeline blockers: line-scoped //nolint for 3 golangci-lint findings (2× gosec G115 in authgate/session.go, 1× staticcheck SA1019 on middleware.RealIP) + prettier reformat of 6 Phase 14 frontend files | 2026-09-01 | 30839fb | [260901-jre-fix-commit-pipeline-blockers-golangci-li](./quick/260901-jre-fix-commit-pipeline-blockers-golangci-li/) |
+| 260901-knc | Close frontend-formatting CI gap: add local prettier --write pre-commit hook (mirrors golangci-lint --fix pattern) + Definition of Done checklist at top of CLAUDE.md | 2026-09-01 | bf041b2 | [260901-knc-close-frontend-formatting-ci-gap-add-loc](./quick/260901-knc-close-frontend-formatting-ci-gap-add-loc/) |
 
 ### Roadmap Evolution
 
