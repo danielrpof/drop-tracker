@@ -1,10 +1,13 @@
-# Two local gates before a commit exists, each mirroring its own CI backstop job
-# in .github/workflows/full-pipeline.yml (plan 07-03):
+# Three local gates before a commit exists, each mirroring its own CI backstop
+# job in .github/workflows/full-pipeline.yml (plan 07-03):
 #   - gitleaks (CICD-02/CICD-10): secret scanning.
 #   - golangci-lint (CICD-01/CICD-10): Go linting, reading the repo-root
 #     .golangci.yml so local and CI verdicts share one source of truth.
-# Both are caught here, before a commit object exists, and again in CI as a
-# non-bypassable backstop -- `--no-verify` can skip this file, but not CI.
+#   - prettier (web) (CICD-12): frontend formatting, mirroring the
+#     `frontend-test` job's `prettier --check` step so hand-formatted TS/TSX
+#     is auto-fixed here rather than going red in CI.
+# All three are caught here, before a commit object exists, and again in CI as
+# a non-bypassable backstop -- `--no-verify` can skip this file, but not CI.
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
@@ -19,3 +22,21 @@ repos:
     rev: v2.12.2
     hooks:
       - id: golangci-lint
+  - repo: local
+    hooks:
+      # `--write`, not `--check` -- parity with the golangci-lint `--fix` hook
+      # above: prettier's reformat lands in the working tree for the developer
+      # to see and re-stage, never silently committed. CI keeps `--check` as
+      # the non-bypassable backstop. `--dir web` is load-bearing -- it sets
+      # cwd to web/, without which prettier cannot resolve
+      # prettier-plugin-tailwindcss (plugin resolution is cwd-relative). The
+      # literal `**/*.{ts,tsx}` glob (with pass_filenames: false) is the exact
+      # string CI's frontend-test job and web/package.json's `format` script
+      # use, so all three format the same file set; `files:` only scopes
+      # whether the hook runs at all.
+      - id: prettier-web
+        name: prettier (web)
+        language: system
+        pass_filenames: false
+        files: ^web/.*\.(ts|tsx)$
+        entry: corepack pnpm --dir web exec prettier --write "**/*.{ts,tsx}"
