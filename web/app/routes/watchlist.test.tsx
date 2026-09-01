@@ -154,7 +154,9 @@ describe("Watchlist route under the passphrase gate (GATE-05 / UI-SPEC E6)", () 
     await act(async () => {
       authStore.markUnauthenticated()
     })
-    await screen.findByRole("heading", { name: "Enter the instance passphrase" })
+    await screen.findByRole("heading", {
+      name: "Enter the instance passphrase",
+    })
 
     // Logging back in remounts <Outlet/>, so Watchlist's mount effect
     // re-fetches with no retry-queue machinery (D-16).
@@ -187,6 +189,8 @@ describe("Watchlist route under the passphrase gate (GATE-05 / UI-SPEC E6)", () 
       authStore.markAuthenticated()
     })
 
-    await screen.findByRole("heading", { name: "Enter the instance passphrase" })
+    await screen.findByRole("heading", {
+      name: "Enter the instance passphrase",
+    })
   })
 })

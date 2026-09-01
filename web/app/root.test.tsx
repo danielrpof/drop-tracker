@@ -227,7 +227,8 @@ describe("App — instance passphrase gate", () => {
   })
 
   it("latches the Log out control end-to-end: a 200 carrying X-Instance-Gated flows through apiFetch into the nav (G-14-3 regression, end-to-end)", async () => {
-    const realApi = await vi.importActual<typeof import("~/lib/api")>("~/lib/api")
+    const realApi =
+      await vi.importActual<typeof import("~/lib/api")>("~/lib/api")
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(

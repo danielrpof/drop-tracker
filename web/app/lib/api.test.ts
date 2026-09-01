@@ -174,7 +174,9 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
 
   it("flips the shared store to unauthenticated and still rejects with an ApiError carrying status 401", async () => {
     fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: "unauthenticated" }), { status: 401 })
+      new Response(JSON.stringify({ error: "unauthenticated" }), {
+        status: 401,
+      })
     )
 
     const err = await api.listWatchlist().then(
@@ -235,7 +237,9 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
     expect(url).toBe("/session")
     expect(init.method).toBe("POST")
-    expect(JSON.parse(init.body as string)).toEqual({ passphrase: "open-sesame" })
+    expect(JSON.parse(init.body as string)).toEqual({
+      passphrase: "open-sesame",
+    })
   })
 
   it("createSession does not flip auth state itself", async () => {
@@ -259,7 +263,9 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
 
   it("converges on one consistent unauthenticated state when several endpoint calls fail with 401 at once (GATE-05 concurrency)", async () => {
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ error: "unauthenticated" }), { status: 401 })
+      new Response(JSON.stringify({ error: "unauthenticated" }), {
+        status: 401,
+      })
     )
 
     const results = await Promise.allSettled([
@@ -321,7 +327,9 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
     const listener = vi.fn()
     authStore.subscribe(listener)
     // A fresh Response per call -- a single Response body can only be read once.
-    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse([], 200, GATED)))
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(jsonResponse([], 200, GATED))
+    )
 
     await api.listWatchlist()
     await api.listWatchlist()

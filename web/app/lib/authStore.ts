@@ -97,7 +97,10 @@ function readPersistedGateActive(): boolean {
     if (typeof sessionStorage === "undefined") {
       return false
     }
-    return sessionStorage.getItem(GATE_ACTIVE_STORAGE_KEY) === GATE_ACTIVE_STORAGE_VALUE
+    return (
+      sessionStorage.getItem(GATE_ACTIVE_STORAGE_KEY) ===
+      GATE_ACTIVE_STORAGE_VALUE
+    )
   } catch {
     return false
   }

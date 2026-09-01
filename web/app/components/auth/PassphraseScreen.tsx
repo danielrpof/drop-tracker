@@ -19,7 +19,8 @@ const LABEL_IDLE = "Unlock"
 const LABEL_SUBMITTING = "Unlocking…"
 
 const ERROR_WRONG = "That passphrase isn't correct. Check it and try again."
-const ERROR_THROTTLED = "Too many attempts. Wait about a minute, then try again."
+const ERROR_THROTTLED =
+  "Too many attempts. Wait about a minute, then try again."
 const ERROR_CONNECTION =
   "Couldn't reach the server. Check your connection and try again."
 
