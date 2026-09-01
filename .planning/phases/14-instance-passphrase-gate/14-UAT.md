@@ -13,6 +13,27 @@ updated: 2026-08-31T00:00:00Z
 ## Tests
 
 ### 1. Real-browser cookie behaviour (Chrome + Firefox, http://localhost)
+precondition: |
+  Set INSTANCE_PASSPHRASE as a KEY=VALUE line in the repo-root .env — the
+  gitignored file, NOT .env.example. That is the file docker-compose.yml
+  feeds the app container through its `env_file: .env` directive, and it was
+  the only channel that worked before plan 14-05.
+  - Editing .env.example does nothing. Compose never reads it; it is
+    documentation only. This is the mistake that produced G-14-1.
+  - A host-shell `export INSTANCE_PASSPHRASE=...` now also works, but only
+    because plan 14-05 added `INSTANCE_PASSPHRASE: ${INSTANCE_PASSPHRASE:-}`
+    to the app service `environment:` mapping in docker-compose.yml. Before
+    that it silently did nothing.
+  - Confirm the gate engaged before starting the browser test: read the boot
+    log line added in 14-05 (`logInstanceGateStatus`). It reports the
+    instance passphrase gate as active or inert on every start, prints no
+    secret, and is the fast check.
+  - Value-free container fallback, when the logs are not to hand:
+    `docker compose run --rm --entrypoint sh app -c 'if [ -n "$INSTANCE_PASSPHRASE" ]; then echo GATE_ENV=SET; else echo GATE_ENV=EMPTY; fi'`
+    — it prints only GATE_ENV=SET or GATE_ENV=EMPTY, never the passphrase.
+  - Do NOT verify with `docker compose config`: it inlines env_file contents
+    and would print the Discord webhook URL and the passphrase to the
+    terminal.
 expected: The gate works end-to-end in a real browser; the bare-name `dt_session` cookie (option-a, no `__Host-` prefix) is accepted and replayed by both Chrome and Firefox over plain `http://localhost`. Correct passphrase unlocks and survives a refresh; wrong passphrase shows the fixed inline message; Log out returns to the form.
 result: issue
 reported: "i set the instance passphrase, ran docker compose up --build and when opening localhost, the watchlist is there, no passphrase form is shown, everything is accesible"
@@ -23,6 +44,7 @@ expected: Running SPA matches the approved UI-SPEC pillars — viewport-centred 
 result: blocked
 blocked_by: prior-phase
 reason: "Passphrase screen never renders — blocked by the Test 1 gate-bypass blocker (G-14-1)."
+note: "Unblocks once Test 1's precondition is satisfied and Test 1 passes."
 
 ### 3. docker compose up with no INSTANCE_PASSPHRASE configured
 expected: Stack starts, all seven v1.2 routes answer as before, no passphrase prompt, no new required variable.
@@ -33,6 +55,7 @@ expected: With `DISCORD_WEBHOOK_URL` set, drive >20 failed logins within 5 minut
 result: blocked
 blocked_by: prior-phase
 reason: "Cannot exercise the login/brute-force path — blocked by the Test 1 gate-bypass blocker (G-14-1)."
+note: "Unblocks once Test 1's precondition is satisfied and Test 1 passes."
 
 ## Summary
 
