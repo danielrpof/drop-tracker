@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -61,6 +62,24 @@ const (
 	idleTimeout       = 60 * time.Second
 )
 
+// logInstanceGateStatus emits exactly one Info record stating whether the
+// instance passphrase gate is active or inert (G-14-1). It is safe to leave
+// on in production: it never logs the passphrase, any fragment of it, its
+// length, or a hash -- only a status token and, on the inert branch, a
+// remediation hint naming the channel that actually works. The passphrase is
+// a parameter, never re-read from the environment, so the single call site
+// passing cfg.InstancePassphrase guarantees this line reports the same state
+// the gate constructor sees.
+func logInstanceGateStatus(logger *slog.Logger, passphrase string) {
+	if passphrase == "" {
+		logger.Info("instance passphrase gate is inert -- all routes are served unauthenticated",
+			"status", "inert",
+			"hint", "set INSTANCE_PASSPHRASE as a KEY=VALUE line in the repo-root .env to engage the gate")
+		return
+	}
+	logger.Info("instance passphrase gate is active", "status", "active")
+}
+
 func main() {
 	// WR-03: derive ctx below so a SIGTERM/SIGINT (the normal way a
 	// container orchestrator stops this process) is observable throughout
@@ -105,6 +124,15 @@ func run(ctx context.Context) error {
 	if reason, weak := authgate.IsWeakPassphrase(cfg.InstancePassphrase); weak {
 		logger.Warn("INSTANCE_PASSPHRASE looks weak; the instance gate is only as strong as this value", "reason", reason)
 	}
+
+	// G-14-1: the gate's inert path used to be silent, so an app container
+	// that booted with an empty INSTANCE_PASSPHRASE looked identical in the
+	// logs to one running a live gate -- and the gap survived a whole UAT
+	// round unnoticed. Emit one status line here, adjacent to the D-11 WARN
+	// and ahead of migrations, so the state is visible even when a later boot
+	// step fails. cfg.InstancePassphrase is the same value that flows into
+	// httpserver.WithAuthGate below; do not re-read the environment.
+	logInstanceGateStatus(logger, cfg.InstancePassphrase)
 
 	if err := db.RunMigrations(ctx, cfg.DatabaseURL, logger); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
