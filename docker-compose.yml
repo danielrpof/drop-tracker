@@ -44,6 +44,33 @@ services:
       # not a port difference. Do NOT "fix" this to match .env; see
       # .env.example and the port-remap comment above.
       DATABASE_URL: postgres://drop_tracker:drop_tracker@postgres:5432/drop_tracker?sslmode=disable
+      # Instance passphrase gate wiring (G-14-1). These two entries exist
+      # because before plan 14-05 a host-shell `export INSTANCE_PASSPHRASE=...`
+      # reached nothing: Compose forwards no host variable it is not told
+      # about, and this file referenced none. That silent no-op is half of
+      # what made G-14-1 invisible (the other half was the operator .env
+      # missing the line entirely).
+      # Compose resolves each ${VAR:-default} from the host shell first, then
+      # the project .env. Because `env_file: .env` above points at that same
+      # project .env, a value the operator sets there still arrives correctly
+      # through this line -- it is NOT clobbered; env_file stays the primary
+      # channel and these entries are additive.
+      # The one shadow case: this `environment:` mapping outranks `env_file:`,
+      # so a shell that exports INSTANCE_PASSPHRASE as an empty string beats a
+      # good .env value and `:-` then yields the empty default -- reverting the
+      # gate to inert. The one-line boot status log in cmd/server/main.go
+      # (logInstanceGateStatus) is what makes that immediately visible.
+      # NOTIFY_MAX_RELEASE_AGE_DAYS is deliberately NOT listed here: its Config
+      # field carries an envDefault of 7 that already covers absence, and an
+      # interpolation line would duplicate that default in a second place where
+      # it could drift.
+      # Do NOT render this file with `docker compose config` to check the
+      # values -- that subcommand inlines env_file contents into its output,
+      # printing the real DISCORD_WEBHOOK_URL and INSTANCE_PASSPHRASE to
+      # stdout. Use the value-free container check documented in
+      # .planning/phases/14-instance-passphrase-gate/14-UAT.md Test 1 instead.
+      INSTANCE_PASSPHRASE: ${INSTANCE_PASSPHRASE:-}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
     ports:
       - "8080:8080"
     depends_on:
