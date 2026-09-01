@@ -102,6 +102,33 @@ const (
 	csrfHeaderValue = "drop-tracker"
 )
 
+// instanceGatedHeaderName and instanceGatedHeaderValue are a byte-for-byte
+// contract with the SPA client, shaped exactly like the csrfHeaderName /
+// csrfHeaderValue block above. web/app/lib/api.ts (plan 14-07) reads
+// "X-Instance-Gated" off every response apiFetch handles and, when it carries
+// this value, calls authStore.markGateActive(). Changing either literal here
+// without changing that client file in the same commit silently stops the
+// Log out control from ever appearing on a gated instance -- the client keeps
+// looking for the old header, never latches gateActive, and
+// {gateActive && <LogoutButton />} in root.tsx never mounts -- with no
+// compiler and no runtime error on either side.
+//
+// Semantics: the marker is set ONLY on responses that PASSED gate.Authenticate
+// with a valid session cookie. Its ABSENCE proves nothing -- the exempt routes
+// registered outside the protected group (/health, POST/DELETE /session)
+// legitimately carry none on a gated instance -- which is why the client latch
+// is one-way and never clears. The marker exists only on the gated path:
+// Authenticate is registered solely inside httpserver's `gate != nil` branch,
+// so an ungated instance emits no "X-Instance-Gated" and D-18's
+// ungated-instance rule holds structurally rather than by the mere absence of
+// a 401. This is what lets the SPA discover a gated instance from an ordinary
+// authenticated 200 -- no 401, no typed login, no boot-time probe route
+// (D-16 preserved).
+const (
+	instanceGatedHeaderName  = "X-Instance-Gated"
+	instanceGatedHeaderValue = "1"
+)
+
 // hasCSRFHeader reports whether r carries the exact custom header the SPA
 // client attaches to every non-GET request. See the csrfHeaderName /
 // csrfHeaderValue contract note above.
@@ -163,6 +190,14 @@ func (m *Manager) Authenticate(next http.Handler) http.Handler {
 			writeJSONError(w, http.StatusUnauthorized, "unauthenticated")
 			return
 		}
+		// Mark every response that passes the gate so the SPA can discover the
+		// instance is gated from an ordinary authenticated 200 (G-14-3). Staged
+		// on w here, before next.ServeHTTP, because response headers are
+		// flushed on the downstream handler's first write -- the neighbouring
+		// setSessionCookie renewal call is the in-file precedent for a
+		// middleware writing to w before next. Set only on this proven-valid-
+		// cookie path, never on the two 401 returns above.
+		w.Header().Set(instanceGatedHeaderName, instanceGatedHeaderValue)
 		if needsRenew {
 			renewed := Token{
 				IssuedAt: tok.IssuedAt, // fixed across renewals (D-06 absolute cap)

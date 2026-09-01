@@ -13,12 +13,20 @@
 //     persisted copy would be a client-side authorization cache, which is
 //     the exact failure mode D-16 exists to avoid.
 //
-//   - `gateActive` — set `true` the first time the app observes a `401` OR
-//     completes a login in this browser session. This implements locked
+//   - `gateActive` — set `true` the first time the app, in this browser
+//     session, observes ANY of three things: a `401`, a completed login, or a
+//     response that passed the gate (the server marks every such response
+//     with an `X-Instance-Gated` header; `apiFetch` latches it via
+//     `markGateActive`). The third trigger is what closes **G-14-3**: a
+//     session that already carries a valid `dt_session` cookie and so sees
+//     neither a `401` nor a typed login still learns the instance is gated
+//     from its first ordinary authenticated `200`. This implements locked
 //     decision **D-18** (which resolved 14-UI-SPEC's one open item): the
 //     **Log out** control renders only when `gateActive` is `true`, so an
 //     instance with no `/session` route registered never shows a control
-//     that would call a route that does not exist.
+//     that would call a route that does not exist. The `X-Instance-Gated`
+//     marker only exists on the gated code path, so that guarantee now holds
+//     structurally, not merely by the absence of a `401`.
 //
 //     "In this browser session" (D-18) is `sessionStorage`, not a
 //     module-level `let`. `gateActive` is SEEDED from the browser session
@@ -127,6 +135,35 @@ export const authStore = {
 
   markUnauthenticated(): void {
     authed = false
+    gateActive = true
+    persistGateActive()
+    notify()
+  },
+
+  // markGateActive is the "gated, and this browser already holds a valid
+  // cookie" path — driven by `apiFetch` latching the server's
+  // `X-Instance-Gated` marker (G-14-3). It differs from the two `mark*`
+  // functions above in two deliberate ways:
+  //
+  //   1. It NEVER reads or writes `authed`. A gated response proves the
+  //      instance is gated, never that the caller is authorized; an in-flight
+  //      response resolving AFTER a `401` has already flipped `authed` false
+  //      must not resurrect a dead session (D-16).
+  //   2. It early-returns once the gate is already recorded. The two `mark*`
+  //      functions fire on discrete auth events and always notify; this one is
+  //      evaluated on EVERY API response, so an unconditional `notify()` plus
+  //      an unconditional synchronous storage write would run on every request
+  //      for the life of the session. The early return is scoped to this
+  //      method ONLY and must not be back-ported to `markAuthenticated` /
+  //      `markUnauthenticated`.
+  //
+  // Like `gateActive` itself, this latch is one-way and monotonic within the
+  // browser session — it never clears. `gateActive` stays presentation-only;
+  // the server `401` remains the sole enforcement.
+  markGateActive(): void {
+    if (gateActive) {
+      return
+    }
     gateActive = true
     persistGateActive()
     notify()

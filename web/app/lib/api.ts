@@ -8,6 +8,16 @@
 
 import { authStore } from "~/lib/authStore"
 
+// X-Instance-Gated is a byte-for-byte contract with the server:
+// internal/authgate/gate.go sets exactly this header (with the value below) on
+// every response that passes gate.Authenticate. Changing one side without the
+// other in the same commit silently stops the Log out control from ever
+// appearing on a gated instance -- there is no compiler or runtime error on
+// either side. This is the response-side sibling of the X-Requested-With CSRF
+// header (D-15).
+const INSTANCE_GATED_HEADER = "X-Instance-Gated"
+const INSTANCE_GATED_VALUE = "1"
+
 // ---- Wire types --------------------------------------------------------
 
 // EventItem mirrors internal/events.Event's JSON shape exactly.
@@ -124,6 +134,18 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       : { ...init?.headers, "X-Requested-With": "drop-tracker" }
 
   const res = await fetch(path, { ...init, headers })
+
+  // G-14-3: a gated instance marks every response that passed gate.Authenticate
+  // with X-Instance-Gated. Latch it here -- BEFORE the 401 / 204 / !ok branches
+  // below, because a gated 204, a gated non-OK and a gated error body all
+  // passed the gate and all carry the marker. The latch is one-way and
+  // monotonic within the browser session (as 14-06 established for the
+  // storage-backed flag): it is NEVER cleared when the marker is absent,
+  // because exempt routes on a gated instance legitimately carry none -- so
+  // absence proves nothing. The latch never touches the optimistic auth flag.
+  if (res.headers.get(INSTANCE_GATED_HEADER) === INSTANCE_GATED_VALUE) {
+    authStore.markGateActive()
+  }
 
   // D-16 global 401 interceptor: this is the ONLY place client code flips
   // auth state on a 401. Any gated endpoint that returns 401 (initial load,
