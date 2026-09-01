@@ -80,7 +80,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 4. The session cookie carries `HttpOnly`, `Secure`, `SameSite=Lax` and a bounded lifetime when inspected in devtools, and repeated wrong-passphrase attempts from one client are throttled (rejected with `429`) rather than answered at full speed indefinitely.
 5. With no passphrase configured, every route behaves exactly as it did in v1.2 — `make test-integration`, `pnpm test`, and `docker compose up` all pass untouched with no passphrase anywhere.
 
-**Plans**: 6/6 plans executed (4 phase plans + 2 gap-closure plans) — 5 executed, 14-06 pending
+**Plans**: 7 plans (4 phase plans + 3 gap-closure plans) — 6 executed, 14-07 planned
 
 Plans:
 **Wave 1**
@@ -103,6 +103,10 @@ Plans:
 **Gap closure** *(UAT G-14-2 — the Log out control disappears after a page reload while still logged in)*
 
 - [x] 14-06-PLAN.md — Close G-14-2: back `gateActive` with `sessionStorage` so the Log out control survives a document reload for the browser session (D-18), with guarded access for private-mode and the SPA-mode Node prerender, plus a reload regression test and a UAT Test 5 precondition
+
+**Gap closure** *(UAT G-14-3 — the Log out control never appears at all on a fresh session that already holds a valid `dt_session` cookie: the SPA has no gated-load signal except a 401 or a typed login)*
+
+- [ ] 14-07-PLAN.md — Close G-14-3: `gate.Authenticate` marks every response that passes the gate with a fixed header so a gated 2xx is self-identifying, `apiFetch` latches it into a new `authStore.markGateActive()` that never touches `authed` and never clears, plus the WR-01 storage-guard hardening and a UAT Test 5 re-run sequence that actually reproduces the defect
 
 **UI hint**: yes
 
