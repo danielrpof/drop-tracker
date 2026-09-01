@@ -6,15 +6,118 @@ package main
 // rather than signalling the test process (09-RESEARCH.md Pitfall 2).
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/danielrpof/drop-tracker/internal/config"
+	"github.com/danielrpof/drop-tracker/internal/logging"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 )
+
+// nonEmptyLines splits a captured log buffer into its non-blank lines, so a
+// test can assert a helper emitted exactly one record -- a future second log
+// call inside that helper then fails the count.
+func nonEmptyLines(s string) []string {
+	var out []string
+	for _, ln := range strings.Split(s, "\n") {
+		if strings.TrimSpace(ln) != "" {
+			out = append(out, ln)
+		}
+	}
+	return out
+}
+
+// decodeRecord parses one JSON slog record into a map.
+func decodeRecord(t *testing.T, line string) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(line), &m); err != nil {
+		t.Fatalf("decode log record %q: %v", line, err)
+	}
+	return m
+}
+
+// recordMentions reports whether substr appears in any key or stringified
+// value of rec. Callers delete the "time" key first: the JSON timestamp is
+// full of digits and a two-digit passphrase length would eventually collide
+// with it, making a raw-buffer scan flaky.
+func recordMentions(rec map[string]any, substr string) bool {
+	for k, v := range rec {
+		if strings.Contains(k, substr) {
+			return true
+		}
+		if strings.Contains(fmt.Sprintf("%v", v), substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestLogInstanceGateStatus pins the G-14-1 observability fix: every boot
+// emits exactly one Info record stating whether the instance passphrase gate
+// is active or inert, and the active-branch record carries neither the
+// passphrase nor its decimal rune count.
+func TestLogInstanceGateStatus(t *testing.T) {
+	const passphrase = "correct-horse-battery-staple-9times"
+	runeCount := strconv.Itoa(len([]rune(passphrase)))
+
+	newLogger := func(buf *bytes.Buffer) *slog.Logger {
+		return logging.NewWithWriter(&config.Config{LogLevel: "info", LogFormat: "json"}, buf)
+	}
+
+	t.Run("active passphrase", func(t *testing.T) {
+		var buf bytes.Buffer
+		logInstanceGateStatus(newLogger(&buf), passphrase)
+
+		lines := nonEmptyLines(buf.String())
+		if len(lines) != 1 {
+			t.Fatalf("emitted %d records, want exactly 1: %q", len(lines), buf.String())
+		}
+		rec := decodeRecord(t, lines[0])
+		if rec["level"] != "INFO" {
+			t.Errorf("record level = %v, want INFO", rec["level"])
+		}
+		if !recordMentions(rec, "active") {
+			t.Errorf("active-branch record does not report the gate as active: %v", rec)
+		}
+		delete(rec, "time")
+		if recordMentions(rec, passphrase) {
+			t.Errorf("record leaked the passphrase: %v", rec)
+		}
+		if recordMentions(rec, runeCount) {
+			t.Errorf("record leaked the passphrase rune count %s: %v", runeCount, rec)
+		}
+	})
+
+	t.Run("empty passphrase", func(t *testing.T) {
+		var buf bytes.Buffer
+		logInstanceGateStatus(newLogger(&buf), "")
+
+		lines := nonEmptyLines(buf.String())
+		if len(lines) != 1 {
+			t.Fatalf("emitted %d records, want exactly 1: %q", len(lines), buf.String())
+		}
+		rec := decodeRecord(t, lines[0])
+		if rec["level"] != "INFO" {
+			t.Errorf("record level = %v, want INFO", rec["level"])
+		}
+		if !recordMentions(rec, "inert") {
+			t.Errorf("inert-branch record does not report the gate as inert: %v", rec)
+		}
+		if !recordMentions(rec, ".env") {
+			t.Errorf("inert-branch record does not name the repo-root .env remediation channel: %v", rec)
+		}
+	})
+}
 
 // TestRun_ConfigLoadFailureReturnsEarly proves the fail-fast branch: an
 // empty DATABASE_URL (the only notEmpty field) must make run return before
