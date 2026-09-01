@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: testing
 phase: 14-instance-passphrase-gate
 source: [14-VERIFICATION.md]
 started: 2026-08-29T17:38:38Z
@@ -8,7 +8,23 @@ updated: 2026-08-31T00:00:00Z
 
 ## Current Test
 
-[testing paused — 1 blocker issue, 2 tests blocked behind it]
+number: 1
+name: Real-browser cookie behaviour (Chrome + Firefox, http://localhost)
+expected: |
+  The gate works end-to-end in a real browser; the bare-name `dt_session` cookie
+  is accepted and replayed by both Chrome and Firefox over plain `http://localhost`.
+  Correct passphrase unlocks and survives a refresh; wrong passphrase shows the
+  fixed inline message; Log out returns to the form.
+awaiting: user response
+
+note: |
+  G-14-1 was closed by plan 14-05 (docker-compose wiring + boot-status log +
+  operator .env reconcile). The operator has already confirmed the gate boots
+  ACTIVE and the browser shows the passphrase form. Tests 1, 2, and 4 below were
+  reset from issue/blocked to pending and need a fresh run to confirm the
+  end-to-end behaviours. Test 3 (inert path) already passed and is unchanged.
+  Gap G-14-1 reconciliation is handled by /gsd-verify-work off plan 14-05's
+  gap_ids frontmatter — do not hand-edit the Gaps section.
 
 ## Tests
 
@@ -35,16 +51,16 @@ precondition: |
     and would print the Discord webhook URL and the passphrase to the
     terminal.
 expected: The gate works end-to-end in a real browser; the bare-name `dt_session` cookie (option-a, no `__Host-` prefix) is accepted and replayed by both Chrome and Firefox over plain `http://localhost`. Correct passphrase unlocks and survives a refresh; wrong passphrase shows the fixed inline message; Log out returns to the form.
-result: issue
-reported: "i set the instance passphrase, ran docker compose up --build and when opening localhost, the watchlist is there, no passphrase form is shown, everything is accesible"
-severity: blocker
+result: pending
+prior_result: issue
+prior_reported: "i set the instance passphrase, ran docker compose up --build and when opening localhost, the watchlist is there, no passphrase form is shown, everything is accesible"
+note: "G-14-1 closed by plan 14-05; operator confirmed the gate now boots ACTIVE and the form renders. Re-run end-to-end (unlock, refresh persistence, wrong-passphrase message, Log out)."
 
 ### 2. PassphraseScreen visual conformance to 14-UI-SPEC
 expected: Running SPA matches the approved UI-SPEC pillars — viewport-centred `max-w-sm` `bg-card` card, `gap-6` rhythm, indigo accent reserved to the Unlock fill + input focus ring, destructive colour reserved to error text, dark surface. (Coverage item D8, `human_judgment: true`.)
-result: blocked
-blocked_by: prior-phase
-reason: "Passphrase screen never renders — blocked by the Test 1 gate-bypass blocker (G-14-1)."
-note: "Unblocks once Test 1's precondition is satisfied and Test 1 passes."
+result: pending
+prior_result: blocked
+note: "Was blocked behind G-14-1; now unblocked — the passphrase screen renders."
 
 ### 3. docker compose up with no INSTANCE_PASSPHRASE configured
 expected: Stack starts, all seven v1.2 routes answer as before, no passphrase prompt, no new required variable.
@@ -52,19 +68,18 @@ result: pass
 
 ### 4. Live Discord brute-force alert
 expected: With `DISCORD_WEBHOOK_URL` set, drive >20 failed logins within 5 minutes against a running instance. Exactly one brute-force alert embed arrives in the Discord channel, carrying only a count and window (no passphrase, no fragment, no length); no further alert for 15 minutes.
-result: blocked
-blocked_by: prior-phase
-reason: "Cannot exercise the login/brute-force path — blocked by the Test 1 gate-bypass blocker (G-14-1)."
-note: "Unblocks once Test 1's precondition is satisfied and Test 1 passes."
+result: pending
+prior_result: blocked
+note: "Was blocked behind G-14-1; now unblocked — the login path is reachable."
 
 ## Summary
 
 total: 4
 passed: 1
-issues: 1
-pending: 0
+issues: 0
+pending: 3
 skipped: 0
-blocked: 2
+blocked: 0
 
 ## Gaps
 
