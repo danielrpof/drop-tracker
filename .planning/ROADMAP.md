@@ -80,7 +80,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 4. The session cookie carries `HttpOnly`, `Secure`, `SameSite=Lax` and a bounded lifetime when inspected in devtools, and repeated wrong-passphrase attempts from one client are throttled (rejected with `429`) rather than answered at full speed indefinitely.
 5. With no passphrase configured, every route behaves exactly as it did in v1.2 — `make test-integration`, `pnpm test`, and `docker compose up` all pass untouched with no passphrase anywhere.
 
-**Plans**: 7 plans (4 phase plans + 3 gap-closure plans) — 6 executed, 14-07 planned
+**Plans**: 7/7 plans executed (4 phase plans + 3 gap-closure plans)
 
 Plans:
 **Wave 1**
@@ -106,7 +106,7 @@ Plans:
 
 **Gap closure** *(UAT G-14-3 — the Log out control never appears at all on a fresh session that already holds a valid `dt_session` cookie: the SPA has no gated-load signal except a 401 or a typed login)*
 
-- [ ] 14-07-PLAN.md — Close G-14-3: `gate.Authenticate` marks every response that passes the gate with a fixed header so a gated 2xx is self-identifying, `apiFetch` latches it into a new `authStore.markGateActive()` that never touches `authed` and never clears, plus the WR-01 storage-guard hardening and a UAT Test 5 re-run sequence that actually reproduces the defect
+- [x] 14-07-PLAN.md — Close G-14-3: `gate.Authenticate` marks every response that passes the gate with a fixed header so a gated 2xx is self-identifying, `apiFetch` latches it into a new `authStore.markGateActive()` that never touches `authed` and never clears, plus the WR-01 storage-guard hardening and a UAT Test 5 re-run sequence that actually reproduces the defect
 
 **UI hint**: yes
 
@@ -180,7 +180,7 @@ Phases execute in numeric order: 14 → 15 → 16 → 17
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 14. Instance Passphrase Gate | 6/6 | In Progress|  |
+| 14. Instance Passphrase Gate | 7/7 | In Progress|  |
 | 15. PR Coverage-Diff Comment | 0/? | Not started | - |
 | 16. Rollback-Safe Migrations | 0/? | Not started | - |
 | 17. Automated VPS Deploy with Health-Gated Rollback | 0/? | Not started | - |
