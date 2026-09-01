@@ -13,6 +13,13 @@
 
 Copied verbatim from `14-CONTEXT.md` `<decisions>`. Research answers **HOW**, not whether.
 
+> **Amendments (2026-08-27 plan-hardening pass) — `14-CONTEXT.md` is authoritative where this list is now stale:**
+> - **D-12** — the fixed delay applies only to the two paths that run the passphrase comparison (204 / wrong-passphrase 401); the `429` throttle rejection is **undelayed** (a delayed 429 parks a goroutine + connection). A `maxConcurrentLogins` (~32) semaphore bounds the handler; excess sheds with `503`. Global counter stays alert-only.
+> - **D-14** — `middleware.RealIP` is wired **only** when a second new env var `TRUST_PROXY_HEADERS` (default `false`) is truthy. Unset (local dev, docker-compose, CI, any pre-proxy deploy) → throttle + audit key on `r.RemoteAddr`. The "exactly one new env var" goal (D-07) is relaxed to two. **The §Pattern 1 code sketch below is stale:** `WithAuthGate` takes three args — `WithAuthGate(passphrase string, trustProxyHeaders bool, alerter authgate.Alerter)` — and the `if cfg.gate != nil` branch gates `r.Use(middleware.RealIP)` behind a further `&& cfg.trustProxyHeaders`.
+> - **D-06** — the 90-day absolute cap is measured per-authentication (fixed across sliding renewals, reset by a fresh passphrase entry), not a lifetime "first login ever" ceiling.
+> - **D-18 (new)** — the SPA auth store carries a `gateActive` boolean; the Log out control renders only when it is true. This locks 14-UI-SPEC's one previously-unresolved item.
+> - Rotating `INSTANCE_PASSPHRASE` (the revoke-all lever) must be documented in the Phase 17 runbook (D-10).
+
 - **D-01:** HMAC-SHA256 signing key is **derived from the passphrase**: `key = SHA256(INSTANCE_PASSPHRASE)`. Exactly one new secret. Rotating `INSTANCE_PASSPHRASE` changes the derived key and invalidates every session — rotation *is* revoke-all. No separate `SESSION_SECRET`, no key-version byte. Reversibility: costly.
 - **D-02:** Cookie payload is a signed "authenticated until T" — expiry timestamp + random nonce, HMAC'd with the derived key. No PII, no user identity. Issued-at / first-login timestamp is carried in the payload and does **not** move on renewal (needed for the D-06 absolute cap).
 - **D-03:** The gate is a **pure API concern**. `/search`, `/watchlist` (incl. `POST`/`PATCH`/`DELETE`), `/events` are gated. Exempt (registered outside the protected `Group`): `GET /health` (exact path only, not a prefix), the session-login endpoint, and the SPA `NotFound` fallback (`webassets.Handler` — `index.html` + hashed JS/CSS under `/assets/`).

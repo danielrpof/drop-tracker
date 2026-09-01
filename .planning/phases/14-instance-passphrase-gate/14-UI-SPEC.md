@@ -31,7 +31,7 @@ created: 2026-08-27
 | Component library | base-ui (`@base-ui/react`) primitives — Button, Input wrap base-ui |
 | Icon library | `lucide-react` |
 | Font | Inter Variable (`@fontsource-variable/inter`), `--font-sans` |
-| Theme | Dark only. `<html class="dark">` applied unconditionally in `root.tsx` (D-13). No light mode, no toggle. Design the passphrase screen for dark surfaces only. |
+| Theme | Dark only. `<html class="dark">` applied unconditionally in `root.tsx` (Phase 6 UI spec). No light mode, no toggle. Design the passphrase screen for dark surfaces only. |
 
 **Existing components reused (already vendored in `web/app/components/ui/`):**
 `button.tsx`, `input.tsx`, `card.tsx`, `sonner.tsx` (toast). No new `ui/` component is required — the passphrase field label is a plain semantic `<label>` (matches project minimalism; no `label.tsx` exists and none is needed).
@@ -120,7 +120,8 @@ Dark theme only. Values are the locked Phase 6 `.dark` token set in `web/app/app
 Post-verification state probe: **40 applicable considerations** across 6 surfaces —
 E1 `<PassphraseScreen>`, E2 passphrase input, E3 Unlock button, E4 inline error slot,
 E5 Log out control, E6 post-login transition. Resolved: **22 explicit**, **3 backstop**,
-**15 dismissed (N/A, reason recorded)**; plus **1 unresolved** planner assumption.
+**15 dismissed (N/A, reason recorded)**; plus **1 item** that was open at UI-spec time and is now
+**locked as decision D-18** (see below).
 
 ### E1 — `<PassphraseScreen>` (full-screen gate)
 
@@ -192,11 +193,11 @@ E5 Log out control, E6 post-login transition. Resolved: **22 explicit**, **3 bac
 | overflow | ⊘ dismissed | The transition is a re-render, not a content surface. |
 | long-text | ⊘ dismissed | No text content in the transition; focus moves to the routed page `<h1>`. |
 
-### Unresolved — planner must treat as assumption
+### Resolved after UI-spec — locked as decision D-18
 
-| Item | Detail |
-|------|--------|
-| ⚠ Log out control visibility when the gate is unconfigured | With no `INSTANCE_PASSPHRASE` set there is no `/session` endpoint, so a rendered Log out button would `404`. Recommendation: render Log out only after a successful login in the current session (a third `authStore` signal), OR never render it while `authed` is still the optimistic default. Planner to confirm the `authStore` shape; treated as an assumption until then. |
+| Item | Resolution |
+|------|------------|
+| Log out control visibility when the gate is unconfigured | **D-18:** the `authStore` carries a second boolean `gateActive`, initialised `false` and set `true` the first time the app observes a `401` or completes a login this browser session. Log out renders only when `gateActive` is `true`, so an ungated instance (no `/session` route) never shows a control that would `404`. `gateActive` is presentation-only, never access control. No longer a UAT confirmation. |
 
 <!-- Status vocabulary:
      ✅ explicit    → plain truth string lifted into must_haves.truths
