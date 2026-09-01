@@ -164,15 +164,31 @@
 
 ## Comments
 
+Comments explain *why*, not *what*, and are kept short. Over-commenting makes the
+code harder to navigate — for humans and agents both.
+
 **When to Comment:**
 - Every exported type, interface, and function has a documentation comment
-- Unexported functions: comment if not obvious from name or context
-- Complex logic: explain the "why" not the "what"
-- Non-obvious requirements or constraints: reference design docs (e.g., D-02, T-02-04)
+- Unexported functions: comment only if not obvious from name or context
+- Complex logic: a brief note on the "why", not a narration of the "what"
+- Non-obvious constraints: point at the design doc, don't reproduce it
+
+**Keep it concise:**
+- Prefer a **1–3 line** summary of intent. No multi-paragraph file header blocks.
+- **One** design-doc identifier reference is enough (`D-16`, `G-14-2`). Don't
+  re-argue the decision inline — the doc is the source of truth; a reader who
+  needs the full rationale follows the reference.
+- Delete comments that restate the function signature, the type, or an obvious
+  guard (`// returns false on error`, `// the mutex`).
+- If a unit genuinely needs pages of rationale, that belongs in a design doc or
+  a short ADR, not a comment.
+- **Anti-pattern:** `web/app/lib/authStore.ts` — ~90 comment lines for ~120 code
+  lines, with the decision rationale for D-16/D-18/G-14-2/G-14-3 re-litigated
+  inline. This is the density to avoid, not to emulate.
 
 **Style:**
 - Package-level comments start with `// Package {name}` describing the whole package's role
-- Function/method comments describe what the receiver does, use third-person imperative
+- Function/method comments start with the identifier name, third-person imperative
 - Example:
   ```go
   // Package detection implements the diff-based event detection Phase 4 owns...
@@ -180,9 +196,9 @@
   ```
 
 **JSDoc/TSDoc:**
-- TypeScript components: no JSDoc comments needed if props interface is clear
-- Exported functions: inline comments above the function explaining behavior
-- Example comment pattern in TypeScript:
+- TypeScript components: no JSDoc needed if the props interface is clear
+- Exported functions: a short inline comment above the function
+- Example:
   ```tsx
   // SEARCH_DEBOUNCE_MS is the wait after the last keystroke before
   // searchArtists() fires — long enough that GET /search is not issued on
@@ -191,9 +207,8 @@
   ```
 
 **Reference Patterns:**
-- Comments often reference design document identifiers (D-01, T-02-03, WLST-01, etc.)
-- These are cross-references to phase/design documentation
-- Example: `// WR-02: ...` refers to a specific code-review finding or design decision
+- A design-doc identifier (`D-01`, `T-02-03`, `WLST-01`, `WR-02`) cross-references
+  phase/design documentation — cite it, don't expand it
 
 ## Function Design
 

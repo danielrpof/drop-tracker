@@ -17,6 +17,17 @@ Every commit must clear the same gates CI enforces. Run them locally first, don'
 
 **Never bypass the hooks with `git commit --no-verify`.** The hooks (gitleaks, golangci-lint `--fix`, prettier `--write`) are the fast local mirror of CI — skipping them only relocates the failure somewhere slower and more public. Install them with `make hooks`.
 
+## Comment discipline — keep them short
+
+Comments explain *why*, not *what*, and earn their place. Excessive comments make agents work harder to find the code.
+
+- Prefer a **1–3 line** summary of intent. No multi-paragraph header blocks.
+- **One** design-doc reference (`D-16`, `G-14-2`) is enough — don't re-argue the decision inline; the doc is the source of truth.
+- Delete comments that restate the signature, the type, or an obvious guard.
+- If a file genuinely needs pages of rationale, that belongs in a design doc or a short ADR, not the source.
+
+Anti-pattern to avoid: `web/app/lib/authStore.ts` (~90 comment lines for ~120 code lines).
+
 <!-- GSD:project-start source:PROJECT.md -->
 
 ## Project
