@@ -73,7 +73,29 @@ precondition: |
   (`logInstanceGateStatus`) reports the gate ACTIVE on start and prints no
   secret — that is the fast check.
 
-  Positive check (the G-14-2 fix):
+  G-14-3 re-run (do this FIRST, while the browser session is genuinely fresh):
+  - This reproduces the reported failure: a browser session that ALREADY holds
+    a valid `dt_session` cookie from earlier testing and has NOT had the
+    passphrase typed into it during this session. Typing the passphrase here
+    instead would set the gate signal through the login path and mask the
+    defect — the re-run would pass without ever exercising G-14-3.
+  - Get to that state deterministically from a session that has already
+    unlocked: either close the tab entirely and open a new one, OR in devtools
+    (Application -> Storage -> Session Storage) delete the `dt_gate_active`
+    entry for the origin. Do NOT use the Log out control and do NOT clear
+    cookies — the `dt_session` cookie must survive while the per-session
+    `dt_gate_active` signal does not.
+  - Open the app in that fresh tab. Expected: you are let straight in with no
+    passphrase form, AND the **Log out** control is present in the nav on that
+    first authenticated view — with no passphrase typed and no reload. The
+    control appears once the first data request of that page load completes,
+    so a glance during the very first frame, before the watchlist has loaded,
+    is not a failure.
+  - If the control is absent here, that is the exact G-14-3 symptom. Access to
+    the watchlist is unaffected either way — the server 401 is the sole
+    enforcement.
+
+  Positive check (the G-14-2 fix / the login path):
   - Unlock with the correct passphrase. Confirm the **Log out** control is in
     the nav.
   - Do a FULL document reload (browser refresh) while the dt_session cookie is
