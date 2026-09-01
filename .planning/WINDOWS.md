@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 2
+open_count: 3
 waived_count: 1
 fixed_count: 1
-total_count: 4
-last_updated: 2026-08-29T17:20:29.066Z
+total_count: 5
+last_updated: 2026-09-01T03:23:20.970Z
 ---
 
 # Broken Windows Ledger
@@ -19,6 +19,7 @@ last_updated: 2026-08-29T17:20:29.066Z
 | 2 | quick-260806-hfn | deviation | internal/db/migrate_test.go |  | gitleaks history scan found 4 findings (fake DSN test-fixture password, no real credential) in commits fc3c02d/1dc505a/25c285c; accepted per human decision, not suppressed via .gitleaksignore -- see 260806-hfn-SUMMARY.md | open |  | 2026-08-06T18:05:12.264Z |  |
 | 3 | 03 | unrun-verify | internal/httpserver/search.go |  | Live happy-path human-check (curl against running binary + real musicbrainz.org, confirming real Drake artist results) could not run in this sandbox: no outbound TLS egress to musicbrainz.org. D-03 degraded-path behavior was confirmed live instead (200 with status:error, no leaked text). | waived | Confirmed via /gsd-verify-work 03: reproduced with plain curl (bypassing drop-tracker's Go client entirely) on a real dev WSL2 machine with genuine internet access -- TLS handshake fails identically (server decode_error alert after ClientHello, IPv6 route unreachable falling back to IPv4). Third independent environment to hit this, Deezer unaffected each time. Confirmed environmental (WSL2 network path to musicbrainz.org), not a drop-tracker defect -- see 03-UAT.md gap G-03-1. | 2026-08-07T22:00:10.701Z | 2026-08-08T00:21:10.539Z |
 | 4 | 14 | deviation | .env.example |  | INSTANCE_PASSPHRASE / TRUST_PROXY_HEADERS added to .env.example by operator during 14-01 (file is denied to agent tools; plan 14-04 formalizes wording) | fixed |  | 2026-08-29T16:16:47.738Z | 2026-08-29T17:20:29.066Z |
+| 5 | 14 | lint-warning | web/app/root.tsx | 19 | tsc --noEmit fails on stale react-router typegen artifact (./+types/root TS2307); pre-existing, react-router build passes; needs a typegen pretypecheck step | open |  | 2026-09-01T03:23:20.970Z |  |
 
 ````json
 [
@@ -69,6 +70,18 @@ last_updated: 2026-08-29T17:20:29.066Z
     "reason": "",
     "recorded_at": "2026-08-29T16:16:47.738Z",
     "resolved_at": "2026-08-29T17:20:29.066Z"
+  },
+  {
+    "id": 5,
+    "kind": "lint-warning",
+    "phase": "14",
+    "file": "web/app/root.tsx",
+    "line": 19,
+    "description": "tsc --noEmit fails on stale react-router typegen artifact (./+types/root TS2307); pre-existing, react-router build passes; needs a typegen pretypecheck step",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-01T03:23:20.970Z",
+    "resolved_at": null
   }
 ]
 ````

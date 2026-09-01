@@ -80,7 +80,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 4. The session cookie carries `HttpOnly`, `Secure`, `SameSite=Lax` and a bounded lifetime when inspected in devtools, and repeated wrong-passphrase attempts from one client are throttled (rejected with `429`) rather than answered at full speed indefinitely.
 5. With no passphrase configured, every route behaves exactly as it did in v1.2 — `make test-integration`, `pnpm test`, and `docker compose up` all pass untouched with no passphrase anywhere.
 
-**Plans**: 6 plans (4 phase plans + 2 gap-closure plans) — 5 executed, 14-06 pending
+**Plans**: 6/6 plans executed (4 phase plans + 2 gap-closure plans) — 5 executed, 14-06 pending
 
 Plans:
 **Wave 1**
@@ -102,7 +102,7 @@ Plans:
 
 **Gap closure** *(UAT G-14-2 — the Log out control disappears after a page reload while still logged in)*
 
-- [ ] 14-06-PLAN.md — Close G-14-2: back `gateActive` with `sessionStorage` so the Log out control survives a document reload for the browser session (D-18), with guarded access for private-mode and the SPA-mode Node prerender, plus a reload regression test and a UAT Test 5 precondition
+- [x] 14-06-PLAN.md — Close G-14-2: back `gateActive` with `sessionStorage` so the Log out control survives a document reload for the browser session (D-18), with guarded access for private-mode and the SPA-mode Node prerender, plus a reload regression test and a UAT Test 5 precondition
 
 **UI hint**: yes
 
@@ -176,7 +176,7 @@ Phases execute in numeric order: 14 → 15 → 16 → 17
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 14. Instance Passphrase Gate | 5/5 | In Progress|  |
+| 14. Instance Passphrase Gate | 6/6 | In Progress|  |
 | 15. PR Coverage-Diff Comment | 0/? | Not started | - |
 | 16. Rollback-Safe Migrations | 0/? | Not started | - |
 | 17. Automated VPS Deploy with Health-Gated Rollback | 0/? | Not started | - |
