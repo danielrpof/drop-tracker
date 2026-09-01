@@ -6,10 +6,10 @@ current_phase: 15
 current_phase_name: PR Coverage-Diff Comment
 status: planning
 stopped_at: Phase 14 complete, ready to plan Phase 15
-last_updated: "2026-09-01T18:48:44.848Z"
+last_updated: "2026-09-01T21:16:01.523Z"
 last_activity: 2026-09-01
 last_activity_desc: Phase 14 complete, transitioned to Phase 15
-state_head: 256e056feb796e32b226324a432d230f17f304bf
+state_head: 5de010b834fce6a4c259d564b55fce82d30c916d
 progress:
   total_phases: 4
   completed_phases: 1
@@ -237,6 +237,7 @@ None yet.
 | 260901-jre | Fix commit pipeline blockers: line-scoped //nolint for 3 golangci-lint findings (2× gosec G115 in authgate/session.go, 1× staticcheck SA1019 on middleware.RealIP) + prettier reformat of 6 Phase 14 frontend files | 2026-09-01 | 30839fb | [260901-jre-fix-commit-pipeline-blockers-golangci-li](./quick/260901-jre-fix-commit-pipeline-blockers-golangci-li/) |
 | 260901-knc | Close frontend-formatting CI gap: add local prettier --write pre-commit hook (mirrors golangci-lint --fix pattern) + Definition of Done checklist at top of CLAUDE.md | 2026-09-01 | bf041b2 | [260901-knc-close-frontend-formatting-ci-gap-add-loc](./quick/260901-knc-close-frontend-formatting-ci-gap-add-loc/) |
 | 260901-lvn | Add repo-root .gitattributes pinning the tree to LF (overrides core.autocrlf) + forced re-checkout to clear 455 working-tree CRLF files; ends the prettier stat-dirty loop | 2026-09-01 | 1524333 | [260901-lvn-add-repo-root-gitattributes-and-renormal](./quick/260901-lvn-add-repo-root-gitattributes-and-renormal/) |
+| 20 | Add comment-conciseness rule to CLAUDE.md + CONVENTIONS.md (stop multi-paragraph comment essays; authStore.ts cited as anti-pattern) | 2026-09-01 | 5de010b | — |
 
 ### Roadmap Evolution
 
