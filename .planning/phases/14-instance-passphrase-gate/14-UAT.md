@@ -68,6 +68,38 @@ prior_result: blocked
 note: "Was blocked behind G-14-1; now unblocked. Operator: 'test 4 pass.'"
 
 ### 5. Log out control persists across a page reload while logged in
+precondition: |
+  Test 5 needs a GATED instance, so Test 1's precondition applies first:
+  INSTANCE_PASSPHRASE must be a KEY=VALUE line in the repo-root .env (the
+  gitignored file compose feeds the container, NOT .env.example, NOT a host
+  shell export unless it is also mapped in docker-compose.yml). Confirm the
+  gate engaged before starting: the 14-05 boot log line
+  (`logInstanceGateStatus`) reports the gate ACTIVE on start and prints no
+  secret — that is the fast check.
+
+  Positive check (the G-14-2 fix):
+  - Unlock with the correct passphrase. Confirm the **Log out** control is in
+    the nav.
+  - Do a FULL document reload (browser refresh) while the dt_session cookie is
+    still valid. The control must STILL be there — without logging in again
+    and without any 401 firing.
+  - Then navigate between the Watchlist and History tabs, add an artist, and
+    reload once more. The control must persist across all of it, for as long
+    as the browser session lasts.
+
+  Negative check (guards D-18's ungated-instance rule):
+  - The signal is per-tab and per-browser-session by design. To re-test the
+    ungated case you MUST first either close the tab entirely, or clear the
+    `dt_gate_active` sessionStorage entry for the origin in devtools
+    (Application -> Storage -> Session Storage), before loading an instance
+    that has NO passphrase configured.
+  - Skip that step and a leftover `dt_gate_active` entry from the positive
+    check will make an ungated instance appear to render a Log out control.
+    That looks like a regression and is not one.
+
+  This test is presentation-only. At no point does access to the watchlist
+  depend on the Log out control being visible — the server 401 is the sole
+  enforcement.
 expected: After unlocking, the **Log out** control stays visible in the nav across a browser refresh / navigation (for as long as the browser session lasts), not only until the next 401. The user remains logged in and the control remains available to end the session.
 result: issue
 reported: "log out button disappeared when i added a new artist. [access to the watchlist was unaffected — still fully usable]"
