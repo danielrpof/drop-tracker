@@ -1,21 +1,33 @@
 ---
-status: diagnosed
+status: testing
 phase: 14-instance-passphrase-gate
-source: [14-VERIFICATION.md, 14-06-SUMMARY.md]
+source: [14-VERIFICATION.md, 14-06-SUMMARY.md, 14-07-SUMMARY.md]
 started: 2026-08-29T17:38:38Z
-updated: 2026-09-01T00:00:00Z
+updated: 2026-09-01T18:10:00Z
 ---
 
 ## Current Test
 
-[testing complete — Test 5 re-run FAILED, fresh gap G-14-3 recorded]
+number: 5
+name: Log out control present on a fresh gated session (carried cookie, no typed login, no 401)
+expected: |
+  On a gated instance the Log out control is present on the first authenticated
+  view of a carried-cookie session (once the first data request completes) and
+  survives refresh + tab-nav + add-artist for the browser session; on an ungated
+  instance it is absent after the dt_gate_active storage entry is cleared. Access
+  to the watchlist never depends on the control being visible — the server 401 is
+  the sole enforcement.
+awaiting: user response
 
 note: |
-  Round 3 (post plan 14-06): G-14-2 reconciled as resolved (plan 14-06 backed
-  gateActive with sessionStorage). D1-D6 auto-passed by the new frontend
-  regression suite. But the operator real-browser re-run of Test 5 (coverage
-  D7) still shows NO Log out control on a gated instance — recorded as a fresh
-  regression G-14-3 per #1921, now in diagnosis.
+  Round 4 (post plan 14-07): G-14-3 closed in code — gate.Authenticate now stamps
+  X-Instance-Gated: 1 on every gate-passing response and apiFetch latches it into
+  a new authStore.markGateActive() one-shot (never touches authed, never clears).
+  Full automated chain green (Go marker matrix; header -> apiFetch -> store ->
+  rendered control end-to-end in jsdom; 125/125 frontend; react-router build).
+  Re-verification (14-VERIFICATION.md) scored 7/7 must-haves in code and routed
+  the operator real-browser re-run of Test 5 (coverage D7) as the sole remaining
+  human item. Follow Test 5's `G-14-3 re-run` sub-block FIRST.
   Tests 1-4 unchanged (operator PASS in round 2).
 
 ## Tests
@@ -119,14 +131,13 @@ precondition: |
   depend on the Log out control being visible — the server 401 is the sole
   enforcement.
 expected: After unlocking, the **Log out** control stays visible in the nav across a browser refresh / navigation (for as long as the browser session lasts), not only until the next 401. The user remains logged in and the control remains available to end the session.
-result: issue
-reported: "fail, no log out button present"
-severity: major
-new_gap: G-14-3
+result: pending
 prior_result: issue
-prior_reported: "log out button disappeared when i added a new artist. [access to the watchlist was unaffected — still fully usable]"
-prior_severity: warning
-reconciled: "G-14-2 resolved by plan 14-06 (sessionStorage-backed gateActive), but round-3 operator re-run still shows NO Log out control on a gated instance — treated as a fresh regression G-14-3 per #1921, not a re-open of G-14-2."
+prior_reported: "fail, no log out button present"
+prior_severity: major
+prior_gap: G-14-3
+awaiting_reverify: "Plan 14-07 closed G-14-3 in code (X-Instance-Gated marker + apiFetch markGateActive latch). Automated chain green. Needs the operator real-browser re-run against `docker compose up --build` — the `G-14-3 re-run` sub-block first, then the positive and ungated-negative checks."
+reconciled: "G-14-2 resolved by plan 14-06 (sessionStorage-backed gateActive), but round-3 operator re-run still showed NO Log out control on a gated instance — treated as a fresh regression G-14-3 per #1921, closed by plan 14-07."
 root_cause: |
   `web/app/lib/authStore.ts` holds `gateActive` as a volatile module-level
   boolean initialised to `false`. `root.tsx` renders `<LogoutButton />` only
@@ -152,8 +163,8 @@ root_cause: |
 
 total: 5
 passed: 4
-issues: 1
-pending: 0
+issues: 0
+pending: 1
 skipped: 0
 blocked: 0
 
@@ -209,8 +220,11 @@ blocked: 0
     - "Regression test: Log out control still present after a reload while authed (root.test.tsx or an authStore reload test)."
 
 - gap_id: G-14-3
-  truth: "On a gated instance, after unlocking with the correct passphrase, the Log out control is visible in the nav and stays visible across refresh / tab navigation / add-artist for the browser session"
-  status: failed
+  truth: "On a gated instance, a browser session that already holds a valid dt_session cookie renders the Log out control on its first authenticated load — with no 401, no typed login, and no reload — and it stays visible across refresh / tab navigation / add-artist for the browser session"
+  status: closed_pending_uat
+  resolved_by: [14-07]
+  resolved_at: 2026-09-01
+  resolution: "Plan 14-07: gate.Authenticate stamps X-Instance-Gated: 1 on every gate-passing response (gate.go:200, neither 401 path); apiFetch latches it (api.ts:146-148, before the 401/204/!ok branches) into a new authStore.markGateActive() one-shot that writes gateActive only — never authed, never clears. Marker's only write site is inside Authenticate, registered solely in server.go's gate != nil branch, so an ungated instance emits nothing structurally (D-18). Also retired the prior WR-01 residual (typeof sessionStorage probe moved inside the try in both storage helpers). Go marker matrix + jsdom end-to-end + 125/125 frontend + react-router build all green; 14-VERIFICATION.md re-verification 7/7 must-haves in code. Remaining: operator real-browser re-run of Test 5."
   reason: "User reported (round-3 re-run of Test 5, after plan 14-06's sessionStorage fix): 'fail, no log out button present'. Clarified: ran `docker compose up --build`, the dt_session login 'was already set' (valid cookie carried over from a prior test — user did NOT type the passphrase this session), and there was NO Log out button from the first authed render onward."
   severity: major
   test: 5
