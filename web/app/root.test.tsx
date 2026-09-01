@@ -114,6 +114,13 @@ describe("App — instance passphrase gate", () => {
   let toastError: ReturnType<typeof vi.fn>
 
   beforeEach(async () => {
+    // Storage reset MUST come first -- before vi.resetModules() and the
+    // dynamic re-import below. jsdom keeps one sessionStorage per file and
+    // vi.resetModules() does not clear it; authStore seeds gateActive from
+    // the store at import time, so a gate recorded by an earlier case would
+    // otherwise leak into "does not render the Log out control when the gate
+    // is not active".
+    sessionStorage.clear()
     // Fresh module registry so App and the test share one authStore instance.
     vi.resetModules()
     ;({ authStore } = await import("~/lib/authStore"))
@@ -171,6 +178,32 @@ describe("App — instance passphrase gate", () => {
     authStore.markAuthenticated() // sets gateActive true, authed stays true
 
     renderAppAt("/")
+
+    expect(logoutButton()).toBeInTheDocument()
+  })
+
+  it("keeps the Log out control after a document reload with a valid cookie — no 401, no login (G-14-2 regression)", async () => {
+    // Simulate a full document reload while dt_session is still valid: the
+    // browser session already recorded the gate as active on a previous
+    // page load, this load fires no 401 (loader fetch returns 200) and
+    // performs no login. gateActive must be seeded from the session store,
+    // so the control is still there -- with no mark* call anywhere here.
+    sessionStorage.setItem("dt_gate_active", "1")
+    vi.resetModules()
+    ;({ authStore } = await import("~/lib/authStore"))
+    const { default: ReloadedApp } = await import("./root")
+
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: ReloadedApp,
+        children: [
+          { index: true, Component: () => <div>Watchlist page</div> },
+          { path: "history", Component: () => <div>History page</div> },
+        ],
+      },
+    ])
+    render(<Stub initialEntries={["/"]} />)
 
     expect(logoutButton()).toBeInTheDocument()
   })
