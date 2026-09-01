@@ -53,17 +53,25 @@
 //     prohibition, carried forward verbatim from 14-03).
 //
 // Every sessionStorage access is guarded in BOTH directions, and a later
-// reader must not simplify either away:
-//   - a `typeof` check, because `react-router build` runs with `ssr: false`
-//     but still evaluates `root.tsx` — and transitively this module —
-//     inside Node to emit `index.html`, where `sessionStorage` does not
-//     exist; a bare module-scope dereference there is a build-time
+// reader must not simplify either guard away. The `typeof` probe sits INSIDE
+// the `try` in both helpers so ONE `catch` covers all three failure modes:
+//   - the identifier is undefined, because `react-router build` runs with
+//     `ssr: false` but still evaluates `root.tsx` — and transitively this
+//     module — inside Node to emit `index.html`, where `sessionStorage` does
+//     not exist; a bare module-scope dereference there is a build-time
 //     `ReferenceError` that breaks the Docker image build (the Dockerfile
-//     builds `web/` itself);
-//   - a `try`/`catch`, because a browser can deny or throw on storage
-//     access (private mode, disabled storage); an unguarded read at module
-//     scope would white-screen the whole SPA, since `root.tsx` imports this
-//     module.
+//     builds `web/` itself). `typeof` on an undeclared identifier does not
+//     throw, so this branch returns cleanly whether the probe is inside the
+//     `try` or not;
+//   - `getItem` / `setItem` throw, because a browser can deny or throw on
+//     storage access (private mode, disabled storage);
+//   - the `sessionStorage` property ACCESSOR itself throws on read — a
+//     sandboxed `<iframe>` without `allow-same-origin`, or a browser with
+//     storage disabled by policy. `typeof` does NOT suppress a
+//     present-but-throwing getter, so this is exactly why the probe must be
+//     inside the `try` (14-VERIFICATION residual WR-01).
+// An unguarded read at module scope in any of these cases would white-screen
+// the whole SPA, since `root.tsx` imports this module at the top level.
 //
 // Both `mark*` functions set `gateActive` to `true`, because either signal
 // proves the instance is gated. They are convergent and safe to call
@@ -85,10 +93,10 @@ const GATE_ACTIVE_STORAGE_VALUE = "1"
 // exactly once by the module initialiser below. It returns `false` for
 // every failure mode and never throws, logs, or re-raises.
 function readPersistedGateActive(): boolean {
-  if (typeof sessionStorage === "undefined") {
-    return false
-  }
   try {
+    if (typeof sessionStorage === "undefined") {
+      return false
+    }
     return sessionStorage.getItem(GATE_ACTIVE_STORAGE_KEY) === GATE_ACTIVE_STORAGE_VALUE
   } catch {
     return false
@@ -98,10 +106,10 @@ function readPersistedGateActive(): boolean {
 // persistGateActive is the ONLY place the session store is written, called
 // by both `mark*` functions. It swallows every failure and never throws.
 function persistGateActive(): void {
-  if (typeof sessionStorage === "undefined") {
-    return
-  }
   try {
+    if (typeof sessionStorage === "undefined") {
+      return
+    }
     sessionStorage.setItem(GATE_ACTIVE_STORAGE_KEY, GATE_ACTIVE_STORAGE_VALUE)
   } catch {
     // Storage denied or full — the in-memory boolean still carries the
