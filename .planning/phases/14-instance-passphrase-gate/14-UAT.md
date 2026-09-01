@@ -8,22 +8,19 @@ updated: 2026-08-31T00:00:00Z
 
 ## Current Test
 
-number: 4
-name: Live Discord brute-force alert
-expected: |
-  With DISCORD_WEBHOOK_URL set, drive >20 failed logins within 5 minutes against a
-  running instance. Exactly one brute-force alert embed arrives, carrying only a
-  count and window (no passphrase, fragment, or length); no further alert for 15 min.
-awaiting: user response
+[UAT complete for this round — Tests 1-4 PASS, Test 5 recorded as issue G-14-2]
 
 note: |
-  G-14-1 was closed by plan 14-05 (docker-compose wiring + boot-status log +
-  operator .env reconcile). Operator-confirmed the gate boots ACTIVE and the form
-  renders. Test 1 PASS and Test 2 PASS reported by the operator on re-run.
-  Test 5 (new) captures a Log out-button regression the operator hit during Test 1
-  — a real Phase 14 gap (G-14-2). Test 4 still needs a run.
-  Gap G-14-1 reconciliation is handled by /gsd-verify-work off plan 14-05's
-  gap_ids frontmatter.
+  Round 2 (post plan 14-05):
+  - Test 1 PASS, Test 2 PASS, Test 3 PASS (unchanged), Test 4 PASS — all
+    operator-reported.
+  - G-14-1 (gate never engaged) is CLOSED: plan 14-05 wired docker-compose,
+    added the boot-status log, and the operator reconciled the live .env;
+    every gate-behaviour test now passes.
+  - Test 5 / gap G-14-2 (open): the Log out control disappears after a page
+    reload while still logged in. Presentation-only (server 401 enforcement
+    unaffected), severity warning. Needs a gap plan.
+  Next: /gsd-plan-phase 14 --gaps  (G-14-2 only; G-14-1 already resolved).
 
 ## Tests
 
@@ -66,9 +63,9 @@ result: pass
 
 ### 4. Live Discord brute-force alert
 expected: With `DISCORD_WEBHOOK_URL` set, drive >20 failed logins within 5 minutes against a running instance. Exactly one brute-force alert embed arrives in the Discord channel, carrying only a count and window (no passphrase, no fragment, no length); no further alert for 15 minutes.
-result: pending
+result: pass
 prior_result: blocked
-note: "Was blocked behind G-14-1; now unblocked — the login path is reachable."
+note: "Was blocked behind G-14-1; now unblocked. Operator: 'test 4 pass.'"
 
 ### 5. Log out control persists across a page reload while logged in
 expected: After unlocking, the **Log out** control stays visible in the nav across a browser refresh / navigation (for as long as the browser session lasts), not only until the next 401. The user remains logged in and the control remains available to end the session.
@@ -99,9 +96,9 @@ root_cause: |
 ## Summary
 
 total: 5
-passed: 3
+passed: 4
 issues: 1
-pending: 1
+pending: 0
 skipped: 0
 blocked: 0
 
@@ -109,7 +106,9 @@ blocked: 0
 
 - gap_id: G-14-1
   truth: "With INSTANCE_PASSPHRASE set, opening the app shows the passphrase form and blocks all access until unlocked"
-  status: failed
+  status: resolved
+  resolved_by: [14-05]
+  resolution: "Plan 14-05 forwarded INSTANCE_PASSPHRASE/TRUST_PROXY_HEADERS through docker-compose.yml (with regression test), added the secret-free boot-status log line, and documented the .env channel in Test 1. Operator reconciled the live repo-root .env; boot log reports the gate ACTIVE and Tests 1-4 all pass on re-run."
   reason: "User reported: i set the instance passphrase, ran docker compose up --build and when opening localhost, the watchlist is there, no passphrase form is shown, everything is accesible"
   severity: blocker
   test: 1
