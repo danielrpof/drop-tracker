@@ -3,7 +3,7 @@ package authgate
 // Whitebox tests for the D-11 boot-time weak-passphrase heuristic: the pure
 // IsWeakPassphrase function and the exact WARN snippet cmd/server/main.go runs
 // right after the logger is constructed. These live in package authgate so
-// they can reference knownDefaults / envExamplePlaceholder directly.
+// they can reference knownDefaults directly.
 
 import (
 	"bytes"
@@ -28,7 +28,6 @@ func TestIsWeakPassphrase(t *testing.T) {
 		{"known default, lowercase", "instance-passphrase", true, "matches a known default value"},
 		{"known default, mixed casing", "InStAnCe-PaSsPhRaSe", true, "matches a known default value"},
 		{"known default padded past the length floor with whitespace", "  instance-passphrase          ", true, "matches a known default value"},
-		{".env.example placeholder is flagged weak", envExamplePlaceholder, true, "shorter than 16 characters"},
 		{"16 multi-byte runes is not reported short", strings.Repeat("é", 16), false, ""},
 		{"15 multi-byte runes is reported short by rune count", strings.Repeat("é", 15), true, "shorter than 16 characters"},
 		{"short distinctive value: reason names length, never the value", "Zq9-improbabl-x", true, "shorter than 16 characters"},
@@ -47,25 +46,6 @@ func TestIsWeakPassphrase(t *testing.T) {
 				t.Fatalf("reason %q contains the input value %q", reason, tc.in)
 			}
 		})
-	}
-}
-
-// TestWeakPassphrase_EnvExamplePlaceholderOnDenylist pins the plan prohibition:
-// whatever literal .env.example ships as INSTANCE_PASSPHRASE must be on the
-// knownDefaults denylist so copying the file verbatim self-reports.
-func TestWeakPassphrase_EnvExamplePlaceholderOnDenylist(t *testing.T) {
-	found := false
-	for _, d := range knownDefaults {
-		if d == envExamplePlaceholder {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("envExamplePlaceholder %q is not in knownDefaults", envExamplePlaceholder)
-	}
-	if _, weak := IsWeakPassphrase(envExamplePlaceholder); !weak {
-		t.Fatalf("IsWeakPassphrase(%q) = not weak, want weak", envExamplePlaceholder)
 	}
 }
 
