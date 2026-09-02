@@ -125,7 +125,7 @@ _Notes:_ Joint backend + frontend slice — a Go `internal/authgate` package plu
 4. A PR whose coverage drops still shows that drop in the comment and stays mergeable — only the pre-existing 80%/70% coverage gates can block it.
 5. A merge to main publishes that run's coverage as the baseline the next PR diffs against, and no PR run recomputes main's coverage.
 
-**Plans**: 1/3 plans executed
+**Plans**: 2/3 plans executed
 
 Plans:
 **Wave 1**
@@ -134,7 +134,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 15-02-PLAN.md — Makefile wiring: `COVER_PKGS` exclusion, `make coverage-report`, and the D-17 `coverage-gate` cutover with a measured margin check (wave 2)
+- [x] 15-02-PLAN.md — Makefile wiring: `COVER_PKGS` exclusion, `make coverage-report`, and the D-17 `coverage-gate` cutover with a measured margin check (wave 2)
 - [ ] 15-03-PLAN.md — CI wiring: Vitest `json-summary` reporter, artifact hand-off, main-branch cache baseline, and the report-only `coverage-comment` job (wave 2)
 
 _Notes:_ CI-only, report-only, low risk. Must not join any release-path `needs:` graph — `needs: [test, frontend-test]` and nothing else. `pull-requests: write` is scoped to this job only, never workflow-wide. Same-repo branches only; fork PRs degrade to the job summary. `pull_request_target` is prohibited outright. Open decision for discuss/spec: baseline storage (Actions cache with `restore-keys` vs. an orphan `coverage-baseline` branch). Relevant pitfalls: PITFALLS.md 24-27.
@@ -191,7 +191,7 @@ Phases execute in numeric order: 14 → 15 → 16 → 17
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 14. Instance Passphrase Gate | 7/7 | Complete    | 2026-09-01 |
-| 15. PR Coverage-Diff Comment | 1/3 | In Progress|  |
+| 15. PR Coverage-Diff Comment | 2/3 | In Progress|  |
 | 16. Rollback-Safe Migrations | 0/? | Not started | - |
 | 17. Automated VPS Deploy with Health-Gated Rollback | 0/? | Not started | - |
 

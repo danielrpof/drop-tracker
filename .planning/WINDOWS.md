@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 3
 waived_count: 1
-fixed_count: 2
-total_count: 6
-last_updated: 2026-09-02T22:19:34.900Z
+fixed_count: 3
+total_count: 7
+last_updated: 2026-09-02T22:30:26.122Z
 ---
 
 # Broken Windows Ledger
@@ -21,6 +21,7 @@ last_updated: 2026-09-02T22:19:34.900Z
 | 4 | 14 | deviation | .env.example |  | INSTANCE_PASSPHRASE / TRUST_PROXY_HEADERS added to .env.example by operator during 14-01 (file is denied to agent tools; plan 14-04 formalizes wording) | fixed |  | 2026-08-29T16:16:47.738Z | 2026-08-29T17:20:29.066Z |
 | 5 | 14 | lint-warning | web/app/root.tsx | 19 | tsc --noEmit fails on stale react-router typegen artifact (./+types/root TS2307); pre-existing, react-router build passes; needs a typegen pretypecheck step | open |  | 2026-09-01T03:23:20.970Z |  |
 | 6 | 15 | deviation | cmd/coverage-report/testdata/baseline-metrics-backend.json |  | Task 1 baseline sidecar fixtures carried 41-char sha fields; corrected to valid 40-char in 20e6d68 (resolved) | fixed |  | 2026-09-02T22:19:13.272Z | 2026-09-02T22:19:34.900Z |
+| 7 | 15 | deviation | cmd/coverage-report/main.go |  | backendTotalPct summed numStmts per profile line, inflating the denominator ~10x on a real merged go-test profile (reported 7.97% vs go tool cover 90.0%); fixed in b1967f6 by merging blocks by position (resolved) | fixed |  | 2026-09-02T22:30:17.794Z | 2026-09-02T22:30:26.122Z |
 
 ````json
 [
@@ -95,6 +96,18 @@ last_updated: 2026-09-02T22:19:34.900Z
     "reason": "",
     "recorded_at": "2026-09-02T22:19:13.272Z",
     "resolved_at": "2026-09-02T22:19:34.900Z"
+  },
+  {
+    "id": 7,
+    "kind": "deviation",
+    "phase": "15",
+    "file": "cmd/coverage-report/main.go",
+    "line": null,
+    "description": "backendTotalPct summed numStmts per profile line, inflating the denominator ~10x on a real merged go-test profile (reported 7.97% vs go tool cover 90.0%); fixed in b1967f6 by merging blocks by position (resolved)",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-09-02T22:30:17.794Z",
+    "resolved_at": "2026-09-02T22:30:26.122Z"
   }
 ]
 ````
