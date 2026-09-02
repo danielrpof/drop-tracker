@@ -33,9 +33,10 @@ export default defineConfig({
       // `vitest run` invocation per D-08.
       enabled: true,
       provider: "v8",
-      // Text reporter only -- log-only output, writes nothing to disk
-      // (mirrors the backend's D-03 posture).
-      reporter: ["text"],
+      // The text reporter is for the CI log; the summary reporter writes the
+      // coverage-summary.json file the Phase 15 PR coverage comment reads
+      // (web/coverage/ is gitignored).
+      reporter: ["text", "json-summary"],
       // Load-bearing, not boilerplate: Vitest 4 removed coverage.all, so
       // only files imported during the test run are measured by default.
       // Without this glob, an entirely untested route (app/routes/history.tsx)
