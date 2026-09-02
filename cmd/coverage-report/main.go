@@ -82,19 +82,69 @@ func run(args []string, stdout io.Writer) error {
 // validSHA reports whether s is a well-formed short or full commit SHA:
 // 7 to 40 lowercase hexadecimal characters. It is the only gate by which a
 // SHA string from a file or a CLI argument may reach the comment body (V5).
-// TODO(15-01 Task 3 GREEN): implement.
-func validSHA(s string) bool { return false }
-
-// runTotal writes only the bare 2-decimal backend percentage to stdout (D-17).
-// TODO(15-01 Task 3 GREEN): implement.
-func runTotal(profilePath string, stdout io.Writer) error {
-	return errors.New("total mode not implemented")
+func validSHA(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
-// runSidecar writes the flat pct/sha/generated_at baseline object (D-02).
-// TODO(15-01 Task 3 GREEN): implement.
+// ---- total mode (D-17) ----
+
+// runTotal writes only the bare 2-decimal backend percentage plus a newline to
+// stdout; a parse failure is a hard error so `make coverage-gate` sees an empty
+// stdout in plan 15-02 (RESEARCH Pitfall 9).
+func runTotal(profilePath string, stdout io.Writer) error {
+	pct, err := readBackend(profilePath)
+	if err != nil {
+		return fmt.Errorf("total mode: %w", err)
+	}
+	if _, err := fmt.Fprintf(stdout, "%.2f\n", round2(pct)); err != nil {
+		return fmt.Errorf("total mode: write: %w", err)
+	}
+	return nil
+}
+
+// ---- sidecar mode (D-02) ----
+
+// sidecarOut is the flat baseline object the backend and frontend publish steps
+// both emit (D-02); one decoder (readSidecar) reads both. pct is a RawMessage so
+// it is byte-identical to what total mode prints for the same profile (D-17).
+type sidecarOut struct {
+	Pct         json.RawMessage `json:"pct"`
+	SHA         string          `json:"sha"`
+	GeneratedAt string          `json:"generated_at"`
+}
+
 func runSidecar(profilePath, sha, outPath string) error {
-	return errors.New("sidecar mode not implemented")
+	if !validSHA(sha) {
+		return fmt.Errorf("sidecar mode: --sha %q is not 7-40 lowercase hex", sha)
+	}
+	if outPath == "" {
+		return errors.New("sidecar mode: --out is required")
+	}
+	pct, err := readBackend(profilePath)
+	if err != nil {
+		return fmt.Errorf("sidecar mode: %w", err)
+	}
+	body, err := json.Marshal(sidecarOut{
+		Pct:         json.RawMessage(fmt.Sprintf("%.2f", round2(pct))),
+		SHA:         sha,
+		GeneratedAt: nowUTC(),
+	})
+	if err != nil {
+		return fmt.Errorf("sidecar mode: marshal: %w", err)
+	}
+	if err := os.WriteFile(outPath, append(body, '\n'), 0o644); err != nil {
+		return fmt.Errorf("sidecar mode: write %s: %w", outPath, err)
+	}
+	return nil
 }
 
 // round2 rounds half-up to 2 decimals (D-06) -- the same rule make coverage-gate
@@ -302,9 +352,11 @@ func formatDelta(d float64) string {
 	}
 }
 
-// shortSHA returns the first 7 characters of a commit SHA, or "" if too short.
+// shortSHA returns the 7-char prefix of a format-valid commit SHA, or "" for
+// anything else. This is the V5 control: a rejected SHA is simply omitted from
+// the footer, never echoed into the body (D-04).
 func shortSHA(s string) string {
-	if len(s) < 7 {
+	if !validSHA(s) {
 		return ""
 	}
 	return s[:7]
