@@ -237,7 +237,9 @@ func render(d commentData) string {
 	case d.baselineSHA != "":
 		fmt.Fprintf(&b, "baseline: main@%s\n", d.baselineSHA)
 	case d.noBaseline:
-		b.WriteString("Delta unavailable — no main baseline cached yet (first run or evicted). Absolute coverage shown.\n")
+		// Footer wording avoids the literal "unavailable" token so it does not
+		// collide with the per-row unavailable cell string (D-11).
+		b.WriteString("Delta not available yet — no main baseline cached (first run or evicted). Absolute coverage shown.\n")
 	}
 	if d.upstreamRed {
 		b.WriteString("Note: an upstream CI job was red; a coverage row may be unavailable.\n")

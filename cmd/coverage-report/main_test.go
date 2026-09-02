@@ -295,8 +295,8 @@ func TestRenderComment_MissingProfile(t *testing.T) {
 	if body != string(want) {
 		t.Fatalf("comment body mismatch\n--- got ---\n%s\n--- want ---\n%s", body, want)
 	}
-	if statusCell(t, body, "Backend") != unavailable {
-		t.Fatalf("Backend row is not unavailable:\n%s", body)
+	if !strings.Contains(body, "| Backend | "+unavailable+" | "+emDash+" | 80% | "+emDash+" |") {
+		t.Fatalf("Backend row is not fully degraded:\n%s", body)
 	}
 	if !strings.Contains(body, "| Frontend | 72.30% |") {
 		t.Fatalf("Frontend row lost its real percentage:\n%s", body)
