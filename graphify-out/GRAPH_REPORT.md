@@ -1,168 +1,154 @@
-# Graph Report - drop-tracker  (2026-08-23)
+# Graph Report - drop-tracker  (2026-09-01)
 
 ## Corpus Check
-- Large corpus: 412 files · ~713,144 words. Semantic extraction will be expensive (many Claude tokens). Consider running on a subfolder.
+- 225 files · ~314,801 words
+- Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1991 nodes · 5038 edges · 137 communities (83 shown, 54 thin omitted)
-- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 384 edges (avg confidence: 0.8)
+- 2088 nodes · 5504 edges · 137 communities (91 shown, 19 thin omitted)
+- Extraction: 90% EXTRACTED · 10% INFERRED · 0% AMBIGUOUS · INFERRED: 568 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
+## Graph Freshness
+- Built from commit: `9ee4aa61`
+- Run `git rev-parse HEAD` and compare to check if the graph is stale.
+- Run `graphify update .` after code changes (no API cost).
+
 ## Community Hubs (Navigation)
-- Events Store & Queries
-- Cron Poller Core
-- Events API Handler Tests
-- Pgx Pool & Querier
-- Watchlist List/Remove/PATCH Plans
-- Event Retention Window
-- Concurrency & Secret-Scan Decisions
-- Server Boot & Graceful Shutdown
-- Dockerfile & CI Hardening
-- MusicBrainz Recordings Client Tests
-- Coverage Gate Makefile & Plans
-- Frontend Vitest Test Suite Plans
-- Detection Engine Core Decisions
-- Release History Frontend Plans
-- SearchBox AbortController Fix
-- CoverArt & Alert UI Components
-- Artist Albums Client Tests
-- Detection Functions & Logging
-- DB Pinger & Store Stubs
-- Docker Compose & Port Revert
-- MusicBrainz/Deezer Search Clients
-- Events Service List
-- Cross-Cutting Architecture Decisions
-- Guest-Feature Detection Sources
-- TS Config Globals
-- Frontend UI Dependencies
-- Config Loader Tests
-- Discord Embed Formatting
-- Watchlist Core Decisions
-- Frontend Dev Tooling Deps
-- Config Surface & sqlc Wiring
-- Bounded Concurrent Polling Design
-- Events Insert & List
-- Search Source Adapters
-- shadcn/ui Components Config
-- Health & Request-ID Config
-- Phase 5 Discord Audit Reports
-- Search Result Row Country Fallback
-- EventCard Crash & Href Bugs
-- Pgx Pool Config & DSN
-- Deluxe-Change Baseline Detection
-- Retry & Buffer Utilities
-- Artist Albums Fetch Logic
-- Phase 11.1 Audit & Filters UI
-- Migrate Retry & DSN Redaction
-- Release Detail Source Stubs
-- Preference Toggle Checkboxes
-- Frontend Tech-Debt Cleanup
-- Discord Client Send Logic
-- sqlc Generated Models
-- HTTP Server & Router Setup
-- Notification Message Formatting
-- Notifier Hang Fix & Pool
-- Guest-Feature & Deluxe Plans
-- Phase 1 Foundation Decisions
-- Phase 3 Search Client Code Review
-- Pool MaxConns Sizing
-- Flaky Test Stability Fixes
-- Discord Notification Tracer Plans
-- Frontend package.json
-- Events Table Migrations
-- Empty State & Button UI
-- Toast & App Shell UI
-- Phase 1 Code Review (DSN Leak)
-- Loss-Window Signal & PoolConfig
-- Backoff Retry Tests
-- MusicBrainz Search Query Escaping
-- CoverArt Reset Fix
-- Phase 12 Popularity Ranking Scope
-- Bounded Polling Worker Config
-- Postgres Port Revert Decision
-- Artist Upsert Query
-- Idempotent Seen-Store Insert
-- UpdatePreferences No-Op Guard Fix
-- v1.1 Milestone Audit
-- Phase 5 Closeout & v1.0 Audit
-- Atomic CAS Baseline Pattern
-- clsx Dependency
-- Fontsource Inter Dependency
-- Health Response Type
-- Poller Overlap Guard
-- next-themes Dependency
-- Dockerfile Go Version Bump
-- Prettier Tailwind Plugin
-- Tailwind CSS Dependency
-- Testing Library React
-- React DOM Types
-- TypeScript Dependency
-- Web Frontend README
-- Phase 1 Discussion Log
-- Pitfall: pgxpool Silent Connect
-- Pitfall: golangci-lint v1/v2 Confusion
-- HTTP Server Timeout Gap
-- Stale .gitignore Template
-- Health Endpoint Info Disclosure Threat
-- Health Endpoint DoS Threat
-- Migration Retry DoS Threat
-- .env Commit Threat
-- Config Error Echo Threat
-- SearchBox Comment Fix
-- Per-Source Pool Config
-- Cycle-End Log Field
-- Concurrent Log Ordering
-- Rate Limiter Burst Edge Case
-- Baseline Tampering Threat
-- Broken Windows Defect Ledger
-- Recording Source Interface
-- Release Detail Source Interface
-- Discord Embed Struct
-- Artist Credit Entry
-- Recording Browse Limit
-- Recording Struct
-- Release Browse Limit
-- Medium Struct
-- Release Struct
-- Discord NoOp Sink
-- Notifier Sender Interface
-- Notifier Sink Interface
-- Repo Module Path
-- Guest-Feature MusicBrainz-Only Decision
-- Seed Cycle Pre-Notified Rows
-- Implicit Seed Mode Detection
-- Per-Source Independent Seeding
-- Remove-Re-Add History Preservation
-- Idempotency via Unique Constraint
-- New-Release Event Detection
-- Track Count Baseline Query
-- HasAnyEvent Query
-- ListExternalIDs Query
-- SetGroupTrackCountBaseline Query
+- New
+- poller_test.go
+- New
+- New
+- gate_test.go
+- TestDetectGuestFeatures_NonSeedCycle_FreshFeatureStillDelivered
+- Album
+- net/http.Request
+- releases_test.go
+- newTestClient
+- golang.org/x/time/rate.Limiter
+- Phase 8: Frontend Test Suite
+- NewMatcher
+- .HandleLogin
+- authStore.ts
+- cn
+- testing.T
+- log/slog.Logger
+- context.Context
+- sync.Mutex
+- time.Duration
+- events_test.go
+- EncodeCursor
+- Recording
+- compilerOptions
+- dependencies
+- config_test.go
+- formatEmbed
+- devDependencies
+- Backfill
+- PROJECT.md
+- github.com/jackc/pgx/v5/pgtype.Timestamptz
+- match.go
+- components.json
+- NewWithWriter
+- Pattern Assignments
+- watchlist.tsx
+- EventCard.tsx
+- run
+- RunMigrations
+- time.Time
+- history.tsx
+- Implementation Decisions
+- Release
+- WatchlistEntry
+- Artist
+- Artist
+- Server
+- Phase 14 Plan 04: Instance Passphrase Gate — CSRF, Referrer-Policy & Weak-Passphrase WARN Summary
+- scripts
+- Phase 14 Plan 02: Instance Passphrase Gate — Brute-force Defense & Auditability Summary
+- Phase 14 — UI Design Contract
+- root.tsx
+- Phase 14 Plan 05: Passphrase Gate Config Reachability (G-14-1 Closure) Summary
+- Phase 14 Plan 01: Instance Passphrase Gate Summary
+- Artist
+- Phase 14 Plan 03: SPA Instance Passphrase Gate Summary
+- Phase 14: Instance Passphrase Gate - Discussion Log
+- Goal Achievement
+- Phase 14 Plan 07: Close G-14-3 — Self-Identifying Gated Responses Summary
+- Milestone v1.1 Audit Report
+- v1.0 Milestone Audit Report
+- clsx
+- api.ts
+- healthResponse
+- typescript
+- web/pnpm-workspace.yaml
+- Phase 14: Instance Passphrase Gate - Research
+- Requirements: drop-tracker
+- Phase 14 Plan 06: Close G-14-2 — persist gateActive for the browser session Summary
+- events/service.go
+- Info
+- Broken Windows Ledger cross-phase defect register
+- Tests
+- ArtistDetail
+- Roadmap: drop-tracker
+- Architecture Patterns
+- Common Pitfalls
+- Phase 14 — Validation Strategy
+- Issue tracker: GitHub
+- github.com/danielrpof/drop-tracker
+- Phase 14 — Security
+- Domain Docs
+- 14-07-PLAN.md
+- Code Examples
+- 14-05-PLAN.md
+- 14-06-PLAN.md
+- Validation Architecture
+- .pre-commit-config.yaml
+- Standard Stack
+- User Constraints (from CONTEXT.md)
+- Sources
+- Phase 14 — External API Coverage
+- Out-of-scope discoveries (not fixed)
+- 14-01-PLAN.md
+- 14-02-PLAN.md
+- 14-03-PLAN.md
+- 14-04-PLAN.md
+- Security Domain
+- react
+- @react-router/dev
+- @tailwindcss/vite
+- @testing-library/jest-dom
+- tw-animate-css
+- @types/react
+- vitest
+- NewActivityGate
+- .fetchReleaseGroupPage
+- cancelingSearcher
+- artists
 
 ## God Nodes (most connected - your core abstractions)
-1. `New()` - 111 edges
-2. `NewTestPool()` - 107 edges
-3. `New()` - 75 edges
-4. `discardLogger()` - 58 edges
-5. `newTestLogger()` - 58 edges
-6. `New()` - 50 edges
-7. `New()` - 49 edges
-8. `newTestClient()` - 45 edges
-9. `NewService()` - 44 edges
-10. `insertTestArtist()` - 43 edges
+1. `New()` - 141 edges
+2. `NewTestPool()` - 134 edges
+3. `New()` - 81 edges
+4. `discardLogger()` - 64 edges
+5. `New()` - 60 edges
+6. `newTestLogger()` - 58 edges
+7. `newTestClient()` - 57 edges
+8. `NewService()` - 56 edges
+9. `insertTestArtist()` - 51 edges
+10. `unlimitedLimiter()` - 51 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `deluxeDetectionEnabled()` --semantically_similar_to--> `musicbrainz.ReleaseGroup`  [INFERRED] [semantically similar]
-  internal/detection/filter.go → .planning/milestones/v1.0-phases/03-external-clients-search/03-03-PLAN.md
-- `sendAttempt` --semantically_similar_to--> `coverArtURLForReleaseGroup()`  [INFERRED] [semantically similar]
-  .planning/milestones/v1.0-phases/05-discord-notifications/05-01-PLAN.md → internal/detection/musicbrainz.go
-- `Phase 2 Plan 02: Duplicate-Add & Preferences Plan` --references--> `redactedTarget()`  [AMBIGUOUS]
-  .planning/milestones/v1.0-phases/02-watchlist-core/02-02-PLAN.md → internal/db/pool.go
 - `Graceful shutdown via signal.NotifyContext` --references--> `run()`  [EXTRACTED]
   .planning/PROJECT.md → cmd/server/main.go
 - `caarlos0/env config parsing` --references--> `Load()`  [EXTRACTED]
   .claude/CLAUDE.md → internal/config/config.go
+- `handleHealth (internal/httpserver/health.go)` --shares_data_with--> `NewPool()`  [INFERRED]
+  .planning/codebase/ARCHITECTURE.md → internal/db/pool.go
+- `golang-migrate schema migrations` --references--> `RunMigrations()`  [EXTRACTED]
+  .claude/CLAUDE.md → internal/db/migrate.go
+- `pgx/v5 Postgres driver` --references--> `NewPool()`  [EXTRACTED]
+  .claude/CLAUDE.md → internal/db/pool.go
 
 ## Import Cycles
 - None detected.
@@ -170,379 +156,392 @@
 ## Hyperedges (group relationships)
 - **Full Pipeline CI/CD job set (lint, test, scan, sbom, release)** — github_workflows_full_pipeline_doc, tech_golangci_lint_v2, tech_trivy, tech_gitleaks, tech_svu, tech_syft_sbom [EXTRACTED 1.00]
 - **Phase 12 scope: CoverArt reset plus search popularity/disambiguation work** — phase12_cleanup, coverart_reset_bug, search_popularity_disambiguation, deezer_fan_count_capture, musicbrainz_country_fallback [EXTRACTED 1.00]
-- **Notifier hang bug AND-gate: two independent causes composing into one production incident** — notify_pass_hang_bug, internal_notifier_notifier_notifypending, internal_db_pool_newpool, postgres_port_remap [INFERRED 0.85]
-- **Phase 1 Service Boot Sequence** — cmd_server_main_run, internal_config_config_load, internal_db_migrate_runmigrations, internal_httpserver_server_new [INFERRED 0.85]
-- **Watchlist Add Validation Pipeline** — internal_httpserver_watchlist_handleaddwatchlist, internal_watchlist_service_add, internal_watchlist_service_normalizeset, _planning_milestones_v1_0_phases_02_watchlist_core_02_02_plan_t0213 [EXTRACTED 1.00]
-- **DSN Redaction Hardening Effort** — internal_db_migrate_redactdsn, internal_db_pool_redactedtarget, _planning_milestones_v1_0_phases_01_foundation_data_layer_config_health_01_review_cr01, _planning_milestones_v1_0_phases_01_foundation_data_layer_config_health_01_security_t0101 [EXTRACTED 1.00]
-- **Phase 02 design-decision documentation set (context, discussion log, research, patterns)** — _planning_milestones_v1_0_phases_02_watchlist_core_02_context, _planning_milestones_v1_0_phases_02_watchlist_core_02_discussion_log, _planning_milestones_v1_0_phases_02_watchlist_core_02_research, _planning_milestones_v1_0_phases_02_watchlist_core_02_patterns [INFERRED 0.85]
-- **G-02-1 gap closure flow: UAT finding through plan 02-07 to re-verification** — _planning_milestones_v1_0_phases_02_watchlist_core_02_uat, _planning_milestones_v1_0_phases_02_watchlist_core_02_07_plan, _planning_milestones_v1_0_phases_02_watchlist_core_02_07_summary, concept_gap_g_02_1, _planning_milestones_v1_0_phases_02_watchlist_core_02_verification [EXTRACTED 0.90]
-- **G-02-2/CR-01 gap closure flow: UAT finding through plan 02-08 to security register and re-verification** — _planning_milestones_v1_0_phases_02_watchlist_core_02_uat, _planning_milestones_v1_0_phases_02_watchlist_core_02_08_plan, _planning_milestones_v1_0_phases_02_watchlist_core_02_08_summary, concept_gap_g_02_2, _planning_milestones_v1_0_phases_02_watchlist_core_02_verification, _planning_milestones_v1_0_phases_02_watchlist_core_02_security [EXTRACTED 0.90]
-- **Phase 3 External Clients & Search Plan Sequence** — _planning_milestones_v1_0_phases_03_external_clients_search_03_01_plan, _planning_milestones_v1_0_phases_03_external_clients_search_03_02_plan, _planning_milestones_v1_0_phases_03_external_clients_search_03_03_plan, _planning_milestones_v1_0_phases_03_external_clients_search_03_04_plan [EXTRACTED 1.00]
-- **Narrow-Interface Consumer-Declared Seam Pattern** — internal_musicbrainz_client_artistsearcher, internal_deezer_client_artistsearcher, internal_httpserver_search_searchsource, internal_poller_poller_eventrecorder, internal_watchlist_service_store [INFERRED 0.85]
-- **Phase 3 Quality-Gate Document Chain** — _planning_milestones_v1_0_phases_03_external_clients_search_03_review, _planning_milestones_v1_0_phases_03_external_clients_search_03_review_fix, _planning_milestones_v1_0_phases_03_external_clients_search_03_uat, _planning_milestones_v1_0_phases_03_external_clients_search_03_verification [EXTRACTED 1.00]
-- **Guest-Feature Detection Pipeline (DTCT-03)** — internal_musicbrainz_recordings_recordingsbyartist, internal_detection_musicbrainz_isguestfeature, internal_detection_musicbrainz_detectguestfeatures, internal_detection_detector_recordingsource [INFERRED 0.85]
-- **Deluxe-Change Baseline Pipeline (DTCT-02)** — internal_musicbrainz_releases_releasesbyreleasegroup, internal_detection_detector_groupbaseline, internal_detection_detector_setgroupbaseline, internal_detection_musicbrainz_detectdeluxechanges [INFERRED 0.85]
-- **Discord Delivery Outbox Pipeline (NTFY-01..04)** — internal_notifier_notifier_notifypending, internal_notifier_format_formatembed, internal_discord_client_send, queries_events_marknotified [INFERRED 0.85]
-- **Phase 5 Discord Notifications Sign-off Gate** — _planning_milestones_v1_0_phases_05_discord_notifications_05_review, _planning_milestones_v1_0_phases_05_discord_notifications_05_review_fix, _planning_milestones_v1_0_phases_05_discord_notifications_05_security, _planning_milestones_v1_0_phases_05_discord_notifications_05_validation, _planning_milestones_v1_0_phases_05_discord_notifications_05_verification, _planning_milestones_v1_0_phases_05_discord_notifications_05_uat [INFERRED 0.85]
-- **Phase 6 Wave-Based Execution Plans** — _planning_milestones_v1_0_phases_06_frontend_release_history_06_01_plan, _planning_milestones_v1_0_phases_06_frontend_release_history_06_02_plan, _planning_milestones_v1_0_phases_06_frontend_release_history_06_03_plan, _planning_milestones_v1_0_phases_06_frontend_release_history_06_04_plan [INFERRED 0.90]
-- **Phase 6 Shared Frontend Surface (api.ts, CoverArt, EmptyState)** — web_app_components_common_coverart_coverart, web_app_components_common_emptystate_emptystate, _planning_milestones_v1_0_phases_06_frontend_release_history_06_02_plan, _planning_milestones_v1_0_phases_06_frontend_release_history_06_03_plan, _planning_milestones_v1_0_phases_06_frontend_release_history_06_04_plan [INFERRED 0.85]
-- **Vulnerability Gate Strictness Decision Group (D-07/D-08/D-09)** — concept_d07_trivy_critical_high_gate, concept_d08_trivyignore_escape_hatch, concept_d09_pr_build_scan_no_push [EXTRACTED 0.90]
-- **docker-compose Dev-Loop Shape Decision Group (D-10/D-11/D-12)** — concept_d10_compose_build_local_image, concept_d11_compose_env_file, concept_d12_compose_database_url_override, concept_dockercompose_app_service [EXTRACTED 0.90]
-- **Phase 07 Code Review Findings Closed by Post-Execution Hardening** — concept_cr01_lint_missing_setup_go, concept_cr02_scan_push_image_mismatch, concept_wr01_trivy_fs_scan_missing, concept_wr02_gosec_linter_missing, concept_wr03_sbom_output_destination, concept_wr04_concurrent_release_race [EXTRACTED 0.90]
-- **RED-then-GREEN commit pair convention applied to all three folded bugs** — planning_milestones_v1_1_phases_08_frontend_test_suite_08_context_d07, planning_milestones_v1_1_phases_08_frontend_test_suite_08_context_folded_eventcard_crash, planning_milestones_v1_1_phases_08_frontend_test_suite_08_context_folded_searchbox_abortcontroller, planning_milestones_v1_1_phases_08_frontend_test_suite_08_context_folded_guestfeaturehref_encoding, planning_milestones_v1_1_phases_08_frontend_test_suite_08_03_plan, planning_milestones_v1_1_phases_08_frontend_test_suite_08_04_plan, planning_milestones_v1_1_phases_08_frontend_test_suite_08_05_plan [EXTRACTED 1.00]
-- **Phase 8 pre-planning context/research package** — planning_milestones_v1_1_phases_08_frontend_test_suite_08_context, planning_milestones_v1_1_phases_08_frontend_test_suite_08_research, planning_milestones_v1_1_phases_08_frontend_test_suite_08_patterns, planning_milestones_v1_1_phases_08_frontend_test_suite_08_discussion_log [INFERRED 0.85]
-- **Phase 8 post-execution quality-gate audit trail** — planning_milestones_v1_1_phases_08_frontend_test_suite_08_review, planning_milestones_v1_1_phases_08_frontend_test_suite_08_security, planning_milestones_v1_1_phases_08_frontend_test_suite_08_uat, planning_milestones_v1_1_phases_08_frontend_test_suite_08_validation, planning_milestones_v1_1_phases_08_frontend_test_suite_08_verification [INFERRED 0.80]
-- **Backend coverage gate delivery chain (measure, close gap, wire into CI)** — _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_01_plan_doc, _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_03_plan_doc, _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_05_plan_doc, _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_context_cicd_11 [INFERRED 0.85]
-- **Frontend coverage gate delivery chain (measure, close gap, wire into CI)** — _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_02_plan_doc, _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_04_plan_doc, _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_05_plan_doc, _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_context_cicd_12 [INFERRED 0.85]
-- **Phase 9 verification and audit trail (review, security, UAT, validation)** — _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_verification_doc, _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_security_doc, _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_uat_doc, _planning_milestones_v1_1_phases_09_ci_coverage_gates_09_validation_doc [INFERRED 0.80]
-- **Detection-state queries that must stay permanently unfiltered by retention** — _planning_milestones_v1_1_phases_10_event_retention_window_10_01_plan_listexternalids_query, _planning_milestones_v1_1_phases_10_event_retention_window_10_01_plan_hasanyevent_query, _planning_milestones_v1_1_phases_10_event_retention_window_10_01_plan_listunnotified_query, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_03_plan_advancegrouptrackcountbaseline_query, _planning_milestones_v1_1_phases_10_event_retention_window_10_01_plan_testretention_detectionstatequeriesstayunfiltered [EXTRACTED 1.00]
-- **Bounded worker-pool fan-out pattern mirrored across MusicBrainz and Deezer poll cycles** — _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_01_plan_poller_option_type, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_01_plan_withmusicbrainzworkers, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_02_plan_withdeezerworkers, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_01_plan_runmusicbrainzcycle_fanout, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_02_plan_rundeezercycle_fanout [EXTRACTED 1.00]
-- **Flaky-test root-cause fixes required for a trustworthy PERF-04 race proof** — _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_04_plan_migrate_scratch_isolation, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_04_plan_spacing_seam, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_04_plan_flaky_test_todo, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_03_plan_perf_04 [EXTRACTED 1.00]
-- **Phase 11 Gap G-11-1 Closure Flow** — _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_uat_gap_g11_1, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_05_plan_doc, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_05_summary_doc, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_verification_doc, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_validation_doc [EXTRACTED 1.00]
-- **Phase 11.1 Backend Debt Closure (D-10/D-11/D-12)** — _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_review_wr01_doc_undersells_blast_radius, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_review_wr02_notification_loss_window, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_review_in01_identical_error_text, _planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_03_plan_doc, _planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_03_summary_doc [EXTRACTED 1.00]
-- **Flaky Test Suite Stabilization Effort** — _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_context_folded_todo_flaky_tests, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_research_pitfall6_migrate_schema_drop, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_research_pitfall7_notifier_clock_injection, _planning_milestones_v1_1_phases_11_bounded_concurrent_polling_11_04_summary_doc [EXTRACTED 1.00]
-- **Phase 11.1 GSD Planning-Execution-Verification Chain** — planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_doc, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_discussion_log_doc, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_research_doc, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_patterns_doc, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_05_plan_doc, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_05_summary_doc, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_validation_doc, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_verification_doc [EXTRACTED 1.00]
-- **Phase 12 GSD Planning-Execution Chain** — planning_phases_12_cleanup_coverart_reset_search_popularity_ranking_12_context_doc, planning_phases_12_cleanup_coverart_reset_search_popularity_ranking_12_discussion_log_doc, planning_phases_12_cleanup_coverart_reset_search_popularity_ranking_12_research_doc, planning_phases_12_cleanup_coverart_reset_search_popularity_ranking_12_patterns_doc, planning_phases_12_cleanup_coverart_reset_search_popularity_ranking_12_01_plan_doc, planning_phases_12_cleanup_coverart_reset_search_popularity_ranking_12_02_plan_doc, planning_phases_12_cleanup_coverart_reset_search_popularity_ranking_12_03_plan_doc, planning_phases_12_cleanup_coverart_reset_search_popularity_ranking_12_validation_doc [EXTRACTED 1.00]
-- **Phase 11.1 Locked Tech-Debt Decisions (D-01..D-13)** — planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d01, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d02, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d03, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d04, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d05, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d06, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d07, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d08, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d09, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d10, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d11, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d12, planning_milestones_v1_1_phases_11_1_address_tech_debt_v1_1_cleanup_11_1_context_d13 [INFERRED 0.85]
-- **Events Table Dual-Role Retention Pitfalls** — concept_pitfall_seed_mode_reset, concept_pitfall_baseline_loss, concept_pitfall_dedup_key_loss, internal_detection_detector [EXTRACTED 1.00]
-- **Concurrent Polling Worker-Pool Risk Set** — concept_pitfall_baseline_race, concept_pitfall_rate_limiter_burst, concept_pitfall_unrecovered_panic, concept_pitfall_db_pool_sizing, internal_poller_poller [EXTRACTED 1.00]
-- **Phase 5 Formal Closeout Flow** — planning_quick_260808_pt0_close_out_phase_5_commit_docs_cleanup_st_260808_pt0_plan, planning_quick_260808_pt0_close_out_phase_5_commit_docs_cleanup_st_260808_pt0_summary, planning_v1_0_milestone_audit [INFERRED 0.85]
 
-## Communities (137 total, 54 thin omitted)
+## Communities (137 total, 19 thin omitted)
 
-### Community 0 - "Events Store & Queries"
-Cohesion: 0.08
-Nodes (105): insertEventFailingQuerier, Queries, New(), TestSQLCPing(), insertBaselineNewRelease(), int32Ptr(), readBaselineTrackCount(), TestAdvanceGroupBaseline_ConcurrentRace() (+97 more)
-
-### Community 1 - "Cron Poller Core"
-Cohesion: 0.09
-Nodes (77): cron.Cron, bytes.Buffer, New(), decodeLogRecords(), deezerID(), eightEntries(), failFirstThree(), newTestLogger() (+69 more)
-
-### Community 2 - "Events API Handler Tests"
-Cohesion: 0.10
-Nodes (61): testing.T, errorBody, healthBody, watchlistEntryBody, TestHandleListEvents_EmptyReturnsEmptyArrayAndNullCursor(), TestHandleListEvents_HappyPathReturns200WithEnvelope(), TestHandleListEvents_NilEventsSliceStillEncodesAsEmptyArray(), TestHandleListEvents_StoreErrorReturns500WithFixedMessage() (+53 more)
-
-### Community 3 - "Pgx Pool & Querier"
-Cohesion: 0.09
-Nodes (53): github.com/jackc/pgx/v5/pgxpool.Pool, sync/atomic.Bool, sync/atomic.Int32, time.Duration, Querier, NewClient(), TestSend_429RetryAfterClamped(), TestSend_429ThenSuccess_HonorsRetryAfter() (+45 more)
-
-### Community 4 - "Watchlist List/Remove/PATCH Plans"
-Cohesion: 0.08
-Nodes (61): Phase 02 Plan 03: Watchlist List and Remove, Phase 02 Plan 03 Summary, Phase 02 Plan 04: PATCH Preferences Update, Phase 02 Plan 04 Summary, Phase 02 Plan 05: Close Gap G-02-2a, Phase 02 Plan 05 Summary, Phase 02 Plan 06: Close Gap G-02-2b, Phase 02 Plan 06 Summary (+53 more)
-
-### Community 5 - "Event Retention Window"
+### Community 0 - "New"
 Cohesion: 0.07
-Nodes (60): Phase 10 Plan 01: Event Retention Window, DATA-01: Configurable event retention window, DATA-02: History/API exclude aged-out events, Config.EventRetentionDays, HasAnyEvent query (must stay unfiltered), ListEvents retention cutoff predicate, ListExternalIDs query (must stay unfiltered), ListUnnotified query (must stay unfiltered) (+52 more)
+Nodes (125): fakeReleaseDetailSource, insertEventFailingQuerier, Queries, New(), Querier, TestSQLCPing(), TestDetectDeezer_FiltersByRecordType(), TestDetectDeezer_NeverProducesDeluxeChange() (+117 more)
 
-### Community 6 - "Concurrency & Secret-Scan Decisions"
-Cohesion: 0.05
-Nodes (43): D-10: dedup key excludes artist_id (global dedup), errgroup.SetLimit Bounded-Concurrency Pattern, Events Retention: Soft-Delete vs Hard-Delete Design Decision, Local Gitleaks Pre-commit Secret Scanning Hook, Local golangci-lint Pre-commit Hook (Changed-Files Only), Pitfall: TTL Delete Destroys Deluxe-Change Baseline, Pitfall: Concurrent Worker Pool TOCTOU Race on Shared Baseline, Pitfall: Coverage Gate Retrofit Breaks Build on Unmeasured Baseline (+35 more)
+### Community 1 - "poller_test.go"
+Cohesion: 0.08
+Nodes (78): cron.Cron, bytes.Buffer, sync/atomic.Bool, New(), decodeLogRecords(), deezerID(), eightEntries(), failFirstThree() (+70 more)
 
-### Community 7 - "Server Boot & Graceful Shutdown"
-Cohesion: 0.06
-Nodes (36): D-06: Boot test selects on run()'s error channel instead of timing out, main(), run(), TestRun_BootServesHealthThenGracefulShutdownOnCancel(), TestRun_ConfigLoadFailureReturnsEarly(), net/http.Request, net/http.Response, net/http.ResponseWriter (+28 more)
+### Community 2 - "New"
+Cohesion: 0.08
+Nodes (59): errorBody, healthBody, watchlistEntryBody, TestHandleListEvents_CursorRejection(), TestHandleListEvents_EmptyReturnsEmptyArrayAndNullCursor(), TestHandleListEvents_HappyPathReturns200WithEnvelope(), TestHandleListEvents_NilEventsSliceStillEncodesAsEmptyArray(), TestHandleListEvents_StoreErrorReturns500WithFixedMessage() (+51 more)
 
-### Community 8 - "Dockerfile & CI Hardening"
+### Community 3 - "New"
 Cohesion: 0.09
-Nodes (54): CICD-08: Third-Party Action Commit-SHA Pinning, CR-01: lint Job Missing Pinned Go Toolchain, CR-02: Scanned Image Never Equals Pushed Image, D-01: Alpine Final-Stage Base Image (Debuggability vs Distroless), D-02: Fixed Non-Root UID/GID 10001:10001, D-03: Dockerfile HEALTHCHECK Against /health, D-04: Seed v0.1.0, svu Computes Subsequent Versions, D-05: Public ghcr.io Image Package (+46 more)
+Nodes (53): github.com/jackc/pgx/v5/pgxpool.Pool, NewClient(), TestSend_429RetryAfterClamped(), TestSend_429ThenSuccess_HonorsRetryAfter(), TestSend_429Twice_ReturnsErrorAfterSingleRetry(), TestSend_AllowedMentionsAlwaysSuppressed(), TestSend_Success204(), TestSend_TransportFailure_ErrorNeverLeaksHostOrToken() (+45 more)
 
-### Community 9 - "MusicBrainz Recordings Client Tests"
-Cohesion: 0.10
-Nodes (50): net/http/httptest.Server, buildRecordingPageJSON(), pagedRecordingServer(), TestRecordingsByArtist_DecodesEnvelope(), TestRecordingsByArtist_EmptyMBID(), TestRecordingsByArtist_NonOKStatus(), TestRecordingsByArtist_Paginates(), TestRecordingsByArtist_RequestShape() (+42 more)
-
-### Community 10 - "Coverage Gate Makefile & Plans"
-Cohesion: 0.07
-Nodes (53): Makefile COVER_PKGS variable (-coverpkg package-list exclusion), Makefile coverage-gate target, Makefile COVERAGE_THRESHOLD_BACKEND variable (default 80), Phase 9 Plan 01: Backend Coverage Measurement & Gate, Phase 9 Plan 01 Summary: Backend Coverage Measurement & Gate, Phase 9 Plan 02: Frontend Coverage Provider + Baseline, Phase 9 Plan 02 Summary: Frontend Coverage Provider + Baseline, Phase 9 Plan 03: Backend Coverage Gap Closure (+45 more)
-
-### Community 11 - "Frontend Vitest Test Suite Plans"
-Cohesion: 0.11
-Nodes (48): Phase 8 Plan 01: Vitest Harness Tracer, frontend-test CI job (parallel tier), Phase 8 Plan 01 Summary, Phase 8 Plan 02: Router Stub + Watchlist Tests, Phase 8 Plan 02 Summary, Phase 8 Plan 03: Search Surface + AbortController Fix, Phase 8 Plan 03 Summary, Phase 8 Plan 04: EventCard Badge Fallback Fix (+40 more)
-
-### Community 12 - "Detection Engine Core Decisions"
-Cohesion: 0.06
-Nodes (43): Phase 3 Plan 4 Summary, Phase 4 Plan 1: Thin End-to-End Detection Slice, D-09: events table as combined seen-store/event-log, D-12: event display snapshot columns (title/artist_name/release_date/cover_art_url), D-14: implicit seed mode, no seeded_at column, D-19: recovery is re-derivation, not resume state, D-20: never overwrite an event's display snapshot, T-04-01: range-only iteration over externally-supplied release-group slice (+35 more)
-
-### Community 13 - "Release History Frontend Plans"
-Cohesion: 0.09
-Nodes (40): Phase 6 Plan 1: End-to-End Release History Slice, Phase 6 Plan 1 Summary, Phase 6 Plan 2: History Filters, Cards, Query-Param Validation, Phase 6 Plan 2 Summary, Phase 6 Plan 3: Watchlist Tab, Phase 6 Plan 3 Summary, Phase 6 Plan 4: Artist Search & Phase Sign-off, Phase 6 Plan 4 Summary (+32 more)
-
-### Community 14 - "SearchBox AbortController Fix"
-Cohesion: 0.10
-Nodes (27): D-03: Fix SearchBox.test.tsx stale comment, D-05: Add watchlist/HistoryFilters test coverage, SearchBox AbortController Never Cancels Fetch (Todo), SearchBox(), handleChange(), runSearch(), SearchBoxProps, mockSearchArtists (+19 more)
-
-### Community 15 - "CoverArt & Alert UI Components"
-Cohesion: 0.10
-Nodes (29): CoverArtProps, Alert(), AlertAction(), AlertDescription(), AlertTitle(), alertVariants, Avatar(), AvatarBadge() (+21 more)
-
-### Community 16 - "Artist Albums Client Tests"
-Cohesion: 0.14
-Nodes (35): golang.org/x/time/rate.Limiter, net/http.Client, buildArtistAlbumsPageJSON(), pagedArtistAlbumsServer(), TestArtistAlbums_CancellationBetweenPagesAborts(), TestArtistAlbums_DecodesFixture(), TestArtistAlbums_EmptyArtistIDReturnsErrorWithZeroRequests(), TestArtistAlbums_MidFetchErrorStopsWithNoRetry() (+27 more)
-
-### Community 17 - "Detection Functions & Logging"
-Cohesion: 0.11
-Nodes (18): log/slog.Logger, Detector, nullableString(), seedNotifiedAt(), eventTypeMuted(), coverArtURLForReleaseGroup(), Detector, releaseTypeForStorage() (+10 more)
-
-### Community 18 - "DB Pinger & Store Stubs"
-Cohesion: 0.13
-Nodes (13): context.Context, noopPinger, stubPinger, stubStore, Queries, TestNormalizeSet(), AddParams, Entry (+5 more)
-
-### Community 19 - "Docker Compose & Port Revert"
-Cohesion: 0.11
-Nodes (30): docker-compose.yml, .env.example, Makefile, Phase 11.1 Plan 05: Amend Audit & Reconcile Validation, Phase 11.1 Plan 05 Summary, D-01: Keep Postgres port 5432 revert, D-02: Update port rationale comments, D-04: Fix EventCard.tsx quotes + add CI prettier gate (+22 more)
-
-### Community 20 - "MusicBrainz/Deezer Search Clients"
-Cohesion: 0.10
-Nodes (29): Phase 3 Plan 1: MusicBrainz Client and GET /search Proxy, T-03-04: MusicBrainz User-Agent spoofing mitigation, T-03-08: DoS via unauthenticated /search amplifying MusicBrainz traffic, Phase 3 Plan 1 Summary, Phase 3 Plan 2: Deezer Client and Two-Source Search, Phase 3 Plan 2 Summary, Phase 3 Plan 3: MusicBrainz Release-Groups Browse-by-Artist, T-03-12: unbounded release-group pagination DoS (+21 more)
-
-### Community 21 - "Events Service List"
-Cohesion: 0.21
-Nodes (23): Service, eventsResponseBody, stubEventsStore, Event, ListParams, Page, NewService(), toEvent() (+15 more)
-
-### Community 22 - "Cross-Cutting Architecture Decisions"
+### Community 4 - "gate_test.go"
 Cohesion: 0.12
-Nodes (22): Bounded worker-pool concurrent polling, Atomic CAS overlap-guard pattern (poll cycles), CLAUDE.md (project instructions), CI coverage gates (80% backend / 70% frontend), FOR UPDATE-locked CTE fix for deluxe-change baseline race, full-pipeline.yml (GitHub Actions workflow), .golangci.yml (lint config), Graceful shutdown via signal.NotifyContext (+14 more)
+Nodes (42): fakeAlerter, stubPinger, Token, net/http.Cookie, net/http.Response, deleteSession(), discardLogger(), login() (+34 more)
 
-### Community 23 - "Guest-Feature Detection Sources"
+### Community 5 - "TestDetectGuestFeatures_NonSeedCycle_FreshFeatureStillDelivered"
+Cohesion: 0.20
+Nodes (21): insertBaselineNewRelease(), int32Ptr(), readBaselineTrackCount(), TestAdvanceGroupBaseline_ConcurrentRace(), TestAdvanceGroupBaseline_SingleCallerContract(), newNotifyGate(), filterTestLogger(), filterTestMBID() (+13 more)
+
+### Community 6 - "Album"
 Cohesion: 0.11
-Nodes (19): fakeRecordingSource, noRecordingSource, detectGuestFeatures, displayArtistName(), isGuestFeature(), creditFor(), TestIsGuestFeature_EmptyCredit(), TestIsGuestFeature_MissingArtistID() (+11 more)
+Nodes (14): stubAlbumLister, AlbumLister, APIError, artistAlbumsResponse, errorProbe, Album, Client, Artist (+6 more)
 
-### Community 24 - "TS Config Globals"
+### Community 7 - "net/http.Request"
+Cohesion: 0.17
+Nodes (15): net/http.Request, net/http.ResponseWriter, addWatchlistRequest, errorResponse, updateWatchlistRequest, Server, parseOptionalPageSize(), parseOptionalPositiveInt64() (+7 more)
+
+### Community 8 - "releases_test.go"
+Cohesion: 0.12
+Nodes (19): net/http/httptest.Server, buildRecordingPageJSON(), pagedRecordingServer(), TestRecordingsByArtist_DecodesEnvelope(), TestRecordingsByArtist_EmptyMBID(), TestRecordingsByArtist_NonOKStatus(), TestRecordingsByArtist_Paginates(), TestRecordingsByArtist_RequestShape() (+11 more)
+
+### Community 9 - "newTestClient"
+Cohesion: 0.11
+Nodes (44): TestLookupArtist_DecodesFixture(), TestLookupArtist_EmptyMBID(), TestLookupArtist_MalformedJSON(), TestLookupArtist_NonOKStatus(), TestLookupArtist_NoRelationsNoAliasesYieldsNonNilZeroLengthSlices(), TestLookupArtist_RequestShape(), TestReleasesForRecording_DecodesFixture(), TestReleasesForRecording_EmptyMBID() (+36 more)
+
+### Community 10 - "golang.org/x/time/rate.Limiter"
+Cohesion: 0.22
+Nodes (14): golang.org/x/time/rate.Limiter, net/http.Client, Client, NewClient(), Do(), TestDo_CloseCancelsTheDerivedContext(), TestDo_LimiterWaitErrorOnCancelledContext(), TestDo_Success() (+6 more)
+
+### Community 11 - "Phase 8: Frontend Test Suite"
+Cohesion: 0.47
+Nodes (6): v1.1 Requirements Archive, TEST-01 Requirement, TEST-02 Requirement, v1.1 Roadmap, Phase 8: Frontend Test Suite, Phase 9: CI Coverage Gates
+
+### Community 12 - "NewMatcher"
+Cohesion: 0.13
+Nodes (37): stubSearcherFunc, NewMatcher(), TestMatch_EmptyNameFailsClosedWithoutOutboundCall(), TestMatch_MatchedCandidateWithEmptyPictureYieldsNilImageURL(), TestMatch_NoCloseNameCandidateFailsClosed(), TestMatch_SearchErrorSurfaces(), TestMatch_SingleCandidateIssuesNoTieBreakFetch(), TestMatch_SingleCloseNameCandidate() (+29 more)
+
+### Community 13 - ".HandleLogin"
+Cohesion: 0.21
+Nodes (9): sync.Once, time.Ticker, Manager, hasCSRFHeader(), setSessionCookie(), writeJSONError(), clientIP(), Manager (+1 more)
+
+### Community 14 - "authStore.ts"
+Cohesion: 0.11
+Nodes (8): PassphraseScreen(), handleSubmit(), Input(), createSession(), authStore, gateActive, listeners, reimportStore()
+
+### Community 15 - "cn"
+Cohesion: 0.11
+Nodes (28): Alert(), AlertAction(), AlertDescription(), AlertTitle(), alertVariants, Avatar(), AvatarBadge(), AvatarFallback() (+20 more)
+
+### Community 16 - "testing.T"
+Cohesion: 0.18
+Nodes (36): testing.T, buildArtistAlbumsPageJSON(), pagedArtistAlbumsServer(), TestArtistAlbums_CancellationBetweenPagesAborts(), TestArtistAlbums_DecodesFixture(), TestArtistAlbums_EmptyArtistIDReturnsErrorWithZeroRequests(), TestArtistAlbums_MidFetchErrorStopsWithNoRetry(), TestArtistAlbums_NonexistentArtistReturnsEmptyNonNilNoError() (+28 more)
+
+### Community 17 - "log/slog.Logger"
+Cohesion: 0.11
+Nodes (25): stubGroupLister, log/slog.Logger, Detector, nullableString(), deluxeDetectionEnabled(), eventTypeMuted(), releaseTypeAllowed(), TestFilter_DeluxeIsAGateNotAType() (+17 more)
+
+### Community 18 - "context.Context"
+Cohesion: 0.09
+Nodes (16): stubStore, context.Context, noopPinger, stubPinger, stubStore, Queries, Client, TestNormalizeSet() (+8 more)
+
+### Community 19 - "sync.Mutex"
+Cohesion: 0.15
+Nodes (6): syncBuf, syncBuffer, net/http.RoundTripper, sync.Mutex, capturingRoundTripper, rateLimitedReleaseGroupSource
+
+### Community 20 - "time.Duration"
+Cohesion: 0.11
+Nodes (47): discordAlerter, noopAlerter, recordingAlerter, golang.org/x/time/rate.Limit, time.Duration, serverConfig, Alerter, NoOpAlerter() (+39 more)
+
+### Community 21 - "events_test.go"
+Cohesion: 0.28
+Nodes (22): NewService(), datePtr(), insertTestArtist(), insertTestEvent(), insertTestEventAt(), insertTestEventTyped(), insertTestEventWithDate(), TestHandleListEvents_CursorRoundTripsThroughHTTP() (+14 more)
+
+### Community 22 - "EncodeCursor"
+Cohesion: 0.36
+Nodes (9): Cursor, cursorWireForm, DecodeCursor(), EncodeCursor(), TestDecodeCursor_NeverPanics(), TestDecodeCursor_RejectsInvalidInput(), TestEncodeCursor_ProducesURLSafeToken(), TestEncodeDecodeCursor_RoundTripsWithNilReleaseDate() (+1 more)
+
+### Community 23 - "Recording"
+Cohesion: 0.09
+Nodes (20): datedRecordingSource, erroringRecordingSource, fakeRecordingSource, noRecordingSource, isGuestFeature(), creditFor(), TestGuestFeatureArt(), TestIsGuestFeature_EmptyCredit() (+12 more)
+
+### Community 24 - "compilerOptions"
 Cohesion: 0.08
 Nodes (25): **/*, **/.client/**/*, DOM, DOM.Iterable, ES2022, node, .react-router/types/**/*, **/.server/**/* (+17 more)
 
-### Community 25 - "Frontend UI Dependencies"
+### Community 25 - "dependencies"
 Cohesion: 0.08
-Nodes (25): @base-ui/react, class-variance-authority, isbot, lucide-react, react, react-dom, react-router, @react-router/node (+17 more)
+Nodes (25): @base-ui/react, class-variance-authority, @fontsource-variable/inter, isbot, lucide-react, next-themes, react-dom, react-router (+17 more)
 
-### Community 26 - "Config Loader Tests"
-Cohesion: 0.19
-Nodes (23): Load(), configEnvKeys(), envExampleKeys(), repoRoot(), setDiff(), setRequired(), TestDotEnvIsNotTracked(), TestEnvExampleCompleteness() (+15 more)
+### Community 26 - "config_test.go"
+Cohesion: 0.18
+Nodes (24): Load(), configEnvKeys(), envExampleKeys(), repoRoot(), setDiff(), setRequired(), TestDockerComposeWiresGateEnvVars(), TestDotEnvIsNotTracked() (+16 more)
 
-### Community 27 - "Discord Embed Formatting"
-Cohesion: 0.16
-Nodes (23): formatEmbed(), emojiPrefix(), i32Ptr(), strPtr(), TestFormatEmbed_AllNilOptionalFields_NoEmptyFieldsNoThumbnail(), TestFormatEmbed_DeluxeChange_BothCountsPresent(), TestFormatEmbed_DeluxeChange_NilBothCounts(), TestFormatEmbed_DeluxeChange_NilPreviousTrackCount() (+15 more)
-
-### Community 28 - "Watchlist Core Decisions"
-Cohesion: 0.13
-Nodes (23): Phase 2 Plan 01: Watchlist Core Tracer Plan, D-08 (Phase 2): Adding an artist defaults to full visibility, D-09 (Phase 2): Duplicate add never implicitly updates preferences, D-11 (Phase 2): Optional initial preferences override defaults, D-13 (Phase 2): Error bodies never leak internals, D-14 (Phase 2): Flat routes, no /api prefix, T-02-01: Over-posting via handler body decode, T-02-02: SQL injection via handler-constructed queries (+15 more)
-
-### Community 29 - "Frontend Dev Tooling Deps"
+### Community 27 - "formatEmbed"
 Cohesion: 0.09
-Nodes (23): jsdom, prettier, @react-router/dev, @tailwindcss/vite, @testing-library/jest-dom, @testing-library/user-event, @types/node, @types/react (+15 more)
+Nodes (40): allowedMentions, EmbedImage, retry429Body, webhookPayload, Event, Client, Embed, EmbedField (+32 more)
 
-### Community 30 - "Config Surface & sqlc Wiring"
-Cohesion: 0.12
-Nodes (22): Phase 1 Plan 3: Complete Config Surface Plan, Phase 1 Plan 3: Complete Config Surface Summary, Phase 1 Plan 4: Wire sqlc End to End Plan, Phase 1 Plan 4: sqlc + Makefile Summary, Phase 1 Plan 5: Injectable Migrate Retry Policy Plan, Phase 1 Pattern Map, Phase 1 Foundation Research, OPS-01: /health reports service and DB connectivity (+14 more)
+### Community 29 - "devDependencies"
+Cohesion: 0.09
+Nodes (23): jsdom, prettier, prettier-plugin-tailwindcss, tailwindcss, @testing-library/dom, @testing-library/react, @testing-library/user-event, @types/node (+15 more)
 
-### Community 31 - "Bounded Concurrent Polling Design"
-Cohesion: 0.13
-Nodes (20): D-03: Partial results on source failure (HTTP 200), D-09: per-source in-process overlap guard, Pattern 1: Bounded concurrent fan-out with per-worker error isolation, Pitfall 2: Existing test hard-asserts sequential-only polling, Pitfall 3: errgroup.WithContext cancels siblings on first error, deezer.AlbumLister, deezer.ArtistSearcher, deezer.Client (internal/deezer/client.go) (+12 more)
+### Community 30 - "Backfill"
+Cohesion: 0.26
+Nodes (15): Stats, Store, Backfill(), matchingCandidate(), TestBackfill_ActivityGate_DelaysThenProceeds(), TestBackfill_AllMatch_WritesUpsertAndRecordsAttemptForEach(), TestBackfill_ContextCancelledPartway_StopsPromptly(), TestBackfill_ListArtistsMissingImageErrors_ReturnsErrNoWrites() (+7 more)
 
-### Community 32 - "Events Insert & List"
-Cohesion: 0.13
-Nodes (10): Event, recordingQuerier, HasOlderEventsParams, InsertEventParams, ListEventsParams, ListEventsRow, Queries, AdvanceGroupTrackCountBaselineParams (+2 more)
+### Community 31 - "PROJECT.md"
+Cohesion: 0.05
+Nodes (51): Bounded worker-pool concurrent polling, Atomic CAS overlap-guard pattern (poll cycles), CLAUDE.md (project instructions), CI coverage gates (80% backend / 70% frontend), CoverArt.tsx image-load-error state never resets on src change, Deezer fan-count capture and popularity sort, DSN/secret redaction on every error path, FOR UPDATE-locked CTE fix for deluxe-change baseline race (+43 more)
 
-### Community 33 - "Search Source Adapters"
-Cohesion: 0.16
-Nodes (22): deezer.Artist struct, deezer.SearchArtists, deezerSource.SearchArtists adapter, musicBrainzSource.SearchArtists adapter, httpserver.SearchArtist wire struct, musicbrainz.Artist, Phase 03 Research (v1.0), Phase 06 Plan 04 Summary (v1.0) (+14 more)
+### Community 32 - "github.com/jackc/pgx/v5/pgtype.Timestamptz"
+Cohesion: 0.09
+Nodes (18): notifyGate, Option, RecordingSource, ReleaseDetailSource, Event, github.com/jackc/pgx/v5/pgtype.Timestamptz, recordingQuerier, HasOlderEventsParams (+10 more)
 
-### Community 34 - "shadcn/ui Components Config"
+### Community 33 - "match.go"
+Cohesion: 0.15
+Nodes (20): AlbumLister, ArtistDetailLookup, ArtistFetcher, ArtistSearcher, Matcher, Option, ReleaseGroupLister, aliasQueryNames() (+12 more)
+
+### Community 34 - "components.json"
 Cohesion: 0.09
 Nodes (21): aliases, components, hooks, lib, ui, utils, iconLibrary, menuAccent (+13 more)
 
-### Community 35 - "Health & Request-ID Config"
-Cohesion: 0.14
-Nodes (18): Phase 1 Plan 2 Summary: Health & Request-ID Test Coverage, io.Writer, log/slog.Level, Config, TestBootToHealth_EndToEnd(), handleHealth (internal/httpserver/health.go), New(), NewWithWriter() (+10 more)
-
-### Community 36 - "Phase 5 Discord Audit Reports"
-Cohesion: 0.15
-Nodes (21): Phase 5 Discord Notifications Research, Phase 5 Code Review Report, Phase 5 Code Review Fix Report, Phase 5 Security Report, Phase 5 UAT Report, Phase 5 Validation Strategy, Phase 5 Verification Report, Phase 5 Discord Webhook API Coverage Matrix (+13 more)
-
-### Community 37 - "Search Result Row Country Fallback"
-Cohesion: 0.15
-Nodes (16): D-10: Render country fallback in same UI slot, SearchResultRow(), SearchResultRowProps, SearchResultsColumnsProps, SOURCE_LABELS, SourceColumn(), SourceColumnProps, sourceLabel() (+8 more)
-
-### Community 38 - "EventCard Crash & Href Bugs"
-Cohesion: 0.14
-Nodes (11): EventCard Crashes on Unrecognized Event Type (Todo), guestFeatureHref Missing encodeURIComponent (Todo), EVENT_BADGE, EventCardProps, GuestFeatureBody(), guestFeatureHref(), UNKNOWN_EVENT_BADGE, HistoryFiltersValue (+3 more)
-
-### Community 39 - "Pgx Pool Config & DSN"
+### Community 35 - "NewWithWriter"
 Cohesion: 0.19
-Nodes (15): T-01-01: DSN leakage via logs/errors, D-11: Differentiate PoolConfig's two parse-failure error messages, Pitfall: Worker Pool Serializes on Unreviewed pgxpool MaxConns, github.com/jackc/pgx/v5/pgxpool.Config, dsnSetsMaxConns(), PoolConfig(), poolMaxConnsForWorkers(), redactedTarget() (+7 more)
+Nodes (13): io.Writer, log/slog.Level, Config, TestNoDSNInLogs(), New(), NewWithWriter(), parseLevel(), TestNewWithWriter_JSONFormatRendersParsableJSON() (+5 more)
 
-### Community 40 - "Deluxe-Change Baseline Detection"
-Cohesion: 0.12
-Nodes (17): D-10: detectDeluxeChanges doc comment permanent-loss/delayed asymmetry, D-12: Static window=baseline_advanced_insert_failed log signal, D-04: Cycle-end duration_ms log field, Pitfall 1: Reordering baseline-advance and event-insert can swallow a notification, setGroupBaseline, detectDeluxeChanges, RecordingsByArtist, ReleasesByReleaseGroup (+9 more)
+### Community 36 - "Pattern Assignments"
+Cohesion: 0.07
+Nodes (28): `cmd/server/main.go` (MOD), Disabled-case seam (never a nil check in the request path), File Classification, Fixed JSON error body, never raw error text, Functional-option constructor, `internal/authgate/alerter.go` (service seam — the strongest analog in this phase), `internal/authgate/gate.go` (middleware), `internal/authgate/login.go` (login/logout handlers + throttle + global counter) (+20 more)
 
-### Community 41 - "Retry & Buffer Utilities"
-Cohesion: 0.26
-Nodes (13): RetryOption, syncBuffer, closedPortDSN(), closedPortKeywordValueDSN(), countWarnLines(), newCapturingLogger(), TestRunMigrations_HonoursContextCancellation(), TestRunMigrations_NeverLogsDSN() (+5 more)
-
-### Community 42 - "Artist Albums Fetch Logic"
-Cohesion: 0.16
-Nodes (9): artistAlbumsResponse, sync.Mutex, time.Time, syncBuffer, Album, Client, fakeAlbumSource, rateLimitedAlbumSource (+1 more)
-
-### Community 43 - "Phase 11.1 Audit & Filters UI"
+### Community 37 - "watchlist.tsx"
 Cohesion: 0.13
-Nodes (11): Phase 11.1 Code Review Report, Phase 11.1 Validation Strategy, Phase 11.1 Verification Report, ComboboxOption, ComboboxProps, EVENT_TYPE_OPTIONS, HistoryFilters(), HistoryFiltersProps (+3 more)
+Nodes (21): Button(), buttonVariants, SearchResultRow(), SearchResultRowProps, SearchResultsColumns(), SearchResultsColumnsProps, SOURCE_LABELS, SourceColumn() (+13 more)
 
-### Community 44 - "Migrate Retry & DSN Redaction"
+### Community 38 - "EventCard.tsx"
+Cohesion: 0.15
+Nodes (10): CoverArt(), CoverArtProps, EVENT_BADGE, EventCard(), GuestFeatureBody(), guestFeatureHref(), UNKNOWN_EVENT_BADGE, watchlistNote() (+2 more)
+
+### Community 39 - "run"
+Cohesion: 0.06
+Nodes (43): logInstanceGateStatus(), main(), run(), decodeRecord(), nonEmptyLines(), recordMentions(), TestLogInstanceGateStatus(), TestRun_BootServesHealthThenGracefulShutdownOnCancel() (+35 more)
+
+### Community 41 - "RunMigrations"
+Cohesion: 0.13
+Nodes (28): retryConfig, RetryOption, syncBuffer, github.com/golang-migrate/migrate/v4/source.Driver, TestBackoffDelay_ClampsToMaxDelayOnceExceeded(), TestBackoffDelay_GrowsExponentiallyBeforeSaturating(), TestBackoffDelay_SaturatesRatherThanOverflowsToZero(), TestNewRetryConfig_ClampsNonPositiveMaxAttemptsToOne() (+20 more)
+
+### Community 42 - "time.Time"
+Cohesion: 0.22
+Nodes (7): globalCounter, ipLimiter, loginRequest, loginThrottle, time.Time, loginDelay(), SetSpacingWaitForTest()
+
+### Community 43 - "history.tsx"
+Cohesion: 0.08
+Nodes (24): EmptyState(), EmptyStateProps, EventCardProps, Combobox(), commitSelection(), handleTriggerKeyDown(), openAt(), ComboboxOption (+16 more)
+
+### Community 44 - "Implementation Decisions"
+Cohesion: 0.08
+Nodes (25): 401 handling in the SPA, Brute-force defense, Canonical References, Claude's Discretion, Client IP resolution, CSRF, Deferred Ideas, Established Patterns (+17 more)
+
+### Community 45 - "Release"
+Cohesion: 0.21
+Nodes (6): noReleaseDetailSource, Client, Release, Medium, releaseEnvelope, fakeReleaseDetailSource
+
+### Community 46 - "WatchlistEntry"
 Cohesion: 0.27
-Nodes (13): Phase 1 Plan 5: Injectable Migrate Retry Policy Summary, DSN/secret redaction on every error path, github.com/golang-migrate/migrate/v4/source.Driver, redactDSN(), redactError(), RunMigrations(), runMigrationsOnce(), TestRedactDSN_NeverEchoesPassword() (+5 more)
+Nodes (10): PreferenceToggles(), toggleMutedEventType(), toggleReleaseType(), PreferenceTogglesProps, entry, mockUpdateWatchlistPreferences, WatchlistRow(), WatchlistRowProps (+2 more)
 
-### Community 45 - "Release Detail Source Stubs"
-Cohesion: 0.18
-Nodes (7): fakeReleaseDetailSource, noReleaseDetailSource, Client, Release, Medium, releaseEnvelope, fakeReleaseDetailSource
+### Community 48 - "Artist"
+Cohesion: 0.19
+Nodes (8): perArtistOutcome, perArtistSearcher, stubArtistFetcher, stubSearcher, stubSearcherByQuery, artistSearchResponse, stubDeezerArtistSearcher, Artist
 
-### Community 46 - "Preference Toggle Checkboxes"
-Cohesion: 0.23
-Nodes (11): Checkbox(), PreferenceToggles(), toggleMutedEventType(), toggleReleaseType(), PreferenceTogglesProps, entry, mockUpdateWatchlistPreferences, WatchlistRow() (+3 more)
+### Community 49 - "Artist"
+Cohesion: 0.11
+Nodes (12): stubStore, Artist, Queries, UpsertArtistParams, Artist, Watchlist, Queries, toEntry() (+4 more)
 
-### Community 47 - "Frontend Tech-Debt Cleanup"
-Cohesion: 0.16
-Nodes (13): D-05a: watchlist.test.tsx success-path row-removal coverage gap, D-05b: HistoryFilters.test.tsx eventType axis coverage gap, D-13: White-on-white History filter dropdown option text bug, Phase 11.1 Plan 01 — Frontend Tech-Debt Cleanup, Phase 11.1 Plan 01 Summary — Frontend Tech-Debt Cleanup, D-04: Whole-tree prettier formatting + blocking CI check, Phase 11.1 Plan 02 — Frontend Formatting + CI Gate, Phase 11.1 Plan 02 Summary — Frontend Formatting + CI Gate (+5 more)
+### Community 50 - "Server"
+Cohesion: 0.12
+Nodes (22): chi.Router, net/http.Handler, Option, Pinger, syncBuffer, echoRequestID(), Server, registerDataRoutes() (+14 more)
 
-### Community 48 - "Discord Client Send Logic"
-Cohesion: 0.23
-Nodes (9): allowedMentions, Client, EmbedImage, retry429Body, webhookPayload, Embed, EmbedField, fakeSender (+1 more)
+### Community 57 - "Phase 14 Plan 04: Instance Passphrase Gate — CSRF, Referrer-Policy & Weak-Passphrase WARN Summary"
+Cohesion: 0.11
+Nodes (18): 1. [Rule 3 — Blocking] `internal/authgate/login_test.go` + `internal/authgate/gate_test.go` shared helpers updated (beyond frontmatter `files_modified` intent), 2. [Rule 1 — Bug] CSRF counter-isolation test tripped a real brute-force alert, 3. [Rule 3 — Blocking] `.env.example` writable; placeholder changed by operator mid-run, Accomplishments, Decisions Made, Deviations from Plan, Files Created/Modified, Issues Encountered (+10 more)
 
-### Community 49 - "sqlc Generated Models"
-Cohesion: 0.21
-Nodes (8): github.com/jackc/pgx/v5/pgtype.Timestamptz, Artist, Watchlist, Queries, CreateWatchlistEntryParams, ListWatchlistRow, UpdateWatchlistPreferencesParams, UpdateWatchlistPreferencesRow
-
-### Community 50 - "HTTP Server & Router Setup"
-Cohesion: 0.23
-Nodes (11): net/http.Handler, Pinger, Store, echoRequestID(), Server, newCapturingServer(), requestIDsInLog(), TestNoDSNInLogs() (+3 more)
-
-### Community 51 - "Notification Message Formatting"
-Cohesion: 0.31
-Nodes (13): Event, appendField(), formatDeluxeChange(), formatGuestFeature(), formatNewRelease(), musicBrainzRecordingURL(), musicBrainzReleaseGroupURL(), musicBrainzReleaseURL() (+5 more)
-
-### Community 52 - "Notifier Hang Fix & Pool"
-Cohesion: 0.24
-Nodes (11): NewPool(), sqlc.Querier (interface), NotifyPending (internal/notifier/notifier.go), Notifier NotifyPending permanent hang (resolved), Debug: notify pass hangs forever, WR-01: Un-muting new_release after a mute period floods a notification burst, D-06: Shared CAS guard prevents double-posting across cycles, D-07: Serial sends with spacing between events (+3 more)
-
-### Community 53 - "Guest-Feature & Deluxe Plans"
-Cohesion: 0.28
-Nodes (13): Phase 4 Plan 3: Guest-Feature Detection, Phase 4 Plan 3 Summary: Guest-Feature Detection, Phase 4 Plan 4: Deluxe/Tracklist-Change Detection, Phase 4 Plan 4 Summary: Deluxe/Tracklist-Change Detection, Phase 4 Context: Detection Engine, Phase 4 Discussion Log: Detection Engine, Phase 4 Pattern Map: Detection Engine, Phase 4 Research: Detection Engine (+5 more)
-
-### Community 54 - "Phase 1 Foundation Decisions"
-Cohesion: 0.17
-Nodes (12): Phase 1 Foundation Context, D-01: Bookkeeping-only initial schema, D-02: Wire sqlc in Phase 1 with drift check, D-03: /health DB ping only, no readiness split, D-04: 503 on DB ping failure, 200 when healthy, D-05: Fail-fast config validation, exit(1) on error, D-06: Stub future-phase settings in .env.example now, D-07: Stubbed settings are real Config struct fields with defaults (+4 more)
-
-### Community 55 - "Phase 3 Search Client Code Review"
-Cohesion: 0.26
-Nodes (12): D-07: one rate.Limiter per client, sequential polling, Phase 3 Code Review Report, Phase 3 Code Review Fix Report, WR-01: unescaped Lucene special characters in MusicBrainz search query, WR-02: deezer.ArtistAlbums lacked pagination unlike musicbrainz ReleaseGroupsByArtist, Phase 3 UAT, Phase 3 Verification Report, deezer.ArtistAlbums (+4 more)
-
-### Community 56 - "Pool MaxConns Sizing"
-Cohesion: 0.21
-Nodes (12): Phase 11 Plan 05 — Pool MaxConns Sizing Plan, Phase 11 Plan 05 Summary — Pool MaxConns Sizing, PERF-01: Bounded env-configurable worker pool per source, PERF-02: Concurrency preserves rate limiter and overlap guard, PERF-03: Per-artist error isolation under concurrency, PERF-04: Atomic deluxe-change baseline compare-and-set, Phase 11 External API Coverage, Pitfall 4: pgxpool default MaxConns can become the new bottleneck (+4 more)
-
-### Community 57 - "Flaky Test Stability Fixes"
-Cohesion: 0.25
-Nodes (9): Phase 11 Plan 04 Summary — Suite-Stability Fixes, Folded todo: fix flaky tests under parallel go test, Pitfall 6: flaky-test root cause is a raw schema-drop, not a migrate race, Pitfall 7: notifier flaky tests need clock injection, not DB isolation, scratchSchemaDSN(), TestRunMigrations_AppliesFromScratch(), TestRunMigrations_IsIdempotent(), TestBootToHealth_MigrationsAreIdempotent() (+1 more)
-
-### Community 58 - "Discord Notification Tracer Plans"
-Cohesion: 0.24
-Nodes (11): Phase 5 Plan 1: Discord Notification Tracer, Phase 5 Plan 1 Summary: Discord Notification Tracer, Phase 5 Plan 2: Complete Embed Rendering, Phase 5 Plan 2 Summary: Complete Embed Rendering, Phase 5 Plan 3: Adversarial Notifier Concurrency Tests, Phase 5 Plan 3 Summary: Adversarial Notifier Concurrency Tests, Phase 5 Context: Discord Notifications, NTFY-01: new_release notification carries title/artist/cover/date/type (+3 more)
-
-### Community 59 - "Frontend package.json"
+### Community 59 - "scripts"
 Cohesion: 0.18
 Nodes (10): name, private, scripts, build, dev, format, test, test:watch (+2 more)
 
-### Community 60 - "Events Table Migrations"
-Cohesion: 0.20
-Nodes (10): events table (migration 000003), events.previous_track_count / events.release_type columns (migration 000004), sqlc.Event (model), groupBaseline, D-09: One combined events table serves as seen store and event log, D-10: Dedup key is a per-event-type external ID, D-11: Nullable notified_at column added now for Phase 5, Pitfall 1: Deluxe-change baseline false positive on first real comparison (+2 more)
+### Community 60 - "Phase 14 Plan 02: Instance Passphrase Gate — Brute-force Defense & Auditability Summary"
+Cohesion: 0.12
+Nodes (16): 1. [Rule 3 — Blocking] `internal/authgate/gate.go` and `internal/httpserver/server.go` modified (not in frontmatter `files_modified`), 2. [Process] RED/GREEN combined for Task 1, Accomplishments, Authentication Gates, Chosen tunable values (recorded verbatim per plan `<output>`), Decisions Made, Deviations from Plan, Files Created/Modified (+8 more)
 
-### Community 61 - "Empty State & Button UI"
-Cohesion: 0.29
-Nodes (6): EmptyStateProps, Button(), buttonVariants, emptyStateCopy(), fetchHistoryPage(), History()
+### Community 61 - "Phase 14 — UI Design Contract"
+Cohesion: 0.12
+Nodes (16): Checker Sign-Off, Color, Copywriting Contract, Design System, E1 — `<PassphraseScreen>` (full-screen gate), E2 — Passphrase input, E3 — Unlock submit button, E4 — Inline error slot (+8 more)
 
-### Community 62 - "Toast & App Shell UI"
-Cohesion: 0.29
-Nodes (4): Toaster(), App(), ErrorBoundary(), renderAppAt()
+### Community 62 - "root.tsx"
+Cohesion: 0.14
+Nodes (12): Toaster(), deleteSession(), App(), ErrorBoundary(), LogoutButton(), handleLogout(), renderAppAt(), entry (+4 more)
 
-### Community 63 - "Phase 1 Code Review (DSN Leak)"
-Cohesion: 0.31
-Nodes (9): OPS-02: Structured JSON logs with request-ID correlation, Phase 1 Code Review Report, CR-01: redactDSN leaks password in libpq keyword/value DSN form, Phase 1 Code Review Fix Report, WR-01: Migration attempt not context-aware, WR-03: No graceful shutdown, Phase 1 Security Contract, Phase 1 UAT Report (+1 more)
+### Community 63 - "Phase 14 Plan 05: Passphrase Gate Config Reachability (G-14-1 Closure) Summary"
+Cohesion: 0.12
+Nodes (15): Accomplishments, Auth / Checkpoint Gates, Continuation note, Decisions Made, Deviations from Plan, Files Created/Modified, Issues Encountered, Next Phase Readiness (+7 more)
 
-### Community 64 - "Loss-Window Signal & PoolConfig"
-Cohesion: 0.22
-Nodes (9): Phase 11.1 Plan 03 — Detection Loss-Window Signal + PoolConfig Error Differentiation, insertEventFailingQuerier test-only sqlc.Querier decorator, Phase 11.1 Plan 03 Summary, Phase 11 Code Review Report, IN-01: PoolConfig's two parse failures share identical error text, WR-01: detectDeluxeChanges doc undersells InsertEvent-failure blast radius, WR-02: advance-then-insert ordering is a narrow notification-loss window, Phase 11 Security Report (+1 more)
+### Community 65 - "Phase 14 Plan 01: Instance Passphrase Gate Summary"
+Cohesion: 0.13
+Nodes (14): 1. [Rule 3 — Blocking] `.env.example` keys added by the operator (not the agent), 2. [Process] RED/GREEN combined per commit, Accomplishments, Decisions Made, Deviations from Plan, Files Created/Modified, Issues Encountered, Next Phase Readiness (+6 more)
 
-### Community 65 - "Backoff Retry Tests"
-Cohesion: 0.33
-Nodes (8): retryConfig, TestBackoffDelay_ClampsToMaxDelayOnceExceeded(), TestBackoffDelay_GrowsExponentiallyBeforeSaturating(), TestBackoffDelay_SaturatesRatherThanOverflowsToZero(), TestNewRetryConfig_ClampsNonPositiveMaxAttemptsToOne(), TestNewRetryConfig_PositiveMaxAttemptsUnchanged(), backoffDelay(), newRetryConfig()
-
-### Community 66 - "MusicBrainz Search Query Escaping"
-Cohesion: 0.31
-Nodes (6): stubMusicBrainzArtistSearcher, clampLimit(), escapeLucene(), Artist, Client, artistSearchResponse
-
-### Community 67 - "CoverArt Reset Fix"
+### Community 66 - "Artist"
 Cohesion: 0.36
-Nodes (8): Phase 12 Plan 01: CoverArt Reset Fix, Phase 12 Plan 01 Summary, D-01: CoverArt useEffect reset on src change, D-02: CoverArt regression test, Phase 12 Pattern Map, Phase 12 Research, CoverArt(), CoverArt stale-failure-state bug (WR-02)
+Nodes (5): stubMusicBrainzArtistSearcher, escapeLucene(), Artist, Client, artistSearchResponse
 
-### Community 68 - "Phase 12 Popularity Ranking Scope"
-Cohesion: 0.32
-Nodes (6): CoverArt.tsx image-load-error state never resets on src change, Deezer fan-count capture and popularity sort, MusicBrainz country fallback for disambiguation, Phase 12: CoverArt Reset & Search Popularity Ranking, Search-result popularity ranking / same-name artist disambiguation, Soft-delete/filter event retention (not hard delete)
+### Community 67 - "Phase 14 Plan 03: SPA Instance Passphrase Gate Summary"
+Cohesion: 0.13
+Nodes (14): Accomplishments, Adjustments within plan latitude (not deviations), Auto-fixed Issues, D-18 (`gateActive`) confirmation — per the plan `<output>`, Decisions Made, Deviations from Plan, Files Created/Modified, Issues Encountered (+6 more)
 
-### Community 69 - "Bounded Polling Worker Config"
-Cohesion: 0.29
-Nodes (7): D-02: Default pool sizes MB=3, Deezer=5, D-03: MUSICBRAINZ_POLL_WORKERS/DEEZER_POLL_WORKERS naming, Phase 11 Context — Bounded Concurrent Polling, Phase 11 Discussion Log, Phase 11 Pattern Map, Phase 11 Research, Phase 11 Validation Strategy
+### Community 69 - "Phase 14: Instance Passphrase Gate - Discussion Log"
+Cohesion: 0.13
+Nodes (14): Boot-time passphrase strength, Brute-force defense beyond per-IP throttle, Claude's Discretion, Deferred Ideas, Follow-up: client IP resolution (behind a Phase 17 reverse proxy), Follow-up: CSRF, Follow-up: how the SPA detects the 401, Follow-up: logout semantics (+6 more)
 
-### Community 70 - "Postgres Port Revert Decision"
-Cohesion: 0.50
-Nodes (5): D-01: Revert Postgres port 5433 back to 5432, committed, D-02: Preserve full 5433-to-5432 incident history in comments, Phase 11.1 Plan 04 — Boot Test, Coverage Filter, Postgres Port Revert, Phase 11.1 Plan 04 Summary, IN-02: .env.example could not be reviewed — sandboxed by tool permissions
+### Community 72 - "Goal Achievement"
+Cohesion: 0.13
+Nodes (14): Anti-Patterns Found, Behavioral Spot-Checks, Data-Flow Trace (Level 4), Gaps Summary, Goal Achievement, Human Verification Required, Key Link Verification, Observable Truths (+6 more)
 
-### Community 71 - "Artist Upsert Query"
-Cohesion: 0.40
-Nodes (3): Artist, Queries, UpsertArtistParams
+### Community 73 - "Phase 14 Plan 07: Close G-14-3 — Self-Identifying Gated Responses Summary"
+Cohesion: 0.14
+Nodes (13): Accomplishments, Auto-fixed Issues, Decisions Made, Deviations from Plan, Files Created/Modified, Issues Encountered, Next Phase Readiness, Output confirmations (per plan `<output>`) (+5 more)
 
-### Community 72 - "Idempotent Seen-Store Insert"
-Cohesion: 0.40
-Nodes (5): sqlc.InsertEventParams, D-20: ON CONFLICT DO NOTHING preserves the original snapshot, DTCT-04: Idempotent seen store, never re-notify, Pitfall 2: ON CONFLICT DO NOTHING row-count semantics must be tested, not assumed, InsertEvent (sqlc query)
-
-### Community 73 - "UpdatePreferences No-Op Guard Fix"
-Cohesion: 0.80
-Nodes (5): handleUpdateWatchlist (internal/httpserver/watchlist.go), Service.UpdatePreferences (internal/watchlist/service.go), JSON trailing-data rejection (WR-02), Debug: watchlist UpdatePreferences no-op guard and JSON trailing data, UpdatePreferences no-op domain-boundary guard (WR-01)
-
-### Community 74 - "v1.1 Milestone Audit"
+### Community 74 - "Milestone v1.1 Audit Report"
 Cohesion: 0.67
 Nodes (3): CoverArt.tsx Stale Image-Load-Error State Bug, v1.1 Milestone Nyquist Compliance (All 5 Phases), Milestone v1.1 Audit Report
 
-### Community 75 - "Phase 5 Closeout & v1.0 Audit"
-Cohesion: 1.00
-Nodes (3): Close Out Phase 5 Plan, Close Out Phase 5 Summary, v1.0 Milestone Audit Report
+### Community 78 - "api.ts"
+Cohesion: 0.17
+Nodes (15): SearchBox(), handleChange(), runSearch(), SearchBoxProps, mockSearchArtists, searchResponse, addWatchlist(), ApiError (+7 more)
 
-## Ambiguous Edges - Review These
-- `redactedTarget()` → `Phase 2 Plan 02: Duplicate-Add & Preferences Plan`  [AMBIGUOUS]
-  .planning/milestones/v1.0-phases/02-watchlist-core/02-02-PLAN.md · relation: references
-- `Phase 3 Plan 1 Summary` → `Phase 3 Plan 4 Summary`  [AMBIGUOUS]
-  .planning/milestones/v1.0-phases/03-external-clients-search/03-04-SUMMARY.md · relation: references
-- `IN-02: .env.example could not be reviewed — sandboxed by tool permissions` → `D-02: Preserve full 5433-to-5432 incident history in comments`  [AMBIGUOUS]
-  .planning/milestones/v1.1-phases/11.1-address-tech-debt-v1-1-cleanup/11.1-04-PLAN.md · relation: conceptually_related_to
-- `Phase 12 Plan 02: Deezer Popularity Ranking` → `deezerSource.SearchArtists adapter`  [AMBIGUOUS]
-  .planning/phases/12-cleanup-coverart-reset-search-popularity-ranking/12-02-PLAN.md · relation: conceptually_related_to
+### Community 89 - "Phase 14: Instance Passphrase Gate - Research"
+Cohesion: 0.15
+Nodes (12): Architectural Responsibility Map, Assumptions Log, Don't Hand-Roll, Environment Availability, Metadata, Open Questions, Package Legitimacy Audit, Phase 14: Instance Passphrase Gate - Research (+4 more)
+
+### Community 90 - "Requirements: drop-tracker"
+Cohesion: 0.15
+Nodes (12): Access Gate, Access Gate, CI/CD Pipeline, CI/CD Pipeline, Deployment, Deployment / Operations, Future Requirements, Migration Safety (+4 more)
+
+### Community 95 - "Phase 14 Plan 06: Close G-14-2 — persist gateActive for the browser session Summary"
+Cohesion: 0.17
+Nodes (11): Accomplishments, Decisions Made, Deviations from Plan, Files Created/Modified, Issues Encountered, Next Phase Readiness, Performance, Phase 14 Plan 06: Close G-14-2 — persist gateActive for the browser session Summary (+3 more)
+
+### Community 96 - "events/service.go"
+Cohesion: 0.24
+Nodes (10): stubEventsStore, Service, eventsResponse, eventsResponseBody, stubEventsStore, Event, ListParams, Page (+2 more)
+
+### Community 98 - "Info"
+Cohesion: 0.18
+Nodes (10): IN-01: Structural "ungated instance" guarantee is asserted only in prose + tests, IN-02: Latch silently no-ops if the API is ever served cross-origin, IN-03: Test matrix gaps on the marker's negative space, IN-04: `apiFetch` reads a header on every response for a session-lifetime one-shot, Info, Phase 14: Code Review Report, Summary, Warnings (+2 more)
+
+### Community 109 - "Tests"
+Cohesion: 0.20
+Nodes (9): 1. Real-browser cookie behaviour (Chrome + Firefox, http://localhost), 2. PassphraseScreen visual conformance to 14-UI-SPEC, 3. docker compose up with no INSTANCE_PASSPHRASE configured, 4. Live Discord brute-force alert, 5. Log out control persists across a page reload while logged in, Current Test, Gaps, Summary (+1 more)
+
+### Community 110 - "ArtistDetail"
+Cohesion: 0.48
+Nodes (5): stubArtistDetailLookup, ArtistDetail, ArtistAlias, ArtistRelation, ArtistRelationURL
+
+### Community 112 - "Roadmap: drop-tracker"
+Cohesion: 0.22
+Nodes (8): Milestone Summary, Overview, Phase 12: Cleanup: CoverArt Reset & Search Popularity Ranking, Phase 13: Fix History Dates, Guest-Feature Art & Artist Art, Phase Details, Phases, Progress, Roadmap: drop-tracker
+
+### Community 113 - "Architecture Patterns"
+Cohesion: 0.22
+Nodes (9): Anti-Patterns to Avoid, Architecture Patterns, Pattern 1: Conditional wiring via a trailing functional option (GATE-07), Pattern 2: Stateless HMAC session token (D-01, D-02, D-06, D-08), Pattern 3: Cookie construction (D-09 — with the A1 adjustment), Pattern 4: `rate.Limiter` per IP with bounded memory (GATE-04, D-12), Pattern 5: SPA shared auth state without a provider (D-16, GATE-05), Recommended Project Structure (+1 more)
+
+### Community 114 - "Common Pitfalls"
+Cohesion: 0.22
+Nodes (9): Common Pitfalls, Pitfall 1: `__Host-` cookie prefix silently dropped by Chrome on `http://localhost`, Pitfall 2: `/health` swept into the gate → deploy health-poll gets `401`, Pitfall 3: Length leak in the constant-time compare, Pitfall 4: Session not rotated on login (fixation), Pitfall 5: Absolute cap not enforced because `IssuedAt` moves on renewal, Pitfall 6: Passphrase / session leaking into `httplog` output, Pitfall 7: The "inert" path isn't actually inert (+1 more)
+
+### Community 115 - "Phase 14 — Validation Strategy"
+Cohesion: 0.22
+Nodes (8): Manual-Only Verifications, Per-Task Verification Map, Phase 14 — Validation Strategy, Sampling Rate, Test Infrastructure, Validation Audit 2026-09-01, Validation Sign-Off, Wave 0 Requirements
+
+### Community 120 - "Issue tracker: GitHub"
+Cohesion: 0.29
+Nodes (6): Conventions, Issue tracker: GitHub, Pull requests as a triage surface, Wayfinding operations, When a skill says "fetch the relevant ticket", When a skill says "publish to the issue tracker"
+
+### Community 129 - "Phase 14 — Security"
+Cohesion: 0.29
+Nodes (6): Accepted Risks Log, Phase 14 — Security, Security Audit Trail, Sign-Off, Threat Register, Trust Boundaries
+
+### Community 130 - "Domain Docs"
+Cohesion: 0.33
+Nodes (5): Before exploring, read these, Domain Docs, File structure, Flag ADR conflicts, Use the glossary's vocabulary
+
+### Community 131 - "14-07-PLAN.md"
+Cohesion: 0.33
+Nodes (5): Artifacts this plan produces, Deliberate scoping decisions, Source coverage audit, STRIDE Threat Register, Trust Boundaries
+
+### Community 132 - "Code Examples"
+Cohesion: 0.33
+Nodes (6): `Alerter` seam + disabled-case idiom (mirrors `notifier.Select`), Boot-time weak WARN (main.go, right after `config.Load()`), Code Examples, Config field (follows the grouped-by-phase convention), Go table-driven session test (matches the repo's individual-named-test lean, with `t.Run` subcases), RTL test for the 401 → passphrase → re-fetch flow
+
+### Community 139 - "14-05-PLAN.md"
+Cohesion: 0.40
+Nodes (4): Compose semantics — already verified empirically, do not re-derive, Constraints, STRIDE Threat Register, Trust Boundaries
+
+### Community 140 - "14-06-PLAN.md"
+Cohesion: 0.40
+Nodes (4): Artifacts this phase produces, Deliberate scoping decisions, STRIDE Threat Register, Trust Boundaries
+
+### Community 141 - "Validation Architecture"
+Cohesion: 0.40
+Nodes (5): Phase Requirements → Test Map, Sampling Rate, Test Framework, Validation Architecture, Wave 0 Gaps
+
+### Community 142 - ".pre-commit-config.yaml"
+Cohesion: 0.50
+Nodes (3): Local Gitleaks Pre-commit Secret Scanning Hook, Local golangci-lint Pre-commit Hook (Changed-Files Only), drop-tracker README
+
+### Community 148 - "Standard Stack"
+Cohesion: 0.50
+Nodes (4): Alternatives Considered, Core (all already present — nothing to install), Frontend (all already present), Standard Stack
+
+### Community 149 - "User Constraints (from CONTEXT.md)"
+Cohesion: 0.50
+Nodes (4): Claude's Discretion, Deferred Ideas (OUT OF SCOPE), Locked Decisions, User Constraints (from CONTEXT.md)
+
+### Community 150 - "Sources"
+Cohesion: 0.50
+Nodes (4): Primary (HIGH confidence), Secondary (MEDIUM confidence), Sources, Tertiary (LOW confidence — flagged as A1)
+
+### Community 151 - "Phase 14 — External API Coverage"
+Cohesion: 0.50
+Nodes (3): Everything else in this phase, Phase 14 — External API Coverage, Re-decision on the D-12 brute-force alert (required by the api-coverage capability)
+
+### Community 152 - "Out-of-scope discoveries (not fixed)"
+Cohesion: 0.50
+Nodes (3): Out-of-scope discoveries (not fixed), Phase 14 — Deferred Items, `tsc --noEmit` fails on a stale react-router typegen artifact
+
+### Community 162 - "Security Domain"
+Cohesion: 0.67
+Nodes (3): Applicable ASVS Categories, Known Threat Patterns for {Go/chi API + embedded React SPA + shared passphrase}, Security Domain
+
+### Community 177 - "NewActivityGate"
+Cohesion: 0.20
+Nodes (9): sync/atomic.Int32, ActivityGate, NewActivityGate(), TestActivityGate_ActiveWhileBegunNotEnded(), TestActivityGate_ConcurrentUse(), TestActivityGate_DoubleEndDoesNotCorruptState(), TestActivityGate_FreshGateIsNotActive(), TestActivityGate_TwoConcurrentBeginsBothMustEnd() (+1 more)
+
+### Community 180 - "cancelingSearcher"
+Cohesion: 0.22
+Nodes (6): cancelingSearcher, recordingTimeSearcher, ArtistSearcher, context.CancelFunc, io.ReadCloser, cancelReadCloser
+
+### Community 183 - "artists"
+Cohesion: 0.50
+Nodes (3): artists, watchlist, events
 
 ## Knowledge Gaps
-- **252 isolated node(s):** `github.com/danielrpof/drop-tracker`, `Queries`, `Queries`, `AlbumLister`, `Client` (+247 more)
-  These have ≤1 connection - possible missing edges or undocumented components.
-- **54 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **434 isolated node(s):** `github.com/danielrpof/drop-tracker`, `loginRequest`, `Queries`, `Client`, `AlbumLister` (+429 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 558 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **19 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **What is the exact relationship between `redactedTarget()` and `Phase 2 Plan 02: Duplicate-Add & Preferences Plan`?**
-  _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
-- **What is the exact relationship between `Phase 3 Plan 1 Summary` and `Phase 3 Plan 4 Summary`?**
-  _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
-- **What is the exact relationship between `IN-02: .env.example could not be reviewed — sandboxed by tool permissions` and `D-02: Preserve full 5433-to-5432 incident history in comments`?**
-  _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **What is the exact relationship between `Phase 12 Plan 02: Deezer Popularity Ranking` and `deezerSource.SearchArtists adapter`?**
-  _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `Handler()` connect `Release History Frontend Plans` to `Events API Handler Tests`, `HTTP Server & Router Setup`, `Bounded Concurrent Polling Design`?**
-  _High betweenness centrality (0.076) - this node is a cross-community bridge._
-- **Why does `New()` connect `Events API Handler Tests` to `Cron Poller Core`, `Health & Request-ID Config`, `Server Boot & Graceful Shutdown`, `Release History Frontend Plans`, `Detection Functions & Logging`, `HTTP Server & Router Setup`, `Events Service List`, `Watchlist Core Decisions`, `Bounded Concurrent Polling Design`?**
-  _High betweenness centrality (0.071) - this node is a cross-community bridge._
-- **Why does `NewPool()` connect `Notifier Hang Fix & Pool` to `Events Store & Queries`, `Pgx Pool & Querier`, `Health & Request-ID Config`, `Pgx Pool Config & DSN`, `Server Boot & Graceful Shutdown`, `DB Pinger & Store Stubs`, `Cross-Cutting Architecture Decisions`, `Pool MaxConns Sizing`?**
-  _High betweenness centrality (0.055) - this node is a cross-community bridge._
+- **Why does `run()` connect `run` to `New`, `poller_test.go`, `New`, `New`, `gate_test.go`, `golang.org/x/time/rate.Limiter`, `NewMatcher`, `context.Context`, `time.Duration`, `events_test.go`, `config_test.go`, `Backfill`, `PROJECT.md`, `github.com/jackc/pgx/v5/pgtype.Timestamptz`, `match.go`, `NewWithWriter`, `RunMigrations`, `NewActivityGate`, `Server`?**
+  _High betweenness centrality (0.034) - this node is a cross-community bridge._
+- **Why does `New()` connect `New` to `poller_test.go`, `New`, `New`, `TestDetectGuestFeatures_NonSeedCycle_FreshFeatureStillDelivered`, `run`, `events_test.go`?**
+  _High betweenness centrality (0.018) - this node is a cross-community bridge._
+- **Why does `unnotifiedForArtist()` connect `New` to `testing.T`, `context.Context`, `formatEmbed`?**
+  _High betweenness centrality (0.017) - this node is a cross-community bridge._
+- **What connects `github.com/danielrpof/drop-tracker`, `loginRequest`, `Queries` to the rest of the system?**
+  _434 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `New` be split into smaller, more focused modules?**
+  _Cohesion score 0.07278112768433302 - nodes in this community are weakly interconnected._
+- **Should `poller_test.go` be split into smaller, more focused modules?**
+  _Cohesion score 0.08372093023255814 - nodes in this community are weakly interconnected._
+- **Should `New` be split into smaller, more focused modules?**
+  _Cohesion score 0.08141321044546851 - nodes in this community are weakly interconnected._
