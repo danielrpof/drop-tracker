@@ -52,12 +52,40 @@ jobs:
           go-version-file: go.mod
       - name: Run integration tests
         run: make test-integration
+      # Ordered before the gate step (15-CONTEXT.md D-15/D-18) so a coverage-gate
+      # failure still hands a complete profile to the Phase 15 PR coverage comment.
+      - name: Upload backend coverage profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-backend-pr
+          path: coverage.out
+          retention-days: 1
       # Extends this job rather than adding a new one (09-CONTEXT.md D-11). The
       # profile read here (coverage.out) is produced by the integration-test
       # step above, so this step does not re-run the suite -- it only gates on
       # the already-written profile.
       - name: Backend coverage gate (80)
         run: make coverage-gate
+      # Publish this run's coverage as the main baseline the PR comment diffs
+      # against, but only on a green push to main (15-CONTEXT.md D-13/D-14). The
+      # failure-tolerant flag is mandatory per D-04: a baseline write must never
+      # redden a green main.
+      - name: Write backend baseline sidecar
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        env:
+          BASELINE_SHA: ${{ github.sha }}
+        run: go run ./cmd/coverage-report --mode=sidecar --profile=coverage.out --sha="$BASELINE_SHA" --out=baseline-metrics-backend.json
+      - name: Save backend coverage baseline
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            coverage.out
+            baseline-metrics-backend.json
+          key: coverage-baseline-main-backend-${{ github.sha }}
 
   gitleaks:
     runs-on: ubuntu-latest
@@ -117,6 +145,43 @@ jobs:
         run: pnpm exec prettier --check "**/*.{ts,tsx}"
       - name: Run Vitest suite
         run: pnpm test
+      # actions/* steps ignore the job's working-directory default (RESEARCH
+      # Pitfall 8), so every path input below is repository-relative.
+      - name: Upload frontend coverage profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-frontend-pr
+          path: web/coverage/coverage-summary.json
+          retention-days: 1
+      # Node one-liner rather than the Go tool (15-03 planner resolution 3): this
+      # job has no Go toolchain. It emits the same flat pct/sha/generated_at keys
+      # the tool's sidecar mode writes. Publish + save only on a green push to
+      # main (D-13/D-14); failure-tolerant per D-04.
+      - name: Write frontend baseline sidecar
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        env:
+          BASELINE_SHA: ${{ github.sha }}
+        run: |
+          node -e '
+            const s = require("./coverage/coverage-summary.json");
+            const fs = require("fs");
+            fs.writeFileSync("baseline-metrics-frontend.json", JSON.stringify({
+              pct: Number(s.total.lines.pct.toFixed(2)),
+              sha: process.env.BASELINE_SHA,
+              generated_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+            }));
+          '
+      - name: Save frontend coverage baseline
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            web/coverage/coverage-summary.json
+            web/baseline-metrics-frontend.json
+          key: coverage-baseline-main-frontend-${{ github.sha }}
 
   pr-title:
     if: github.event_name == 'pull_request'
