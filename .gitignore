@@ -37,3 +37,7 @@ Thumbs.db
 graphify-out/cache/
 # graphify machine-local state (interpreter path, scan root) and internal labels cache
 graphify-out/.graphify_*
+# graphify dated backup snapshots of the curated graph, written on every rebuild
+graphify-out/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+# GSD graphify skill's working copy of the graph; graphify-out/ is the tracked source of truth
+.planning/graphs/
