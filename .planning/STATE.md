@@ -5,16 +5,16 @@ milestone_name: Continuous Deployment
 current_phase: 15
 current_phase_name: PR Coverage-Diff Comment
 status: executing
-stopped_at: Completed 15-02-PLAN.md
-last_updated: "2026-09-02T22:32:17.695Z"
+stopped_at: Completed 15-03-PLAN.md
+last_updated: "2026-09-02T22:47:14.621Z"
 last_activity: 2026-09-02
-last_activity_desc: Completed 15-01 — cmd/coverage-report Go tool (3 modes, golden render tests)
-state_head: 6def7cc0b0713c3d2fddfde9dc93807577b4173f
+last_activity_desc: Completed 15-03 — Vitest json-summary + coverage artifact/baseline wiring + report-only coverage-comment job
+state_head: 9270c6064c75bd0ed23c7ddefd511abd3673b5bb
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 10
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-09-01)
 
 ## Current Position
 
-Phase: 15 (PR Coverage-Diff Comment) — EXECUTING
-Plan: 3 of 3
-Status: 15-01 complete (cmd/coverage-report Go tool); 15-02 and 15-03 next
-Last activity: 2026-09-02 — Completed 15-01: cmd/coverage-report tool (3 modes, golden render tests, gosec carve-out); executed across two sessions after a quota interruption
+Phase: 15 (PR Coverage-Diff Comment) — all 3 plans executed, pending verification
+Plan: 3 of 3 complete
+Status: 15-01 (cmd/coverage-report tool), 15-02 (Makefile cutover), 15-03 (CI wiring: json-summary reporter, coverage artifacts + Actions-cache baseline, report-only coverage-comment job) all complete. Pending the live scratch-branch PR walkthrough (SC #1–#5, WINDOWS.md #8) and /gsd-verify-work 15.
+Last activity: 2026-09-02 — Completed 15-03: Vitest json-summary reporter, per-run coverage-profile artifacts, main-branch Actions-cache baseline, and the report-only coverage-comment job (actionlint clean, all static gates pass)
 
 ## Performance Metrics
 
@@ -104,6 +104,7 @@ Last activity: 2026-09-02 — Completed 15-01: cmd/coverage-report tool (3 modes
 | Phase 14 P07 | 25 min | 4 tasks | 8 files |
 | Phase 15 P01 | ~8 min (2 sessions) | 3 tasks | 15 files |
 | Phase 15 P02 | 24min | 2 tasks | 3 files |
+| Phase 15 P03 | 35min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -209,6 +210,7 @@ Recent decisions affecting current work:
 - [Phase 15]: [Phase 15-01] cmd/coverage-report is stdlib-only with three --mode arms; the comment renderer emits only compile-time literals, tool-computed 2-dp numbers, a tool-generated RFC3339 timestamp, and a 7-40-lowercase-hex-validated short SHA — validSHA is the single gate for every SHA into the body. Sidecar pct is a json.RawMessage of the same %.2f string total mode prints, so gate and comment can never disagree. Comment mode never returns an error: every bad input degrades to an 'unavailable' row and exits 0.
 - [Phase 15]: [15-02] make coverage-gate now measures the backend total by shelling cmd/coverage-report --mode=total (D-17) instead of scraping go tool cover -func; cmd/coverage-report dropped from COVER_PKGS (D-07). One algorithm feeds both the gate and the PR comment.
 - [Phase 15]: [15-02] Rule 1 fix: backendTotalPct summed numStmts per profile line, inflating the denominator ~10x on a real merged go-test profile (7.97% vs go tool cover 90.0%). Now merges blocks by position key before weighting (x/tools/cover semantics). Cutover margin measured on a real run: tool 90.03%, 10.03pp above the 80 floor, no top-up needed. Race detector substituted out (A1 cgo limit); -p 1 needed for the flaky poller DB test.
+- [Phase 15]: [15-03] full-pipeline.yml: test/frontend-test upload coverage-{backend,frontend}-pr every run (backend before its gate) + on green push to main save coverage.out/-summary.json + a per-language baseline-metrics sidecar under coverage-baseline-main-{backend,frontend}-<sha>; new report-only coverage-comment job (needs [test,frontend-test] only, job-scoped pull-requests: write, job+step continue-on-error) restores both baselines by prefix, renders one table via cmd/coverage-report --mode=comment, sticky-upserts one same-repo PR comment (marocchino v3.0.5). Baseline presence via cache-matched-key + on-disk sidecar (D-20). Vitest gains the json-summary reporter.
 
 ### Pending Todos
 
@@ -268,8 +270,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-02T22:32:03.738Z
-Stopped at: Completed 15-02-PLAN.md
+Last session: 2026-09-02T22:46:48.505Z
+Stopped at: Completed 15-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

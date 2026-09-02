@@ -39,8 +39,8 @@ Automate shipping the app to a self-hosted VPS on every merge to main, put a pas
 
 ### CI/CD Pipeline
 
-- [ ] **CICD-13**: On a pull request from a same-repo branch, CI posts and updates in place a single comment reporting backend and frontend coverage totals plus their delta versus the main-branch baseline; the comment is report-only and never blocks the merge
-- [ ] **CICD-14**: Main-branch pipeline runs publish their coverage results as the baseline the PR comment diffs against, and the comment degrades gracefully (absolute numbers only) when no baseline is available
+- [x] **CICD-13**: On a pull request from a same-repo branch, CI posts and updates in place a single comment reporting backend and frontend coverage totals plus their delta versus the main-branch baseline; the comment is report-only and never blocks the merge
+- [x] **CICD-14**: Main-branch pipeline runs publish their coverage results as the baseline the PR comment diffs against, and the comment degrades gracefully (absolute numbers only) when no baseline is available
 
 ## Future Requirements
 
@@ -84,8 +84,8 @@ Mapped during roadmap creation (2026-08-27). See `.planning/ROADMAP.md` for each
 | GATE-05 | Phase 14 | Complete |
 | GATE-06 | Phase 14 | Complete |
 | GATE-07 | Phase 14 | Complete |
-| CICD-13 | Phase 15 | Pending |
-| CICD-14 | Phase 15 | Pending |
+| CICD-13 | Phase 15 | Complete |
+| CICD-14 | Phase 15 | Complete |
 | MGRT-01 | Phase 16 | Pending |
 | MGRT-02 | Phase 16 | Pending |
 | DPLY-01 | Phase 17 | Pending |

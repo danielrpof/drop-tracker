@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 4
 waived_count: 1
 fixed_count: 3
-total_count: 7
-last_updated: 2026-09-02T22:30:26.122Z
+total_count: 8
+last_updated: 2026-09-02T22:44:55.675Z
 ---
 
 # Broken Windows Ledger
@@ -22,6 +22,7 @@ last_updated: 2026-09-02T22:30:26.122Z
 | 5 | 14 | lint-warning | web/app/root.tsx | 19 | tsc --noEmit fails on stale react-router typegen artifact (./+types/root TS2307); pre-existing, react-router build passes; needs a typegen pretypecheck step | open |  | 2026-09-01T03:23:20.970Z |  |
 | 6 | 15 | deviation | cmd/coverage-report/testdata/baseline-metrics-backend.json |  | Task 1 baseline sidecar fixtures carried 41-char sha fields; corrected to valid 40-char in 20e6d68 (resolved) | fixed |  | 2026-09-02T22:19:13.272Z | 2026-09-02T22:19:34.900Z |
 | 7 | 15 | deviation | cmd/coverage-report/main.go |  | backendTotalPct summed numStmts per profile line, inflating the denominator ~10x on a real merged go-test profile (reported 7.97% vs go tool cover 90.0%); fixed in b1967f6 by merging blocks by position (resolved) | fixed |  | 2026-09-02T22:30:17.794Z | 2026-09-02T22:30:26.122Z |
+| 8 | 15 | unrun-verify | .github/workflows/full-pipeline.yml |  | SC #1-#5 (one sticky comment; three pushes -> one comment; no-baseline degrades to absolute+footer; sub-gate coverage still posts + stays mergeable; merge publishes baseline, no PR recompute) require a live scratch-branch PR against a throwaway target branch -- not automatable, not runnable from this box. actionlint + all per-task static gates pass; the cache/artifact/comment runtime behavior is unverified until the walkthrough. | open |  | 2026-09-02T22:44:55.675Z |  |
 
 ````json
 [
@@ -108,6 +109,18 @@ last_updated: 2026-09-02T22:30:26.122Z
     "reason": "",
     "recorded_at": "2026-09-02T22:30:17.794Z",
     "resolved_at": "2026-09-02T22:30:26.122Z"
+  },
+  {
+    "id": 8,
+    "kind": "unrun-verify",
+    "phase": "15",
+    "file": ".github/workflows/full-pipeline.yml",
+    "line": null,
+    "description": "SC #1-#5 (one sticky comment; three pushes -> one comment; no-baseline degrades to absolute+footer; sub-gate coverage still posts + stays mergeable; merge publishes baseline, no PR recompute) require a live scratch-branch PR against a throwaway target branch -- not automatable, not runnable from this box. actionlint + all per-task static gates pass; the cache/artifact/comment runtime behavior is unverified until the walkthrough.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-02T22:44:55.675Z",
+    "resolved_at": null
   }
 ]
 ````
