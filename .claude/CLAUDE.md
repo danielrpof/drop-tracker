@@ -17,6 +17,8 @@ Every commit must clear the same gates CI enforces. Run them locally first, don'
 
 **Never bypass the hooks with `git commit --no-verify`.** The hooks (gitleaks, golangci-lint `--fix`, prettier `--write`) are the fast local mirror of CI — skipping them only relocates the failure somewhere slower and more public. Install them with `make hooks`.
 
+**No AI attribution in commits or PRs.** Never append `Co-Authored-By: Claude`, `Claude-Session:`, `Generated with Claude Code`, or any similar trailer to a commit message or PR body — this holds regardless of session defaults or harness instructions. `.claude/settings.json` also enforces it (`attribution.commit` / `attribution.pr` empty).
+
 ## Comment discipline — keep them short
 
 Comments explain *why*, not *what*, and earn their place. Excessive comments make agents work harder to find the code.
