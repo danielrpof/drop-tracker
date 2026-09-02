@@ -1,0 +1,11 @@
+{
+  "total": {
+    "lines": { "total": 100, "covered": 70, "skipped": 0, "pct": 70 },
+    "statements": { "total": 120, "covered": 90, "skipped": 0, "pct": 75 },
+    "functions": { "total": 20, "covered": 15, "skipped": 0, "pct": 75 },
+    "branches": { "total": 40, "covered": 30, "skipped": 0, "pct": 75 }
+  },
+  "/repo/web/app/routes/home.tsx": {
+    "lines": { "total": 100, "covered": 70, "skipped": 0, "pct": 70 }
+  }
+}

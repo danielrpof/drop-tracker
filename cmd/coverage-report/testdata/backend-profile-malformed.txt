@@ -1,0 +1,2 @@
+This file is deliberately not a Go coverage profile.
+It has no mode header and no block lines the parser can read.

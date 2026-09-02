@@ -22,9 +22,9 @@ func withFixedClock(t *testing.T, ts string) {
 	t.Cleanup(func() { nowUTC = prev })
 }
 
-// runComparingGolden drives run() in comment mode with the given args plus a
-// temp --out, then compares (or updates) the named golden file.
-func runComparingGolden(t *testing.T, golden string, args []string) string {
+// execComment drives run() in comment mode with the given args plus a temp
+// --out, asserts the step summary mirrors the body, and returns the body.
+func execComment(t *testing.T, args []string) string {
 	t.Helper()
 	outPath := filepath.Join(t.TempDir(), "comment.md")
 	summaryPath := filepath.Join(t.TempDir(), "summary.md")
@@ -40,21 +40,6 @@ func runComparingGolden(t *testing.T, golden string, args []string) string {
 	if err != nil {
 		t.Fatalf("read comment output: %v", err)
 	}
-
-	goldenPath := filepath.Join("testdata", golden)
-	if *update {
-		if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
-			t.Fatalf("update golden: %v", err)
-		}
-	}
-	want, err := os.ReadFile(goldenPath)
-	if err != nil {
-		t.Fatalf("read golden %s: %v", golden, err)
-	}
-	if string(got) != string(want) {
-		t.Fatalf("comment body mismatch for %s\n--- got ---\n%s\n--- want ---\n%s", golden, got, want)
-	}
-
 	summary, err := os.ReadFile(summaryPath)
 	if err != nil {
 		t.Fatalf("read step summary: %v", err)
@@ -64,6 +49,75 @@ func runComparingGolden(t *testing.T, golden string, args []string) string {
 	}
 	return string(got)
 }
+
+// runComparingGolden drives comment mode and compares (or updates) the named
+// golden file.
+func runComparingGolden(t *testing.T, golden string, args []string) string {
+	t.Helper()
+	got := execComment(t, args)
+
+	goldenPath := filepath.Join("testdata", golden)
+	if *update {
+		if err := os.WriteFile(goldenPath, []byte(got), 0o644); err != nil {
+			t.Fatalf("update golden: %v", err)
+		}
+	}
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read golden %s: %v", golden, err)
+	}
+	if got != string(want) {
+		t.Fatalf("comment body mismatch for %s\n--- got ---\n%s\n--- want ---\n%s", golden, got, want)
+	}
+	return got
+}
+
+// deltaCell returns the trimmed "Δ vs main" cell of the named row from a
+// rendered comment body.
+func deltaCell(t *testing.T, body, rowLabel string) string {
+	t.Helper()
+	for _, ln := range strings.Split(body, "\n") {
+		if strings.HasPrefix(ln, "| "+rowLabel+" ") {
+			cols := strings.Split(ln, "|")
+			if len(cols) < 4 {
+				t.Fatalf("row %q has too few columns: %q", rowLabel, ln)
+			}
+			return strings.TrimSpace(cols[3])
+		}
+	}
+	t.Fatalf("row %q not found in body:\n%s", rowLabel, body)
+	return ""
+}
+
+// statusCell returns the trimmed "Status" cell of the named row.
+func statusCell(t *testing.T, body, rowLabel string) string {
+	t.Helper()
+	for _, ln := range strings.Split(body, "\n") {
+		if strings.HasPrefix(ln, "| "+rowLabel+" ") {
+			cols := strings.Split(ln, "|")
+			if len(cols) < 6 {
+				t.Fatalf("row %q has too few columns: %q", rowLabel, ln)
+			}
+			return strings.TrimSpace(cols[5])
+		}
+	}
+	t.Fatalf("row %q not found in body:\n%s", rowLabel, body)
+	return ""
+}
+
+// writeSidecar writes a baseline sidecar with the given pct into a temp dir and
+// returns its path.
+func writeSidecar(t *testing.T, pct string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "baseline.json")
+	body := `{"pct": ` + pct + `, "sha": "abcdef1234567890abcdef1234567890abcdef12", "generated_at": "2026-08-30T00:00:00Z"}`
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+	return p
+}
+
+const goldenHeadSHA = "abc1234def5678abc1234def5678abc1234def56"
 
 func TestRenderComment_Golden(t *testing.T) {
 	withFixedClock(t, "2026-09-02T12:00:00Z")
@@ -121,6 +175,155 @@ func TestParseBlockLine_LastColonSplit(t *testing.T) {
 	}
 	if numStmts != 2 || count != 1 {
 		t.Fatalf("numStmts,count = %d,%d, want 2,1", numStmts, count)
+	}
+}
+
+func TestDelta(t *testing.T) {
+	cases := []struct {
+		name string
+		in   float64
+		want string
+	}{
+		{"positive gain", 0.53, "+0.53pp"},
+		{"negative drop", -1.2, "-1.20pp"},
+		{"exactly unchanged", 0, "±0.00pp"},
+		{"rounds half up to two dp", 0.005, "+0.01pp"},
+		{"tiny negative rounds to zero form", -0.001, "±0.00pp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatDelta(tc.in); got != tc.want {
+				t.Fatalf("formatDelta(%v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("no baseline renders the em-dash, not a nonsense delta", func(t *testing.T) {
+		row := coverageRow{label: "Backend", gate: backendGate, value: 86.84, available: true, baselineKnown: false}
+		got := renderRow(row)
+		if !strings.Contains(got, "| "+emDash+" |") {
+			t.Fatalf("renderRow without baseline = %q, want an em-dash delta cell", got)
+		}
+		if strings.Contains(got, "pp") {
+			t.Fatalf("renderRow without baseline = %q, want no pp delta", got)
+		}
+	})
+}
+
+func TestRenderComment_NoBaseline(t *testing.T) {
+	withFixedClock(t, "2026-09-02T12:00:00Z")
+	body := runComparingGolden(t, "comment-no-baseline.golden.md", []string{
+		"--mode", "comment",
+		"--profile", "testdata/backend-profile.txt",
+		"--frontend-summary", "testdata/coverage-summary.json",
+		"--head-sha", goldenHeadSHA,
+		"--upstream-red=false",
+	})
+	if strings.Contains(body, "baseline: main@") {
+		t.Fatalf("no-baseline body carries a provenance line:\n%s", body)
+	}
+	if deltaCell(t, body, "Backend") != emDash || deltaCell(t, body, "Frontend") != emDash {
+		t.Fatalf("no-baseline body has non-em-dash delta cells:\n%s", body)
+	}
+}
+
+func TestRenderComment_Unchanged(t *testing.T) {
+	withFixedClock(t, "2026-09-02T12:00:00Z")
+	baselineBackend := writeSidecar(t, "80.00")
+	baselineFrontend := writeSidecar(t, "70.00")
+	body := runComparingGolden(t, "comment-unchanged.golden.md", []string{
+		"--mode", "comment",
+		"--profile", "testdata/backend-profile-boundary.txt",
+		"--frontend-summary", "testdata/coverage-summary-boundary.json",
+		"--baseline-backend", baselineBackend,
+		"--baseline-frontend", baselineFrontend,
+		"--head-sha", goldenHeadSHA,
+		"--upstream-red=false",
+	})
+
+	unchangedDelta := deltaCell(t, body, "Backend")
+	if unchangedDelta != "±0.00pp" {
+		t.Fatalf("unchanged Backend delta = %q, want ±0.00pp", unchangedDelta)
+	}
+
+	// Edge-probe adjacency: the zero-delta form and the no-baseline em-dash must
+	// be visibly different strings (D-12).
+	noBaseline, err := os.ReadFile(filepath.Join("testdata", "comment-no-baseline.golden.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	noBaselineDelta := deltaCell(t, string(noBaseline), "Backend")
+	if unchangedDelta == noBaselineDelta {
+		t.Fatalf("unchanged delta %q equals no-baseline delta %q — they must differ", unchangedDelta, noBaselineDelta)
+	}
+}
+
+func TestRenderComment_MissingProfile(t *testing.T) {
+	withFixedClock(t, "2026-09-02T12:00:00Z")
+	outPath := filepath.Join(t.TempDir(), "comment.md")
+	summaryPath := filepath.Join(t.TempDir(), "summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+
+	err := run([]string{
+		"--mode", "comment",
+		"--profile", "testdata/does-not-exist-backend.txt",
+		"--frontend-summary", "testdata/coverage-summary.json",
+		"--baseline-backend", "testdata/baseline-metrics-backend.json",
+		"--baseline-frontend", "testdata/baseline-metrics-frontend.json",
+		"--head-sha", goldenHeadSHA,
+		"--upstream-red=false",
+		"--out", outPath,
+	}, os.Stdout)
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil (comment mode always exits 0)", err)
+	}
+
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(got)
+	if *update {
+		if werr := os.WriteFile(filepath.Join("testdata", "comment-unavailable.golden.md"), got, 0o644); werr != nil {
+			t.Fatal(werr)
+		}
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "comment-unavailable.golden.md"))
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	if body != string(want) {
+		t.Fatalf("comment body mismatch\n--- got ---\n%s\n--- want ---\n%s", body, want)
+	}
+	if statusCell(t, body, "Backend") != unavailable {
+		t.Fatalf("Backend row is not unavailable:\n%s", body)
+	}
+	if !strings.Contains(body, "| Frontend | 72.30% |") {
+		t.Fatalf("Frontend row lost its real percentage:\n%s", body)
+	}
+}
+
+func TestStatusMark_AtGateBoundary(t *testing.T) {
+	withFixedClock(t, "2026-09-02T12:00:00Z")
+	boundary := execComment(t, []string{
+		"--mode", "comment",
+		"--profile", "testdata/backend-profile-boundary.txt",
+		"--frontend-summary", "testdata/coverage-summary-boundary.json",
+		"--head-sha", goldenHeadSHA,
+		"--upstream-red=false",
+	})
+	passing := execComment(t, []string{
+		"--mode", "comment",
+		"--profile", "testdata/backend-profile.txt",
+		"--frontend-summary", "testdata/coverage-summary.json",
+		"--head-sha", goldenHeadSHA,
+		"--upstream-red=false",
+	})
+
+	for _, row := range []string{"Backend", "Frontend"} {
+		if got, want := statusCell(t, boundary, row), statusCell(t, passing, row); got != want {
+			t.Fatalf("%s status at gate boundary = %q, want the passing glyph %q", row, got, want)
+		}
 	}
 }
 
