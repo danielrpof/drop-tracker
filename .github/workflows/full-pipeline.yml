@@ -183,6 +183,104 @@ jobs:
             web/baseline-metrics-frontend.json
           key: coverage-baseline-main-frontend-${{ github.sha }}
 
+  # Report-only (15-CONTEXT.md D-05/D-18, ROADMAP notes): waits for the two
+  # producing jobs but joins no release-path needs: graph, so it can never block
+  # a merge. Runs when an upstream job failed (a coverage-gate failure must still
+  # surface the number) and skips when one was cancelled. The PR-write grant is
+  # scoped to this job alone; the workflow-level permission block is untouched.
+  coverage-comment:
+    needs: [test, frontend-test]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: coverage-comment-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Prefix restore-keys never hit the SHA-suffixed primary key, so baseline
+      # presence is decided by the matched-key output plus the sidecar on disk,
+      # never by the exact-hit boolean (15-CONTEXT.md D-20). Each path list
+      # matches its Task 2 save step exactly.
+      - name: Restore backend coverage baseline
+        id: restore-backend
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            coverage.out
+            baseline-metrics-backend.json
+          key: coverage-baseline-main-backend-${{ github.sha }}
+          restore-keys: coverage-baseline-main-backend-
+      - name: Restore frontend coverage baseline
+        id: restore-frontend
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            web/coverage/coverage-summary.json
+            web/baseline-metrics-frontend.json
+          key: coverage-baseline-main-frontend-${{ github.sha }}
+          restore-keys: coverage-baseline-main-frontend-
+      # Separate directories so a downloaded current profile cannot collide with
+      # a restored baseline of the same filename. The tolerance flag is required:
+      # a compile failure upstream means the artifact was never uploaded and the
+      # download would otherwise fail the step (D-18).
+      - name: Download current backend profile
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-backend-pr
+          path: pr-backend
+      - name: Download current frontend profile
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-frontend-pr
+          path: pr-frontend
+      # Every dynamic value crosses in through env, never interpolated into the
+      # shell command (T-15-V5). Each baseline path is the sidecar path only when
+      # its restore matched a key, empty otherwise (D-20). The tool writes the
+      # job summary itself, so a fork with a read-only token still gets the table.
+      - name: Render coverage comment
+        id: render
+        continue-on-error: true
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          UPSTREAM_RED: ${{ needs.test.result == 'failure' || needs.frontend-test.result == 'failure' }}
+          BASELINE_BACKEND: ${{ steps.restore-backend.outputs.cache-matched-key != '' && 'baseline-metrics-backend.json' || '' }}
+          BASELINE_FRONTEND: ${{ steps.restore-frontend.outputs.cache-matched-key != '' && 'web/baseline-metrics-frontend.json' || '' }}
+        run: |
+          go run ./cmd/coverage-report --mode=comment \
+            --profile=pr-backend/coverage.out \
+            --frontend-summary=pr-frontend/coverage-summary.json \
+            --baseline-backend="$BASELINE_BACKEND" \
+            --baseline-frontend="$BASELINE_FRONTEND" \
+            --head-sha="$HEAD_SHA" \
+            --upstream-red="$UPSTREAM_RED" \
+            --out=comment.md
+          if [ -s comment.md ]; then
+            echo "has_content=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Same-repo guard: a fork PR carries a read-only token and the comment API
+      # returns 403 (RESEARCH Pitfall 25). The non-empty-render guard uses the
+      # step output, not hashFiles -- an empty file still hashes.
+      - name: Upsert coverage comment
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && steps.render.outputs.has_content == 'true' }}
+        continue-on-error: true
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: drop-tracker-coverage
+          path: comment.md
+          skip_unchanged: true
+
   pr-title:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
