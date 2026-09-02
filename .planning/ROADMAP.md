@@ -128,7 +128,12 @@ _Notes:_ Joint backend + frontend slice — a Go `internal/authgate` package plu
 **Plans**: 3 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 15-01-PLAN.md — `cmd/coverage-report` Go tool: profile/summary/sidecar parsing, delta math, markdown renderer, `--mode=total|sidecar|comment`, plus the `gosec` carve-out (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 15-02-PLAN.md — Makefile wiring: `COVER_PKGS` exclusion, `make coverage-report`, and the D-17 `coverage-gate` cutover with a measured margin check (wave 2)
 - [ ] 15-03-PLAN.md — CI wiring: Vitest `json-summary` reporter, artifact hand-off, main-branch cache baseline, and the report-only `coverage-comment` job (wave 2)
 
