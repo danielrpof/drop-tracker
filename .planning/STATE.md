@@ -5,16 +5,16 @@ milestone_name: Continuous Deployment
 current_phase: 15
 current_phase_name: PR Coverage-Diff Comment
 status: executing
-stopped_at: Phase 15 context gathered
-last_updated: "2026-09-02T20:41:53.353Z"
-last_activity: 2026-09-01
-last_activity_desc: Phase 14 complete, transitioned to Phase 15
-state_head: fd348a090acfc8951dc81049e4371384b7355d38
+stopped_at: Completed 15-01-PLAN.md
+last_updated: "2026-09-02T22:18:28.137Z"
+last_activity: 2026-09-02
+last_activity_desc: Completed 15-01 — cmd/coverage-report Go tool (3 modes, golden render tests)
+state_head: 20e6d6834f4b7e7f472e69f41f2a171a31e63f4a
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 10
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-09-01)
 
 ## Current Position
 
-Phase: 15 (PR Coverage-Diff Comment) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-09-01 — Completed quick task 260901-rl9: removed the orphaned envExamplePlaceholder ("caliber") apparatus from internal/authgate (const + denylist entry + drift-guard test), orphaned by 465260c blanking the .env.example placeholder; IsWeakPassphrase behavior unchanged
+Phase: 15 (PR Coverage-Diff Comment) — EXECUTING
+Plan: 2 of 3
+Status: 15-01 complete (cmd/coverage-report Go tool); 15-02 and 15-03 next
+Last activity: 2026-09-02 — Completed 15-01: cmd/coverage-report tool (3 modes, golden render tests, gosec carve-out); executed across two sessions after a quota interruption
 
 ## Performance Metrics
 
@@ -102,6 +102,7 @@ Last activity: 2026-09-01 — Completed quick task 260901-rl9: removed the orpha
 | Phase 14 P05 | 20 min | 4 tasks | 5 files |
 | Phase 14 P06 | 15 min | 3 tasks | 4 files |
 | Phase 14 P07 | 25 min | 4 tasks | 8 files |
+| Phase 15 P01 | ~8 min (2 sessions) | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -204,6 +205,7 @@ Recent decisions affecting current work:
 - [Phase 14]: [14-07] WR-01 retired: the typeof sessionStorage probe moved inside the existing try in readPersistedGateActive/persistGateActive, covered by a jsdom test that redefines the global with a throwing getter. One catch now covers all three storage failure modes (absent, throwing methods, throwing accessor).
 - [Phase 14 UAT, closed 2026-09-01]: All 5 UAT tests pass. Test 5 (G-14-3 re-run: carried-cookie fresh gated session renders the Log out control on first authed view, survives refresh/tab-nav/add-artist, absent on an ungated instance) confirmed by the operator in a real browser against `docker compose up --build`. G-14-1/G-14-2/G-14-3 all resolved. Phase 14 marked complete, transitioned to Phase 15.
 - [Phase 14 Security]: `/gsd-secure-phase 14` (State B, ASVS L1, block_on high) — 67 threats across the 7 plans' STRIDE registers, 66 closed, `threats_open: 0`. No auditor spawn (short-circuit: register authored at plan time + L1). One below-threshold open item recorded as T-14-CACHE-01 (14-REVIEW WR-01): gated authenticated 2xx responses set no `Cache-Control: no-store` / `Vary: Cookie` — medium, non-blocking, recommendation logged for the same middleware that stamps `X-Instance-Gated`. See 14-SECURITY.md.
+- [Phase 15]: [Phase 15-01] cmd/coverage-report is stdlib-only with three --mode arms; the comment renderer emits only compile-time literals, tool-computed 2-dp numbers, a tool-generated RFC3339 timestamp, and a 7-40-lowercase-hex-validated short SHA — validSHA is the single gate for every SHA into the body. Sidecar pct is a json.RawMessage of the same %.2f string total mode prints, so gate and comment can never disagree. Comment mode never returns an error: every bad input degrades to an 'unavailable' row and exits 0.
 
 ### Pending Todos
 
@@ -263,9 +265,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-02T18:47:19.170Z
-Stopped at: Phase 15 context gathered
-Resume file: .planning/phases/15-pr-coverage-diff-comment/15-CONTEXT.md
+Last session: 2026-09-02T22:18:17.899Z
+Stopped at: Completed 15-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

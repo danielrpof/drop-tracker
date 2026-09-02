@@ -125,12 +125,12 @@ _Notes:_ Joint backend + frontend slice — a Go `internal/authgate` package plu
 4. A PR whose coverage drops still shows that drop in the comment and stays mergeable — only the pre-existing 80%/70% coverage gates can block it.
 5. A merge to main publishes that run's coverage as the baseline the next PR diffs against, and no PR run recomputes main's coverage.
 
-**Plans**: 3 plans
+**Plans**: 1/3 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 15-01-PLAN.md — `cmd/coverage-report` Go tool: profile/summary/sidecar parsing, delta math, markdown renderer, `--mode=total|sidecar|comment`, plus the `gosec` carve-out (wave 1)
+- [x] 15-01-PLAN.md — `cmd/coverage-report` Go tool: profile/summary/sidecar parsing, delta math, markdown renderer, `--mode=total|sidecar|comment`, plus the `gosec` carve-out (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -191,7 +191,7 @@ Phases execute in numeric order: 14 → 15 → 16 → 17
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 14. Instance Passphrase Gate | 7/7 | Complete    | 2026-09-01 |
-| 15. PR Coverage-Diff Comment | 0/? | Not started | - |
+| 15. PR Coverage-Diff Comment | 1/3 | In Progress|  |
 | 16. Rollback-Safe Migrations | 0/? | Not started | - |
 | 17. Automated VPS Deploy with Health-Gated Rollback | 0/? | Not started | - |
 
