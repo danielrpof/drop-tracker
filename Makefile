@@ -1,4 +1,4 @@
-.PHONY: build run test test-short test-integration coverage-gate sqlc sqlc-check sqlc-version-check db-up db-down hooks web
+.PHONY: build run test test-short test-integration coverage-report coverage-gate sqlc sqlc-check sqlc-version-check db-up db-down hooks web
 
 # Must stay in lockstep with docker-compose.yml's published port -- see the
 # comment there. Pointing this at a port another project already holds does
@@ -27,11 +27,13 @@ SQLC_VERSION := v1.31.1
 # anchored (`(^|/)...$$`) rather than a bare substring match -- an unanchored
 # match would also drop a future package such as internal/db/sqlcgen or
 # internal/db/sqlc_helpers from the coverage profile, silently changing the
-# percentage the CICD-11 gate enforces (09-REVIEW.md WR-02). The doubled `$$`
-# is required: a single `$` is consumed by make's own variable expansion
-# before the shell ever sees it, silently turning the anchor into an empty
-# string.
-COVER_PKGS = $(shell go list ./... | grep -vE '(^|/)internal/db/sqlc$$' | paste -sd, -)
+# percentage the CICD-11 gate enforces (09-REVIEW.md WR-02). cmd/coverage-report
+# is dropped for a second reason (15-CONTEXT.md D-07): a CI helper that reports
+# the backend coverage number must not sit in the denominator of the metric it
+# reports. The doubled `$$` is required: a single `$` is consumed by make's own
+# variable expansion before the shell ever sees it, silently turning the anchor
+# into an empty string.
+COVER_PKGS = $(shell go list ./... | grep -vE '(^|/)(internal/db/sqlc|cmd/coverage-report)$$' | paste -sd, -)
 
 # CICD-11: 80% is the required floor for aggregate backend coverage, not a
 # tunable -- `?=` only exists so this can be overridden on the command line
@@ -73,6 +75,17 @@ test-integration: db-up
 		-coverprofile=coverage.out -coverpkg=$(COVER_PKGS)
 
 test: test-integration
+
+# D-17: the single place the backend coverage total is measured. coverage-gate
+# consumes this same tool and mode, so the gate and the PR coverage comment
+# cannot disagree by construction. Prints only the bare 2-decimal number to
+# stdout; a missing profile is a loud stderr diagnostic and a non-zero exit.
+coverage-report:
+	@if [ ! -s coverage.out ]; then \
+		echo "coverage.out not found or empty -- run 'make test-integration' first" >&2; \
+		exit 1; \
+	fi
+	@go run ./cmd/coverage-report --mode=total --profile=coverage.out
 
 # Hand-rolled coverage gate (09-CONTEXT.md D-01) -- no prerequisites, so CI
 # and a developer can run it immediately after test-integration without
