@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-01)
 Phase: 15 — PR Coverage-Diff Comment
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-01 — Completed quick task 260901-muu: trimmed essay-style comments in 6 files (999→349 comment lines, no logic changes)
+Last activity: 2026-09-01 — Completed quick task 260901-rl9: removed the orphaned envExamplePlaceholder ("caliber") apparatus from internal/authgate (const + denylist entry + drift-guard test), orphaned by 465260c blanking the .env.example placeholder; IsWeakPassphrase behavior unchanged
 
 ## Performance Metrics
 
@@ -239,6 +239,7 @@ None yet.
 | 260901-lvn | Add repo-root .gitattributes pinning the tree to LF (overrides core.autocrlf) + forced re-checkout to clear 455 working-tree CRLF files; ends the prettier stat-dirty loop | 2026-09-01 | 1524333 | [260901-lvn-add-repo-root-gitattributes-and-renormal](./quick/260901-lvn-add-repo-root-gitattributes-and-renormal/) |
 | 20 | Add comment-conciseness rule to CLAUDE.md + CONVENTIONS.md (stop multi-paragraph comment essays; authStore.ts cited as anti-pattern) | 2026-09-01 | 5de010b | — |
 | 260901-muu | Trim essay-style comments in 6 most comment-dense files (authStore.ts + config/pool/detector/musicbrainz/notifier) — 999→349 comment lines, no logic changes, diff-gated comments-only | 2026-09-01 | eed828a | [260901-muu-trim-essay-style-code-comments-in-6-file](./quick/260901-muu-trim-essay-style-code-comments-in-6-file/) |
+| 260901-rl9 | Remove orphaned envExamplePlaceholder ("caliber") apparatus from internal/authgate — const + doc comment + knownDefaults entry + TestWeakPassphrase_EnvExamplePlaceholderOnDenylist + table case; orphaned by 465260c blanking .env.example's INSTANCE_PASSPHRASE placeholder. Generic denylist + 16-rune floor untouched; IsWeakPassphrase behavior byte-for-byte unchanged (91.0% coverage held) | 2026-09-01 | e555b34 | [260901-rl9-remove-orphaned-envexampleplaceholder-ap](./quick/260901-rl9-remove-orphaned-envexampleplaceholder-ap/) |
 
 ### Roadmap Evolution
 
