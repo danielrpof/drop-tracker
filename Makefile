@@ -90,13 +90,15 @@ coverage-report:
 # Hand-rolled coverage gate (09-CONTEXT.md D-01) -- no prerequisites, so CI
 # and a developer can run it immediately after test-integration without
 # re-running the suite. Log-only (D-03): the two echoes below are the entire
-# report surface, no HTML report and no artifact upload.
+# report surface, no HTML report and no artifact upload. The measured number
+# comes from `coverage-report` (the cmd/coverage-report tool, D-17) so the gate
+# and the PR coverage comment share one algorithm; the 80 literal stays here.
 coverage-gate:
 	@if [ ! -s coverage.out ]; then \
 		echo "coverage.out not found or empty -- run 'make test-integration' first" >&2; \
 		exit 1; \
 	fi
-	@coverage=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{v=$$3; print substr(v, 1, length(v)-1)}'); \
+	@coverage=$$(go run ./cmd/coverage-report --mode=total --profile=coverage.out); \
 	if [ -z "$$coverage" ]; then \
 		echo "failed to parse aggregate coverage total from coverage.out" >&2; \
 		exit 1; \
