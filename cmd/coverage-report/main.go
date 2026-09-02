@@ -155,10 +155,17 @@ func round2(x float64) float64 { return math.Floor(x*100+0.5) / 100 }
 
 // backendTotalPct returns the statement-weighted coverage percentage of a Go
 // coverage profile: sum(numStmts where count>0) / sum(numStmts) * 100.
+//
+// A `go test ./... -coverprofile` run concatenates one full block set per test
+// binary, so the merged profile repeats every block many times (mostly count 0).
+// Blocks are merged by position first -- summing counts, matching
+// x/tools/cover semantics -- or the denominator inflates ~10x and the number
+// disagrees badly with `go tool cover -func` (D-06, D-17).
 func backendTotalPct(r io.Reader) (float64, error) {
 	sc := bufio.NewScanner(r)
-	var covered, total int64
 	seenHeader := false
+	stmts := make(map[string]int64)
+	counts := make(map[string]int64)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -171,20 +178,25 @@ func backendTotalPct(r io.Reader) (float64, error) {
 			seenHeader = true
 			continue
 		}
-		_, numStmts, count, err := parseBlockLine(line)
+		_, block, numStmts, count, err := parseBlockLine(line)
 		if err != nil {
 			return 0, err
 		}
-		total += numStmts
-		if count > 0 {
-			covered += numStmts
-		}
+		stmts[block] = numStmts
+		counts[block] += count
 	}
 	if err := sc.Err(); err != nil {
 		return 0, fmt.Errorf("scan profile: %w", err)
 	}
 	if !seenHeader {
 		return 0, errors.New("empty coverage profile")
+	}
+	var covered, total int64
+	for block, n := range stmts {
+		total += n
+		if counts[block] > 0 {
+			covered += n
+		}
 	}
 	if total == 0 {
 		return 0, errors.New("coverage profile has zero statements")
@@ -194,31 +206,32 @@ func backendTotalPct(r io.Reader) (float64, error) {
 
 // parseBlockLine splits "<path>:<sL>.<sC>,<eL>.<eC> <numStmts> <count>". The
 // file field is split on the LAST colon so a path containing a colon cannot
-// corrupt the parse.
-func parseBlockLine(line string) (file string, numStmts, count int64, err error) {
+// corrupt the parse. block is the "<path>:<sL>.<sC>,<eL>.<eC>" prefix -- the
+// merge key that identifies one basic block across repeated profile segments.
+func parseBlockLine(line string) (file, block string, numStmts, count int64, err error) {
 	lastSpace := strings.LastIndexByte(line, ' ')
 	if lastSpace < 0 {
-		return "", 0, 0, fmt.Errorf("malformed profile line %q", line)
+		return "", "", 0, 0, fmt.Errorf("malformed profile line %q", line)
 	}
 	count, err = strconv.ParseInt(line[lastSpace+1:], 10, 64)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("parse execution count in %q: %w", line, err)
+		return "", "", 0, 0, fmt.Errorf("parse execution count in %q: %w", line, err)
 	}
 	rest := line[:lastSpace]
 	prevSpace := strings.LastIndexByte(rest, ' ')
 	if prevSpace < 0 {
-		return "", 0, 0, fmt.Errorf("malformed profile line %q", line)
+		return "", "", 0, 0, fmt.Errorf("malformed profile line %q", line)
 	}
 	numStmts, err = strconv.ParseInt(rest[prevSpace+1:], 10, 64)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("parse statement count in %q: %w", line, err)
+		return "", "", 0, 0, fmt.Errorf("parse statement count in %q: %w", line, err)
 	}
 	posPart := rest[:prevSpace]
 	lastColon := strings.LastIndexByte(posPart, ':')
 	if lastColon <= 0 {
-		return "", 0, 0, fmt.Errorf("malformed profile line %q", line)
+		return "", "", 0, 0, fmt.Errorf("malformed profile line %q", line)
 	}
-	return posPart[:lastColon], numStmts, count, nil
+	return posPart[:lastColon], posPart, numStmts, count, nil
 }
 
 // ---- frontend summary parse (D-10) ----

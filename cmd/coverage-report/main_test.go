@@ -169,7 +169,7 @@ func TestFrontendLinesPct(t *testing.T) {
 }
 
 func TestParseBlockLine_LastColonSplit(t *testing.T) {
-	file, numStmts, count, err := parseBlockLine(
+	file, block, numStmts, count, err := parseBlockLine(
 		"github.com/danielrpof/drop-tracker/internal/x:special/y.go:2.2,4.4 2 1")
 	if err != nil {
 		t.Fatalf("parseBlockLine error = %v", err)
@@ -177,8 +177,33 @@ func TestParseBlockLine_LastColonSplit(t *testing.T) {
 	if file != "github.com/danielrpof/drop-tracker/internal/x:special/y.go" {
 		t.Fatalf("file = %q, want the path including its embedded colon", file)
 	}
+	if block != "github.com/danielrpof/drop-tracker/internal/x:special/y.go:2.2,4.4" {
+		t.Fatalf("block = %q, want the path plus the position range", block)
+	}
 	if numStmts != 2 || count != 1 {
 		t.Fatalf("numStmts,count = %d,%d, want 2,1", numStmts, count)
+	}
+}
+
+func TestBackendTotalPct_MergesDuplicateBlocks(t *testing.T) {
+	// A `go test ./...` run concatenates one block set per test binary, so the
+	// merged profile repeats every block -- most copies count 0. The total must
+	// be computed over merged blocks (covered if covered in ANY copy), not the
+	// raw per-line sum.
+	const profile = `mode: atomic
+pkg/a.go:1.0,3.0 3 0
+pkg/a.go:1.0,3.0 3 5
+pkg/a.go:5.0,6.0 2 0
+pkg/a.go:5.0,6.0 2 0
+`
+	got, err := backendTotalPct(strings.NewReader(profile))
+	if err != nil {
+		t.Fatalf("backendTotalPct error = %v", err)
+	}
+	// merged: block1 (3 stmts) covered, block2 (2 stmts) uncovered => 3/5 = 60.
+	// the raw per-line sum would give 3 / 10 = 30.
+	if round2(got) != 60.00 {
+		t.Fatalf("round2(backendTotalPct) = %v, want 60.00", round2(got))
 	}
 }
 
@@ -466,7 +491,7 @@ func TestRenderComment_NoUntrustedInterpolation(t *testing.T) {
 		if ln == "" || strings.HasPrefix(ln, "mode:") {
 			continue
 		}
-		file, _, _, perr := parseBlockLine(ln)
+		file, _, _, _, perr := parseBlockLine(ln)
 		if perr != nil {
 			t.Fatalf("hostile fixture line unparseable: %q: %v", ln, perr)
 		}
