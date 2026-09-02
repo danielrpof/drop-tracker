@@ -34,3 +34,11 @@ linters:
       - path: '_test\.go$'
         linters:
           - gosec
+      # cmd/coverage-report is a CI helper that opens coverage-file paths
+      # handed to it as workflow inputs (argv / env), so gosec's G304
+      # (file inclusion via variable) flags a surface that is not a real
+      # path-traversal risk -- the paths are CI-controlled, not user input
+      # (D-19). Scoped to gosec and this directory only.
+      - path: '^cmd/coverage-report/'
+        linters:
+          - gosec

@@ -1,0 +1,14 @@
+{
+  "total": {
+    "lines": { "total": 1000, "covered": 723, "skipped": 0, "pct": 72.3 },
+    "statements": { "total": 1100, "covered": 780, "skipped": 0, "pct": 70.91 },
+    "functions": { "total": 200, "covered": 150, "skipped": 0, "pct": 75 },
+    "branches": { "total": 400, "covered": 260, "skipped": 0, "pct": 65 }
+  },
+  "/repo/web/app/root.tsx": {
+    "lines": { "total": 50, "covered": 40, "skipped": 0, "pct": 80 },
+    "statements": { "total": 55, "covered": 44, "skipped": 0, "pct": 80 },
+    "functions": { "total": 10, "covered": 8, "skipped": 0, "pct": 80 },
+    "branches": { "total": 20, "covered": 15, "skipped": 0, "pct": 75 }
+  }
+}
