@@ -53,11 +53,11 @@ func run(args []string, stdout io.Writer) error {
 	baselineFrontend := fs.String("baseline-frontend", "", "path to the frontend baseline sidecar")
 	headSHA := fs.String("head-sha", "", "PR head commit SHA")
 	upstreamRed := fs.Bool("upstream-red", false, "an upstream CI job was red")
-	out := fs.String("out", "", "output file path for comment mode")
+	out := fs.String("out", "", "output file path for comment/sidecar mode")
+	sha := fs.String("sha", "", "commit SHA to stamp into the sidecar (sidecar mode)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	_ = stdout
 
 	switch *mode {
 	case "comment":
@@ -70,9 +70,31 @@ func run(args []string, stdout io.Writer) error {
 			upstreamRed:      *upstreamRed,
 			out:              *out,
 		})
+	case "total":
+		return runTotal(*profile, stdout)
+	case "sidecar":
+		return runSidecar(*profile, *sha, *out)
 	default:
 		return fmt.Errorf("unrecognised --mode %q (want total, sidecar, or comment)", *mode)
 	}
+}
+
+// validSHA reports whether s is a well-formed short or full commit SHA:
+// 7 to 40 lowercase hexadecimal characters. It is the only gate by which a
+// SHA string from a file or a CLI argument may reach the comment body (V5).
+// TODO(15-01 Task 3 GREEN): implement.
+func validSHA(s string) bool { return false }
+
+// runTotal writes only the bare 2-decimal backend percentage to stdout (D-17).
+// TODO(15-01 Task 3 GREEN): implement.
+func runTotal(profilePath string, stdout io.Writer) error {
+	return errors.New("total mode not implemented")
+}
+
+// runSidecar writes the flat pct/sha/generated_at baseline object (D-02).
+// TODO(15-01 Task 3 GREEN): implement.
+func runSidecar(profilePath, sha, outPath string) error {
+	return errors.New("sidecar mode not implemented")
 }
 
 // round2 rounds half-up to 2 decimals (D-06) -- the same rule make coverage-gate

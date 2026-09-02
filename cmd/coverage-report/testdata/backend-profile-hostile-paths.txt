@@ -1,0 +1,4 @@
+mode: atomic
+github.com/danielrpof/drop-tracker/internal/x/<script>alert(1)</script>/a.go:10.2,12.16 5 1
+github.com/danielrpof/drop-tracker/internal/x/inject`code`_and_*md*/b.go:15.2,15.20 5 0
+github.com/danielrpof/drop-tracker/internal/x/pipe|table|break/[md](http://evil)/c.go:20.2,24.10 10 1

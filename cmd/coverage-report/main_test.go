@@ -5,9 +5,13 @@ package main
 // cmd/server/main_test.go).
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -324,6 +328,161 @@ func TestStatusMark_AtGateBoundary(t *testing.T) {
 		if got, want := statusCell(t, boundary, row), statusCell(t, passing, row); got != want {
 			t.Fatalf("%s status at gate boundary = %q, want the passing glyph %q", row, got, want)
 		}
+	}
+}
+
+func TestModeTotal_PrintsOnlyNumber(t *testing.T) {
+	var buf bytes.Buffer
+	if err := run([]string{"--mode", "total", "--profile", "testdata/backend-profile.txt"}, &buf); err != nil {
+		t.Fatalf("run() error = %v, want nil", err)
+	}
+	if !regexp.MustCompile(`\A[0-9]+\.[0-9]{2}\n\z`).MatchString(buf.String()) {
+		t.Fatalf("total stdout = %q, want exactly a 2-decimal number and one newline", buf.String())
+	}
+}
+
+func TestModeTotal_MissingProfile(t *testing.T) {
+	var buf bytes.Buffer
+	err := run([]string{"--mode", "total", "--profile", "testdata/does-not-exist.txt"}, &buf)
+	if err == nil {
+		t.Fatal("run() error = nil, want non-nil for a missing profile")
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("total stdout = %q, want empty on error", buf.String())
+	}
+}
+
+func TestModeSidecar_Roundtrip(t *testing.T) {
+	withFixedClock(t, "2026-09-02T12:00:00Z")
+	out := filepath.Join(t.TempDir(), "baseline-metrics-backend.json")
+	if err := run([]string{
+		"--mode", "sidecar",
+		"--profile", "testdata/backend-profile.txt",
+		"--sha", goldenHeadSHA,
+		"--out", out,
+	}, io.Discard); err != nil {
+		t.Fatalf("sidecar run() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("sidecar is not valid JSON: %v (%s)", err, raw)
+	}
+	if len(m) != 3 {
+		t.Fatalf("sidecar key set = %v, want exactly pct/sha/generated_at", m)
+	}
+	for _, k := range []string{"pct", "sha", "generated_at"} {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("sidecar missing key %q (%s)", k, raw)
+		}
+	}
+
+	var total bytes.Buffer
+	if err := run([]string{"--mode", "total", "--profile", "testdata/backend-profile.txt"}, &total); err != nil {
+		t.Fatalf("total run() error = %v", err)
+	}
+	if got, want := string(m["pct"]), strings.TrimSpace(total.String()); got != want {
+		t.Fatalf("sidecar pct = %q, want byte-identical to total-mode output %q", got, want)
+	}
+}
+
+func TestSHAValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"40 lowercase hex", "abc1234def5678abc1234def5678abc1234def56", true},
+		{"7 lowercase hex", "abc1234", true},
+		{"6 hex is too short", "abc123", false},
+		{"41 hex is too long", "abc1234def5678abc1234def5678abc1234def567", false},
+		{"uppercase hex rejected", "ABC1234", false},
+		{"non-hex character rejected", "abcg123", false},
+		{"empty rejected", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validSHA(tc.in); got != tc.want {
+				t.Fatalf("validSHA(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSidecar_RejectsBadSHA(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "sc.json")
+	err := run([]string{
+		"--mode", "sidecar",
+		"--profile", "testdata/backend-profile.txt",
+		"--sha", "NOThex",
+		"--out", out,
+	}, io.Discard)
+	if err == nil {
+		t.Fatal("sidecar run() error = nil, want a rejection for a non-hex sha")
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Fatal("sidecar file was written despite an invalid sha")
+	}
+}
+
+func TestModeComment_RejectsBadHeadSHA(t *testing.T) {
+	withFixedClock(t, "2026-09-02T12:00:00Z")
+	body := execComment(t, []string{
+		"--mode", "comment",
+		"--profile", "testdata/backend-profile.txt",
+		"--frontend-summary", "testdata/coverage-summary.json",
+		"--head-sha", "GARBAGE-not-a-sha",
+		"--upstream-red=false",
+	})
+	if strings.Contains(body, "GARBAGE") {
+		t.Fatalf("comment body echoed an invalid head-sha argument:\n%s", body)
+	}
+	if strings.Contains(body, "head ") {
+		t.Fatalf("comment body kept a head-sha line for an invalid argument:\n%s", body)
+	}
+}
+
+func TestRenderComment_NoUntrustedInterpolation(t *testing.T) {
+	withFixedClock(t, "2026-09-02T12:00:00Z")
+	body := execComment(t, []string{
+		"--mode", "comment",
+		"--profile", "testdata/backend-profile-hostile-paths.txt",
+		"--frontend-summary", "testdata/coverage-summary.json",
+		"--head-sha", goldenHeadSHA,
+		"--upstream-red=false",
+	})
+
+	raw, err := os.ReadFile("testdata/backend-profile-hostile-paths.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var forbidden []string
+	for _, ln := range strings.Split(string(raw), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || strings.HasPrefix(ln, "mode:") {
+			continue
+		}
+		file, _, _, perr := parseBlockLine(ln)
+		if perr != nil {
+			t.Fatalf("hostile fixture line unparseable: %q: %v", ln, perr)
+		}
+		forbidden = append(forbidden, file)
+	}
+	if len(forbidden) == 0 {
+		t.Fatal("derived no forbidden path strings from the hostile fixture")
+	}
+	for _, f := range forbidden {
+		if strings.Contains(body, f) {
+			t.Errorf("comment body interpolated a coverage-file path: %q\n%s", f, body)
+		}
+	}
+	// 15 covered / 20 total statements.
+	if !strings.Contains(body, "| Backend | 75.00% |") {
+		t.Fatalf("backend percentage wrong or missing from hostile-path render:\n%s", body)
 	}
 }
 
