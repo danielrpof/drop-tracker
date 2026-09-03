@@ -3,10 +3,11 @@ phase: "15"
 slug: "pr-coverage-diff-comment"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: draft
+status: validated
 nyquist_compliant: false
-wave_0_complete: false
+wave_0_complete: true
 created: "2026-09-02"
+validated: "2026-09-03"
 ---
 
 # Phase 15 — Validation Strategy
@@ -40,19 +41,20 @@ created: "2026-09-02"
 
 > Task IDs are provisional — the planner assigns final IDs/waves. This map binds each phase requirement to an automated check and names the Wave 0 test scaffold it depends on.
 
-| Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
-|---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 15-01-01 | 01 | 0 | CICD-13 | — | N/A | unit (scaffold) | `go test ./cmd/coverage-report/... -count=1` | ❌ W0 `cmd/coverage-report/main_test.go` + `testdata/` | ⬜ pending |
-| 15-01-02 | 01 | 1 | CICD-13 | T-15 V5 | Parser fails closed — renders `unavailable`, never panics | unit | `go test ./cmd/coverage-report/... -run TestBackendTotal` | ❌ W0 `testdata/sample.out` | ⬜ pending |
-| 15-01-03 | 01 | 1 | CICD-13 | — | N/A | unit | `go test ./cmd/coverage-report/... -run TestFrontendLines` | ❌ W0 `testdata/coverage-summary.json` | ⬜ pending |
-| 15-01-04 | 01 | 1 | CICD-13 | — | `±0.00pp` distinct from `—`; no nonsense delta when sidecar absent (D-11/D-12) | unit | `go test ./cmd/coverage-report/... -run TestDelta` | ❌ W0 `testdata/baseline-metrics-*.json` | ⬜ pending |
-| 15-01-05 | 01 | 1 | CICD-13 | T-15 V5 | Only numbers + fixed strings emitted into the comment body; no file text interpolated | unit (golden) | `go test ./cmd/coverage-report/... -run TestRender` | ❌ W0 `testdata/*.golden.md` | ⬜ pending |
-| 15-01-06 | 01 | 1 | CICD-13 | — | Per-row `unavailable` when a profile is missing/unparseable (D-18) | unit | `go test ./cmd/coverage-report/... -run TestRender_MissingProfile` | ❌ W0 | ⬜ pending |
-| 15-01-07 | 01 | 1 | CICD-14 | — | `--mode=total` prints ONLY the number to stdout (D-17 / Pitfall 9) | unit | `go test ./cmd/coverage-report/... -run TestModeTotal` | ❌ W0 | ⬜ pending |
-| 15-02-01 | 02 | 2 | CICD-14 | — | Gate still passes consuming the tool's number; margin above 80 confirmed on a real run before cutover (D-17 / A1) | integration | `make coverage-gate` (after `make test-integration`) | existing target, refactored | ⬜ pending |
-| 15-02-02 | 02 | 2 | CICD-14 | — | `COVER_PKGS` excludes `cmd/coverage-report` (D-07), anchored regex | grep/unit | mirror Phase 09 `COVER_PKGS` guard assertion | ❌ W0 | ⬜ pending |
-| 15-03-01 | 03 | 2 | CICD-13 | T-15 V1/V4/V14 | Report-only job, no `needs:` consumer, job-scoped `pull-requests: write`, SHA-pinned actions | static | `actionlint .github/workflows/full-pipeline.yml` | existing workflow | ⬜ pending |
-| 15-03-02 | 03 | 3 | CICD-13, CICD-14 | T-15 V1 | One comment; edits in place; degrades to "delta unavailable" on no baseline; never blocks merge; baseline published on merge to main | manual / live | scratch-branch PR against a throwaway branch — **never `main`** | not automatable | ⬜ pending |
+| Task ID | Plan | Requirement | Test Type | Automated Command | Verifying Test(s) | Status |
+|---------|------|-------------|-----------|-------------------|-------------------|--------|
+| 15-01-01 | 01 | CICD-13 | unit (scaffold) | `go test ./cmd/coverage-report/... -count=1` | `main_test.go` — 21 test funcs | ✅ green |
+| 15-01-02 | 01 | CICD-13 | unit | `go test ./cmd/coverage-report/... -run 'TestBackendTotalPct'` | `TestBackendTotalPct`, `TestBackendTotalPct_MergesDuplicateBlocks`, `TestParseBlockLine_LastColonSplit` | ✅ green |
+| 15-01-03 | 01 | CICD-13 | unit | `go test ./cmd/coverage-report/... -run TestFrontendLinesPct` | `TestFrontendLinesPct` | ✅ green |
+| 15-01-04 | 01 | CICD-13 | unit | `go test ./cmd/coverage-report/... -run 'TestDelta|TestRenderComment_Unchanged'` | `TestDelta`, `TestRenderComment_Unchanged` (`±0.00pp` distinct from `—`) | ✅ green |
+| 15-01-05 | 01 | CICD-13 | unit (golden) | `go test ./cmd/coverage-report/... -run 'TestRenderComment_Golden|TestRenderComment_NoUntrustedInterpolation'` | `TestRenderComment_Golden`, `_GoldenHasFixedShape`, `_NoUntrustedInterpolation`, `TestSHAValidation` | ✅ green |
+| 15-01-06 | 01 | CICD-13 | unit | `go test ./cmd/coverage-report/... -run 'TestRenderComment_MissingProfile|TestRenderComment_UnparseableProfile|TestBackendTotalPct_MalformedHeader'` | `TestRenderComment_MissingProfile` (missing), `TestRenderComment_UnparseableProfile` + `TestBackendTotalPct_MalformedHeader` (present-but-unparseable — **added by this audit**, WR-04) | ✅ green |
+| 15-01-07 | 01 | CICD-14 | unit | `go test ./cmd/coverage-report/... -run 'TestModeTotal|TestModeSidecar'` | `TestModeTotal_PrintsOnlyNumber`, `_MissingProfile`, `TestModeSidecar_Roundtrip`, `TestSidecar_RejectsBadSHA` | ✅ green |
+| 15-01-08 | 01/03 | CICD-13 | unit | `go test ./cmd/coverage-report/... -run TestRenderComment_UpstreamRed` | `TestRenderComment_UpstreamRed` — `--upstream-red=true` footer present / absent (**added by this audit**, WR-03) | ✅ green |
+| 15-02-01 | 02 | CICD-14 | integration (CI-only) | `make coverage-gate` (after `make test-integration`) | Real integration run recorded in 15-02-SUMMARY: gate PASS at 90.03%, margin 10.03pp above the 80 floor (D-17 cutover). Not runnable on the dev box (A1 cgo/-race). | ✅ green (CI) |
+| 15-02-02 | 02 | CICD-14 | procedural | `make -n test-integration \| grep -c 'cmd/coverage-report'` == 0; `'cmd/server'` >= 1 | Procedural assertion (15-02-SUMMARY D1), mirrors Phase 09's `COVER_PKGS` guard posture — no committed test by precedent | ✅ green (procedural) |
+| 15-03-01 | 03 | CICD-13 | static (local) | `actionlint .github/workflows/full-pipeline.yml` | Clean on every workflow-touching commit; local-only by design (15-03 key-decision — not wired into CI/pre-commit) | ✅ green (local) |
+| 15-03-02 | 03 | CICD-13, CICD-14 | manual / live | scratch-branch PR against a throwaway branch — **never `main`** | Not automatable. Completed via live-CI UAT — see `15-UAT.md`: SC #1–#5 all pass on PR #2 / PR #3 (run IDs recorded). | ✅ done (UAT) |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -60,11 +62,11 @@ created: "2026-09-02"
 
 ## Wave 0 Requirements
 
-- [ ] `cmd/coverage-report/main.go` — parse (`coverage.out` raw counts + Vitest `coverage-summary.json`) + delta vs sidecar + render markdown + `--mode` flag
-- [ ] `cmd/coverage-report/main_test.go` — table tests per the map above (backend total, frontend lines, delta, render golden, missing-profile, `--mode=total`)
-- [ ] `cmd/coverage-report/testdata/` — `sample.out` (a real `mode: atomic` profile slice), `coverage-summary.json` (a real Vitest v8 summary), `baseline-metrics-backend.json` / `baseline-metrics-frontend.json`, `*.golden.md`
-- [ ] `COVER_PKGS`-excludes-`cmd/coverage-report` assertion (mirror Phase 09's anchored-regex guard pattern)
-- [ ] `actionlint` invocation on `full-pipeline.yml` (pre-commit hook or a CI step — planner's discretion; not strictly required by CONTEXT)
+- [x] `cmd/coverage-report/main.go` — parse (`coverage.out` raw counts + Vitest `coverage-summary.json`) + delta vs sidecar + render markdown + `--mode` flag
+- [x] `cmd/coverage-report/main_test.go` — table tests per the map above (backend total, frontend lines, delta, render golden, missing-profile, `--mode=total`); 21 test funcs
+- [x] `cmd/coverage-report/testdata/` — `backend-profile*.txt`, `coverage-summary*.json`, `baseline-metrics-{backend,frontend}.json`, four `comment-*.golden.md`
+- [x] `COVER_PKGS`-excludes-`cmd/coverage-report` assertion — procedural (`make -n`), mirrors Phase 09
+- [x] `actionlint` invocation on `full-pipeline.yml` — local verification tool (not CI/pre-commit, per 15-03 decision)
 
 Framework install: none — Go stdlib `testing` already in use.
 
@@ -86,11 +88,32 @@ Delete the scratch branch and any throwaway target branch after the walkthrough.
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 10s (Go tool loop)
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have automated verify, a recorded real-CI run, or a documented manual-only entry
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 10s (Go tool loop — `go test ./cmd/coverage-report/...` ~0.5s)
+- [ ] `nyquist_compliant: true` — **PARTIAL**: one legitimately-manual item (15-03-02, live-PR runtime behavior) remains, completed via UAT but not automatable
 
-**Approval:** pending
+**Approval:** validated (PARTIAL) — 2026-09-03
+
+---
+
+## Validation Audit 2026-09-03
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 2 |
+| Resolved (tests added) | 2 |
+| Escalated | 0 |
+
+**Input state:** A (existing VALIDATION.md, map stale — all rows `⬜ pending`, frontmatter `draft`).
+
+**What the audit found:** All three plans executed and closed; `15-VERIFICATION.md` (2/5 truths static-verified, 3 routed to human) and `15-UAT.md` (SC #1–#5 all pass, live, PR #2/#3) already complete. 9 of 11 requirement-behaviors had green automated coverage; the map had simply never been updated post-execution. Two genuine committed-test gaps remained, both flagged in `15-REVIEW.md`:
+
+- **WR-03** — the `--upstream-red=true` comment footer line had no test (every comment-mode test passed the flag false).
+- **WR-04** — `testdata/backend-profile-malformed.txt` was committed but referenced by no test; the `backendTotalPct` header-error branch and comment-mode degradation on a *present-but-unparseable* profile were both uncovered.
+
+**Resolution:** `gsd-nyquist-auditor` added 3 test functions to `cmd/coverage-report/main_test.go` (`TestRenderComment_UpstreamRed`, `TestBackendTotalPct_MalformedHeader`, `TestRenderComment_UnparseableProfile`) — test-only, no production change, existing fixture reused. Package now 21 test funcs, all green; `go vet` + `golangci-lint` clean.
+
+**Not converted to tests (deliberate):** 15-02-01 (integration gate — CI-only, verified on a real run), 15-02-02 (`COVER_PKGS` exclusion — procedural per Phase 09 precedent), 15-03-01 (`actionlint` — local tool by 15-03 decision), 15-03-02 (live-PR behavior — not automatable, done via UAT). Review finding WR-05 (mixed-baseline em-dash) is an implementation-behavior question, out of scope for validation — left for a follow-up.
