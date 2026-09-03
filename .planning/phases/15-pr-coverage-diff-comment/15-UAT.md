@@ -1,14 +1,14 @@
 ---
-status: partial
+status: complete
 phase: 15-pr-coverage-diff-comment
 source: [15-VERIFICATION.md]
 started: 2026-09-02T23:03:10Z
-updated: 2026-09-03T17:45:00Z
+updated: 2026-09-03T19:12:00Z
 ---
 
 ## Current Test
 
-[testing paused — 1 item outstanding: test 5 blocked on Phase 15 reaching origin/main]
+[testing complete]
 
 ## Tests
 
@@ -62,26 +62,30 @@ verified: |
 
 ### 5. Merge publishes the baseline; next PR diffs against it; no PR job recomputes main's coverage (SC #5)
 expected: Merging the scratch PR (to main, or a throwaway target branch running the pipeline as main-like) executes the "Write backend/frontend baseline sidecar" + "Save ... coverage baseline" steps (gated `success() && push && refs/heads/main`). A fresh PR opened afterward shows a numeric delta with a `baseline: main@<sha>` provenance line. No PR-triggered job runs the backend/frontend suite against main's tree.
-result: blocked
-blocked_by: prior-phase
-reason: |
-  Phase 15 is not on origin/main yet — local main is 25 commits ahead of origin/main
-  (origin HEAD 6e50487), so full-pipeline.yml on origin/main has neither the
-  coverage-comment job nor the baseline-save steps. The baseline-save steps only run on
-  a push to refs/heads/main, so SC #5 cannot be exercised until the phase ships to
-  origin/main (normally via /gsd-ship, which runs after verify-work). Re-run
-  /gsd-verify-work 15 after ship and check against a fresh small PR.
-  Mechanism otherwise covered by auto-passed coverage entries: D3 (cache-save step
-  gating + structure, actionlint-clean) and D5 (local render sim producing the
-  `baseline: main@<sha>` footer + a numeric delta).
+result: pass
+verified: |
+  Phase 15 pushed to origin/main at f0ad39f. Main-push run 33786944467: test +
+  frontend-test green; "Write backend/frontend baseline sidecar" + "Save coverage
+  baseline" steps ran (BASELINE_SHA f0ad39f). Two Actions caches created:
+  coverage-baseline-main-{backend,frontend}-f0ad39fd8e6997d3cf8ec76c16b6790aaf3a98d2.
+  Fresh PR #3 (head 85c3cf2), run 33794353082: coverage-comment restored both baselines
+  via the bare prefix restore-key ("Cache hit for restore-key:
+  coverage-baseline-main-backend-f0ad39f…" after the merge-commit primary key missed —
+  D-20). Render env BASELINE_BACKEND=baseline-metrics-backend.json,
+  BASELINE_FRONTEND=web/baseline-metrics-frontend.json, UPSTREAM_RED=false. Comment:
+  Backend 89.92% ±0.00pp ✅ / Frontend 89.34% ±0.00pp ✅ (numeric deltas, provably
+  distinct from em-dash), footer "baseline: main@f0ad39f". No PR job recomputes main's
+  coverage — the coverage-comment job has no test-run step (checkout + setup-go +
+  cache/restore + download-artifact + render + upsert only); test/frontend-test run
+  against PR #3's own merge ref, not main's tree.
 
 ## Summary
 
 total: 5
-passed: 4
+passed: 5
 issues: 0
 pending: 0
 skipped: 0
-blocked: 1
+blocked: 0
 
 ## Gaps
