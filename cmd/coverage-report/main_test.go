@@ -529,3 +529,92 @@ func TestRenderComment_GoldenHasFixedShape(t *testing.T) {
 		t.Errorf("golden footer has no baseline provenance marker")
 	}
 }
+
+func TestRenderComment_UpstreamRed(t *testing.T) {
+	// GAP 1 (WR-03): --upstream-red=true footer line has no test.
+	// Verify the line appears when true and is absent when false.
+	const upstreamRedNote = "Note: an upstream CI job was red; a coverage row may be unavailable."
+
+	withFixedClock(t, "2026-09-02T12:00:00Z")
+	bodyTrue := execComment(t, []string{
+		"--mode", "comment",
+		"--profile", "testdata/backend-profile.txt",
+		"--frontend-summary", "testdata/coverage-summary.json",
+		"--head-sha", goldenHeadSHA,
+		"--upstream-red=true",
+	})
+
+	if !strings.Contains(bodyTrue, upstreamRedNote) {
+		t.Fatalf("comment with --upstream-red=true missing the upstream-red note:\n%s", bodyTrue)
+	}
+
+	bodyFalse := execComment(t, []string{
+		"--mode", "comment",
+		"--profile", "testdata/backend-profile.txt",
+		"--frontend-summary", "testdata/coverage-summary.json",
+		"--head-sha", goldenHeadSHA,
+		"--upstream-red=false",
+	})
+
+	if strings.Contains(bodyFalse, upstreamRedNote) {
+		t.Fatalf("comment with --upstream-red=false should not contain the upstream-red note:\n%s", bodyFalse)
+	}
+}
+
+func TestBackendTotalPct_MalformedHeader(t *testing.T) {
+	// GAP 2 (WR-04a): backendTotalPct does not test the header-error path.
+	// Verify that a profile without a mode header returns the expected error.
+	f, err := os.Open("testdata/backend-profile-malformed.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	_, err = backendTotalPct(f)
+	if err == nil {
+		t.Fatal("backendTotalPct on malformed profile should return an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "is not a coverage mode header") {
+		t.Fatalf("backendTotalPct error = %q, want it to mention 'is not a coverage mode header'", err.Error())
+	}
+}
+
+func TestRenderComment_UnparseableProfile(t *testing.T) {
+	// GAP 2 (WR-04b): present-but-unparseable profile is untested.
+	// Verify that comment mode with a malformed profile degrades the Backend row
+	// to unavailable while Frontend keeps its real number, and returns nil.
+	withFixedClock(t, "2026-09-02T12:00:00Z")
+	outPath := filepath.Join(t.TempDir(), "comment.md")
+	summaryPath := filepath.Join(t.TempDir(), "summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+
+	err := run([]string{
+		"--mode", "comment",
+		"--profile", "testdata/backend-profile-malformed.txt",
+		"--frontend-summary", "testdata/coverage-summary.json",
+		"--baseline-backend", "testdata/baseline-metrics-backend.json",
+		"--baseline-frontend", "testdata/baseline-metrics-frontend.json",
+		"--head-sha", goldenHeadSHA,
+		"--upstream-red=false",
+		"--out", outPath,
+	}, os.Stdout)
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil (comment mode always exits 0)", err)
+	}
+
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(got)
+
+	// Backend must be unavailable
+	if !strings.Contains(body, "| Backend | "+unavailable+" | "+emDash+" | 80% | "+emDash+" |") {
+		t.Fatalf("Backend row is not fully degraded to unavailable:\n%s", body)
+	}
+
+	// Frontend must still show its real percentage
+	if !strings.Contains(body, "| Frontend | 72.30% |") {
+		t.Fatalf("Frontend row lost its real percentage:\n%s", body)
+	}
+}
