@@ -6,6 +6,8 @@ Every commit must clear the same gates CI enforces. Run them locally first, don'
 
 **Format frontend first.** If anything under `web/` changed, run `corepack pnpm --dir web exec prettier --write "**/*.{ts,tsx}"` before staging. Prettier's output and `prettier-plugin-tailwindcss` class ordering cannot be reproduced by hand, so hand-formatted TSX fails CI's `frontend-test` job.
 
+**Adding or editing a migration?** Read `internal/db/migrations/README.md` first.
+
 1. `go vet ./...`
 2. `golangci-lint run`
 3. `make test` — integration suite; run `make db-up` first
