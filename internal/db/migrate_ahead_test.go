@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -158,5 +159,120 @@ func TestRunMigrationsWithSource_NoOpsAgainstAheadOfSource(t *testing.T) {
 	}
 	if version != n+1 || dirty {
 		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (%d, false) -- the old binary must observe the schema, not rewrite it", version, dirty, n+1)
+	}
+}
+
+// TestRunMigrationsWithSource_DirtyAheadStillErrors pins the guard's one
+// deliberate non-inert path (RESEARCH.md Finding 1 / Pitfall F, T-16-01):
+// a dirty schema_migrations row at an ahead-of-source version must never be
+// swallowed as a benign no-op -- a half-applied forward migration blocks
+// the old binary too and must surface as an error.
+func TestRunMigrationsWithSource_DirtyAheadStillErrors(t *testing.T) {
+	dsn := requirePostgresDSN(t)
+	ctx := context.Background()
+	logger := migrateAheadDiscardLogger()
+
+	const n = 5
+	const schema = "migrate_ahead_scratch_dirty"
+	sqlDB, scratchDSN := migrateAheadScratchDB(t, dsn, schema)
+
+	fullSrc := mapFSSource(t, n+1)
+	if err := runMigrationsWithSource(ctx, scratchDSN, logger, fullSrc); err != nil {
+		t.Fatalf("prime to n+1: runMigrationsWithSource: %v", err)
+	}
+
+	if _, err := sqlDB.ExecContext(ctx, fmt.Sprintf("UPDATE %s.schema_migrations SET dirty = true", schema)); err != nil {
+		t.Fatalf("force dirty: %v", err)
+	}
+
+	nSrc := mapFSSource(t, n)
+	err := runMigrationsWithSource(ctx, scratchDSN, logger, nSrc)
+	if err == nil {
+		t.Fatal("runMigrationsWithSource against a dirty ahead-of-source schema: want non-nil error, got nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "dirty") {
+		t.Fatalf("error %q does not name a dirty database state", err.Error())
+	}
+}
+
+// TestRunMigrationsWithSource_BehindBySourceStillMigratesForward pins that
+// the guard is inert when cur < smax: a database one version behind the
+// source still migrates forward normally.
+func TestRunMigrationsWithSource_BehindBySourceStillMigratesForward(t *testing.T) {
+	dsn := requirePostgresDSN(t)
+	ctx := context.Background()
+	logger := migrateAheadDiscardLogger()
+
+	const n = 5
+	const schema = "migrate_ahead_scratch_behind"
+	sqlDB, scratchDSN := migrateAheadScratchDB(t, dsn, schema)
+
+	behindSrc := mapFSSource(t, n-1)
+	if err := runMigrationsWithSource(ctx, scratchDSN, logger, behindSrc); err != nil {
+		t.Fatalf("prime to n-1: runMigrationsWithSource: %v", err)
+	}
+
+	fullSrc := mapFSSource(t, n)
+	if err := runMigrationsWithSource(ctx, scratchDSN, logger, fullSrc); err != nil {
+		t.Fatalf("runMigrationsWithSource against a behind-by-one schema: %v", err)
+	}
+
+	var version int
+	var dirty bool
+	if err := sqlDB.QueryRowContext(ctx, fmt.Sprintf("SELECT version, dirty FROM %s.schema_migrations", schema)).Scan(&version, &dirty); err != nil {
+		t.Fatalf("query schema_migrations: %v", err)
+	}
+	if version != n || dirty {
+		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (%d, false)", version, dirty, n)
+	}
+}
+
+// TestRunMigrationsWithSource_FreshDatabaseAppliesFromScratch pins that the
+// guard does not fire on a fresh database (m.Version() returns
+// migrate.ErrNilVersion, RESEARCH.md Finding 1's ErrNilVersion note) -- the
+// full source is applied from scratch exactly as before the guard existed.
+func TestRunMigrationsWithSource_FreshDatabaseAppliesFromScratch(t *testing.T) {
+	dsn := requirePostgresDSN(t)
+	ctx := context.Background()
+	logger := migrateAheadDiscardLogger()
+
+	const n = 5
+	const schema = "migrate_ahead_scratch_fresh"
+	sqlDB, scratchDSN := migrateAheadScratchDB(t, dsn, schema)
+
+	fullSrc := mapFSSource(t, n)
+	if err := runMigrationsWithSource(ctx, scratchDSN, logger, fullSrc); err != nil {
+		t.Fatalf("runMigrationsWithSource against a fresh database: %v", err)
+	}
+
+	var version int
+	var dirty bool
+	if err := sqlDB.QueryRowContext(ctx, fmt.Sprintf("SELECT version, dirty FROM %s.schema_migrations", schema)).Scan(&version, &dirty); err != nil {
+		t.Fatalf("query schema_migrations: %v", err)
+	}
+	if version != n || dirty {
+		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (%d, false)", version, dirty, n)
+	}
+}
+
+// TestRunMigrationsWithSource_IsIdempotentAtEqualVersion pins that calling
+// runMigrationsWithSource twice in a row with the same source returns nil
+// both times -- the second call resolves through migrate.ErrNoChange
+// (equal version), not the ahead-of-source guard.
+func TestRunMigrationsWithSource_IsIdempotentAtEqualVersion(t *testing.T) {
+	dsn := requirePostgresDSN(t)
+	ctx := context.Background()
+	logger := migrateAheadDiscardLogger()
+
+	const n = 5
+	const schema = "migrate_ahead_scratch_idempotent"
+	_, scratchDSN := migrateAheadScratchDB(t, dsn, schema)
+
+	fullSrc := mapFSSource(t, n)
+	if err := runMigrationsWithSource(ctx, scratchDSN, logger, fullSrc); err != nil {
+		t.Fatalf("first runMigrationsWithSource: %v", err)
+	}
+	if err := runMigrationsWithSource(ctx, scratchDSN, logger, fullSrc); err != nil {
+		t.Fatalf("second runMigrationsWithSource: %v", err)
 	}
 }
