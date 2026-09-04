@@ -151,7 +151,7 @@ _Notes:_ CI-only, report-only, low risk. Must not join any release-path `needs:`
 3. The expand/contract rule — additive-only per release, destructive changes split across releases, no blocking DDL in boot migrations — is documented as a standing constraint where someone writing a migration will actually encounter it.
 4. The older binary's boot migration succeeds against an ahead-of-source schema (it no-ops rather than failing on a migration version it has never heard of), proven by an automated test rather than assumed — closing the research's one MEDIUM-confidence assumption about golang-migrate's `Up()` behavior.
 
-**Plans**: 1/5 plans executed
+**Plans**: 2/5 plans executed
 
 Plans:
 **Wave 1**
@@ -160,7 +160,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 16-02-PLAN.md — `cmd/migration-check` scanner: SQL tokenizer, the two finding classes (D-08/S4), the `allow-destructive` annotation grammar behind a one-way-door checkpoint, plus the `gosec` and `COVER_PKGS` carve-outs (wave 2)
+- [x] 16-02-PLAN.md — `cmd/migration-check` scanner: SQL tokenizer, the two finding classes (D-08/S4), the `allow-destructive` annotation grammar behind a one-way-door checkpoint, plus the `gosec` and `COVER_PKGS` carve-outs (wave 2)
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -212,7 +212,7 @@ Phases execute in numeric order: 14 → 15 → 16 → 17
 |-------|----------------|--------|-----------|
 | 14. Instance Passphrase Gate | 7/7 | Complete    | 2026-09-01 |
 | 15. PR Coverage-Diff Comment | 3/3 | Complete    | 2026-09-03 |
-| 16. Rollback-Safe Migrations | 1/5 | In Progress|  |
+| 16. Rollback-Safe Migrations | 2/5 | In Progress|  |
 | 17. Automated VPS Deploy with Health-Gated Rollback | 0/? | Not started | - |
 
 ## Backlog

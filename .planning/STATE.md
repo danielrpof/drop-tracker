@@ -5,16 +5,16 @@ milestone_name: Continuous Deployment
 current_phase: 16
 current_phase_name: Rollback-Safe Migrations
 status: executing
-stopped_at: Completed 16-01-PLAN.md
-last_updated: "2026-09-04T14:17:08.514Z"
+stopped_at: Completed 16-02-PLAN.md
+last_updated: "2026-09-04T16:49:30.193Z"
 last_activity: 2026-09-04
 last_activity_desc: Phase 16 execution started
-state_head: 1463d7558306abd9acfaf906230ee327f1a30182
+state_head: d47792231aad00f7a67217223e291a9c0a23e3a2
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 15
-  completed_plans: 11
+  completed_plans: 12
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-03)
 ## Current Position
 
 Phase: 16 (Rollback-Safe Migrations) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-09-04 — Phase 16 execution started
 
@@ -107,6 +107,7 @@ Last activity: 2026-09-04 — Phase 16 execution started
 | Phase 15 P02 | 24min | 2 tasks | 3 files |
 | Phase 15 P03 | 35min | 3 tasks | 2 files |
 | Phase 16 P01 | 20min | 3 tasks | 5 files |
+| Phase 16 P02 | ~30min | 3 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -216,6 +217,9 @@ Recent decisions affecting current work:
 - [Phase 16]: [Phase 16]: [16-01] Confirmed RESEARCH.md Finding 1 live: golang-migrate v4.19.1's Up() errors (not ErrNoChange) against an ahead-of-source schema — RED commit body records the observed failure text as evidence; ahead-of-source no-op guard (maxSourceVersion + runMigrationsOnce branch) added and pinned GREEN
 - [Phase 16]: [Phase 16]: [16-01] migrate_ahead_test.go (package db, in-package) reimplements RequirePostgresDSN/scratchSchemaDSN locally rather than importing internal/testutil, which would create an import cycle (testutil -> db); no new exported symbols added to internal/db
 - [Phase 16]: [Phase 16]: [16-01] MGRT-01 left unmarked — requirements.ready-ids reports it blocked because sibling plans 16-02/16-03/16-04 also declare it and have not executed yet
+- [Phase 16]: [Phase 16]: [16-02] Checkpoint decided allow-destructive annotation grammar option a -- file-scoped single-line bare-token tag with trailing free-text reason; expand-shipped-in shape-validated at parse boundary (T-16-11), git-tag existence check deferred to Plan 03
+- [Phase 16]: [Phase 16]: [16-02] A half-written allow-destructive annotation is a hard error naming the missing key and never suppresses the underlying finding, distinguishing it from no annotation at all
+- [Phase 16]: [Phase 16]: [16-02] MGRT-01 left unmarked -- requirements.ready-ids confirms it blocked pending 16-03/16-04
 
 ### Pending Todos
 
@@ -276,8 +280,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-04T14:17:07.703Z
-Stopped at: Completed 16-01-PLAN.md
+Last session: 2026-09-04T16:49:29.300Z
+Stopped at: Completed 16-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
