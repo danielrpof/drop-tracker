@@ -184,3 +184,20 @@
 - `down` migration authoring / a `migrate down` rollback path — out of scope; app is forward-only by design.
 - A `docs/adr/` ADR for the expand/contract decision — rejected to avoid introducing the ADR convention now.
 - Poller leader-election via Postgres advisory lock (Pitfall 10 / CLAUDE.md future fix) — same problem class, a scaling concern the single-instance design doesn't have yet.
+
+---
+
+## Revision round — 2026-09-04 (post-context grill)
+
+A `/grill-with-docs` pass on the finished context (verified against the live codebase) raised eight findings. The operator chose a resolution for each. Full detail is in `16-CONTEXT.md` `<revisions>`; this is the audit trail of what changed and what was considered.
+
+| # | Finding | Options weighed | Chosen |
+|---|---------|-----------------|--------|
+| S1 | N-1 boot check was GET-only → poller write paths (`events`/`artists` INSERTs) unverified | (a) `POST /watchlist` write assertion in the boot job; (b) static guard cross-references shipped query SQL; (c) document the gap and accept | **b (primary) + a** — D-15 (guard reads previous release's `queries/*.sql` via `git show`, reds a drop/rename of a still-referenced column) plus a `POST /watchlist` assertion in D-03 |
+| S2 | "direct push to main" guard was a no-op (merge-base == HEAD on a push to main) | (a) diff `github.event.before..github.sha` for push, merge-base for PR; (b) drop the direct-push justification, make the guard PR-only | **a** — D-16 `changes` prelude job computes the diff base per event |
+| S3 | `RunMigrations` hard-codes its source → D-02 test couldn't exercise the real boot path | (a) unexported `runMigrationsWithSource` seam; (b) accept testing raw `migrate.Up()` | **a** — D-18 seam; `RunMigrations` signature unchanged; D-02 test drives the seam and is planned as task 1 / a checkpoint |
+| S4 | `ADD COLUMN NOT NULL` (no default) mislabeled as an N-1 break (it's a forward-deploy hazard) | (a) keep the check, split into two finding classes with distinct messages; (b) move it to the deferred "blocking DDL" bucket | **a** — D-08/D-10 two-class split (backward-incompatible vs unsafe-forward) |
+| S5 | Only one rollback hop verified; `expand-shipped-in` annotation was self-reported prose | (a) constrain Phase 17 rollback to strictly N-1 + validate the annotation tag; (b) multi-hop rollback-floor tracking | **a** — D-17 (strict N-1, locked in Phase 17 discuss) + D-13 tag validation |
+| S6 | N-1 boot job ran on every push for signal only on migration PRs | (a) job-level `if:` path filter keyed on `changes` output; (b) leave unconditional | **a** — D-12; job stays in `build-scan.needs:`, skipped == success |
+| S7 | Blocking gate ships in Phase 16 for a rollback capability that lands in Phase 17 | (a) keep blocking, accept the residual transient-ghcr risk; (b) report-only in 16, flip to blocking in 17 | **a** — D-11; the repo already shipped the "non-blocking then forgotten" defect once (Phase 8→9) |
+| S8 | `HTTP_PORT` vs `PORT`; `fetch-depth: 0` not stated as required; bootstrap skip-green untestable; empty-DB 200s unconfirmed | Apply corrections | D-14 (`HTTP_PORT`), D-13/D-16 (`fetch-depth: 0` + tags, hard req), D-19 (skip-green is an in-job step / accepted dead path; gosec + COVER_PKGS confirmed; empty-DB 200s verified in code) |
