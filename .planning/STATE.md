@@ -5,16 +5,16 @@ milestone_name: Continuous Deployment
 current_phase: 16
 current_phase_name: Rollback-Safe Migrations
 status: executing
-stopped_at: Phase 16 context gathered
-last_updated: "2026-09-04T07:18:57.605Z"
-last_activity: 2026-09-03
-last_activity_desc: Phase 15 complete, transitioned to Phase 16
-state_head: a0fe1eb4f0ad0d75158f3e18b9eae96b1f2bc309
+stopped_at: Completed 16-01-PLAN.md
+last_updated: "2026-09-04T14:17:08.514Z"
+last_activity: 2026-09-04
+last_activity_desc: Phase 16 execution started
+state_head: 1463d7558306abd9acfaf906230ee327f1a30182
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 15
-  completed_plans: 10
+  completed_plans: 11
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-09-03)
 
 ## Current Position
 
-Phase: 16 (Rollback-Safe Migrations) — READY TO EXECUTE
-Plan: Not started
+Phase: 16 (Rollback-Safe Migrations) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-09-03 — Phase 15 complete, transitioned to Phase 16
+Last activity: 2026-09-04 — Phase 16 execution started
 
 ## Performance Metrics
 
@@ -106,6 +106,7 @@ Last activity: 2026-09-03 — Phase 15 complete, transitioned to Phase 16
 | Phase 15 P01 | ~8 min (2 sessions) | 3 tasks | 15 files |
 | Phase 15 P02 | 24min | 2 tasks | 3 files |
 | Phase 15 P03 | 35min | 3 tasks | 2 files |
+| Phase 16 P01 | 20min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -212,6 +213,9 @@ Recent decisions affecting current work:
 - [Phase 15]: [15-02] make coverage-gate now measures the backend total by shelling cmd/coverage-report --mode=total (D-17) instead of scraping go tool cover -func; cmd/coverage-report dropped from COVER_PKGS (D-07). One algorithm feeds both the gate and the PR comment.
 - [Phase 15]: [15-02] Rule 1 fix: backendTotalPct summed numStmts per profile line, inflating the denominator ~10x on a real merged go-test profile (7.97% vs go tool cover 90.0%). Now merges blocks by position key before weighting (x/tools/cover semantics). Cutover margin measured on a real run: tool 90.03%, 10.03pp above the 80 floor, no top-up needed. Race detector substituted out (A1 cgo limit); -p 1 needed for the flaky poller DB test.
 - [Phase 15]: [15-03] full-pipeline.yml: test/frontend-test upload coverage-{backend,frontend}-pr every run (backend before its gate) + on green push to main save coverage.out/-summary.json + a per-language baseline-metrics sidecar under coverage-baseline-main-{backend,frontend}-<sha>; new report-only coverage-comment job (needs [test,frontend-test] only, job-scoped pull-requests: write, job+step continue-on-error) restores both baselines by prefix, renders one table via cmd/coverage-report --mode=comment, sticky-upserts one same-repo PR comment (marocchino v3.0.5). Baseline presence via cache-matched-key + on-disk sidecar (D-20). Vitest gains the json-summary reporter.
+- [Phase 16]: [Phase 16]: [16-01] Confirmed RESEARCH.md Finding 1 live: golang-migrate v4.19.1's Up() errors (not ErrNoChange) against an ahead-of-source schema — RED commit body records the observed failure text as evidence; ahead-of-source no-op guard (maxSourceVersion + runMigrationsOnce branch) added and pinned GREEN
+- [Phase 16]: [Phase 16]: [16-01] migrate_ahead_test.go (package db, in-package) reimplements RequirePostgresDSN/scratchSchemaDSN locally rather than importing internal/testutil, which would create an import cycle (testutil -> db); no new exported symbols added to internal/db
+- [Phase 16]: [Phase 16]: [16-01] MGRT-01 left unmarked — requirements.ready-ids reports it blocked because sibling plans 16-02/16-03/16-04 also declare it and have not executed yet
 
 ### Pending Todos
 
@@ -272,9 +276,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-04T05:12:12.670Z
-Stopped at: Phase 16 context gathered
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/16-rollback-safe-migrations/16-CONTEXT.md
+Last session: 2026-09-04T14:17:07.703Z
+Stopped at: Completed 16-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
