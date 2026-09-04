@@ -5,16 +5,16 @@ milestone_name: Continuous Deployment
 current_phase: 16
 current_phase_name: Rollback-Safe Migrations
 status: executing
-stopped_at: Completed 16-02-PLAN.md
-last_updated: "2026-09-04T16:49:30.193Z"
+stopped_at: Completed 16-03-PLAN.md
+last_updated: "2026-09-04T17:29:40.860Z"
 last_activity: 2026-09-04
 last_activity_desc: Phase 16 execution started
-state_head: d47792231aad00f7a67217223e291a9c0a23e3a2
+state_head: c0a92d541c269a374c63019ec312ad460b63c8c4
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 15
-  completed_plans: 12
+  completed_plans: 13
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-03)
 ## Current Position
 
 Phase: 16 (Rollback-Safe Migrations) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-09-04 — Phase 16 execution started
 
@@ -108,6 +108,7 @@ Last activity: 2026-09-04 — Phase 16 execution started
 | Phase 15 P03 | 35min | 3 tasks | 2 files |
 | Phase 16 P01 | 20min | 3 tasks | 5 files |
 | Phase 16 P02 | ~30min | 3 tasks | 22 files |
+| Phase 16 P03 | 20min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -220,6 +221,10 @@ Recent decisions affecting current work:
 - [Phase 16]: [Phase 16]: [16-02] Checkpoint decided allow-destructive annotation grammar option a -- file-scoped single-line bare-token tag with trailing free-text reason; expand-shipped-in shape-validated at parse boundary (T-16-11), git-tag existence check deferred to Plan 03
 - [Phase 16]: [Phase 16]: [16-02] A half-written allow-destructive annotation is a hard error naming the missing key and never suppresses the underlying finding, distinguishing it from no annotation at all
 - [Phase 16]: [Phase 16]: [16-02] MGRT-01 left unmarked -- requirements.ready-ids confirms it blocked pending 16-03/16-04
+- [Phase 16]: [Phase 16]: [16-03] Push-event diff range is the literal two-dot before..sha form (plan's must_haves.truths), not RESEARCH's illustrative three-dot form; only pull_request and the zero/unreachable-before fallback use three-dot merge-base
+- [Phase 16]: [Phase 16]: [16-03] D-15 cross-reference wired via classCrossRef, a finding class pulled out before shouldSuppress runs and appended back after -- structurally non-suppressible; RENAME COLUMN lookups split finding.object on " -> " to recover the old column name
+- [Phase 16]: [Phase 16]: [16-03] Fixed a regex-consumption bug in the original combined FROM/JOIN-plus-alias pattern (alias group could swallow the next clause's own FROM/JOIN keyword, dropping the second joined table); replaced with findFromJoinTables, a manual tokenizer over located keyword positions
+- [Phase 16]: [Phase 16]: [16-03] MGRT-01 left unmarked -- requirements.ready-ids confirms it blocked pending 16-04
 
 ### Pending Todos
 
@@ -280,8 +285,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-04T16:49:29.300Z
-Stopped at: Completed 16-02-PLAN.md
+Last session: 2026-09-04T17:29:40.102Z
+Stopped at: Completed 16-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
