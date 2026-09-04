@@ -151,9 +151,29 @@ _Notes:_ CI-only, report-only, low risk. Must not join any release-path `needs:`
 3. The expand/contract rule — additive-only per release, destructive changes split across releases, no blocking DDL in boot migrations — is documented as a standing constraint where someone writing a migration will actually encounter it.
 4. The older binary's boot migration succeeds against an ahead-of-source schema (it no-ops rather than failing on a migration version it has never heard of), proven by an automated test rather than assumed — closing the research's one MEDIUM-confidence assumption about golang-migrate's `Up()` behavior.
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 16-01-PLAN.md — Tracer: the `runMigrationsWithSource` seam (D-18), `maxSourceVersion`, the ahead-of-source no-op guard, its RED→GREEN hermetic proof (SC #4), and the `cmd/migrate` HEAD-schema helper (wave 1)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 16-02-PLAN.md — `cmd/migration-check` scanner: SQL tokenizer, the two finding classes (D-08/S4), the `allow-destructive` annotation grammar behind a one-way-door checkpoint, plus the `gosec` and `COVER_PKGS` carve-outs (wave 2)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 16-03-PLAN.md — `--mode=changed-files` diff-base selection (D-16), ref allowlisting, the immutable-migration error, and the D-15 previous-release query cross-reference that no annotation can override (wave 3)
+- [ ] 16-05-PLAN.md — `internal/db/migrations/README.md` (MGRT-02 / SC #3), its doc-presence test, and the CLAUDE.md Definition-of-Done pointer (wave 3)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 16-04-PLAN.md — CI wiring: the `changes` prelude, the `migration-check` guard, the `n1-boot` job, and both entries appended to `build-scan.needs:` — all jobs unconditional, expensive steps step-gated (wave 4)
 
 _Notes:_ Split out of the deploy phase deliberately. Pitfall 8 is the milestone's highest-cost failure mode (a non-backward-compatible migration turns a routine rollback into data loss), and it is *cross-cutting* — the rule binds every migration from now on, not just ones written during the deploy phase. Building it last inside the heaviest phase would put the safety precondition after the thing it protects. CI-only, no VPS required. Relevant pitfalls: PITFALLS.md 8, 9, 10.
+
+**Scope amended at planning (2026-09-04)** by two research findings that were verified by execution against the pinned modules, both reviewed and accepted by the developer. (1) `migrate.Up()` against an ahead-of-source schema returns a hard error, not `ErrNoChange` — SC #4's assumption was false, so the phase now carries **one genuine runtime-behaviour change** to `internal/db/migrate.go` (an ahead-of-source no-op guard), relaxing CONTEXT.md's "no runtime behaviour change" boundary. (2) A skipped `needs:` job **skips** its dependents rather than counting as success, so all three new CI jobs are unconditional with their expensive *steps* gated — a job-level `if:` would have skipped `build-scan` and `release` on ~95% of pushes.
 
 ### Phase 17: Automated VPS Deploy with Health-Gated Rollback
 
