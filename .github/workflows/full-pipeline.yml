@@ -293,6 +293,83 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # changes and migration-check (16-CONTEXT.md D-11/D-12/D-16) are both
+  # unconditional -- no job-level if: on either one. RESEARCH.md Finding 2: a
+  # skipped needs: job skips its dependents, so gating one of these jobs
+  # instead of its own steps would silently skip build-scan and release on
+  # the ~95% of pushes that touch no migration. (n1-boot, added alongside
+  # these two, follows the identical unconditional-job / gated-step shape.)
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      migrations_changed: ${{ steps.diff.outputs.migrations_changed }}
+      migration_files: ${{ steps.diff.outputs.migration_files }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # migration-check --mode=changed-files (16-03) owns the diff-base
+      # selection (D-16) and writes migrations_changed/migration_files to
+      # $GITHUB_OUTPUT itself -- this step only supplies the GitHub event
+      # context, entirely through env: (T-16-21; never string-interpolated
+      # into the run: body).
+      - name: Compute migration diff base
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          go run ./cmd/migration-check --mode=changed-files \
+            --event-name="$EVENT_NAME" --before="$BEFORE" --sha="$SHA" --base-ref="$BASE_REF"
+
+  migration-check:
+    needs: [changes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Same pinned svu the release job uses (D-13); tolerates an empty
+      # result (true bootstrap, D-04) rather than failing the step.
+      - name: Resolve previous release tag
+        id: prevtag
+        run: |
+          set -e
+          go install github.com/caarlos0/svu/v3@v3.4.1
+          SVU="$(go env GOPATH)/bin/svu"
+          TAG="$("$SVU" current 2>/dev/null || true)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      # Cheap and unconditional: the tool itself no-ops on an empty file list
+      # and still prints the scanned-file line (D-07 transparency), so a
+      # zero-file run is visibly a zero-file run, not indistinguishable from
+      # one that examined nothing.
+      - name: Run migration-check scan
+        env:
+          MIGRATION_FILES: ${{ needs.changes.outputs.migration_files }}
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          go run ./cmd/migration-check --mode=scan --files="$MIGRATION_FILES" --prev-tag="$PREV_TAG"
+
   build-scan:
     # frontend-test was created report-only in Phase 8 specifically so this
     # phase would only have to make it blocking (08-CONTEXT.md D-04;
