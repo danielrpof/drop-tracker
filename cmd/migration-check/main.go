@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -23,8 +25,12 @@ func main() {
 
 func run(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("migration-check", flag.ContinueOnError)
-	mode := fs.String("mode", "", "one of: scan")
+	mode := fs.String("mode", "", "one of: scan, changed-files")
 	filesArg := fs.String("files", "", "space- or newline-separated list of migration file paths")
+	eventName := fs.String("event-name", "", "GitHub Actions event name (pull_request or push)")
+	before := fs.String("before", "", "GitHub Actions github.event.before (push only)")
+	sha := fs.String("sha", "", "GitHub Actions github.sha")
+	baseRef := fs.String("base-ref", "", "GitHub Actions github.base_ref (pull_request only)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -32,8 +38,10 @@ func run(args []string, stdout io.Writer) error {
 	switch *mode {
 	case "scan":
 		return runScan(*filesArg, stdout)
+	case "changed-files":
+		return runChangedFiles(*eventName, *before, *sha, *baseRef, stdout)
 	default:
-		return fmt.Errorf("unrecognised --mode %q (want scan)", *mode)
+		return fmt.Errorf("unrecognised --mode %q (want scan or changed-files)", *mode)
 	}
 }
 
@@ -113,6 +121,175 @@ func splitFileList(s string) []string {
 	return strings.FieldsFunc(s, func(r rune) bool {
 		return r == ' ' || r == '\t' || r == '\n' || r == '\r'
 	})
+}
+
+// ---- changed-files mode: diff-base selection (D-16, S2, T-16-21/T-16-23) ----
+
+const (
+	allZeroSHA             = "0000000000000000000000000000000000000000"
+	mergeBaseFallbackRange = "origin/main...HEAD"
+	migrationsUpGlob       = "internal/db/migrations/*.up.sql"
+)
+
+var reBranchRef = regexp.MustCompile(`^[A-Za-z0-9._][A-Za-z0-9._/-]*$`)
+
+// validCommitish reports whether s is a well-formed short or full commit SHA:
+// 7 to 40 lowercase hexadecimal characters. Mirrors cmd/coverage-report's
+// validSHA -- the only gate by which a SHA-shaped string may reach a git
+// argv element (T-16-21).
+func validCommitish(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// validBranchRef gates a branch/ref-shaped input before it can reach a git
+// argv element (T-16-21): letters, digits, `.`, `_`, `/`, `-`, and never a
+// `..` component (which git itself forbids in a ref and which could
+// otherwise be used to construct a path-traversal-shaped remote ref).
+func validBranchRef(s string) bool {
+	if s == "" || strings.Contains(s, "..") {
+		return false
+	}
+	return reBranchRef.MatchString(s)
+}
+
+// commitExists reports whether ref (already shape-validated) names a commit
+// reachable in this repository. Package-level seam so diffRange's own tests
+// never need a real git repo (mirrors gitShow's seam below).
+var commitExists = func(ref string) bool {
+	return exec.Command("git", "cat-file", "-e", ref+"^{commit}").Run() == nil
+}
+
+// diffRange computes the git revision range changed-files mode diffs for the
+// given event shape, gating every ref-shaped input through an allowlist
+// before it is ever assembled into a git argv element. Pure function -- no
+// git repository is required to unit test it; commitExists is the only
+// external seam it calls, and only on an already shape-validated value.
+//
+//   - pull_request: origin/<base-ref>...HEAD (three-dot merge-base).
+//   - push: <before>..<sha> (two-dot literal range) when before is a
+//     shape-valid, reachable commit.
+//   - push with an all-zeroes or unreachable before (new branch, force-push,
+//     Pitfall G): falls back to the merge-base range against origin/main, so
+//     a destructive migration pushed straight to main is still scanned
+//     (D-16/S2).
+//   - any other event name: a hard error, never a silently-empty range.
+func diffRange(event, before, sha, baseRef string) (string, error) {
+	switch event {
+	case "pull_request":
+		if !validBranchRef(baseRef) {
+			return "", fmt.Errorf("diffRange: rejected --base-ref %q", baseRef)
+		}
+		return "origin/" + baseRef + "...HEAD", nil
+	case "push":
+		if before == allZeroSHA {
+			return mergeBaseFallbackRange, nil
+		}
+		if !validCommitish(before) {
+			return "", fmt.Errorf("diffRange: rejected --before %q", before)
+		}
+		if !commitExists(before) {
+			return mergeBaseFallbackRange, nil
+		}
+		if !validCommitish(sha) {
+			return "", fmt.Errorf("diffRange: rejected --sha %q", sha)
+		}
+		return before + ".." + sha, nil
+	default:
+		return "", fmt.Errorf("diffRange: unrecognised --event-name %q (want pull_request or push)", event)
+	}
+}
+
+// gitDiffNames is a package-level seam over
+// `git diff --name-only --diff-filter=<filter> <rangeArg> -- <pathspec>`,
+// argv-slice form, never sh -c. Stubbable in tests (mirrors commitExists and
+// gitShow).
+var gitDiffNames = func(filter, rangeArg string) ([]string, error) {
+	out, err := exec.Command("git", "diff", "--name-only", "--diff-filter="+filter, rangeArg, "--", migrationsUpGlob).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff --diff-filter=%s %s: %w", filter, rangeArg, err)
+	}
+	return splitFileList(string(out)), nil
+}
+
+// filterMigrationUpFiles keeps only paths matching the migrations up-glob,
+// defensively re-filtering the diff seam's output (T-16-23) -- a stubbed or
+// unexpectedly broad diff result must never leak a non-migration path into
+// migration_files. path.Match (not filepath.Match) because git always
+// emits forward-slash paths regardless of the host OS.
+func filterMigrationUpFiles(files []string) []string {
+	var out []string
+	for _, f := range files {
+		if ok, _ := path.Match(migrationsUpGlob, f); ok {
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// runChangedFiles implements --mode=changed-files: selects the diff base
+// (diffRange), lists added and modified *.up.sql files across it, emits
+// migrations_changed/migration_files as GitHub Actions key=value lines to
+// $GITHUB_OUTPUT (when set) and mirrors them to stdout unconditionally, then
+// hard-errors if any already-released migration file was modified --
+// released migrations are immutable (RESEARCH Open Question 1).
+func runChangedFiles(eventName, before, sha, baseRef string, stdout io.Writer) error {
+	rangeArg, err := diffRange(eventName, before, sha, baseRef)
+	if err != nil {
+		return fmt.Errorf("changed-files: %w", err)
+	}
+
+	added, err := gitDiffNames("A", rangeArg)
+	if err != nil {
+		return fmt.Errorf("changed-files: diff added: %w", err)
+	}
+	modified, err := gitDiffNames("M", rangeArg)
+	if err != nil {
+		return fmt.Errorf("changed-files: diff modified: %w", err)
+	}
+	added = filterMigrationUpFiles(added)
+	modified = filterMigrationUpFiles(modified)
+
+	migrationsChanged := len(added) > 0
+	migrationFiles := strings.Join(added, " ")
+
+	if _, err := fmt.Fprintf(stdout, "migrations_changed=%t\nmigration_files=%s\n", migrationsChanged, migrationFiles); err != nil {
+		return fmt.Errorf("changed-files: write report: %w", err)
+	}
+
+	if ghOut := os.Getenv("GITHUB_OUTPUT"); ghOut != "" {
+		if err := appendGithubOutput(ghOut, migrationsChanged, migrationFiles); err != nil {
+			return fmt.Errorf("changed-files: %w", err)
+		}
+	}
+
+	if len(modified) > 0 {
+		return fmt.Errorf("changed-files: released migration(s) modified -- released migrations are immutable: %s", strings.Join(modified, ", "))
+	}
+	return nil
+}
+
+// appendGithubOutput writes the two changed-files outputs as GitHub Actions
+// key=value lines, appended to the file named by $GITHUB_OUTPUT.
+func appendGithubOutput(outPath string, migrationsChanged bool, migrationFiles string) error {
+	f, err := os.OpenFile(outPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return fmt.Errorf("open GITHUB_OUTPUT %s: %w", outPath, err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := fmt.Fprintf(f, "migrations_changed=%t\nmigration_files=%s\n", migrationsChanged, migrationFiles); err != nil {
+		return fmt.Errorf("write GITHUB_OUTPUT: %w", err)
+	}
+	return nil
 }
 
 // buildReport renders the scanned-file list unconditionally (including the
@@ -354,7 +531,7 @@ func stripComments(src string) string {
 	return b.String()
 }
 
-// copySingleQuoted copies a '...' string literal body (with '' escapes)
+// copySingleQuoted copies a '...' string literal body (with ” escapes)
 // starting just after the opening quote, returning the index past the
 // closing quote.
 func copySingleQuoted(b *strings.Builder, src string, i int) int {

@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -376,5 +377,242 @@ func TestParseAnnotation_NoAnnotationIsNotAnError(t *testing.T) {
 	ann, ok, err := parseAnnotation("ALTER TABLE events ADD COLUMN foo text;\n")
 	if err != nil || ok || ann != (annotation{}) {
 		t.Fatalf("parseAnnotation(no annotation) = %+v, %v, %v; want zero value, false, nil", ann, ok, err)
+	}
+}
+
+// ---- changed-files mode: diff-base selection (Task 1, D-16/S2) ----
+
+// withStubCommitExists swaps the commitExists seam for a test, restoring it
+// in t.Cleanup -- mirrors coverage-report's withFixedClock pattern.
+func withStubCommitExists(t *testing.T, fn func(ref string) bool) {
+	t.Helper()
+	prev := commitExists
+	commitExists = fn
+	t.Cleanup(func() { commitExists = prev })
+}
+
+// withStubGitDiffNames swaps the gitDiffNames seam for a test.
+func withStubGitDiffNames(t *testing.T, fn func(filter, rangeArg string) ([]string, error)) {
+	t.Helper()
+	prev := gitDiffNames
+	gitDiffNames = fn
+	t.Cleanup(func() { gitDiffNames = prev })
+}
+
+func TestDiffRange(t *testing.T) {
+	const reachableSHA = "abc1234abc1234abc1234abc1234abc1234abc1"
+	const targetSHA = "def5678def5678def5678def5678def5678def5"
+
+	t.Run("pull_request uses three-dot merge-base against base-ref", func(t *testing.T) {
+		withStubCommitExists(t, func(string) bool { return true })
+		got, err := diffRange("pull_request", "", "", "main")
+		if err != nil {
+			t.Fatalf("diffRange() error = %v, want nil", err)
+		}
+		if want := "origin/main...HEAD"; got != want {
+			t.Fatalf("diffRange() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("push with a reachable before uses the two-dot literal range", func(t *testing.T) {
+		withStubCommitExists(t, func(ref string) bool { return ref == reachableSHA })
+		got, err := diffRange("push", reachableSHA, targetSHA, "")
+		if err != nil {
+			t.Fatalf("diffRange() error = %v, want nil", err)
+		}
+		if want := reachableSHA + ".." + targetSHA; got != want {
+			t.Fatalf("diffRange() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("push with all-zeroes before falls back to merge-base against origin/main", func(t *testing.T) {
+		withStubCommitExists(t, func(string) bool {
+			t.Fatal("commitExists must not be called for the all-zeroes before")
+			return false
+		})
+		got, err := diffRange("push", allZeroSHA, targetSHA, "")
+		if err != nil {
+			t.Fatalf("diffRange() error = %v, want nil", err)
+		}
+		if got != mergeBaseFallbackRange {
+			t.Fatalf("diffRange() = %q, want the merge-base fallback %q", got, mergeBaseFallbackRange)
+		}
+	})
+
+	t.Run("push with an unreachable before falls back to the same merge-base range", func(t *testing.T) {
+		withStubCommitExists(t, func(string) bool { return false })
+		got, err := diffRange("push", reachableSHA, targetSHA, "")
+		if err != nil {
+			t.Fatalf("diffRange() error = %v, want nil", err)
+		}
+		if got != mergeBaseFallbackRange {
+			t.Fatalf("diffRange() = %q, want the merge-base fallback %q", got, mergeBaseFallbackRange)
+		}
+	})
+
+	t.Run("unknown event name is a hard error, never a silently-empty range", func(t *testing.T) {
+		got, err := diffRange("workflow_dispatch", "", "", "")
+		if err == nil {
+			t.Fatalf("diffRange() error = nil, want non-nil for an unrecognised event")
+		}
+		if got != "" {
+			t.Fatalf("diffRange() = %q, want empty range alongside the error", got)
+		}
+	})
+
+	rejectCases := []struct {
+		name                        string
+		event, before, sha, baseRef string
+	}{
+		{"base-ref shell metacharacter", "pull_request", "", "", "main;rm -rf /"},
+		{"base-ref path traversal", "pull_request", "", "", "../../etc"},
+		{"before shell metacharacter", "push", "abc; echo pwned", targetSHA, ""},
+		{"sha with a newline", "push", reachableSHA, "abc1234\nrm -rf /", ""},
+	}
+	for _, tc := range rejectCases {
+		t.Run(tc.name, func(t *testing.T) {
+			withStubCommitExists(t, func(string) bool { return true })
+			got, err := diffRange(tc.event, tc.before, tc.sha, tc.baseRef)
+			if err == nil {
+				t.Fatalf("diffRange() error = nil, want non-nil")
+			}
+			if got != "" {
+				t.Fatalf("diffRange() = %q, want empty range alongside the error", got)
+			}
+			var rejected string
+			switch {
+			case tc.baseRef != "" && !validBranchRef(tc.baseRef):
+				rejected = tc.baseRef
+			case tc.event == "push" && !validCommitish(tc.before):
+				rejected = tc.before
+			default:
+				rejected = tc.sha
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf("%q", rejected)) {
+				t.Fatalf("diffRange() error = %q, want it to name the rejected value %q", err.Error(), rejected)
+			}
+		})
+	}
+}
+
+func TestChangedFiles_AddedAndModified(t *testing.T) {
+	withStubGitDiffNames(t, func(filter, rangeArg string) ([]string, error) {
+		switch filter {
+		case "A":
+			return []string{"internal/db/migrations/000008_x.up.sql", "web/app/root.tsx"}, nil
+		case "M":
+			return nil, nil
+		}
+		t.Fatalf("unexpected diff-filter %q", filter)
+		return nil, nil
+	})
+	var buf bytes.Buffer
+	err := run([]string{"--mode", "changed-files", "--event-name", "pull_request", "--base-ref", "main"}, &buf)
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil:\n%s", err, buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "migrations_changed=true") {
+		t.Fatalf("output missing migrations_changed=true:\n%s", out)
+	}
+	if !strings.Contains(out, "migration_files=internal/db/migrations/000008_x.up.sql") {
+		t.Fatalf("output missing the .up.sql migration_files entry:\n%s", out)
+	}
+	if strings.Contains(out, "web/app/root.tsx") {
+		t.Fatalf("output leaked a non-migration path into migration_files:\n%s", out)
+	}
+}
+
+func TestChangedFiles_NothingUnderGlobIsFalseAndEmpty(t *testing.T) {
+	withStubGitDiffNames(t, func(filter, rangeArg string) ([]string, error) {
+		return nil, nil
+	})
+	var buf bytes.Buffer
+	err := run([]string{"--mode", "changed-files", "--event-name", "pull_request", "--base-ref", "main"}, &buf)
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil:\n%s", err, buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "migrations_changed=false") {
+		t.Fatalf("output missing migrations_changed=false:\n%s", out)
+	}
+	if !strings.Contains(out, "migration_files=\n") {
+		t.Fatalf("output missing an empty migration_files line:\n%s", out)
+	}
+}
+
+func TestChangedFiles_WritesGithubOutputFile(t *testing.T) {
+	withStubGitDiffNames(t, func(filter, rangeArg string) ([]string, error) {
+		if filter == "A" {
+			return []string{"internal/db/migrations/000009_y.up.sql"}, nil
+		}
+		return nil, nil
+	})
+	outPath := filepath.Join(t.TempDir(), "github_output.txt")
+	t.Setenv("GITHUB_OUTPUT", outPath)
+
+	var buf bytes.Buffer
+	if err := run([]string{"--mode", "changed-files", "--event-name", "pull_request", "--base-ref", "main"}, &buf); err != nil {
+		t.Fatalf("run() error = %v, want nil", err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read GITHUB_OUTPUT file: %v", err)
+	}
+	if !strings.Contains(string(got), "migrations_changed=true") || !strings.Contains(string(got), "migration_files=internal/db/migrations/000009_y.up.sql") {
+		t.Fatalf("GITHUB_OUTPUT file missing expected key=value lines:\n%s", got)
+	}
+}
+
+func TestModifiedReleasedMigration(t *testing.T) {
+	withStubGitDiffNames(t, func(filter, rangeArg string) ([]string, error) {
+		switch filter {
+		case "A":
+			return nil, nil
+		case "M":
+			return []string{"internal/db/migrations/000006_events_watched_artist_name.up.sql"}, nil
+		}
+		t.Fatalf("unexpected diff-filter %q", filter)
+		return nil, nil
+	})
+	var buf bytes.Buffer
+	err := run([]string{"--mode", "changed-files", "--event-name", "pull_request", "--base-ref", "main"}, &buf)
+	if err == nil {
+		t.Fatalf("run() error = nil, want non-nil for a modified already-released migration:\n%s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "000006_events_watched_artist_name.up.sql") {
+		t.Fatalf("error = %q, want it to name the modified file", err.Error())
+	}
+	if !strings.Contains(err.Error(), "immutable") {
+		t.Fatalf("error = %q, want it to name the immutability rule", err.Error())
+	}
+}
+
+func TestFilterMigrationUpFiles_KeepsOnlyTheGlob(t *testing.T) {
+	got := filterMigrationUpFiles([]string{
+		"internal/db/migrations/000010_z.up.sql",
+		"internal/db/migrations/000010_z.down.sql",
+		"web/app/root.tsx",
+	})
+	if len(got) != 1 || got[0] != "internal/db/migrations/000010_z.up.sql" {
+		t.Fatalf("filterMigrationUpFiles() = %#v, want only the .up.sql migration path", got)
+	}
+}
+
+func TestValidCommitishAndValidBranchRef(t *testing.T) {
+	if !validCommitish("abc1234") {
+		t.Fatal("validCommitish(7-char hex) = false, want true")
+	}
+	if validCommitish("abc123") {
+		t.Fatal("validCommitish(6-char hex) = true, want false")
+	}
+	if validCommitish("abc123g") {
+		t.Fatal("validCommitish(non-hex) = true, want false")
+	}
+	if !validBranchRef("main") || !validBranchRef("feature/foo-bar.1") {
+		t.Fatal("validBranchRef rejected a well-formed branch ref")
+	}
+	if validBranchRef("../../etc") || validBranchRef("main;rm -rf /") || validBranchRef("") {
+		t.Fatal("validBranchRef accepted a malformed or path-traversal-shaped ref")
 	}
 }
