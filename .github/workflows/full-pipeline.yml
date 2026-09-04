@@ -370,6 +370,163 @@ jobs:
         run: |
           go run ./cmd/migration-check --mode=scan --files="$MIGRATION_FILES" --prev-tag="$PREV_TAG"
 
+  # n1-boot itself is unconditional (no job-level if:), matching changes and
+  # migration-check above; every step past checkout/setup-go/teardown
+  # carries a step-level if: on needs.changes.outputs.migrations_changed, so
+  # on the ~95% of pushes that touch no migration this job succeeds in
+  # runner spin-up time alone. No services: key -- a services: container
+  # ignores step if: and would start on every push (RESEARCH Pitfall D);
+  # Postgres is brought up by a gated docker run step instead.
+  n1-boot:
+    needs: [changes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Resolve previous release tag
+        id: prevtag
+        if: needs.changes.outputs.migrations_changed == 'true'
+        run: |
+          set -e
+          go install github.com/caarlos0/svu/v3@v3.4.1
+          SVU="$(go env GOPATH)/bin/svu"
+          TAG="$("$SVU" current 2>/dev/null || true)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      # D-04/D-19a: an in-job step, not a job-level if: -- unreachable on this
+      # repo (v1.x tags exist) but the sole correct way to skip-green a
+      # genuine first-ever release with no prior tag to roll back to.
+      - name: True-bootstrap guard
+        id: bootstrap
+        if: needs.changes.outputs.migrations_changed == 'true'
+        env:
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          if [ -z "$PREV_TAG" ]; then
+            echo "::notice::no prior release tag found -- true bootstrap, N-1 check not applicable (D-04/D-19a)"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Start throwaway Postgres
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        run: |
+          set -e
+          docker run -d --name drop-tracker-n1-pg --network host \
+            -e POSTGRES_USER=drop_tracker -e POSTGRES_PASSWORD=drop_tracker -e POSTGRES_DB=drop_tracker \
+            postgres:16
+          for i in $(seq 1 30); do
+            if docker exec drop-tracker-n1-pg pg_isready -U drop_tracker -d drop_tracker >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::throwaway Postgres never became ready" >&2
+          exit 1
+      # D-01: the exact embedded-iofs + bounded-retry boot path cmd/server
+      # runs, applied via cmd/migrate (16-01) -- not a docker build, not the
+      # golang-migrate CLI.
+      - name: Apply HEAD schema
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        env:
+          DATABASE_URL: postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable
+        run: go run ./cmd/migrate
+      # One retry after a short sleep (D-04); an immutable vX.Y.Z tag only,
+      # never a floating tag (D-13). Public package -- no registry
+      # authentication step, no packages: permission.
+      - name: Pull previous release image
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        env:
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          set -e
+          IMAGE="ghcr.io/danielrpof/drop-tracker:$PREV_TAG"
+          docker pull "$IMAGE" || { sleep 5; docker pull "$IMAGE"; }
+      # Exactly DATABASE_URL + HTTP_PORT -- no INSTANCE_PASSPHRASE, so the
+      # Phase 14 GATE-07 inert path leaves /watchlist and /events reachable
+      # unauthenticated and a schema break surfaces as a 500, not an auth
+      # response (D-14/S8).
+      - name: Run previous release image
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        env:
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          set -e
+          docker run -d --name drop-tracker-n1 --network host \
+            -e DATABASE_URL="postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable" \
+            -e HTTP_PORT=8080 \
+            "ghcr.io/danielrpof/drop-tracker:$PREV_TAG"
+      # 8 consecutive 200s at ~2s spacing before proceeding -- a container
+      # that starts and then dies must fail here, not pass on one early 200
+      # (D-03).
+      - name: Health probe -- sustained green
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        run: |
+          set -e
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+              ok=$((ok+1))
+              if [ "$ok" -ge 8 ]; then
+                exit 0
+              fi
+            else
+              ok=0
+            fi
+            sleep 2
+          done
+          echo "::error::N-1 image never reached a sustained-healthy state" >&2
+          docker logs drop-tracker-n1 || true
+          exit 1
+      - name: Read probes -- GET /watchlist and GET /events
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        run: |
+          set -e
+          BODY="$(curl -fsS http://localhost:8080/watchlist)"
+          if [ "$BODY" != "[]" ]; then
+            echo "::error::GET /watchlist on an empty DB did not return [] (got: $BODY)" >&2
+            exit 1
+          fi
+          curl -fsS http://localhost:8080/events >/dev/null
+      # image_url is supplied so the art matcher is bypassed entirely (S1) --
+      # a pure UpsertArtist/CreateWatchlistEntry DB write, no external call.
+      # Covers the poller's insert paths a GET-only check would miss.
+      - name: Write probe -- POST /watchlist then re-GET
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        run: |
+          set -e
+          STATUS="$(curl -fsS -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/watchlist \
+            -H 'Content-Type: application/json' \
+            -d '{"mbid":"00000000-0000-0000-0000-000000000001","name":"CI N-1 Boot Probe","image_url":"https://example.invalid/x.png"}')"
+          if [ "$STATUS" != "201" ]; then
+            echo "::error::POST /watchlist did not return 201 (got: $STATUS)" >&2
+            exit 1
+          fi
+          BODY="$(curl -fsS http://localhost:8080/watchlist)"
+          case "$BODY" in
+            *"CI N-1 Boot Probe"*) ;;
+            *) echo "::error::GET /watchlist after POST does not contain the probe row (got: $BODY)" >&2; exit 1 ;;
+          esac
+      # A red here must teach the rule, not report an opaque boot error (SC #2).
+      - name: N-1 boot failure -- explain the rule
+        if: failure() && needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        run: |
+          echo "::error::This branch's migration breaks the N-1 rollback / expand-contract rule -- the previously-released image must still boot, stay healthy, read, and write against this schema. See internal/db/migrations/README.md."
+      - name: Teardown
+        if: always() && needs.changes.outputs.migrations_changed == 'true'
+        run: |
+          docker rm -f drop-tracker-n1 >/dev/null 2>&1 || true
+          docker rm -f drop-tracker-n1-pg >/dev/null 2>&1 || true
+
   build-scan:
     # frontend-test was created report-only in Phase 8 specifically so this
     # phase would only have to make it blocking (08-CONTEXT.md D-04;
