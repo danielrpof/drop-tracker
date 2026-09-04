@@ -4,16 +4,16 @@ milestone: v1.3
 milestone_name: Continuous Deployment
 current_phase: 16
 current_phase_name: Rollback-Safe Migrations
-status: planning
+status: executing
 stopped_at: Phase 16 context gathered
-last_updated: "2026-09-04T05:12:13.442Z"
+last_updated: "2026-09-04T07:18:57.605Z"
 last_activity: 2026-09-03
 last_activity_desc: Phase 15 complete, transitioned to Phase 16
-state_head: 14c8c7361de4d470d1dae62c88fb02c52412aa90
+state_head: a0fe1eb4f0ad0d75158f3e18b9eae96b1f2bc309
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 10
+  total_plans: 15
   completed_plans: 10
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-03)
 
 ## Current Position
 
-Phase: 16 — Rollback-Safe Migrations
+Phase: 16 (Rollback-Safe Migrations) — READY TO EXECUTE
 Plan: Not started
-Status: Ready to plan
+Status: Ready to execute
 Last activity: 2026-09-03 — Phase 15 complete, transitioned to Phase 16
 
 ## Performance Metrics
@@ -256,6 +256,7 @@ None yet.
 - Phase 13 added: Fix History Dates, Guest-Feature Art & Artist Art — bundles three post-Phase-12 display/data bugs (History tab missing release dates, guest-feature cards missing album art, MusicBrainz artist art not rendering) with backlog Phase 999.2 (Deezer artist-art backfill), which was absorbed where it overlaps with the artist-art bug
 - v1.3 milestone opened (2026-08-27): Phases 14-17 added — Instance Passphrase Gate, PR Coverage-Diff Comment, Rollback-Safe Migrations, Automated VPS Deploy with Health-Gated Rollback. Phase numbering continued from 13 rather than resetting.
 - Phase 16 (Rollback-Safe Migrations) split out of the research-recommended single deploy phase so the N-1 schema-compatibility guarantee is in force before anything can auto-roll-back.
+- Phase 16 context revised (2026-09-04) after a `/grill-with-docs` pass — 8 findings (S1-S8) resolved, new decisions D-15..D-19: (S1) static guard now cross-references the previous release's `queries/*.sql` + boot job adds a `POST /watchlist` write assertion — GET-only missed the poller's write paths; (S2) a `changes` prelude job computes the diff base per event (`github.event.before..github.sha` for push) — the old merge-base approach was a no-op on direct-to-main; (S3) unexported `runMigrationsWithSource` seam so the SC #4 test drives the real boot path; (S4) `ADD COLUMN NOT NULL` reclassified as unsafe-forward (deploy hazard), not an N-1 break — two-class guard messages; (S5) Phase 17 rollback constrained to strictly N-1 (D-17) + annotation tag validated; (S6) N-1 boot job path-filtered to migration PRs; (S7) both checks stay blocking, transient-ghcr risk accepted; (S8) `HTTP_PORT` not `PORT`, `fetch-depth: 0` + tags a hard req. See `16-CONTEXT.md` `<revisions>`.
 
 ## Deferred Items
 
@@ -277,7 +278,9 @@ Resume file: C:/CodeProjects/drop-tracker/.planning/phases/16-rollback-safe-migr
 
 ## Operator Next Steps
 
-- `/clear` then `/gsd-discuss-phase 16` (or `/gsd-plan-phase 16` directly) — Rollback-Safe Migrations. CI-only phase: prove the previously-released image still boots healthy against the current branch's schema; expand/contract becomes a documented standing constraint.
+- `/clear` then `/gsd-plan-phase 16` — Rollback-Safe Migrations. Context is revised and ready (grill pass done 2026-09-04; `16-CONTEXT.md` `<revisions>` holds S1-S8 + D-15..D-19). CI-only phase: prove the previously-released image still boots healthy against the current branch's schema; expand/contract becomes a documented standing constraint.
+- Planner: sequence the D-02/D-18 seam + SC #4 ahead-of-source test **first** as a checkpoint — if `migrate.Up()` errors instead of `ErrNoChange` against an ahead-of-source DB, stop and escalate (no plan B; Phase 17 auto-rollback depends on it).
+- RESEARCH.md must scope D-15's `queries/*.sql` identifier extraction (previous-release column-reference set) and its blind spots — it's the largest addition to `cmd/migration-check`.
 - Phase 16's edit target is `.github/workflows/full-pipeline.yml` — the same shared file Phases 15 and 17 touch; keep the 15 → 16 → 17 order. Phase 17 additionally needs the `release` job to expose `outputs.version`.
 - Before planning Phase 17, run its discuss/spec pass — the TLS reverse-proxy choice (recommended: Caddy on-VPS) blocks the first deploy, and no VPS is provisioned yet.
 - Non-blocking follow-up from Phase 14 security: consider `Cache-Control: no-store` on the gated response path (T-14-CACHE-01 / 14-REVIEW WR-01)
