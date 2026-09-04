@@ -32,8 +32,10 @@ SQLC_VERSION := v1.31.1
 # the backend coverage number must not sit in the denominator of the metric it
 # reports. The doubled `$$` is required: a single `$` is consumed by make's own
 # variable expansion before the shell ever sees it, silently turning the anchor
-# into an empty string.
-COVER_PKGS = $(shell go list ./... | grep -vE '(^|/)(internal/db/sqlc|cmd/coverage-report)$$' | paste -sd, -)
+# into an empty string. cmd/migrate is dropped for the same reason as
+# cmd/coverage-report (16-CONTEXT.md D-19b, Phase 15 D-07 precedent): a CI
+# helper does not dilute the product coverage denominator.
+COVER_PKGS = $(shell go list ./... | grep -vE '(^|/)(internal/db/sqlc|cmd/coverage-report|cmd/migrate)$$' | paste -sd, -)
 
 # CICD-11: 80% is the required floor for aggregate backend coverage, not a
 # tunable -- `?=` only exists so this can be overridden on the command line
