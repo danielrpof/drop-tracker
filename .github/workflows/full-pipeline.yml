@@ -531,7 +531,12 @@ jobs:
     # frontend-test was created report-only in Phase 8 specifically so this
     # phase would only have to make it blocking (08-CONTEXT.md D-04;
     # 09-CONTEXT.md D-11) -- appended here, all five prior entries unchanged.
-    needs: [vet, lint, test, gitleaks, trivy-fs, frontend-test]
+    # migration-check and n1-boot (16-CONTEXT.md D-11) are appended the same
+    # way. Both stay unconditional by design (RESEARCH.md Finding 2): a
+    # skipped needs: job skips its dependents, so a job-level if: on either
+    # one would silently skip build-scan and release on the ~95% of pushes
+    # that touch no migration -- never "optimise" this into a job-level if:.
+    needs: [vet, lint, test, gitleaks, trivy-fs, frontend-test, migration-check, n1-boot]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
