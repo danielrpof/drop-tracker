@@ -209,7 +209,15 @@ func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger, opts ..
 	if err != nil {
 		return fmt.Errorf("load embedded migrations: %w", err)
 	}
+	return runMigrationsWithSource(ctx, dsn, logger, src, opts...)
+}
 
+// runMigrationsWithSource holds RunMigrations' retry/backoff body against an
+// injected source.Driver (D-18) rather than the embedded migrationsFS, so a
+// test can drive the exact boot path with a synthetic source without
+// exporting migrationsFS. RunMigrations' own signature and behavior are
+// unchanged; this is a behavior-preserving split.
+func runMigrationsWithSource(ctx context.Context, dsn string, logger *slog.Logger, src source.Driver, opts ...RetryOption) error {
 	cfg := newRetryConfig(opts...)
 	target := redactDSN(dsn)
 
