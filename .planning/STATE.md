@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Continuous Deployment
-current_phase: 15
-current_phase_name: PR Coverage-Diff Comment
-status: executing
-stopped_at: Phase 15 executed — human verification pending (15-UAT.md)
-last_updated: "2026-09-02T23:03:35.404Z"
-last_activity: 2026-09-02
-last_activity_desc: Completed 15-03 — Vitest json-summary + coverage artifact/baseline wiring + report-only coverage-comment job
-state_head: 5af58748c00c5505fc2e11faf04276aead330061
+current_phase: 16
+current_phase_name: Rollback-Safe Migrations
+status: planning
+stopped_at: Phase 15 complete, ready to plan Phase 16
+last_updated: "2026-09-04T03:10:42.871Z"
+last_activity: 2026-09-03
+last_activity_desc: Phase 15 complete, transitioned to Phase 16
+state_head: f7c78c0a1a19a79bad730ec099ceef081134b843
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 10
   completed_plans: 10
 ---
@@ -21,23 +21,23 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-01)
+See: .planning/PROJECT.md (updated 2026-09-03)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 15 — PR Coverage-Diff Comment
+**Current focus:** Phase 16 — Rollback-Safe Migrations
 
 ## Current Position
 
-Phase: 15 (PR Coverage-Diff Comment) — all 3 plans executed, pending verification
-Plan: 3 of 3 complete
-Status: 15-01 (cmd/coverage-report tool), 15-02 (Makefile cutover), 15-03 (CI wiring: json-summary reporter, coverage artifacts + Actions-cache baseline, report-only coverage-comment job) all complete. Pending the live scratch-branch PR walkthrough (SC #1–#5, WINDOWS.md #8) and /gsd-verify-work 15.
-Last activity: 2026-09-02 — Completed 15-03: Vitest json-summary reporter, per-run coverage-profile artifacts, main-branch Actions-cache baseline, and the report-only coverage-comment job (actionlint clean, all static gates pass)
+Phase: 16 — Rollback-Safe Migrations
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-03 — Phase 15 complete, transitioned to Phase 16
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 64
+- Total plans completed: 67
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -59,6 +59,7 @@ Last activity: 2026-09-02 — Completed 15-03: Vitest json-summary reporter, per
 | 12 | 3 | - | - |
 | 13 | 3 | - | - |
 | 14 | 7 | - | - |
+| 15 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -270,13 +271,14 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-02T23:03:34.666Z
-Stopped at: Phase 15 executed — human verification pending (15-UAT.md)
-Resume file: .planning/phases/15-pr-coverage-diff-comment/15-UAT.md
+Last session: 2026-09-03T03:11:00Z
+Stopped at: Phase 15 UAT passed (5/5, live CI on PR #2/#3), verification canonicalized to passed, phase marked complete — ready to plan Phase 16
+Resume file: None
 
 ## Operator Next Steps
 
-- `/clear` then `/gsd-plan-phase 15` (or `/gsd-discuss-phase 15` first) — PR Coverage-Diff Comment. Open decision: baseline storage (Actions cache vs. orphan branch).
-- Phase 15's edit target is `.github/workflows/full-pipeline.yml` — the same shared file Phases 16 and 17 touch; keep the 15 → 16 → 17 order.
-- Before planning Phase 17, run its discuss/spec pass — the TLS reverse-proxy choice blocks the first deploy
+- `/clear` then `/gsd-discuss-phase 16` (or `/gsd-plan-phase 16` directly) — Rollback-Safe Migrations. CI-only phase: prove the previously-released image still boots healthy against the current branch's schema; expand/contract becomes a documented standing constraint.
+- Phase 16's edit target is `.github/workflows/full-pipeline.yml` — the same shared file Phases 15 and 17 touch; keep the 15 → 16 → 17 order. Phase 17 additionally needs the `release` job to expose `outputs.version`.
+- Before planning Phase 17, run its discuss/spec pass — the TLS reverse-proxy choice (recommended: Caddy on-VPS) blocks the first deploy, and no VPS is provisioned yet.
 - Non-blocking follow-up from Phase 14 security: consider `Cache-Control: no-store` on the gated response path (T-14-CACHE-01 / 14-REVIEW WR-01)
+- Non-blocking from Phase 15: `15-VALIDATION.md` is `nyquist_compliant: false` (PARTIAL — validated strategy, audit complete, 2 gaps filled); revisit at milestone audit if deeper feedback-sampling coverage is wanted.

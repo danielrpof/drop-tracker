@@ -1,9 +1,10 @@
 ---
 phase: 15-pr-coverage-diff-comment
 verified: 2026-09-02T23:15:00Z
-status: human_needed
-score: 2/5 must-haves verified
-behavior_unverified: 3
+status: passed
+uat_reconciled: 2026-09-03
+score: 5/5 must-haves verified (2 static + 3 via live-CI UAT on PR #2 / PR #3)
+behavior_unverified: 0
 overrides_applied: 0
 requirements_verified: [CICD-13, CICD-14]
 behavior_unverified_items:
@@ -40,9 +41,9 @@ human_verification:
 # Phase 15: PR Coverage-Diff Comment Verification Report
 
 **Phase Goal:** Every pull request from a same-repo branch carries a single, always-current comment showing what it does to backend and frontend coverage relative to main — closing the last CI reporting gap without ever becoming a new merge blocker.
-**Verified:** 2026-09-02T23:15:00Z
-**Status:** human_needed
-**Re-verification:** No — initial verification
+**Verified:** 2026-09-02T23:15:00Z (UAT-reconciled 2026-09-03)
+**Status:** passed
+**Re-verification:** No — initial verification, then UAT reconciliation 2026-09-03
 
 ## Goal Achievement
 
@@ -154,5 +155,19 @@ What remains is runtime confirmation of the five ROADMAP success criteria on a l
 
 ---
 
+## UAT Reconciliation — 2026-09-03
+
+`/gsd-verify-work 15` recorded all 5 ROADMAP success criteria as **pass** in `15-UAT.md`, exercised on live GitHub Actions runs:
+
+- **SC #1 / #3** — PR #2, Full Pipeline run 33782262458: one `## Coverage` comment, sticky marker `drop-tracker-coverage`, Backend 89.92% / Frontend 89.34%, em-dash deltas + "Delta not available yet" footer (no baseline cached), `coverage-comment` green.
+- **SC #2** — PR #2, 4 pushed head SHAs: issue-comments API `count: 1` throughout, single comment `updated` advancing while `created` held — edited in place via the sticky marker.
+- **SC #4** — commit db4618e dropped Vitest lines coverage to 20.34%; run 33784303141: `frontend-test` red, `coverage-comment` green, comment showed `20.34% | — | 70% | ⚠️` + upstream-red footer; PR #2 stayed `MERGEABLE` (main has no branch protection → `coverage-comment` in no required-check set).
+- **SC #5** — phase pushed to `main` at f0ad39f (run 33786944467): baseline sidecars written, caches `coverage-baseline-main-{backend,frontend}-f0ad39f…` created. Fresh PR #3 (run 33794353082): baselines restored via bare-prefix restore-key (D-20), comment showed numeric `±0.00pp` deltas + `baseline: main@f0ad39f`; `coverage-comment` job runs checkout + cache-restore + download-artifact + render + upsert only — no test-suite step.
+
+Status advanced `human_needed` → `passed`. Phase 15 marked complete in ROADMAP.md / STATE.md.
+
+---
+
 _Verified: 2026-09-02T23:15:00Z_
 _Verifier: Claude (gsd-verifier)_
+_UAT reconciliation: 2026-09-03 (gsd-verify-work)_
