@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"time"
 
@@ -289,6 +290,17 @@ func runMigrationsOnce(ctx context.Context, dsn string, src source.Driver) error
 		return fmt.Errorf("create migrate instance: %w", err)
 	}
 
+	// Ahead-of-source no-op (D-17, RESEARCH.md Finding 1): golang-migrate's
+	// Up() errors rather than returning ErrNoChange when schema_migrations is
+	// ahead of this binary's embedded source -- the rollback scenario. A
+	// dirty state or a fresh DB (ErrNilVersion) both fall through to Up() as
+	// before.
+	if cur, dirty, verr := m.Version(); verr == nil && !dirty {
+		if smax, ok := maxSourceVersion(src); ok && cur > smax {
+			return nil
+		}
+	}
+
 	done := make(chan error, 1)
 	go func() {
 		done <- m.Up()
@@ -302,5 +314,28 @@ func runMigrationsOnce(ctx context.Context, dsn string, src source.Driver) error
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// maxSourceVersion walks src to its highest migration version, returning
+// (0, false) if the source is empty or an unexpected error interrupts the
+// walk. It does not string-match golang-migrate's error text (RESEARCH.md
+// Anti-Patterns: that message is fmt.Errorf-wrapped, not a stable sentinel)
+// -- it relies only on the documented os.ErrNotExist end-of-source signal
+// from source.Driver.Next.
+func maxSourceVersion(src source.Driver) (uint, bool) {
+	v, err := src.First()
+	if err != nil {
+		return 0, false
+	}
+	for {
+		next, err := src.Next(v)
+		if errors.Is(err, os.ErrNotExist) {
+			return v, true
+		}
+		if err != nil {
+			return 0, false
+		}
+		v = next
 	}
 }
