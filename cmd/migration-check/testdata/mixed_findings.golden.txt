@@ -1,0 +1,16 @@
+Scanned migration files:
+  testdata/mixed_findings.sql
+
+testdata/mixed_findings.sql:1: [backward-incompatible] DROP COLUMN release_type on events
+Backward-incompatible change: this breaks the expand/contract rule and the N-1
+rollback invariant -- the previously-released binary must still run correctly against
+this schema after a rollback. Split the change across two releases: expand (add the
+new shape) in one release, contract (remove the old shape) only once that release has
+shipped and is no longer a rollback target. See internal/db/migrations/README.md.
+
+testdata/mixed_findings.sql:2: [unsafe-forward] ADD COLUMN foo NOT NULL (no DEFAULT) on events
+Unsafe-forward change: adding a NOT NULL column with no DEFAULT fails outright, or
+locks the table for a full rewrite, against any table that already has rows. Add a
+DEFAULT in the same ADD COLUMN clause, or backfill in a separate migration before
+tightening NOT NULL. See internal/db/migrations/README.md.
+
