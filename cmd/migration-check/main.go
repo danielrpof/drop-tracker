@@ -1432,19 +1432,24 @@ func crossReferenceFinding(refs *prevReleaseRefs, f finding, prevTag string, ann
 	if refs == nil {
 		return finding{}, false
 	}
+	// prevReleaseRefs keys are always schema-stripped (extractBlockReferences,
+	// parseSchemaColumns); f.table is raw from the scanner and may carry a
+	// schema qualifier (e.g. "public.events") that would otherwise miss the
+	// lookup and let a live D-15 reference slip past the annotation override.
+	table := stripSchemaQualifier(f.table)
 	var ref queryRef
 	var hit bool
 	switch f.kind {
 	case "drop_column":
-		ref, hit = refs.hasHigh(f.table, f.object)
+		ref, hit = refs.hasHigh(table, f.object)
 	case "rename_column":
 		// f.object is the combined "old -> new" display string
 		// (classifyAlterClause); the previous release could only ever have
 		// referenced the OLD name.
 		old, _, _ := strings.Cut(f.object, " -> ")
-		ref, hit = refs.hasHigh(f.table, old)
+		ref, hit = refs.hasHigh(table, old)
 	case "drop_table", "rename_table":
-		ref, hit = refs.hasHighAnyColumn(f.table)
+		ref, hit = refs.hasHighAnyColumn(table)
 	default:
 		return finding{}, false
 	}

@@ -979,6 +979,22 @@ func TestPrevReleaseCrossRef_RenameTableIsRed(t *testing.T) {
 	}
 }
 
+// CR-01 regression: a schema-qualified table name (e.g. "public.events") must
+// not bypass the D-15 cross-reference — the scan side's raw f.table and the
+// query-reference side's schema-stripped keys must normalize the same way.
+func TestPrevReleaseCrossRef_SchemaQualifiedDropTableIsRed(t *testing.T) {
+	stubQueriesGitShow(t, map[string]string{
+		"queries/events.sql": readPrevReleaseFixture(t, "events.sql"),
+	})
+	out, err := runCapture(t, "--mode", "scan", "--files", "testdata/drop_table_schema_qualified.sql", "--prev-tag", "v1.7.0")
+	if err == nil {
+		t.Fatalf("run() error = nil, want non-nil (DROP TABLE public.events is still queried):\n%s", out)
+	}
+	if !strings.Contains(out, string(classCrossRef)) {
+		t.Fatalf("output missing the classCrossRef finding class for a schema-qualified table:\n%s", out)
+	}
+}
+
 func TestPrevReleaseCrossRef_NoReferenceStillPlainFindingSuppressedByAnnotation(t *testing.T) {
 	stubQueriesGitShow(t, map[string]string{
 		"queries/events.sql": readPrevReleaseFixture(t, "events.sql"),
