@@ -35,7 +35,7 @@ Automate shipping the app to a self-hosted VPS on every merge to main, put a pas
 ### Migration Safety
 
 - [ ] **MGRT-01**: A CI check boots the previously-released image against the current branch's schema and fails the build if the older binary cannot start and stay healthy (backward-compatibility / N-1 check)
-- [ ] **MGRT-02**: The repo documents the expand/contract migration rule (additive-only per release, destructive changes split across releases, no blocking DDL in boot migrations) as a standing constraint
+- [x] **MGRT-02**: The repo documents the expand/contract migration rule (additive-only per release, destructive changes split across releases, no blocking DDL in boot migrations) as a standing constraint
 
 ### CI/CD Pipeline
 
@@ -87,7 +87,7 @@ Mapped during roadmap creation (2026-08-27). See `.planning/ROADMAP.md` for each
 | CICD-13 | Phase 15 | Complete |
 | CICD-14 | Phase 15 | Complete |
 | MGRT-01 | Phase 16 | Pending |
-| MGRT-02 | Phase 16 | Pending |
+| MGRT-02 | Phase 16 | Complete |
 | DPLY-01 | Phase 17 | Pending |
 | DPLY-02 | Phase 17 | Pending |
 | DPLY-03 | Phase 17 | Pending |

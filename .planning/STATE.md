@@ -5,16 +5,16 @@ milestone_name: Continuous Deployment
 current_phase: 16
 current_phase_name: Rollback-Safe Migrations
 status: executing
-stopped_at: Completed 16-03-PLAN.md
-last_updated: "2026-09-04T17:29:40.860Z"
+stopped_at: Completed 16-05-PLAN.md
+last_updated: "2026-09-04T17:39:35.040Z"
 last_activity: 2026-09-04
 last_activity_desc: Phase 16 execution started
-state_head: c0a92d541c269a374c63019ec312ad460b63c8c4
+state_head: 0bd748c841b0e18d0412fe05070818a29083bf76
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 15
-  completed_plans: 13
+  completed_plans: 14
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-03)
 ## Current Position
 
 Phase: 16 (Rollback-Safe Migrations) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-09-04 — Phase 16 execution started
 
@@ -109,6 +109,7 @@ Last activity: 2026-09-04 — Phase 16 execution started
 | Phase 16 P01 | 20min | 3 tasks | 5 files |
 | Phase 16 P02 | ~30min | 3 tasks | 22 files |
 | Phase 16 P03 | 20min | 3 tasks | 13 files |
+| Phase 16 P05 | 25min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -225,6 +226,7 @@ Recent decisions affecting current work:
 - [Phase 16]: [Phase 16]: [16-03] D-15 cross-reference wired via classCrossRef, a finding class pulled out before shouldSuppress runs and appended back after -- structurally non-suppressible; RENAME COLUMN lookups split finding.object on " -> " to recover the old column name
 - [Phase 16]: [Phase 16]: [16-03] Fixed a regex-consumption bug in the original combined FROM/JOIN-plus-alias pattern (alias group could swallow the next clause's own FROM/JOIN keyword, dropping the second joined table); replaced with findFromJoinTables, a manual tokenizer over located keyword positions
 - [Phase 16]: [Phase 16]: [16-03] MGRT-01 left unmarked -- requirements.ready-ids confirms it blocked pending 16-04
+- [Phase 16]: [Phase 16]: [16-05] Documented the allow-destructive annotation grammar verbatim from Plan 02's locked checkpoint; README's five sections plus a doc-presence test close MGRT-02
 
 ### Pending Todos
 
@@ -285,8 +287,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-04T17:29:40.102Z
-Stopped at: Completed 16-03-PLAN.md
+Last session: 2026-09-04T17:39:34.282Z
+Stopped at: Completed 16-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
