@@ -771,3 +771,512 @@ func stripIdent(s string) string {
 	s = strings.Trim(s, `"`)
 	return strings.TrimRight(s, ";,()")
 }
+
+// ---- D-15: previous-release query cross-reference (Task 2) ----
+//
+// gitShow reads a file as it existed at a tag, behind readAtTag's shape/path
+// gate, so the D-15 cross-reference can ask "does the previously-released
+// binary's queries/*.sql still touch this column?" without ever executing
+// anything -- it only reads and pattern-matches text (RESEARCH V5).
+
+// gitShow is a package-level function variable over
+// `git show <tag>:<path>`, built as an argv slice (never sh -c). Stubbable
+// in tests via withStubGitShow so this package's own tests never need a
+// real git repository or a real tag (T-16-20).
+var gitShow = func(tag, path string) ([]byte, error) {
+	out, err := exec.Command("git", "show", tag+":"+path).Output() //nolint:gosec // G204: tag/path gated by readAtTag before this is ever called
+	if err != nil {
+		return nil, fmt.Errorf("git show %s:%s: %w", tag, path, err)
+	}
+	return out, nil
+}
+
+// allowedGitShowPaths is the fixed set of directories readAtTag may read at
+// a tag (T-16-22). A path outside this set is a hard error -- the
+// subprocess is never spawned for it.
+var allowedGitShowPaths = []string{
+	"queries/*.sql",
+	migrationsUpGlob,
+	"internal/db/sqlc/*.go",
+}
+
+// pathAllowedForGitShow reports whether p matches one of
+// allowedGitShowPaths. path.Match (not filepath.Match) because git paths are
+// always forward-slash regardless of host OS, and `*` must never cross a
+// `/` -- that is exactly what keeps `queries/../../etc/passwd` from
+// matching `queries/*.sql`.
+func pathAllowedForGitShow(p string) bool {
+	for _, pattern := range allowedGitShowPaths {
+		if ok, _ := path.Match(pattern, p); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// readAtTag reads path as it existed at tag, gating both arguments before
+// gitShow (the stubbable seam) is ever invoked: tag against the same shape
+// allowlist the allow-destructive annotation's expand-shipped-in value uses
+// (reTagShape), and path against the fixed three-glob allowlist above. A
+// rejected argument never reaches gitShow -- tests assert this by stubbing
+// gitShow to fail the test if called (T-16-20/T-16-22).
+func readAtTag(tag, path string) ([]byte, error) {
+	if !reTagShape.MatchString(tag) {
+		return nil, fmt.Errorf("readAtTag: rejected tag %q", tag)
+	}
+	if !pathAllowedForGitShow(path) {
+		return nil, fmt.Errorf("readAtTag: path %q is outside the allowed read set", path)
+	}
+	return gitShow(tag, path)
+}
+
+// tableColumn is a normalised (table, column) identifier pair.
+type tableColumn struct {
+	table  string
+	column string
+}
+
+// queryRef is a single high-confidence (table, column) reference plus the
+// provenance Task 3's cross-reference message needs: which previous-release
+// query file and sqlc query name it came from.
+type queryRef struct {
+	tc        tableColumn
+	file      string
+	queryName string
+}
+
+// prevReleaseRefs is the split high/low confidence reference set D-15 builds
+// from the previous release's queries/*.sql. High and low stay separate
+// deliberately -- Task 3 only reds on the high-confidence tier (RESEARCH
+// Pitfall E); conflating them is the unrecoverable-false-red failure mode.
+// params is the separate parameter-name bag (sqlc.arg/narg, @name) --
+// collected but never asserted as a column of any specific table.
+type prevReleaseRefs struct {
+	high   []queryRef
+	low    map[tableColumn]bool
+	params map[string]bool
+}
+
+func newPrevReleaseRefs() *prevReleaseRefs {
+	return &prevReleaseRefs{low: map[tableColumn]bool{}, params: map[string]bool{}}
+}
+
+func (r *prevReleaseRefs) addHigh(table, column, file, queryName string) {
+	table, column = normalizeIdent(table), normalizeIdent(column)
+	if table == "" || column == "" {
+		return
+	}
+	r.high = append(r.high, queryRef{tc: tableColumn{table: table, column: column}, file: file, queryName: queryName})
+}
+
+func (r *prevReleaseRefs) addLow(table, column string) {
+	table, column = normalizeIdent(table), normalizeIdent(column)
+	if table == "" || column == "" {
+		return
+	}
+	r.low[tableColumn{table: table, column: column}] = true
+}
+
+// hasHigh reports whether (table, column) appears in the high-confidence
+// set and returns the first matching reference for message provenance.
+func (r *prevReleaseRefs) hasHigh(table, column string) (queryRef, bool) {
+	key := tableColumn{table: normalizeIdent(table), column: normalizeIdent(column)}
+	for _, ref := range r.high {
+		if ref.tc == key {
+			return ref, true
+		}
+	}
+	return queryRef{}, false
+}
+
+// hasLow reports whether (table, column) appears in the low-confidence set
+// -- Task 3 never reds on this; it is at most an informational note.
+func (r *prevReleaseRefs) hasLow(table, column string) bool {
+	return r.low[tableColumn{table: normalizeIdent(table), column: normalizeIdent(column)}]
+}
+
+// normalizeIdent folds an unquoted SQL identifier to lower case (Postgres's
+// own unquoted-identifier rule) and preserves a double-quoted identifier
+// byte-exact (quotes included), so both sides of a D-15 comparison agree
+// regardless of how the identifier was written.
+func normalizeIdent(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s
+	}
+	return strings.ToLower(s)
+}
+
+// stripSchemaQualifier drops a leading `schema.` qualifier defensively
+// (RESEARCH blind spot B6 -- `public.events` resolves to table `events`).
+func stripSchemaQualifier(table string) string {
+	table = strings.TrimSpace(table)
+	if idx := strings.LastIndex(table, "."); idx >= 0 {
+		return table[idx+1:]
+	}
+	return table
+}
+
+// ---- schema column set: "all columns of table X" (RESEARCH D-15) ----
+
+var reCreateTable = regexp.MustCompile(`(?is)^CREATE\s+TABLE\s+(\S+)\s*\((.*)\)\s*$`)
+
+// tableDefKeywords are ALTER/CREATE TABLE clause prefixes that are not
+// column definitions (constraints), so parseSchemaColumns does not
+// misinterpret e.g. `CONSTRAINT foo UNIQUE (a, b)` as a column named
+// CONSTRAINT.
+var tableDefKeywords = []string{"CONSTRAINT", "PRIMARY KEY", "UNIQUE", "CHECK", "FOREIGN KEY"}
+
+// parseSchemaColumns parses CREATE TABLE and ALTER TABLE ... ADD COLUMN
+// statements out of migration SQL (read at the previous release tag via
+// readAtTag) to build the "all columns of table X" set that a bare
+// `SELECT *` / `RETURNING *` over a single table expands to.
+func parseSchemaColumns(sql string) map[string][]string {
+	stripped := stripComments(sql)
+	cols := map[string][]string{}
+	for _, st := range splitStatements(stripped) {
+		text := strings.TrimSpace(st.text)
+		if m := reCreateTable.FindStringSubmatch(text); m != nil {
+			table := normalizeIdent(stripSchemaQualifier(stripIdent(m[1])))
+			for _, colDef := range splitTopLevelCommas(m[2]) {
+				colDef = strings.TrimSpace(colDef)
+				if colDef == "" {
+					continue
+				}
+				upper := strings.ToUpper(colDef)
+				isConstraint := false
+				for _, kw := range tableDefKeywords {
+					if strings.HasPrefix(upper, kw) {
+						isConstraint = true
+						break
+					}
+				}
+				if isConstraint {
+					continue
+				}
+				fields := strings.Fields(colDef)
+				if len(fields) == 0 {
+					continue
+				}
+				cols[table] = append(cols[table], normalizeIdent(stripIdent(fields[0])))
+			}
+			continue
+		}
+		if m := reAlterTable.FindStringSubmatch(text); m != nil {
+			table := normalizeIdent(stripSchemaQualifier(stripIdent(m[1])))
+			for _, clause := range splitTopLevelCommas(m[2]) {
+				clause = strings.TrimSpace(clause)
+				if reAddColumn.MatchString(clause) {
+					cm := reAddColumn.FindStringSubmatch(clause)
+					cols[table] = append(cols[table], normalizeIdent(stripIdent(cm[1])))
+				}
+			}
+		}
+	}
+	return cols
+}
+
+// ---- query block extraction (D-15, Task 2) ----
+
+// reNameMarker splits a queries/*.sql file into sqlc query blocks on its own
+// `-- name: X :kind` marker.
+var reNameMarker = regexp.MustCompile(`(?im)^--\s*name:\s*(\S+)\s*:\S+\s*$`)
+
+type queryBlock struct {
+	name string
+	body string
+}
+
+func splitQueryBlocks(raw string) []queryBlock {
+	locs := reNameMarker.FindAllStringSubmatchIndex(raw, -1)
+	if len(locs) == 0 {
+		return nil
+	}
+	var out []queryBlock
+	for i, loc := range locs {
+		name := raw[loc[2]:loc[3]]
+		start := loc[1]
+		end := len(raw)
+		if i+1 < len(locs) {
+			end = locs[i+1][0]
+		}
+		out = append(out, queryBlock{name: name, body: raw[start:end]})
+	}
+	return out
+}
+
+var (
+	reSqlcNamedParam  = regexp.MustCompile(`sqlc\.(?:arg|narg)\('([^']+)'\)`)
+	reAtParam         = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)`)
+	reFromJoinKeyword = regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\b`)
+	reIdentWithDot    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*`)
+	reIdentSimple     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*`)
+	reWithCTEName     = regexp.MustCompile(`(?i)(?:\bWITH\b|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s+AS\s*\(`)
+	reInsertIntoCols  = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_.]*)\s*\(([^)]*)\)`)
+	reOnConflictCols  = regexp.MustCompile(`(?is)\bON\s+CONFLICT\s*\(([^)]*)\)`)
+	reSelectSeg       = regexp.MustCompile(`(?is)\bSELECT\b(.*?)\bFROM\b`)
+	reQualifiedRef    = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b`)
+	reQualifiedQuoted = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\."([^"]*)"`)
+	reStarQualified   = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.\*`)
+	reBareStarSelect  = regexp.MustCompile(`(?i)\bSELECT\s+\*\s+FROM\b`)
+	reBareStarReturn  = regexp.MustCompile(`(?i)\bRETURNING\s+\*`)
+	reWhereBareCol    = regexp.MustCompile(`(?i)\b(?:WHERE|AND|OR)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|<>|!=|<=|>=|<|>|IS\b|IN\s*\()`)
+	reBareSelectItem  = regexp.MustCompile(`(?i)^([A-Za-z_][A-Za-z0-9_]*)(?:\s+AS\s+\S+)?$`)
+)
+
+// sqlKeywords is a denylist so the bare-identifier passes (WHERE/SELECT-list
+// scanning) never mistake a keyword for a column reference. Not
+// exhaustive -- only what this repo's queries and the test fixtures use --
+// deliberately, since an over-broad bare-column match here would produce an
+// unrecoverable D-15 false-red (RESEARCH Pitfall E).
+var sqlKeywords = map[string]bool{
+	"select": true, "from": true, "where": true, "and": true, "or": true, "not": true,
+	"null": true, "is": true, "in": true, "as": true, "on": true, "join": true,
+	"left": true, "right": true, "inner": true, "outer": true, "with": true,
+	"insert": true, "into": true, "values": true, "update": true, "set": true,
+	"delete": true, "returning": true, "order": true, "by": true, "group": true,
+	"having": true, "limit": true, "asc": true, "desc": true, "distinct": true,
+	"conflict": true, "do": true, "nothing": true, "exists": true, "case": true,
+	"when": true, "then": true, "else": true, "end": true, "nulls": true,
+	"first": true, "last": true, "for": true, "true": true, "false": true,
+	"excluded": true,
+}
+
+// nextToken skips leading whitespace and returns the next simple
+// identifier-shaped token (no dot) plus the remainder of s after it.
+func nextToken(s string) (tok, rest string) {
+	s = strings.TrimLeft(s, " \t\n\r")
+	tok = reIdentSimple.FindString(s)
+	return tok, s[len(tok):]
+}
+
+// fromJoinTable is one FROM/JOIN occurrence's table (possibly
+// schema-qualified) and its resolved alias, if any.
+type fromJoinTable struct {
+	table string
+	alias string
+}
+
+// findFromJoinTables scans stripped for every `FROM`/`JOIN` keyword and
+// tokenizes what follows by hand, rather than a single combined regex --
+// a combined "keyword + table + optional trailing alias" regex would let
+// the alias group's match consume the NEXT clause's own FROM/JOIN keyword
+// (e.g. matching "JOIN" itself as the alias of the table in a preceding
+// `FROM t\nJOIN` pair), which then makes FindAllStringSubmatch skip the
+// real second occurrence entirely -- silently dropping a joined table (and
+// with it, any column referenced only through that table) from the
+// real-table set. Locating just the bare keyword first side-steps that
+// match-consumption trap: the keyword regex matches only "FROM"/"JOIN"
+// itself, so two adjacent clauses are always found as two separate hits
+// regardless of what token follows either one.
+func findFromJoinTables(stripped string) []fromJoinTable {
+	var out []fromJoinTable
+	for _, loc := range reFromJoinKeyword.FindAllStringIndex(stripped, -1) {
+		rest := strings.TrimLeft(stripped[loc[1]:], " \t\n\r")
+		table := reIdentWithDot.FindString(rest)
+		if table == "" {
+			continue
+		}
+		rest = rest[len(table):]
+		tok1, rest2 := nextToken(rest)
+		alias := ""
+		switch {
+		case strings.EqualFold(tok1, "AS"):
+			if tok2, _ := nextToken(rest2); tok2 != "" && !sqlKeywords[strings.ToLower(tok2)] {
+				alias = tok2
+			}
+		case tok1 != "" && !sqlKeywords[strings.ToLower(tok1)]:
+			alias = tok1
+		}
+		out = append(out, fromJoinTable{table: table, alias: alias})
+	}
+	return out
+}
+
+// extractParams replaces sqlc.arg('x')/sqlc.narg('x') and @x occurrences
+// with an inert placeholder (so later regex passes -- especially the
+// alias.col qualified-reference scan -- never mistake `sqlc.arg` for a
+// qualified column reference) and collects the parameter names into a
+// separate bag. Parameter names are never asserted as columns of any table
+// (RESEARCH D-15 step 10).
+func extractParams(body string) (cleaned string, params map[string]bool) {
+	params = map[string]bool{}
+	body = reSqlcNamedParam.ReplaceAllStringFunc(body, func(m string) string {
+		sub := reSqlcNamedParam.FindStringSubmatch(m)
+		params[sub[1]] = true
+		return " __param_" + sub[1] + " "
+	})
+	body = reAtParam.ReplaceAllStringFunc(body, func(m string) string {
+		sub := reAtParam.FindStringSubmatch(m)
+		params[sub[1]] = true
+		return " __param_" + sub[1] + " "
+	})
+	return body, params
+}
+
+// extractReferences parses every sqlc query block in one previous-release
+// queries/*.sql file's raw text into refs' high/low confidence (table,
+// column) sets (D-15). schemaCols is the previous release's "all columns of
+// table X" set (parseSchemaColumns), used to expand a bare `SELECT *` /
+// `RETURNING *` over a single real table.
+func extractReferences(file, content string, schemaCols map[string][]string, refs *prevReleaseRefs) {
+	for _, qb := range splitQueryBlocks(content) {
+		extractBlockReferences(file, qb, schemaCols, refs)
+	}
+}
+
+func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]string, refs *prevReleaseRefs) {
+	body, params := extractParams(qb.body)
+	for p := range params {
+		refs.params[p] = true
+	}
+	stripped := stripComments(body)
+
+	cteNames := map[string]bool{}
+	for _, m := range reWithCTEName.FindAllStringSubmatch(stripped, -1) {
+		cteNames[normalizeIdent(m[1])] = true
+	}
+
+	// aliasMap: normalised alias/table-name -> normalised real table, or ""
+	// for a CTE alias (deliberately excluded from the real-table set, per
+	// the must_haves truth: `FROM existing`/`FROM updated u` never resolve
+	// to a migratable object).
+	aliasMap := map[string]string{}
+	realTables := map[string]bool{}
+	for _, fj := range findFromJoinTables(stripped) {
+		table := normalizeIdent(stripSchemaQualifier(fj.table))
+		alias := normalizeIdent(fj.alias)
+		if cteNames[table] {
+			if alias != "" {
+				aliasMap[alias] = ""
+			}
+			continue
+		}
+		realTables[table] = true
+		aliasMap[table] = table
+		if alias != "" {
+			aliasMap[alias] = table
+		}
+	}
+
+	insertTarget := ""
+	if m := reInsertIntoCols.FindStringSubmatch(stripped); m != nil {
+		insertTarget = normalizeIdent(stripSchemaQualifier(m[1]))
+		aliasMap[insertTarget] = insertTarget
+		aliasMap["excluded"] = insertTarget
+		for _, col := range strings.Split(m[2], ",") {
+			col = strings.TrimSpace(col)
+			if col == "" {
+				continue
+			}
+			refs.addHigh(insertTarget, stripIdent(col), file, qb.name)
+		}
+		if m := reOnConflictCols.FindStringSubmatch(stripped); m != nil {
+			for _, col := range strings.Split(m[1], ",") {
+				col = strings.TrimSpace(col)
+				if col == "" {
+					continue
+				}
+				refs.addHigh(insertTarget, stripIdent(col), file, qb.name)
+			}
+		}
+	}
+
+	// Qualified alias.col / table.col references (INSERT ... EXCLUDED.col,
+	// DO UPDATE SET table.col, RETURNING alias.col, SELECT alias.col, WHERE
+	// alias.col, ...): high confidence whenever the alias resolves to a
+	// real table.
+	for _, m := range reQualifiedRef.FindAllStringSubmatch(stripped, -1) {
+		alias := normalizeIdent(m[1])
+		table, ok := aliasMap[alias]
+		if !ok || table == "" {
+			continue
+		}
+		refs.addHigh(table, m[2], file, qb.name)
+	}
+	// Same pass, quoted-column form (`a."Mixed"`) -- reQualifiedRef's
+	// unquoted-only character class cannot match a double-quoted column, so
+	// this is a separate regex; the quotes are re-added before normalizing
+	// so the byte-exact quoted-identifier rule applies (D-15 case folding).
+	for _, m := range reQualifiedQuoted.FindAllStringSubmatch(stripped, -1) {
+		alias := normalizeIdent(m[1])
+		table, ok := aliasMap[alias]
+		if !ok || table == "" {
+			continue
+		}
+		refs.addHigh(table, `"`+m[2]+`"`, file, qb.name)
+	}
+
+	// Star expansion: alias.* (SELECT/RETURNING) and bare * -- bare SELECT *
+	// only for a single real table; bare RETURNING * always resolves to the
+	// INSERT target (RETURNING can only ever return the acted-on table's
+	// columns).
+	for _, m := range reStarQualified.FindAllStringSubmatch(stripped, -1) {
+		alias := normalizeIdent(m[1])
+		if table, ok := aliasMap[alias]; ok && table != "" {
+			expandStar(refs, schemaCols, table, file, qb.name)
+		}
+	}
+	if reBareStarSelect.MatchString(stripped) && len(realTables) == 1 {
+		for t := range realTables {
+			expandStar(refs, schemaCols, t, file, qb.name)
+		}
+	}
+	if reBareStarReturn.MatchString(stripped) && insertTarget != "" {
+		expandStar(refs, schemaCols, insertTarget, file, qb.name)
+	}
+
+	// Bare unqualified columns in WHERE/AND/OR position (RESEARCH D-15 step
+	// 8; also flattens a subquery's own WHERE clause -- B4).
+	for _, m := range reWhereBareCol.FindAllStringSubmatch(stripped, -1) {
+		classifyBareColumn(refs, realTables, m[1], file, qb.name)
+	}
+
+	// Bare unqualified explicit SELECT list items.
+	if m := reSelectSeg.FindStringSubmatch(stripped); m != nil {
+		for _, item := range splitTopLevelCommas(m[1]) {
+			item = strings.TrimSpace(item)
+			if item == "" || item == "*" || strings.Contains(item, ".") {
+				continue
+			}
+			if bm := reBareSelectItem.FindStringSubmatch(item); bm != nil {
+				classifyBareColumn(refs, realTables, bm[1], file, qb.name)
+			}
+		}
+	}
+	// Note: qualified/star RETURNING items are already covered by the
+	// whole-block qualified-ref and star-expansion passes above (flatten,
+	// per RESEARCH D-15) -- no separate RETURNING-segment pass needed.
+}
+
+// expandStar adds every column of table (per schemaCols) as a high-
+// confidence reference. A table missing from schemaCols (schema unknown)
+// is silently skipped -- no high-confidence claim can be made without it.
+func expandStar(refs *prevReleaseRefs, schemaCols map[string][]string, table, file, queryName string) {
+	cols, ok := schemaCols[table]
+	if !ok {
+		return
+	}
+	for _, c := range cols {
+		refs.addHigh(table, c, file, queryName)
+	}
+}
+
+// classifyBareColumn attributes a bare (unqualified) column reference: high
+// confidence if the query has exactly one real table (unambiguous), low
+// confidence (every real table) otherwise -- the RESEARCH D-15 conservatism
+// split (Pitfall E). A SQL keyword is never treated as a column reference.
+func classifyBareColumn(refs *prevReleaseRefs, realTables map[string]bool, col, file, queryName string) {
+	if sqlKeywords[strings.ToLower(col)] {
+		return
+	}
+	if len(realTables) == 1 {
+		for t := range realTables {
+			refs.addHigh(t, col, file, queryName)
+		}
+		return
+	}
+	for t := range realTables {
+		refs.addLow(t, col)
+	}
+}
