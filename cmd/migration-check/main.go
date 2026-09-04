@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -31,13 +32,14 @@ func run(args []string, stdout io.Writer) error {
 	before := fs.String("before", "", "GitHub Actions github.event.before (push only)")
 	sha := fs.String("sha", "", "GitHub Actions github.sha")
 	baseRef := fs.String("base-ref", "", "GitHub Actions github.base_ref (pull_request only)")
+	prevTag := fs.String("prev-tag", "", "previous release tag for the D-15 cross-reference (empty = true bootstrap, D-04)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
 	switch *mode {
 	case "scan":
-		return runScan(*filesArg, stdout)
+		return runScan(*filesArg, *prevTag, stdout)
 	case "changed-files":
 		return runChangedFiles(*eventName, *before, *sha, *baseRef, stdout)
 	default:
@@ -52,9 +54,26 @@ func run(args []string, stdout io.Writer) error {
 // files this package's own tests drive) is scanned.
 const downMigrationSuffix = ".down.sql"
 
-func runScan(filesArg string, stdout io.Writer) error {
+func runScan(filesArg, prevTag string, stdout io.Writer) error {
 	files := splitFileList(filesArg)
 	sort.Strings(files)
+
+	// D-15 cross-reference setup (Task 3). An empty --prev-tag is the true
+	// bootstrap case (D-04): the sub-check is skipped with a printed notice
+	// and never affects the exit code. A supplied tag that cannot be read
+	// is a hard error -- an unverifiable rollback must not be silently
+	// masked (D-15/D-04).
+	var refs *prevReleaseRefs
+	var crossRefNotice string
+	if prevTag == "" {
+		crossRefNotice = "D-15 previous-release cross-reference: skipped -- no --prev-tag supplied (true bootstrap, D-04).\n"
+	} else {
+		var err error
+		refs, err = buildPrevReleaseRefs(prevTag)
+		if err != nil {
+			return fmt.Errorf("D-15 cross-reference: %w", err)
+		}
+	}
 
 	var scanned, skipped []string
 	var findings []finding
@@ -75,22 +94,34 @@ func runScan(filesArg string, stdout io.Writer) error {
 		}
 		raw := string(data)
 		fileFindings := scanFile(path, raw)
-
 		ann, hasAnn, annErr := parseAnnotation(raw)
+		annValid := hasAnn && annErr == nil
+
+		// D-15: pull out any cross-reference hit BEFORE the suppression
+		// predicate is applied (16-02's shouldSuppress is deliberately
+		// shaped for this bypass) -- a cross-reference finding is never
+		// suppressible, annotation or not.
+		var crossRefFindings, otherFindings []finding
+		for _, ff := range fileFindings {
+			if cf, ok := crossReferenceFinding(refs, ff, prevTag, ann, annValid); ok {
+				crossRefFindings = append(crossRefFindings, cf)
+				continue
+			}
+			otherFindings = append(otherFindings, ff)
+		}
+
 		switch {
 		case annErr != nil:
 			// A half-written annotation is a hard error and never suppresses
 			// anything -- the underlying finding still reports normally.
 			annotationErrs = append(annotationErrs, fmt.Errorf("%s: %w", path, annErr))
-			findings = append(findings, fileFindings...)
-		case hasAnn && shouldSuppress(fileFindings):
-			// Plan 03's D-15 previous-release cross-reference deliberately
-			// bypasses this predicate: a dropped/renamed object still
-			// referenced by the previous release stays red regardless.
-			suppressed = append(suppressed, suppressedFile{path: path, ann: ann, findings: fileFindings})
+			findings = append(findings, otherFindings...)
+		case hasAnn && shouldSuppress(otherFindings):
+			suppressed = append(suppressed, suppressedFile{path: path, ann: ann, findings: otherFindings})
 		default:
-			findings = append(findings, fileFindings...)
+			findings = append(findings, otherFindings...)
 		}
+		findings = append(findings, crossRefFindings...)
 	}
 
 	sort.Slice(findings, func(i, j int) bool {
@@ -100,7 +131,8 @@ func runScan(filesArg string, stdout io.Writer) error {
 		return findings[i].line < findings[j].line
 	})
 
-	if _, err := fmt.Fprint(stdout, buildReport(scanned, skipped, findings, suppressed, annotationErrs)); err != nil {
+	report := crossRefNotice + buildReport(scanned, skipped, findings, suppressed, annotationErrs)
+	if _, err := fmt.Fprint(stdout, report); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
 
@@ -335,6 +367,12 @@ type findingClass string
 const (
 	classBackward      findingClass = "backward-incompatible"
 	classUnsafeForward findingClass = "unsafe-forward"
+	// classCrossRef is D-15's deterministic, non-overridable finding class
+	// (Task 3): a DROP/RENAME COLUMN or DROP/RENAME TABLE whose object is
+	// still referenced by the previous release's queries/*.sql. It bypasses
+	// shouldSuppress entirely -- a well-formed allow-destructive annotation
+	// documents intent but cannot make a live N-1 break safe.
+	classCrossRef findingClass = "prev-release-reference"
 )
 
 // backwardIncompatibleMsg and unsafeForwardMsg are the two class-specific
@@ -360,6 +398,17 @@ type finding struct {
 	kind   string
 	table  string
 	object string
+
+	// classCrossRef-only fields (Task 3, D-15): which previous release and
+	// which of its queries the dropped/renamed object is still referenced
+	// from, plus the file's allow-destructive annotation (if any), echoed
+	// into the message so it is visibly the thing that could not override
+	// this finding.
+	prevTag          string
+	queryFile        string
+	queryName        string
+	annotationTag    string
+	annotationReason string
 }
 
 func newFinding(file string, line int, class findingClass, kind, table, object string) finding {
@@ -367,6 +416,9 @@ func newFinding(file string, line int, class findingClass, kind, table, object s
 }
 
 func (f finding) render() string {
+	if f.class == classCrossRef {
+		return f.renderCrossRef()
+	}
 	label := string(f.class)
 	msg := backwardIncompatibleMsg
 	if f.class == classUnsafeForward {
@@ -376,6 +428,25 @@ func (f finding) render() string {
 	fmt.Fprintf(&b, "%s:%d: [%s] %s\n", f.file, f.line, label, f.describe())
 	b.WriteString(msg)
 	b.WriteString("\n")
+	return b.String()
+}
+
+// renderCrossRef renders the classCrossRef message: names the previous
+// release tag and the query file/name the object is referenced from, states
+// plainly that the previously-released binary would fail against this
+// schema, echoes the file's own allow-destructive annotation (if any) and
+// says explicitly that it cannot override this finding, then points at the
+// README like the other two classes (D-15 Task 3 action).
+func (f finding) renderCrossRef() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s:%d: [%s] %s\n", f.file, f.line, classCrossRef, f.describe())
+	fmt.Fprintf(&b, "Still referenced by the previous release (%s): %s query %s. ", f.prevTag, f.queryFile, f.queryName)
+	b.WriteString("The previously-released binary would fail against this schema after a rollback -- ")
+	b.WriteString("this is a live N-1 break, not merely a documented one. ")
+	if f.annotationTag != "" {
+		fmt.Fprintf(&b, "The migration-check:allow-destructive annotation (expand-shipped-in=%s, reason=%s) cannot override a live reference. ", f.annotationTag, f.annotationReason)
+	}
+	b.WriteString("See internal/db/migrations/README.md for the expand -> backfill -> contract sequence.\n")
 	return b.String()
 }
 
@@ -895,6 +966,20 @@ func (r *prevReleaseRefs) hasLow(table, column string) bool {
 	return r.low[tableColumn{table: normalizeIdent(table), column: normalizeIdent(column)}]
 }
 
+// hasHighAnyColumn reports whether ANY column of table appears in the
+// high-confidence set -- used for DROP TABLE / RENAME TABLE, where "still
+// referenced" means the previous release touches the table at all (a table
+// itself is never a column reference).
+func (r *prevReleaseRefs) hasHighAnyColumn(table string) (queryRef, bool) {
+	table = normalizeIdent(table)
+	for _, ref := range r.high {
+		if ref.tc.table == table {
+			return ref, true
+		}
+	}
+	return queryRef{}, false
+}
+
 // normalizeIdent folds an unquoted SQL identifier to lower case (Postgres's
 // own unquoted-identifier rule) and preserves a double-quoted identifier
 // byte-exact (quotes included), so both sides of a D-15 comparison agree
@@ -1279,4 +1364,101 @@ func classifyBareColumn(refs *prevReleaseRefs, realTables map[string]bool, col, 
 	for t := range realTables {
 		refs.addLow(t, col)
 	}
+}
+
+// ---- D-15 cross-reference wiring into the scan path (Task 3) ----
+
+// prevReleaseQueryFiles is the small, human-curated set of queries/*.sql
+// files sqlc.yaml points its codegen at -- hardcoded rather than discovered
+// via a local filesystem glob for two reasons: it gives readAtTag's own
+// tests a specific, stable path to target with a failing stub
+// (TestPrevReleaseCrossRef_GitShowFailureIsRed), and it means path
+// discovery never depends on the process's working directory, which
+// differs between `go run` at the repo root (production, per this plan's
+// own verify commands) and `go test`'s package-directory convention.
+var prevReleaseQueryFiles = []string{
+	"queries/artists.sql",
+	"queries/events.sql",
+	"queries/health.sql",
+	"queries/watchlist.sql",
+}
+
+// buildPrevReleaseRefs resolves the previous release's high/low confidence
+// (table, column) reference set (D-15) by reading every
+// prevReleaseQueryFiles entry at tag via readAtTag. A read failure for any
+// one of them is a hard error -- D-15's own rule: "prior tag exists but
+// git show fails for a queries file -> red," never a silent skip, since an
+// unverifiable rollback must not be masked.
+//
+// Schema-column data for SELECT */RETURNING * expansion is gathered
+// best-effort from the local internal/db/migrations/*.up.sql glob (present
+// only when running from the repo root, as CI does); a glob miss simply
+// means no star expansion happens -- none of this guard's deterministic-red
+// positions require it, so degrading gracefully here is safe.
+func buildPrevReleaseRefs(tag string) (*prevReleaseRefs, error) {
+	schemaCols := map[string][]string{}
+	if migFiles, err := filepath.Glob(filepath.Join("internal", "db", "migrations", "*.up.sql")); err == nil {
+		for _, f := range migFiles {
+			data, rerr := readAtTag(tag, filepath.ToSlash(f))
+			if rerr != nil {
+				continue
+			}
+			for t, cols := range parseSchemaColumns(string(data)) {
+				schemaCols[t] = append(schemaCols[t], cols...)
+			}
+		}
+	}
+
+	refs := newPrevReleaseRefs()
+	for _, f := range prevReleaseQueryFiles {
+		data, err := readAtTag(tag, f)
+		if err != nil {
+			return nil, fmt.Errorf("could not read %s at %s: %w", f, tag, err)
+		}
+		extractReferences(f, string(data), schemaCols, refs)
+	}
+	return refs, nil
+}
+
+// crossReferenceFinding checks a backward-incompatible finding's (table,
+// object) against refs' high-confidence set. Only DROP COLUMN, RENAME
+// COLUMN, DROP TABLE, and RENAME TABLE are eligible; every other kind
+// (unsafe-forward, alter_type, set_not_null, add_check) is out of D-15's
+// scope by design (RESEARCH "Conservatism tuning"). A hit produces a
+// distinct classCrossRef finding that echoes the file's own annotation (if
+// ann is valid) so the message states plainly that it could not override
+// this finding.
+func crossReferenceFinding(refs *prevReleaseRefs, f finding, prevTag string, ann annotation, annValid bool) (finding, bool) {
+	if refs == nil {
+		return finding{}, false
+	}
+	var ref queryRef
+	var hit bool
+	switch f.kind {
+	case "drop_column":
+		ref, hit = refs.hasHigh(f.table, f.object)
+	case "rename_column":
+		// f.object is the combined "old -> new" display string
+		// (classifyAlterClause); the previous release could only ever have
+		// referenced the OLD name.
+		old, _, _ := strings.Cut(f.object, " -> ")
+		ref, hit = refs.hasHigh(f.table, old)
+	case "drop_table", "rename_table":
+		ref, hit = refs.hasHighAnyColumn(f.table)
+	default:
+		return finding{}, false
+	}
+	if !hit {
+		return finding{}, false
+	}
+	out := f
+	out.class = classCrossRef
+	out.prevTag = prevTag
+	out.queryFile = ref.file
+	out.queryName = ref.queryName
+	if annValid {
+		out.annotationTag = ann.tag
+		out.annotationReason = ann.reason
+	}
+	return out, true
 }

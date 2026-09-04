@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -19,6 +20,15 @@ func runScanCapture(t *testing.T, filesArg string) (string, error) {
 	t.Helper()
 	var buf bytes.Buffer
 	err := run([]string{"--mode", "scan", "--files", filesArg}, &buf)
+	return buf.String(), err
+}
+
+// runCapture drives run() with an arbitrary argv, for scan-mode invocations
+// that also need --prev-tag (Task 3).
+func runCapture(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	var buf bytes.Buffer
+	err := run(args, &buf)
 	return buf.String(), err
 }
 
@@ -173,7 +183,15 @@ func TestScan_OutputIsDeterministic(t *testing.T) {
 }
 
 func TestScan_GoldenFailureMessage(t *testing.T) {
-	out, err := runScanCapture(t, "testdata/mixed_findings.sql")
+	// mixed_findings.sql carries three statements, one per finding class:
+	// DROP COLUMN release_type (backward-incompatible, no cross-ref hit --
+	// this stub's events.sql content never mentions release_type), ADD
+	// COLUMN foo NOT NULL (unsafe-forward), and DROP COLUMN notified_at
+	// (classCrossRef -- notified_at IS referenced below).
+	stubQueriesGitShow(t, map[string]string{
+		"queries/events.sql": "-- name: ListSomething :many\nSELECT notified_at FROM events;\n",
+	})
+	out, err := runCapture(t, "--mode", "scan", "--files", "testdata/mixed_findings.sql", "--prev-tag", "v1.7.0")
 	if err == nil {
 		t.Fatal("run() error = nil, want non-nil")
 	}
@@ -191,11 +209,14 @@ func TestScan_GoldenFailureMessage(t *testing.T) {
 	if out != string(want) {
 		t.Fatalf("golden mismatch\n--- got ---\n%s\n--- want ---\n%s", out, want)
 	}
-	if !strings.Contains(out, "internal/db/migrations/README.md") {
-		t.Fatal("golden output missing the internal/db/migrations/README.md pointer")
+	if strings.Count(out, "internal/db/migrations/README.md") < 3 {
+		t.Fatalf("golden output must cite internal/db/migrations/README.md once per finding class (3), got %d\n%s", strings.Count(out, "internal/db/migrations/README.md"), out)
 	}
 	if !strings.Contains(out, backwardIncompatibleMsg) || !strings.Contains(out, unsafeForwardMsg) {
-		t.Fatal("golden output missing one of the two class-specific remediation paragraphs")
+		t.Fatal("golden output missing one of the backward-incompatible/unsafe-forward remediation paragraphs")
+	}
+	if !strings.Contains(out, string(classCrossRef)) {
+		t.Fatal("golden output missing the classCrossRef finding")
 	}
 }
 
@@ -628,6 +649,22 @@ func withStubGitShow(t *testing.T, fn func(tag, path string) ([]byte, error)) {
 	t.Cleanup(func() { gitShow = prev })
 }
 
+// stubQueriesGitShow stubs gitShow so buildPrevReleaseRefs's four
+// prevReleaseQueryFiles reads resolve to fixture content (Task 3): byFile
+// maps a path (e.g. "queries/events.sql") to its content; any
+// prevReleaseQueryFiles entry not present in byFile gets trivial content
+// (a bare `SELECT 1`, no table refs) rather than an error, so a test only
+// needs to supply the one file its scenario actually cares about.
+func stubQueriesGitShow(t *testing.T, byFile map[string]string) {
+	t.Helper()
+	withStubGitShow(t, func(tag, path string) ([]byte, error) {
+		if content, ok := byFile[path]; ok {
+			return []byte(content), nil
+		}
+		return []byte("-- name: Ping :one\nSELECT 1;\n"), nil
+	})
+}
+
 func TestGitShow_RejectsPathOutsideAllowlist(t *testing.T) {
 	cases := []string{"../../etc/passwd", ".github/workflows/full-pipeline.yml"}
 	for _, path := range cases {
@@ -876,5 +913,123 @@ ALTER TABLE artists ADD COLUMN image_url TEXT;
 		if !want[c] {
 			t.Fatalf("parseSchemaColumns() produced unexpected column %q (CONSTRAINT clause leaked through?)", c)
 		}
+	}
+}
+
+// ---- D-15 cross-reference wired into the scan path (Task 3) ----
+
+func TestPrevReleaseCrossRef_AnnotationCannotOverride(t *testing.T) {
+	stubQueriesGitShow(t, map[string]string{
+		"queries/events.sql": readPrevReleaseFixture(t, "events.sql"),
+	})
+	out, err := runCapture(t, "--mode", "scan", "--files", "testdata/annotated_drop.sql", "--prev-tag", "v1.7.0")
+	if err == nil {
+		t.Fatalf("run() error = nil, want non-nil (annotation cannot override a live reference):\n%s", out)
+	}
+	if !strings.Contains(out, "events.release_type superseded by watched_artist_name") {
+		t.Fatalf("output missing the echoed annotation reason:\n%s", out)
+	}
+	if !strings.Contains(out, "v1.7.0") {
+		t.Fatalf("output missing the echoed annotation tag:\n%s", out)
+	}
+	if !strings.Contains(out, "cannot override") {
+		t.Fatalf("output missing the message stating the annotation cannot override a live reference:\n%s", out)
+	}
+	if !strings.Contains(out, string(classCrossRef)) {
+		t.Fatalf("output missing the classCrossRef finding class:\n%s", out)
+	}
+}
+
+func TestPrevReleaseCrossRef_RenameColumnIsRed(t *testing.T) {
+	stubQueriesGitShow(t, map[string]string{
+		"queries/artists.sql": readPrevReleaseFixture(t, "artists.sql"),
+	})
+	out, err := runCapture(t, "--mode", "scan", "--files", "testdata/prevref_rename_column.sql", "--prev-tag", "v1.7.0")
+	if err == nil {
+		t.Fatalf("run() error = nil, want non-nil (RENAME COLUMN artists.image_url is still referenced):\n%s", out)
+	}
+	if !strings.Contains(out, string(classCrossRef)) {
+		t.Fatalf("output missing the classCrossRef finding class:\n%s", out)
+	}
+}
+
+func TestPrevReleaseCrossRef_DropTableIsRed(t *testing.T) {
+	stubQueriesGitShow(t, map[string]string{
+		"queries/events.sql": readPrevReleaseFixture(t, "events.sql"),
+	})
+	out, err := runCapture(t, "--mode", "scan", "--files", "testdata/drop_table.sql", "--prev-tag", "v1.7.0")
+	if err == nil {
+		t.Fatalf("run() error = nil, want non-nil (DROP TABLE events is still queried):\n%s", out)
+	}
+	if !strings.Contains(out, string(classCrossRef)) {
+		t.Fatalf("output missing the classCrossRef finding class:\n%s", out)
+	}
+}
+
+func TestPrevReleaseCrossRef_RenameTableIsRed(t *testing.T) {
+	stubQueriesGitShow(t, map[string]string{
+		"queries/events.sql": readPrevReleaseFixture(t, "events.sql"),
+	})
+	out, err := runCapture(t, "--mode", "scan", "--files", "testdata/rename_table.sql", "--prev-tag", "v1.7.0")
+	if err == nil {
+		t.Fatalf("run() error = nil, want non-nil (RENAME TABLE events is still queried):\n%s", out)
+	}
+	if !strings.Contains(out, string(classCrossRef)) {
+		t.Fatalf("output missing the classCrossRef finding class:\n%s", out)
+	}
+}
+
+func TestPrevReleaseCrossRef_NoReferenceStillPlainFindingSuppressedByAnnotation(t *testing.T) {
+	stubQueriesGitShow(t, map[string]string{
+		"queries/events.sql": readPrevReleaseFixture(t, "events.sql"),
+	})
+	out, err := runCapture(t, "--mode", "scan", "--files", "testdata/prevref_drop_column_no_ref_annotated.sql", "--prev-tag", "v1.7.0")
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil (no cross-reference hit; the annotation still suppresses the plain finding):\n%s", err, out)
+	}
+	if strings.Contains(out, string(classCrossRef)) {
+		t.Fatalf("output must not contain a classCrossRef finding for an unreferenced column:\n%s", out)
+	}
+}
+
+func TestPrevReleaseCrossRef_LowConfidenceIsNotRed(t *testing.T) {
+	stubQueriesGitShow(t, map[string]string{
+		"queries/events.sql": readPrevReleaseFixture(t, "low_confidence_join.sql"),
+	})
+	out, err := runCapture(t, "--mode", "scan", "--files", "testdata/prevref_low_confidence_annotated.sql", "--prev-tag", "v1.7.0")
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil (low-confidence reference must not cross-reference red; annotation suppresses the plain finding):\n%s", err, out)
+	}
+	if strings.Contains(out, string(classCrossRef)) {
+		t.Fatalf("output must not contain a classCrossRef finding for a low-confidence-only reference:\n%s", out)
+	}
+}
+
+func TestPrevReleaseCrossRef_NoPriorTagSkips(t *testing.T) {
+	out, err := runScanCapture(t, "testdata/safe_additive.sql")
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil for a true bootstrap (no --prev-tag):\n%s", err, out)
+	}
+	if !strings.Contains(strings.ToLower(out), "skip") {
+		t.Fatalf("output missing a notice naming the D-15 cross-reference skip:\n%s", out)
+	}
+}
+
+func TestPrevReleaseCrossRef_GitShowFailureIsRed(t *testing.T) {
+	withStubGitShow(t, func(tag, path string) ([]byte, error) {
+		if path == "queries/events.sql" {
+			return nil, errors.New("simulated git show failure")
+		}
+		return []byte("-- name: Ping :one\nSELECT 1;\n"), nil
+	})
+	_, err := runCapture(t, "--mode", "scan", "--files", "testdata/safe_additive.sql", "--prev-tag", "v1.7.0")
+	if err == nil {
+		t.Fatal("run() error = nil, want non-nil when a supplied --prev-tag cannot be read")
+	}
+	if !strings.Contains(err.Error(), "v1.7.0") {
+		t.Fatalf("error = %q, want it to name the tag", err.Error())
+	}
+	if !strings.Contains(err.Error(), "queries/events.sql") {
+		t.Fatalf("error = %q, want it to name the unreadable query file", err.Error())
 	}
 }

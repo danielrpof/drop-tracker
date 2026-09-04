@@ -14,3 +14,6 @@ locks the table for a full rewrite, against any table that already has rows. Add
 DEFAULT in the same ADD COLUMN clause, or backfill in a separate migration before
 tightening NOT NULL. See internal/db/migrations/README.md.
 
+testdata/mixed_findings.sql:3: [prev-release-reference] DROP COLUMN notified_at on events
+Still referenced by the previous release (v1.7.0): queries/events.sql query ListSomething. The previously-released binary would fail against this schema after a rollback -- this is a live N-1 break, not merely a documented one. See internal/db/migrations/README.md for the expand -> backfill -> contract sequence.
+
