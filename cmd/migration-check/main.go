@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -49,6 +50,8 @@ func runScan(filesArg string, stdout io.Writer) error {
 
 	var scanned, skipped []string
 	var findings []finding
+	var suppressed []suppressedFile
+	var annotationErrs []error
 	for _, path := range files {
 		if strings.HasSuffix(path, downMigrationSuffix) {
 			skipped = append(skipped, path)
@@ -62,7 +65,24 @@ func runScan(filesArg string, stdout io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
-		findings = append(findings, scanFile(path, string(data))...)
+		raw := string(data)
+		fileFindings := scanFile(path, raw)
+
+		ann, hasAnn, annErr := parseAnnotation(raw)
+		switch {
+		case annErr != nil:
+			// A half-written annotation is a hard error and never suppresses
+			// anything -- the underlying finding still reports normally.
+			annotationErrs = append(annotationErrs, fmt.Errorf("%s: %w", path, annErr))
+			findings = append(findings, fileFindings...)
+		case hasAnn && shouldSuppress(fileFindings):
+			// Plan 03's D-15 previous-release cross-reference deliberately
+			// bypasses this predicate: a dropped/renamed object still
+			// referenced by the previous release stays red regardless.
+			suppressed = append(suppressed, suppressedFile{path: path, ann: ann, findings: fileFindings})
+		default:
+			findings = append(findings, fileFindings...)
+		}
 	}
 
 	sort.Slice(findings, func(i, j int) bool {
@@ -72,12 +92,19 @@ func runScan(filesArg string, stdout io.Writer) error {
 		return findings[i].line < findings[j].line
 	})
 
-	if _, err := fmt.Fprint(stdout, buildReport(scanned, skipped, findings)); err != nil {
+	if _, err := fmt.Fprint(stdout, buildReport(scanned, skipped, findings, suppressed, annotationErrs)); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
 
-	if len(findings) > 0 {
-		return fmt.Errorf("migration-check: %d finding(s)", len(findings))
+	if len(findings) > 0 || len(annotationErrs) > 0 {
+		var parts []string
+		if len(findings) > 0 {
+			parts = append(parts, fmt.Sprintf("%d finding(s)", len(findings)))
+		}
+		for _, e := range annotationErrs {
+			parts = append(parts, e.Error())
+		}
+		return fmt.Errorf("migration-check: %s", strings.Join(parts, "; "))
 	}
 	return nil
 }
@@ -89,10 +116,11 @@ func splitFileList(s string) []string {
 }
 
 // buildReport renders the scanned-file list unconditionally (including the
-// empty case, D-07), then every finding in the caller-sorted order. Building
-// into a strings.Builder first keeps every intermediate write error-free;
-// run() checks the single write to stdout.
-func buildReport(scanned, skipped []string, findings []finding) string {
+// empty case, D-07), then suppressed-file/annotation-error lines, then every
+// finding in the caller-sorted order. Building into a strings.Builder first
+// keeps every intermediate write error-free; run() checks the single write
+// to stdout.
+func buildReport(scanned, skipped []string, findings []finding, suppressed []suppressedFile, annotationErrs []error) string {
 	var b strings.Builder
 	b.WriteString("Scanned migration files:\n")
 	if len(scanned) == 0 {
@@ -103,6 +131,13 @@ func buildReport(scanned, skipped []string, findings []finding) string {
 	}
 	for _, f := range skipped {
 		fmt.Fprintf(&b, "Skipped (down-migration file, never scanned): %s\n", f)
+	}
+	for _, s := range suppressed {
+		fmt.Fprintf(&b, "%s: suppressed %d finding(s) via migration-check:allow-destructive (expand-shipped-in=%s, reason=%s)\n",
+			s.path, len(s.findings), s.ann.tag, s.ann.reason)
+	}
+	for _, e := range annotationErrs {
+		fmt.Fprintf(&b, "Annotation error: %s\n", e)
 	}
 	if len(findings) == 0 {
 		b.WriteString("No destructive or unsafe-forward migration statements found.\n")
@@ -188,6 +223,70 @@ func (f finding) describe() string {
 	default:
 		return f.kind
 	}
+}
+
+// ---- allow-destructive annotation (D-07/S4, grammar locked at the 16-02 checkpoint) ----
+
+// annotation is a parsed
+// `-- migration-check:allow-destructive expand-shipped-in=<tag> reason=<text>`
+// comment. Grammar is a one-way door (immutable *.up.sql files) -- do not
+// change its shape once a released migration carries one.
+type annotation struct {
+	tag    string
+	reason string
+}
+
+type suppressedFile struct {
+	path     string
+	ann      annotation
+	findings []finding
+}
+
+var (
+	reAnnotationLine = regexp.MustCompile(`(?m)^[ \t]*--[ \t]*migration-check:allow-destructive(.*)$`)
+	reAnnoTag        = regexp.MustCompile(`\bexpand-shipped-in=(\S+)`)
+	reAnnoReason     = regexp.MustCompile(`\breason=(.*)$`)
+	reTagShape       = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?$`)
+)
+
+// parseAnnotation looks for an allow-destructive comment in raw (pre-strip)
+// file text, since the annotation lives inside a `--` comment. ok reports
+// whether the annotation prefix was found at all; a false ok with a nil err
+// means the file simply carries no annotation. Both keys are required: a
+// partial annotation returns a non-nil err naming the missing key and the
+// zero annotation, so nothing is ever suppressed on a half-written contract.
+// expand-shipped-in's value is shape-validated here (T-16-11) -- it is not
+// yet stored or reachable by any subprocess (that lands in Plan 03).
+func parseAnnotation(raw string) (ann annotation, ok bool, err error) {
+	m := reAnnotationLine.FindStringSubmatch(raw)
+	if m == nil {
+		return annotation{}, false, nil
+	}
+	tail := m[1]
+
+	tagM := reAnnoTag.FindStringSubmatch(tail)
+	if tagM == nil {
+		return annotation{}, true, errors.New(`migration-check:allow-destructive annotation missing required key "expand-shipped-in"`)
+	}
+	reasonM := reAnnoReason.FindStringSubmatch(tail)
+	if reasonM == nil {
+		return annotation{}, true, errors.New(`migration-check:allow-destructive annotation missing required key "reason"`)
+	}
+
+	tag := tagM[1]
+	if !reTagShape.MatchString(tag) {
+		return annotation{}, true, fmt.Errorf("migration-check:allow-destructive expand-shipped-in %q does not match the expected form vX.Y.Z", tag)
+	}
+
+	return annotation{tag: tag, reason: strings.TrimSpace(reasonM[1])}, true, nil
+}
+
+// shouldSuppress is the suppression predicate: a valid annotation suppresses
+// every backward-incompatible and unsafe-forward finding in its file (D-08
+// revision). Plan 03's D-15 previous-release query cross-reference bypasses
+// this predicate deliberately -- it is a separate, non-overridable check.
+func shouldSuppress(findings []finding) bool {
+	return len(findings) > 0
 }
 
 // ---- scan pipeline: stripComments -> splitStatements -> classify ----

@@ -273,3 +273,108 @@ func TestSplitTopLevelCommas_IgnoresCommasInsideParens(t *testing.T) {
 		t.Fatalf("splitTopLevelCommas produced %d clauses, want 2: %#v", len(got), got)
 	}
 }
+
+// ---- annotation parsing / suppression (Task 3, D-07/S4) ----
+
+func TestScan_AnnotatedDropIsSuppressedAndEchoesReason(t *testing.T) {
+	out, err := runScanCapture(t, "testdata/annotated_drop.sql")
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil (annotation suppresses the finding):\n%s", err, out)
+	}
+	if !strings.Contains(out, "v1.7.0") {
+		t.Fatalf("output missing the annotation's expand-shipped-in tag value:\n%s", out)
+	}
+	if !strings.Contains(out, "events.release_type superseded by watched_artist_name") {
+		t.Fatalf("output missing the annotation's reason text:\n%s", out)
+	}
+	if strings.Contains(out, "[backward-incompatible]") {
+		t.Fatalf("suppressed finding must not still appear in output:\n%s", out)
+	}
+}
+
+func TestScan_AnnotatedNotNullIsSuppressed(t *testing.T) {
+	out, err := runScanCapture(t, "testdata/annotated_notnull.sql")
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil (annotation covers unsafe-forward too, D-08 revision):\n%s", err, out)
+	}
+	if strings.Contains(out, "[unsafe-forward]") {
+		t.Fatalf("suppressed finding must not still appear in output:\n%s", out)
+	}
+}
+
+func TestScan_AnnotatedSafeFileIsNotAnError(t *testing.T) {
+	out, err := runScanCapture(t, "testdata/annotated_safe.sql")
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil (an annotation on a clean file is not itself an error):\n%s", err, out)
+	}
+	if !strings.Contains(out, "testdata/annotated_safe.sql") {
+		t.Fatalf("scanned-file list missing annotated_safe.sql:\n%s", out)
+	}
+}
+
+func TestScan_AnnotationMissingReasonIsHardErrorAndDoesNotSuppress(t *testing.T) {
+	out, err := runScanCapture(t, "testdata/annotated_missing_reason.sql")
+	if err == nil {
+		t.Fatalf("run() error = nil, want non-nil for a half-written annotation:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), `"reason"`) {
+		t.Fatalf("error does not name the missing key \"reason\": %v", err)
+	}
+	if !strings.Contains(out, "[backward-incompatible]") {
+		t.Fatalf("underlying DROP COLUMN finding must not be silently suppressed:\n%s", out)
+	}
+}
+
+func TestScan_AnnotationMissingTagIsHardErrorAndDoesNotSuppress(t *testing.T) {
+	out, err := runScanCapture(t, "testdata/annotated_missing_tag.sql")
+	if err == nil {
+		t.Fatalf("run() error = nil, want non-nil for a half-written annotation:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), `"expand-shipped-in"`) {
+		t.Fatalf("error does not name the missing key \"expand-shipped-in\": %v", err)
+	}
+	if !strings.Contains(out, "[backward-incompatible]") {
+		t.Fatalf("underlying DROP COLUMN finding must not be silently suppressed:\n%s", out)
+	}
+}
+
+func TestScan_AnnotatedOutputIsDeterministic(t *testing.T) {
+	out1, err1 := runScanCapture(t, "testdata/annotated_drop.sql")
+	out2, err2 := runScanCapture(t, "testdata/annotated_drop.sql")
+	if (err1 == nil) != (err2 == nil) || out1 != out2 {
+		t.Fatalf("repeated run() over an annotated file is not byte-identical:\n--- 1 ---\n%s\n--- 2 ---\n%s", out1, out2)
+	}
+}
+
+func TestAnnotation_TagShapeIsValidated(t *testing.T) {
+	cases := []struct {
+		name string
+		tail string
+	}{
+		{"shell metacharacter", "expand-shipped-in=v1.7.0;rm-rf reason=bad"},
+		{"path separator", "expand-shipped-in=v1.7.0/../etc reason=bad"},
+		{"shell substitution", "expand-shipped-in=$(whoami) reason=bad"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := "-- migration-check:allow-destructive " + tc.tail + "\nALTER TABLE events DROP COLUMN release_type;\n"
+			ann, ok, err := parseAnnotation(raw)
+			if err == nil {
+				t.Fatalf("parseAnnotation(%q) error = nil, want non-nil", tc.tail)
+			}
+			if !ok {
+				t.Fatalf("parseAnnotation(%q) ok = false, want true (prefix was present)", tc.tail)
+			}
+			if ann.tag != "" {
+				t.Fatalf("parseAnnotation(%q) stored tag %q on a rejected value, want zero value", tc.tail, ann.tag)
+			}
+		})
+	}
+}
+
+func TestParseAnnotation_NoAnnotationIsNotAnError(t *testing.T) {
+	ann, ok, err := parseAnnotation("ALTER TABLE events ADD COLUMN foo text;\n")
+	if err != nil || ok || ann != (annotation{}) {
+		t.Fatalf("parseAnnotation(no annotation) = %+v, %v, %v; want zero value, false, nil", ann, ok, err)
+	}
+}

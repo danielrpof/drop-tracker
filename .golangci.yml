@@ -42,3 +42,10 @@ linters:
       - path: '^cmd/coverage-report/'
         linters:
           - gosec
+      # cmd/migration-check is a CI helper that opens migration-file paths
+      # handed to it as workflow inputs (argv), so gosec's G304 flags a
+      # surface that is not a real path-traversal risk -- the paths are
+      # CI-controlled, not end-user input (D-19b).
+      - path: '^cmd/migration-check/'
+        linters:
+          - gosec
