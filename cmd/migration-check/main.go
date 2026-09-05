@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/danielrpof/drop-tracker/internal/sqlscan"
 )
 
 func main() {
@@ -537,209 +539,15 @@ func shouldSuppress(findings []finding) bool {
 	return len(findings) > 0
 }
 
-// ---- scan pipeline: stripComments -> splitStatements -> classify ----
+// ---- scan pipeline: sqlscan lexer -> classify ----
 
 func scanFile(path, content string) []finding {
-	stripped := stripComments(content)
+	stripped := sqlscan.StripComments(content)
 	var out []finding
-	for _, st := range splitStatements(stripped) {
+	for _, st := range sqlscan.SplitStatements(stripped) {
 		out = append(out, classifyStatement(path, st)...)
 	}
 	return out
-}
-
-// stripComments removes `--` line comments and /* */ block comments,
-// replacing their bytes with spaces while preserving every newline so
-// 1-based line numbers computed downstream stay accurate. String literals
-// and $tag$...$tag$ dollar-quoted spans pass through untouched.
-func stripComments(src string) string {
-	var b strings.Builder
-	b.Grow(len(src))
-	n := len(src)
-	i := 0
-	for i < n {
-		c := src[i]
-		switch {
-		case c == '-' && i+1 < n && src[i+1] == '-':
-			for i < n && src[i] != '\n' {
-				b.WriteByte(' ')
-				i++
-			}
-		case c == '/' && i+1 < n && src[i+1] == '*':
-			b.WriteByte(' ')
-			b.WriteByte(' ')
-			i += 2
-			for i < n && (src[i] != '*' || i+1 >= n || src[i+1] != '/') {
-				if src[i] == '\n' {
-					b.WriteByte('\n')
-				} else {
-					b.WriteByte(' ')
-				}
-				i++
-			}
-			if i+1 < n {
-				b.WriteByte(' ')
-				b.WriteByte(' ')
-				i += 2
-			}
-		case c == '\'':
-			b.WriteByte(c)
-			i++
-			i = copySingleQuoted(&b, src, i)
-		case c == '$':
-			if tag, ok := dollarTagAt(src, i); ok {
-				end := copyDollarQuoted(&b, src, i, tag)
-				i = end
-			} else {
-				b.WriteByte(c)
-				i++
-			}
-		default:
-			b.WriteByte(c)
-			i++
-		}
-	}
-	return b.String()
-}
-
-// copySingleQuoted copies a '...' string literal body (with ” escapes)
-// starting just after the opening quote, returning the index past the
-// closing quote.
-func copySingleQuoted(b *strings.Builder, src string, i int) int {
-	n := len(src)
-	for i < n {
-		c := src[i]
-		b.WriteByte(c)
-		if c == '\'' {
-			if i+1 < n && src[i+1] == '\'' {
-				b.WriteByte(src[i+1])
-				i += 2
-				continue
-			}
-			return i + 1
-		}
-		i++
-	}
-	return i
-}
-
-// dollarTagAt reports whether src[i:] begins a $tag$ delimiter and returns
-// the full delimiter (e.g. "$$" or "$body$").
-func dollarTagAt(src string, i int) (string, bool) {
-	rest := src[i+1:]
-	end := strings.IndexByte(rest, '$')
-	if end < 0 || !isValidDollarTag(rest[:end]) {
-		return "", false
-	}
-	return src[i : i+1+end+1], true
-}
-
-func isValidDollarTag(tag string) bool {
-	for _, r := range tag {
-		if r == '_' || ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-// copyDollarQuoted copies from the opening tag through the matching closing
-// tag (inclusive), returning the index just past it. If no closing tag
-// exists the rest of the source is copied verbatim.
-func copyDollarQuoted(b *strings.Builder, src string, i int, tag string) int {
-	b.WriteString(tag)
-	i += len(tag)
-	closeIdx := strings.Index(src[i:], tag)
-	if closeIdx < 0 {
-		b.WriteString(src[i:])
-		return len(src)
-	}
-	b.WriteString(src[i : i+closeIdx+len(tag)])
-	return i + closeIdx + len(tag)
-}
-
-type statement struct {
-	text string
-	line int
-}
-
-// splitStatements splits comment-stripped SQL on `;`, respecting '...'
-// string literals and $tag$...$tag$ dollar-quoting so an embedded semicolon
-// never ends a statement early.
-func splitStatements(src string) []statement {
-	var stmts []statement
-	var cur strings.Builder
-	line := 1
-	startLine := 1
-	started := false
-	inSingle := false
-	dollarTag := ""
-	n := len(src)
-	i := 0
-	for i < n {
-		c := src[i]
-		if c == '\n' {
-			line++
-		}
-		if !started && !isBlank(c) {
-			started = true
-			startLine = line
-		}
-		switch {
-		case dollarTag != "":
-			if strings.HasPrefix(src[i:], dollarTag) {
-				cur.WriteString(dollarTag)
-				i += len(dollarTag)
-				dollarTag = ""
-				continue
-			}
-			cur.WriteByte(c)
-			i++
-		case inSingle:
-			cur.WriteByte(c)
-			if c == '\'' {
-				if i+1 < n && src[i+1] == '\'' {
-					cur.WriteByte(src[i+1])
-					i += 2
-					continue
-				}
-				inSingle = false
-			}
-			i++
-		case c == '\'':
-			inSingle = true
-			cur.WriteByte(c)
-			i++
-		case c == '$':
-			if tag, ok := dollarTagAt(src, i); ok {
-				dollarTag = tag
-				cur.WriteString(tag)
-				i += len(tag)
-			} else {
-				cur.WriteByte(c)
-				i++
-			}
-		case c == ';':
-			if text := strings.TrimSpace(cur.String()); text != "" {
-				stmts = append(stmts, statement{text: text, line: startLine})
-			}
-			cur.Reset()
-			started = false
-			i++
-		default:
-			cur.WriteByte(c)
-			i++
-		}
-	}
-	if text := strings.TrimSpace(cur.String()); text != "" {
-		stmts = append(stmts, statement{text: text, line: startLine})
-	}
-	return stmts
-}
-
-func isBlank(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 // ---- classify (D-08 reliably-detectable pattern set) ----
@@ -758,20 +566,20 @@ var (
 	reDefault    = regexp.MustCompile(`(?i)\bDEFAULT\b`)
 )
 
-func classifyStatement(path string, st statement) []finding {
-	text := st.text
+func classifyStatement(path string, st sqlscan.RawStatement) []finding {
+	text := st.Text
 	if m := reDropTable.FindStringSubmatch(text); m != nil {
-		return []finding{newFinding(path, st.line, classBackward, "drop_table", stripIdent(m[1]), "")}
+		return []finding{newFinding(path, st.Line, classBackward, "drop_table", sqlscan.StripIdent(m[1]), "")}
 	}
 	if m := reAlterTable.FindStringSubmatch(text); m != nil {
-		table := stripIdent(m[1])
+		table := sqlscan.StripIdent(m[1])
 		var out []finding
-		for _, clause := range splitTopLevelCommas(m[2]) {
+		for _, clause := range sqlscan.SplitTopLevelCommas(m[2]) {
 			clause = strings.TrimSpace(clause)
 			if clause == "" {
 				continue
 			}
-			out = append(out, classifyAlterClause(path, st.line, table, clause)...)
+			out = append(out, classifyAlterClause(path, st.Line, table, clause)...)
 		}
 		return out
 	}
@@ -782,65 +590,28 @@ func classifyAlterClause(path string, line int, table, clause string) []finding 
 	switch {
 	case reDropColumn.MatchString(clause):
 		m := reDropColumn.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "drop_column", table, stripIdent(m[1]))}
+		return []finding{newFinding(path, line, classBackward, "drop_column", table, sqlscan.StripIdent(m[1]))}
 	case reRenameTbl.MatchString(clause):
 		m := reRenameTbl.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "rename_table", table, stripIdent(m[1]))}
+		return []finding{newFinding(path, line, classBackward, "rename_table", table, sqlscan.StripIdent(m[1]))}
 	case reRenameCol.MatchString(clause):
 		m := reRenameCol.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "rename_column", table, stripIdent(m[1])+" -> "+stripIdent(m[2]))}
+		return []finding{newFinding(path, line, classBackward, "rename_column", table, sqlscan.StripIdent(m[1])+" -> "+sqlscan.StripIdent(m[2]))}
 	case reAlterType.MatchString(clause):
 		m := reAlterType.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "alter_type", table, stripIdent(m[1]))}
+		return []finding{newFinding(path, line, classBackward, "alter_type", table, sqlscan.StripIdent(m[1]))}
 	case reSetNotNull.MatchString(clause):
 		m := reSetNotNull.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "set_not_null", table, stripIdent(m[1]))}
+		return []finding{newFinding(path, line, classBackward, "set_not_null", table, sqlscan.StripIdent(m[1]))}
 	case reAddCheck.MatchString(clause):
 		return []finding{newFinding(path, line, classBackward, "add_check", table, "")}
 	case reAddColumn.MatchString(clause):
 		if reNotNull.MatchString(clause) && !reDefault.MatchString(clause) {
 			m := reAddColumn.FindStringSubmatch(clause)
-			return []finding{newFinding(path, line, classUnsafeForward, "add_notnull_no_default", table, stripIdent(m[1]))}
+			return []finding{newFinding(path, line, classUnsafeForward, "add_notnull_no_default", table, sqlscan.StripIdent(m[1]))}
 		}
 	}
 	return nil
-}
-
-// splitTopLevelCommas splits an ALTER TABLE action list on commas that sit
-// outside parens and string literals, so `numeric(10,2)` or a CHECK(...)
-// clause's internal commas never split into a bogus extra clause.
-func splitTopLevelCommas(s string) []string {
-	var parts []string
-	depth := 0
-	inSingle := false
-	start := 0
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inSingle:
-			if c == '\'' {
-				inSingle = false
-			}
-		case c == '\'':
-			inSingle = true
-		case c == '(':
-			depth++
-		case c == ')':
-			depth--
-		case c == ',' && depth == 0:
-			parts = append(parts, s[start:i])
-			start = i + 1
-		}
-	}
-	parts = append(parts, s[start:])
-	return parts
-}
-
-// stripIdent trims surrounding double quotes and trailing punctuation a
-// regex capture group may include at a clause boundary.
-func stripIdent(s string) string {
-	s = strings.Trim(s, `"`)
-	return strings.TrimRight(s, ";,()")
 }
 
 // ---- D-15: previous-release query cross-reference (Task 2) ----
@@ -933,7 +704,7 @@ func newPrevReleaseRefs() *prevReleaseRefs {
 }
 
 func (r *prevReleaseRefs) addHigh(table, column, file, queryName string) {
-	table, column = normalizeIdent(table), normalizeIdent(column)
+	table, column = sqlscan.NormalizeIdent(table), sqlscan.NormalizeIdent(column)
 	if table == "" || column == "" {
 		return
 	}
@@ -941,7 +712,7 @@ func (r *prevReleaseRefs) addHigh(table, column, file, queryName string) {
 }
 
 func (r *prevReleaseRefs) addLow(table, column string) {
-	table, column = normalizeIdent(table), normalizeIdent(column)
+	table, column = sqlscan.NormalizeIdent(table), sqlscan.NormalizeIdent(column)
 	if table == "" || column == "" {
 		return
 	}
@@ -951,7 +722,7 @@ func (r *prevReleaseRefs) addLow(table, column string) {
 // hasHigh reports whether (table, column) appears in the high-confidence
 // set and returns the first matching reference for message provenance.
 func (r *prevReleaseRefs) hasHigh(table, column string) (queryRef, bool) {
-	key := tableColumn{table: normalizeIdent(table), column: normalizeIdent(column)}
+	key := tableColumn{table: sqlscan.NormalizeIdent(table), column: sqlscan.NormalizeIdent(column)}
 	for _, ref := range r.high {
 		if ref.tc == key {
 			return ref, true
@@ -963,7 +734,7 @@ func (r *prevReleaseRefs) hasHigh(table, column string) (queryRef, bool) {
 // hasLow reports whether (table, column) appears in the low-confidence set
 // -- Task 3 never reds on this; it is at most an informational note.
 func (r *prevReleaseRefs) hasLow(table, column string) bool {
-	return r.low[tableColumn{table: normalizeIdent(table), column: normalizeIdent(column)}]
+	return r.low[tableColumn{table: sqlscan.NormalizeIdent(table), column: sqlscan.NormalizeIdent(column)}]
 }
 
 // hasHighAnyColumn reports whether ANY column of table appears in the
@@ -971,35 +742,13 @@ func (r *prevReleaseRefs) hasLow(table, column string) bool {
 // referenced" means the previous release touches the table at all (a table
 // itself is never a column reference).
 func (r *prevReleaseRefs) hasHighAnyColumn(table string) (queryRef, bool) {
-	table = normalizeIdent(table)
+	table = sqlscan.NormalizeIdent(table)
 	for _, ref := range r.high {
 		if ref.tc.table == table {
 			return ref, true
 		}
 	}
 	return queryRef{}, false
-}
-
-// normalizeIdent folds an unquoted SQL identifier to lower case (Postgres's
-// own unquoted-identifier rule) and preserves a double-quoted identifier
-// byte-exact (quotes included), so both sides of a D-15 comparison agree
-// regardless of how the identifier was written.
-func normalizeIdent(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s
-	}
-	return strings.ToLower(s)
-}
-
-// stripSchemaQualifier drops a leading `schema.` qualifier defensively
-// (RESEARCH blind spot B6 -- `public.events` resolves to table `events`).
-func stripSchemaQualifier(table string) string {
-	table = strings.TrimSpace(table)
-	if idx := strings.LastIndex(table, "."); idx >= 0 {
-		return table[idx+1:]
-	}
-	return table
 }
 
 // ---- schema column set: "all columns of table X" (RESEARCH D-15) ----
@@ -1017,13 +766,13 @@ var tableDefKeywords = []string{"CONSTRAINT", "PRIMARY KEY", "UNIQUE", "CHECK", 
 // readAtTag) to build the "all columns of table X" set that a bare
 // `SELECT *` / `RETURNING *` over a single table expands to.
 func parseSchemaColumns(sql string) map[string][]string {
-	stripped := stripComments(sql)
+	stripped := sqlscan.StripComments(sql)
 	cols := map[string][]string{}
-	for _, st := range splitStatements(stripped) {
-		text := strings.TrimSpace(st.text)
+	for _, st := range sqlscan.SplitStatements(stripped) {
+		text := strings.TrimSpace(st.Text)
 		if m := reCreateTable.FindStringSubmatch(text); m != nil {
-			table := normalizeIdent(stripSchemaQualifier(stripIdent(m[1])))
-			for _, colDef := range splitTopLevelCommas(m[2]) {
+			table := sqlscan.NormalizeIdent(sqlscan.StripSchemaQualifier(sqlscan.StripIdent(m[1])))
+			for _, colDef := range sqlscan.SplitTopLevelCommas(m[2]) {
 				colDef = strings.TrimSpace(colDef)
 				if colDef == "" {
 					continue
@@ -1043,17 +792,17 @@ func parseSchemaColumns(sql string) map[string][]string {
 				if len(fields) == 0 {
 					continue
 				}
-				cols[table] = append(cols[table], normalizeIdent(stripIdent(fields[0])))
+				cols[table] = append(cols[table], sqlscan.NormalizeIdent(sqlscan.StripIdent(fields[0])))
 			}
 			continue
 		}
 		if m := reAlterTable.FindStringSubmatch(text); m != nil {
-			table := normalizeIdent(stripSchemaQualifier(stripIdent(m[1])))
-			for _, clause := range splitTopLevelCommas(m[2]) {
+			table := sqlscan.NormalizeIdent(sqlscan.StripSchemaQualifier(sqlscan.StripIdent(m[1])))
+			for _, clause := range sqlscan.SplitTopLevelCommas(m[2]) {
 				clause = strings.TrimSpace(clause)
 				if reAddColumn.MatchString(clause) {
 					cm := reAddColumn.FindStringSubmatch(clause)
-					cols[table] = append(cols[table], normalizeIdent(stripIdent(cm[1])))
+					cols[table] = append(cols[table], sqlscan.NormalizeIdent(sqlscan.StripIdent(cm[1])))
 				}
 			}
 		}
@@ -1215,11 +964,11 @@ func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]
 	for p := range params {
 		refs.params[p] = true
 	}
-	stripped := stripComments(body)
+	stripped := sqlscan.StripComments(body)
 
 	cteNames := map[string]bool{}
 	for _, m := range reWithCTEName.FindAllStringSubmatch(stripped, -1) {
-		cteNames[normalizeIdent(m[1])] = true
+		cteNames[sqlscan.NormalizeIdent(m[1])] = true
 	}
 
 	// aliasMap: normalised alias/table-name -> normalised real table, or ""
@@ -1229,8 +978,8 @@ func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]
 	aliasMap := map[string]string{}
 	realTables := map[string]bool{}
 	for _, fj := range findFromJoinTables(stripped) {
-		table := normalizeIdent(stripSchemaQualifier(fj.table))
-		alias := normalizeIdent(fj.alias)
+		table := sqlscan.NormalizeIdent(sqlscan.StripSchemaQualifier(fj.table))
+		alias := sqlscan.NormalizeIdent(fj.alias)
 		if cteNames[table] {
 			if alias != "" {
 				aliasMap[alias] = ""
@@ -1246,7 +995,7 @@ func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]
 
 	insertTarget := ""
 	if m := reInsertIntoCols.FindStringSubmatch(stripped); m != nil {
-		insertTarget = normalizeIdent(stripSchemaQualifier(m[1]))
+		insertTarget = sqlscan.NormalizeIdent(sqlscan.StripSchemaQualifier(m[1]))
 		aliasMap[insertTarget] = insertTarget
 		aliasMap["excluded"] = insertTarget
 		for _, col := range strings.Split(m[2], ",") {
@@ -1254,7 +1003,7 @@ func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]
 			if col == "" {
 				continue
 			}
-			refs.addHigh(insertTarget, stripIdent(col), file, qb.name)
+			refs.addHigh(insertTarget, sqlscan.StripIdent(col), file, qb.name)
 		}
 		if m := reOnConflictCols.FindStringSubmatch(stripped); m != nil {
 			for _, col := range strings.Split(m[1], ",") {
@@ -1262,7 +1011,7 @@ func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]
 				if col == "" {
 					continue
 				}
-				refs.addHigh(insertTarget, stripIdent(col), file, qb.name)
+				refs.addHigh(insertTarget, sqlscan.StripIdent(col), file, qb.name)
 			}
 		}
 	}
@@ -1272,7 +1021,7 @@ func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]
 	// alias.col, ...): high confidence whenever the alias resolves to a
 	// real table.
 	for _, m := range reQualifiedRef.FindAllStringSubmatch(stripped, -1) {
-		alias := normalizeIdent(m[1])
+		alias := sqlscan.NormalizeIdent(m[1])
 		table, ok := aliasMap[alias]
 		if !ok || table == "" {
 			continue
@@ -1284,7 +1033,7 @@ func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]
 	// this is a separate regex; the quotes are re-added before normalizing
 	// so the byte-exact quoted-identifier rule applies (D-15 case folding).
 	for _, m := range reQualifiedQuoted.FindAllStringSubmatch(stripped, -1) {
-		alias := normalizeIdent(m[1])
+		alias := sqlscan.NormalizeIdent(m[1])
 		table, ok := aliasMap[alias]
 		if !ok || table == "" {
 			continue
@@ -1297,7 +1046,7 @@ func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]
 	// INSERT target (RETURNING can only ever return the acted-on table's
 	// columns).
 	for _, m := range reStarQualified.FindAllStringSubmatch(stripped, -1) {
-		alias := normalizeIdent(m[1])
+		alias := sqlscan.NormalizeIdent(m[1])
 		if table, ok := aliasMap[alias]; ok && table != "" {
 			expandStar(refs, schemaCols, table, file, qb.name)
 		}
@@ -1319,7 +1068,7 @@ func extractBlockReferences(file string, qb queryBlock, schemaCols map[string][]
 
 	// Bare unqualified explicit SELECT list items.
 	if m := reSelectSeg.FindStringSubmatch(stripped); m != nil {
-		for _, item := range splitTopLevelCommas(m[1]) {
+		for _, item := range sqlscan.SplitTopLevelCommas(m[1]) {
 			item = strings.TrimSpace(item)
 			if item == "" || item == "*" || strings.Contains(item, ".") {
 				continue
@@ -1436,7 +1185,7 @@ func crossReferenceFinding(refs *prevReleaseRefs, f finding, prevTag string, ann
 	// parseSchemaColumns); f.table is raw from the scanner and may carry a
 	// schema qualifier (e.g. "public.events") that would otherwise miss the
 	// lookup and let a live D-15 reference slip past the annotation override.
-	table := stripSchemaQualifier(f.table)
+	table := sqlscan.StripSchemaQualifier(f.table)
 	var ref queryRef
 	var hit bool
 	switch f.kind {
