@@ -21,6 +21,17 @@
 # One-time research writeups whose conclusions already live in ROADMAP.md and PROJECT.md
 .planning/research/
 
+# Harness / tooling config -- settings files, not project code. graphify
+# extracts zero nodes from these and warns about them on every build (#1666).
+.claude/settings.json
+.claude/settings.local.json
+.planning/config.json
+
+# Test fixture inputs and golden outputs -- data files exercised by the
+# cmd/* Go tests, not architecture. The tools' own Go source stays indexed.
+cmd/coverage-report/testdata/
+cmd/migration-check/testdata/
+
 # Maintenance: when a milestone completes, add that milestone's phase
 # directory under .planning/milestones/ to this list before the next
 # `/graphify . --update` rebuild.
