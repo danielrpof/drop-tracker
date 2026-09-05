@@ -417,8 +417,34 @@ jobs:
           else
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           fi
+      # G-16-1: every already-released image predates Phase 16's
+      # ahead-of-source guard, so it errors booting against any newer schema
+      # regardless of migration safety. Skip-green while the N-1 tag is
+      # pre-guard; self-clears with no workflow edit once a guard-carrying
+      # release becomes N-1.
+      - name: Guard-adoption check -- does the N-1 image carry the ahead-of-source guard?
+        id: guardcheck
+        if: needs.changes.outputs.migrations_changed == 'true'
+        env:
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          if [ -z "$PREV_TAG" ]; then
+            echo "no prior release tag -- the true-bootstrap step already reported this; nothing to check here"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          elif ! grep -q '^func maxSourceVersion(' internal/db/migrate.go; then
+            echo "::error::guard token 'func maxSourceVersion(' is absent from the checked-out internal/db/migrate.go -- the ahead-of-source guard was renamed at HEAD and this workflow's grep token is now stale. Update the token in n1-boot's guard-adoption check; until then this job cannot tell a pre-guard N-1 image from a guard-carrying one."
+            exit 1
+          elif ! PREV_MIGRATE="$(git show "$PREV_TAG:internal/db/migrate.go" 2>/dev/null)"; then
+            echo "::notice::previous release ${PREV_TAG}'s internal/db/migrate.go could not be read at that tag -- assuming it predates the ahead-of-source migration guard, so N-1 rollback boot is not verifiable this cycle (G-16-1). Self-clears once a guard-carrying release becomes N-1."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          elif ! printf '%s\n' "$PREV_MIGRATE" | grep -q '^func maxSourceVersion('; then
+            echo "::notice::the previously-released image ${PREV_TAG} predates the ahead-of-source migration guard, so it cannot boot against any newer schema and N-1 rollback boot is not verifiable this cycle (G-16-1). This self-clears with no workflow edit once a guard-carrying release becomes the N-1 rollback target."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Start throwaway Postgres
-        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
         run: |
           set -e
           docker run -d --name drop-tracker-n1-pg --network host \
@@ -436,7 +462,7 @@ jobs:
       # runs, applied via cmd/migrate (16-01) -- not a docker build, not the
       # golang-migrate CLI.
       - name: Apply HEAD schema
-        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
         env:
           DATABASE_URL: postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable
         run: go run ./cmd/migrate
@@ -444,7 +470,7 @@ jobs:
       # never a floating tag (D-13). Public package -- no registry
       # authentication step, no packages: permission.
       - name: Pull previous release image
-        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
         env:
           PREV_TAG: ${{ steps.prevtag.outputs.tag }}
         run: |
@@ -456,7 +482,7 @@ jobs:
       # unauthenticated and a schema break surfaces as a 500, not an auth
       # response (D-14/S8).
       - name: Run previous release image
-        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
         env:
           PREV_TAG: ${{ steps.prevtag.outputs.tag }}
         run: |
@@ -469,7 +495,7 @@ jobs:
       # that starts and then dies must fail here, not pass on one early 200
       # (D-03).
       - name: Health probe -- sustained green
-        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
         run: |
           set -e
           ok=0
@@ -488,7 +514,7 @@ jobs:
           docker logs drop-tracker-n1 || true
           exit 1
       - name: Read probes -- GET /watchlist and GET /events
-        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
         run: |
           set -e
           BODY="$(curl -fsS http://localhost:8080/watchlist)"
@@ -501,7 +527,7 @@ jobs:
       # a pure UpsertArtist/CreateWatchlistEntry DB write, no external call.
       # Covers the poller's insert paths a GET-only check would miss.
       - name: Write probe -- POST /watchlist then re-GET
-        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
         run: |
           set -e
           STATUS="$(curl -fsS -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/watchlist \
@@ -518,7 +544,7 @@ jobs:
           esac
       # A red here must teach the rule, not report an opaque boot error (SC #2).
       - name: N-1 boot failure -- explain the rule
-        if: failure() && needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true'
+        if: failure() && needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
         run: |
           echo "::error::This branch's migration breaks the N-1 rollback / expand-contract rule -- the previously-released image must still boot, stay healthy, read, and write against this schema. See internal/db/migrations/README.md."
       - name: Teardown
