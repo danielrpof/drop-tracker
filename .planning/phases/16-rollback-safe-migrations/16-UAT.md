@@ -18,7 +18,7 @@ expected: |
   `migration-check`/`n1-boot` being trivially green (confirms Finding 2's skip-propagation fix
   holds live); (c) `n1-boot` genuinely pulls the ghcr.io image at the previous release tag and
   passes health/read/write probes.
-result: issue
+result: pass
 reported: |
   Ran on scratch/16-n1-boot-live-check (deleted after). Three pushes:
 
@@ -84,7 +84,7 @@ reported: |
     skipped (scratch branch, expected).
   Together the runs prove: guardcheck skip path works, both guards finish `success` not
   `skipped`, build-scan runs when its needs are green, and trivy-fs is clean.
-result: pass
+severity: major
 resolution: |
   Gap G-16-1 closed by quick task 260905-et1 and confirmed live (runs 33978945980 +
   33979094225). Truth #1 now holds within the guard-adoption window via the documented
