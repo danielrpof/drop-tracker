@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 Phase: 17 — Automated VPS Deploy with Health-Gated Rollback
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-05 — Phase 16 complete, transitioned to Phase 17
+Last activity: 2026-09-05 — Completed quick task 260905-kfv (extract internal/sqlscan)
 
 ## Performance Metrics
 
@@ -274,6 +274,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 260901-rl9 | Remove orphaned envExamplePlaceholder ("caliber") apparatus from internal/authgate — const + doc comment + knownDefaults entry + TestWeakPassphrase_EnvExamplePlaceholderOnDenylist + table case; orphaned by 465260c blanking .env.example's INSTANCE_PASSPHRASE placeholder. Generic denylist + 16-rune floor untouched; IsWeakPassphrase behavior byte-for-byte unchanged (91.0% coverage held) | 2026-09-01 | e555b34 | [260901-rl9-remove-orphaned-envexampleplaceholder-ap](./quick/260901-rl9-remove-orphaned-envexampleplaceholder-ap/) |
 | 260905-et1 | n1-boot skip-greens when the previous release image predates the ahead-of-source migration guard (Phase 16 gap G-16-1). New gated `guardcheck` step in full-pipeline.yml + README/16-CONTEXT docs. Static fix only — G-16-1 stays open until a live migration push confirms green. | 2026-09-05 | 9876c4e | [260905-et1-n1-boot-skip-greens-when-the-previous-re](./quick/260905-et1-n1-boot-skip-greens-when-the-previous-re/) |
 | 260905-fa4 | Bump browserslist (→4.28.9) and fast-uri (→3.1.7) past 6 HIGH CVEs via caret `overrides:` in web/pnpm-workspace.yaml + lockfile regen (pnpm 11.8.0) + `make web`. Trivy 0.70.0 local scan: 6 HIGH → 0. Two follow-up todos filed. CI-green confirmation pending a scratch-branch push. | 2026-09-05 | efd9ea0 | [260905-fa4-bump-frontend-transitive-deps-to-clear-t](./quick/260905-fa4-bump-frontend-transitive-deps-to-clear-t/) |
+| 260905-kfv | Extract `internal/sqlscan` from `cmd/migration-check/main.go` (Phase 16 arch-review candidate 1): the SQL comment/quote lexer, a new typed `Parse` DDL model, and the D-15 query-reference extractor (`QueryColumnRefs`/`RefSet`) become one flat stdlib-only package; `main.go` 1469 → 753 lines, all policy/I/O kept. Behavior-preserving — `mixed_findings.golden.txt` byte-identical at every commit. Retires review findings CR-01 (schema-qualified D-15 bypass) and WR-01 (re-parsed display string) by design, not by patch. sqlscan per-package coverage 92.0%; `make coverage-gate` 90.39%. Two follow-up todos filed (unify the two quote scanners; resolve D-15 prev-release files from `--prev-tag`). Verified passed 8/8. On branch `quick/260905-kfv-sqlscan`, PR pending. | 2026-09-05 | 6ccd998 | [260905-kfv-extract-an-internal-sqlscan-module-out-o](./quick/260905-kfv-extract-an-internal-sqlscan-module-out-o/) |
 
 ### Roadmap Evolution
 
