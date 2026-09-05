@@ -41,3 +41,21 @@ func TestCopyDollarQuoted_NoClosingTagCopiesRemainder(t *testing.T) {
 		t.Fatalf("copyDollarQuoted copied %q, want the verbatim remainder %q", b.String(), src)
 	}
 }
+
+// TestFindFromJoinTables_AdjacentFromJoinBothFound pins the fix for a
+// regex-consumption bug: a single combined "FROM/JOIN + table + optional
+// trailing alias" regex let the alias group swallow the following clause's
+// own FROM/JOIN keyword, making FindAllStringSubmatch skip the real second
+// table. findFromJoinTables must find both.
+func TestFindFromJoinTables_AdjacentFromJoinBothFound(t *testing.T) {
+	got := findFromJoinTables("SELECT id\nFROM widgets_a\nJOIN widgets_b ON widgets_a.widget_id = widgets_b.id\nWHERE status = 'ok'")
+	if len(got) != 2 {
+		t.Fatalf("findFromJoinTables() = %#v, want exactly 2 entries (FROM widgets_a, JOIN widgets_b)", got)
+	}
+	if got[0].table != "widgets_a" || got[0].alias != "" {
+		t.Fatalf("findFromJoinTables()[0] = %+v, want table widgets_a with no alias", got[0])
+	}
+	if got[1].table != "widgets_b" || got[1].alias != "" {
+		t.Fatalf("findFromJoinTables()[1] = %+v, want table widgets_b with no alias", got[1])
+	}
+}
