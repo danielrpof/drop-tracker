@@ -846,28 +846,6 @@ func TestFindFromJoinTables_AdjacentFromJoinBothFound(t *testing.T) {
 	}
 }
 
-func TestParseSchemaColumns(t *testing.T) {
-	sql := `CREATE TABLE artists (
-    id BIGSERIAL PRIMARY KEY,
-    mbid TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    CONSTRAINT artists_name_check CHECK (name <> '')
-);
-ALTER TABLE artists ADD COLUMN image_url TEXT;
-`
-	cols := parseSchemaColumns(sql)
-	got := cols["artists"]
-	want := map[string]bool{"id": true, "mbid": true, "name": true, "image_url": true}
-	if len(got) != len(want) {
-		t.Fatalf("parseSchemaColumns() artists columns = %#v, want exactly %v", got, want)
-	}
-	for _, c := range got {
-		if !want[c] {
-			t.Fatalf("parseSchemaColumns() produced unexpected column %q (CONSTRAINT clause leaked through?)", c)
-		}
-	}
-}
-
 // ---- D-15 cross-reference wired into the scan path (Task 3) ----
 
 func TestPrevReleaseCrossRef_AnnotationCannotOverride(t *testing.T) {

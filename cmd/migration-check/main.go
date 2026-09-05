@@ -394,12 +394,18 @@ DEFAULT in the same ADD COLUMN clause, or backfill in a separate migration befor
 tightening NOT NULL. See internal/db/migrations/README.md.`
 
 type finding struct {
-	file   string
-	line   int
-	class  findingClass
-	kind   string
-	table  string
-	object string
+	file  string
+	line  int
+	class findingClass
+	kind  string
+	// table/object hold the NORMALIZED identifiers (for object on a
+	// rename_column, the OLD column name alone); rawTable/rawObject hold the
+	// as-written spellings and are the only thing describe() renders, so
+	// normalizing the parse layer moves no output byte.
+	table     string
+	object    string
+	rawTable  string
+	rawObject string
 
 	// classCrossRef-only fields (Task 3, D-15): which previous release and
 	// which of its queries the dropped/renamed object is still referenced
@@ -413,8 +419,11 @@ type finding struct {
 	annotationReason string
 }
 
-func newFinding(file string, line int, class findingClass, kind, table, object string) finding {
-	return finding{file: file, line: line, class: class, kind: kind, table: table, object: object}
+func newFinding(file string, line int, class findingClass, kind, table, rawTable, object, rawObject string) finding {
+	return finding{
+		file: file, line: line, class: class, kind: kind,
+		table: table, rawTable: rawTable, object: object, rawObject: rawObject,
+	}
 }
 
 func (f finding) render() string {
@@ -452,24 +461,26 @@ func (f finding) renderCrossRef() string {
 	return b.String()
 }
 
+// describe renders from the raw (as-written) identifier spellings only, so
+// normalizing the parse layer changes no output byte.
 func (f finding) describe() string {
 	switch f.kind {
 	case "drop_table":
-		return fmt.Sprintf("DROP TABLE %s", f.table)
+		return fmt.Sprintf("DROP TABLE %s", f.rawTable)
 	case "drop_column":
-		return fmt.Sprintf("DROP COLUMN %s on %s", f.object, f.table)
+		return fmt.Sprintf("DROP COLUMN %s on %s", f.rawObject, f.rawTable)
 	case "rename_table":
-		return fmt.Sprintf("RENAME TABLE %s TO %s", f.table, f.object)
+		return fmt.Sprintf("RENAME TABLE %s TO %s", f.rawTable, f.rawObject)
 	case "rename_column":
-		return fmt.Sprintf("RENAME COLUMN %s on %s", f.object, f.table)
+		return fmt.Sprintf("RENAME COLUMN %s on %s", f.rawObject, f.rawTable)
 	case "alter_type":
-		return fmt.Sprintf("ALTER COLUMN %s TYPE on %s", f.object, f.table)
+		return fmt.Sprintf("ALTER COLUMN %s TYPE on %s", f.rawObject, f.rawTable)
 	case "set_not_null":
-		return fmt.Sprintf("SET NOT NULL on %s.%s", f.table, f.object)
+		return fmt.Sprintf("SET NOT NULL on %s.%s", f.rawTable, f.rawObject)
 	case "add_check":
-		return fmt.Sprintf("ADD CHECK on %s", f.table)
+		return fmt.Sprintf("ADD CHECK on %s", f.rawTable)
 	case "add_notnull_no_default":
-		return fmt.Sprintf("ADD COLUMN %s NOT NULL (no DEFAULT) on %s", f.object, f.table)
+		return fmt.Sprintf("ADD COLUMN %s NOT NULL (no DEFAULT) on %s", f.rawObject, f.rawTable)
 	default:
 		return f.kind
 	}
@@ -539,79 +550,53 @@ func shouldSuppress(findings []finding) bool {
 	return len(findings) > 0
 }
 
-// ---- scan pipeline: sqlscan lexer -> classify ----
+// ---- scan pipeline: sqlscan.Parse -> Statement/Action type switch ----
+//
+// The two switches below ARE the rollback rules: which typed statement and
+// which typed ALTER action count as a backward-incompatible or
+// unsafe-forward change (D-08). sqlscan owns the parse; the policy stays
+// here.
 
 func scanFile(path, content string) []finding {
-	stripped := sqlscan.StripComments(content)
 	var out []finding
-	for _, st := range sqlscan.SplitStatements(stripped) {
-		out = append(out, classifyStatement(path, st)...)
+	for _, st := range sqlscan.Parse(content) {
+		switch s := st.(type) {
+		case sqlscan.DropTable:
+			out = append(out, newFinding(path, s.Line, classBackward, "drop_table", s.Name, s.RawName, "", ""))
+		case sqlscan.AlterTable:
+			for _, a := range s.Actions {
+				if f, ok := classifyAction(path, s, a); ok {
+					out = append(out, f)
+				}
+			}
+		}
 	}
 	return out
 }
 
-// ---- classify (D-08 reliably-detectable pattern set) ----
-
-var (
-	reDropTable  = regexp.MustCompile(`(?is)^DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\S+)`)
-	reAlterTable = regexp.MustCompile(`(?is)^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\S+)\s+(.*)$`)
-	reDropColumn = regexp.MustCompile(`(?is)^DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?(\S+)`)
-	reRenameTbl  = regexp.MustCompile(`(?is)^RENAME\s+TO\s+(\S+)`)
-	reRenameCol  = regexp.MustCompile(`(?is)^RENAME\s+(?:COLUMN\s+)?(\S+)\s+TO\s+(\S+)`)
-	reAlterType  = regexp.MustCompile(`(?is)^ALTER\s+COLUMN\s+(\S+)\s+(?:SET\s+DATA\s+)?TYPE\b`)
-	reSetNotNull = regexp.MustCompile(`(?is)^ALTER\s+COLUMN\s+(\S+)\s+SET\s+NOT\s+NULL\b`)
-	reAddCheck   = regexp.MustCompile(`(?is)^ADD\s+(?:CONSTRAINT\s+\S+\s+)?CHECK\s*\(`)
-	reAddColumn  = regexp.MustCompile(`(?is)^ADD\s+(?:COLUMN\s+)?(\S+)\s`)
-	reNotNull    = regexp.MustCompile(`(?i)\bNOT\s+NULL\b`)
-	reDefault    = regexp.MustCompile(`(?i)\bDEFAULT\b`)
-)
-
-func classifyStatement(path string, st sqlscan.RawStatement) []finding {
-	text := st.Text
-	if m := reDropTable.FindStringSubmatch(text); m != nil {
-		return []finding{newFinding(path, st.Line, classBackward, "drop_table", sqlscan.StripIdent(m[1]), "")}
+func classifyAction(path string, at sqlscan.AlterTable, a sqlscan.Action) (finding, bool) {
+	mk := func(class findingClass, kind, object, rawObject string) (finding, bool) {
+		return newFinding(path, at.Line, class, kind, at.Name, at.RawName, object, rawObject), true
 	}
-	if m := reAlterTable.FindStringSubmatch(text); m != nil {
-		table := sqlscan.StripIdent(m[1])
-		var out []finding
-		for _, clause := range sqlscan.SplitTopLevelCommas(m[2]) {
-			clause = strings.TrimSpace(clause)
-			if clause == "" {
-				continue
-			}
-			out = append(out, classifyAlterClause(path, st.Line, table, clause)...)
-		}
-		return out
-	}
-	return nil
-}
-
-func classifyAlterClause(path string, line int, table, clause string) []finding {
-	switch {
-	case reDropColumn.MatchString(clause):
-		m := reDropColumn.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "drop_column", table, sqlscan.StripIdent(m[1]))}
-	case reRenameTbl.MatchString(clause):
-		m := reRenameTbl.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "rename_table", table, sqlscan.StripIdent(m[1]))}
-	case reRenameCol.MatchString(clause):
-		m := reRenameCol.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "rename_column", table, sqlscan.StripIdent(m[1])+" -> "+sqlscan.StripIdent(m[2]))}
-	case reAlterType.MatchString(clause):
-		m := reAlterType.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "alter_type", table, sqlscan.StripIdent(m[1]))}
-	case reSetNotNull.MatchString(clause):
-		m := reSetNotNull.FindStringSubmatch(clause)
-		return []finding{newFinding(path, line, classBackward, "set_not_null", table, sqlscan.StripIdent(m[1]))}
-	case reAddCheck.MatchString(clause):
-		return []finding{newFinding(path, line, classBackward, "add_check", table, "")}
-	case reAddColumn.MatchString(clause):
-		if reNotNull.MatchString(clause) && !reDefault.MatchString(clause) {
-			m := reAddColumn.FindStringSubmatch(clause)
-			return []finding{newFinding(path, line, classUnsafeForward, "add_notnull_no_default", table, sqlscan.StripIdent(m[1]))}
+	switch act := a.(type) {
+	case sqlscan.DropColumn:
+		return mk(classBackward, "drop_column", act.Column, act.RawColumn)
+	case sqlscan.RenameTable:
+		return mk(classBackward, "rename_table", act.To, act.RawTo)
+	case sqlscan.RenameColumn:
+		return mk(classBackward, "rename_column", act.From, act.RawFrom+" -> "+act.RawTo)
+	case sqlscan.AlterColumnType:
+		return mk(classBackward, "alter_type", act.Column, act.RawColumn)
+	case sqlscan.SetNotNull:
+		return mk(classBackward, "set_not_null", act.Column, act.RawColumn)
+	case sqlscan.AddCheck:
+		return mk(classBackward, "add_check", "", "")
+	case sqlscan.AddColumn:
+		if act.NotNull && !act.HasDefault {
+			return mk(classUnsafeForward, "add_notnull_no_default", act.Column, act.RawColumn)
 		}
 	}
-	return nil
+	return finding{}, false
 }
 
 // ---- D-15: previous-release query cross-reference (Task 2) ----
@@ -749,65 +734,6 @@ func (r *prevReleaseRefs) hasHighAnyColumn(table string) (queryRef, bool) {
 		}
 	}
 	return queryRef{}, false
-}
-
-// ---- schema column set: "all columns of table X" (RESEARCH D-15) ----
-
-var reCreateTable = regexp.MustCompile(`(?is)^CREATE\s+TABLE\s+(\S+)\s*\((.*)\)\s*$`)
-
-// tableDefKeywords are ALTER/CREATE TABLE clause prefixes that are not
-// column definitions (constraints), so parseSchemaColumns does not
-// misinterpret e.g. `CONSTRAINT foo UNIQUE (a, b)` as a column named
-// CONSTRAINT.
-var tableDefKeywords = []string{"CONSTRAINT", "PRIMARY KEY", "UNIQUE", "CHECK", "FOREIGN KEY"}
-
-// parseSchemaColumns parses CREATE TABLE and ALTER TABLE ... ADD COLUMN
-// statements out of migration SQL (read at the previous release tag via
-// readAtTag) to build the "all columns of table X" set that a bare
-// `SELECT *` / `RETURNING *` over a single table expands to.
-func parseSchemaColumns(sql string) map[string][]string {
-	stripped := sqlscan.StripComments(sql)
-	cols := map[string][]string{}
-	for _, st := range sqlscan.SplitStatements(stripped) {
-		text := strings.TrimSpace(st.Text)
-		if m := reCreateTable.FindStringSubmatch(text); m != nil {
-			table := sqlscan.NormalizeIdent(sqlscan.StripSchemaQualifier(sqlscan.StripIdent(m[1])))
-			for _, colDef := range sqlscan.SplitTopLevelCommas(m[2]) {
-				colDef = strings.TrimSpace(colDef)
-				if colDef == "" {
-					continue
-				}
-				upper := strings.ToUpper(colDef)
-				isConstraint := false
-				for _, kw := range tableDefKeywords {
-					if strings.HasPrefix(upper, kw) {
-						isConstraint = true
-						break
-					}
-				}
-				if isConstraint {
-					continue
-				}
-				fields := strings.Fields(colDef)
-				if len(fields) == 0 {
-					continue
-				}
-				cols[table] = append(cols[table], sqlscan.NormalizeIdent(sqlscan.StripIdent(fields[0])))
-			}
-			continue
-		}
-		if m := reAlterTable.FindStringSubmatch(text); m != nil {
-			table := sqlscan.NormalizeIdent(sqlscan.StripSchemaQualifier(sqlscan.StripIdent(m[1])))
-			for _, clause := range sqlscan.SplitTopLevelCommas(m[2]) {
-				clause = strings.TrimSpace(clause)
-				if reAddColumn.MatchString(clause) {
-					cm := reAddColumn.FindStringSubmatch(clause)
-					cols[table] = append(cols[table], sqlscan.NormalizeIdent(sqlscan.StripIdent(cm[1])))
-				}
-			}
-		}
-	}
-	return cols
 }
 
 // ---- query block extraction (D-15, Task 2) ----
@@ -1152,7 +1078,7 @@ func buildPrevReleaseRefs(tag string) (*prevReleaseRefs, error) {
 			if rerr != nil {
 				continue
 			}
-			for t, cols := range parseSchemaColumns(string(data)) {
+			for t, cols := range sqlscan.SchemaColumns(sqlscan.Parse(string(data))) {
 				schemaCols[t] = append(schemaCols[t], cols...)
 			}
 		}
@@ -1181,24 +1107,17 @@ func crossReferenceFinding(refs *prevReleaseRefs, f finding, prevTag string, ann
 	if refs == nil {
 		return finding{}, false
 	}
-	// prevReleaseRefs keys are always schema-stripped (extractBlockReferences,
-	// parseSchemaColumns); f.table is raw from the scanner and may carry a
-	// schema qualifier (e.g. "public.events") that would otherwise miss the
-	// lookup and let a live D-15 reference slip past the annotation override.
-	table := sqlscan.StripSchemaQualifier(f.table)
+	// f.table and f.object arrive already normalized + schema-stripped from
+	// sqlscan (CR-01 bug class retired). For rename_column, f.object is the
+	// OLD column name alone -- a typed RenameColumn.From, not a re-parsed
+	// display string (WR-01 retired).
 	var ref queryRef
 	var hit bool
 	switch f.kind {
-	case "drop_column":
-		ref, hit = refs.hasHigh(table, f.object)
-	case "rename_column":
-		// f.object is the combined "old -> new" display string
-		// (classifyAlterClause); the previous release could only ever have
-		// referenced the OLD name.
-		old, _, _ := strings.Cut(f.object, " -> ")
-		ref, hit = refs.hasHigh(table, old)
+	case "drop_column", "rename_column":
+		ref, hit = refs.hasHigh(f.table, f.object)
 	case "drop_table", "rename_table":
-		ref, hit = refs.hasHighAnyColumn(table)
+		ref, hit = refs.hasHighAnyColumn(f.table)
 	default:
 		return finding{}, false
 	}
