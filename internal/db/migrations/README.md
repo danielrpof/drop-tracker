@@ -47,6 +47,16 @@ Two mechanisms prove this holds, on every relevant run:
   PRs), that a binary whose embedded migration set is behind the database's applied
   version no-ops cleanly at boot instead of erroring.
 
+**Guard-adoption window.** The `n1-boot` half is temporarily inert. The ahead-of-source
+no-op guard and the `n1-boot` job shipped in the same release train, so every
+already-released image predates the guard and its embedded boot migration errors against
+any newer schema regardless of whether the migration itself is rollback-safe. While the
+resolved N-1 tag's `internal/db/migrate.go` does not carry that guard, `n1-boot` detects
+this statically and skip-greens with a `::notice::` in the run log rather than reporting a
+rollback break that isn't one. During this window the `internal/db` ahead-of-source test
+is the only live proof of the invariant. It self-clears with no workflow change once a
+guard-carrying release becomes N-1.
+
 A direct consequence: the **expand half and the contract half of a change must never
 ship in the same release**. A `DROP` or `RENAME` is only safe once the release that
 stopped using the old object is provably not the release a rollback could land on

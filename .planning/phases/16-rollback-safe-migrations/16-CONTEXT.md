@@ -357,6 +357,23 @@ manual re-run. No report-only interim.
   (c) `GET /watchlist` `200 []` and `GET /events` `200 {events:[]}` on an empty DB are
   verified in code - the D-03 / canonical-refs planner TODO is closed.
 
+### Amendment 2026-09-05 (post-UAT, G-16-1) - n1-boot inert during the guard-adoption window -> D-04/D-19a and D-11 amended
+Phase 16 UAT found `n1-boot` reds on every migration-touching branch because the resolved
+N-1 image (`v1.7.0`) predates the very ahead-of-source guard this phase introduced, so its
+embedded boot migration errors against any newer schema regardless of migration safety - a
+destructive `DROP COLUMN` (run 33974299591) and a purely additive nullable `ADD COLUMN`
+(run 33975084671) fail it identically, so the red carries zero discriminating signal.
+- **D-04/D-19a amended:** the skip-green condition set widens from one to two - (a) no prior
+  release tag, and (b) prior tag predates the guard. (b) is implemented as a second
+  dedicated in-job step (`id: guardcheck`, static `git show "$PREV_TAG:internal/db/migrate.go"`
+  grep for `^func maxSourceVersion(`), not a job-level `if:`, so the two skip reasons stay
+  independently readable in the run log, each with its own step name and `::notice::`.
+- **D-11 amended:** blocking guarantee unchanged in shape, but the boot half temporarily has
+  no discriminating signal. `cmd/migration-check`'s static guard and the `internal/db`
+  ahead-of-source test carry the phase's guarantee until the window closes.
+- Self-clears with no workflow edit once a guard-carrying release becomes the N-1 rollback
+  target. D-04, D-11, D-19a are not edited in place - this appended revision wins.
+
 </revisions>
 
 <canonical_refs>
