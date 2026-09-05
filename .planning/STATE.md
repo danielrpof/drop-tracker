@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-03)
 Phase: 16 (Rollback-Safe Migrations) — EXECUTING
 Plan: 5 of 5
 Status: Phase complete — UAT run 2026-09-05, gap G-16-1 found (n1-boot false-red during guard-adoption window); fix quick task 260905-et1 landed (static only — G-16-1 stays open pending a live migration-touching push)
-Last activity: 2026-09-05 — Completed quick task 260905-et1: n1-boot guard-adoption skip
+Last activity: 2026-09-05 — Completed quick task 260905-fa4: bump browserslist/fast-uri past trivy-fs HIGH CVEs
 
 ## Performance Metrics
 
@@ -231,7 +231,10 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- [major] Bump frontend deps to clear trivy-fs HIGH CVEs (browserslist, fast-uri) — `.planning/todos/pending/2026-09-05-bump-frontend-deps-to-clear-trivy-fs-high-cves.md`. Surfaced during Phase 16 UAT; blocks build-scan/release once main is pushed.
+- [minor] Delete the stale tracked `web/package-lock.json` — a drifting second lockfile Trivy also scans. `.planning/todos/pending/2026-09-05-delete-stale-web-package-lock-json.md`
+- [minor] Move `shadcn` out of `web/package.json` `dependencies` (it's a CLI no code imports) — cleanup only, NOT a security fix; reclassifying hides Trivy findings without fixing them. `.planning/todos/pending/2026-09-05-move-shadcn-out-of-frontend-dependencies.md`
+
+_Closed 2026-09-05: trivy-fs HIGH CVE bump (browserslist/fast-uri) — quick task 260905-fa4. Local Trivy green; CI-green confirmation pending a scratch-branch push._
 
 ### Blockers/Concerns
 
@@ -265,6 +268,7 @@ Recent decisions affecting current work:
 | 260901-muu | Trim essay-style comments in 6 most comment-dense files (authStore.ts + config/pool/detector/musicbrainz/notifier) — 999→349 comment lines, no logic changes, diff-gated comments-only | 2026-09-01 | eed828a | [260901-muu-trim-essay-style-code-comments-in-6-file](./quick/260901-muu-trim-essay-style-code-comments-in-6-file/) |
 | 260901-rl9 | Remove orphaned envExamplePlaceholder ("caliber") apparatus from internal/authgate — const + doc comment + knownDefaults entry + TestWeakPassphrase_EnvExamplePlaceholderOnDenylist + table case; orphaned by 465260c blanking .env.example's INSTANCE_PASSPHRASE placeholder. Generic denylist + 16-rune floor untouched; IsWeakPassphrase behavior byte-for-byte unchanged (91.0% coverage held) | 2026-09-01 | e555b34 | [260901-rl9-remove-orphaned-envexampleplaceholder-ap](./quick/260901-rl9-remove-orphaned-envexampleplaceholder-ap/) |
 | 260905-et1 | n1-boot skip-greens when the previous release image predates the ahead-of-source migration guard (Phase 16 gap G-16-1). New gated `guardcheck` step in full-pipeline.yml + README/16-CONTEXT docs. Static fix only — G-16-1 stays open until a live migration push confirms green. | 2026-09-05 | 9876c4e | [260905-et1-n1-boot-skip-greens-when-the-previous-re](./quick/260905-et1-n1-boot-skip-greens-when-the-previous-re/) |
+| 260905-fa4 | Bump browserslist (→4.28.9) and fast-uri (→3.1.7) past 6 HIGH CVEs via caret `overrides:` in web/pnpm-workspace.yaml + lockfile regen (pnpm 11.8.0) + `make web`. Trivy 0.70.0 local scan: 6 HIGH → 0. Two follow-up todos filed. CI-green confirmation pending a scratch-branch push. | 2026-09-05 | efd9ea0 | [260905-fa4-bump-frontend-transitive-deps-to-clear-t](./quick/260905-fa4-bump-frontend-transitive-deps-to-clear-t/) |
 
 ### Roadmap Evolution
 
