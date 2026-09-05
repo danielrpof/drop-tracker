@@ -231,7 +231,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- [major] Bump frontend deps to clear trivy-fs HIGH CVEs (browserslist, fast-uri) — `.planning/todos/pending/2026-09-05-bump-frontend-deps-to-clear-trivy-fs-high-cves.md`. Surfaced during Phase 16 UAT; blocks build-scan/release once main is pushed.
 
 ### Blockers/Concerns
 
