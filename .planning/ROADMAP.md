@@ -62,7 +62,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 14: Instance Passphrase Gate** - A configured passphrase puts the watchlist API and Discord-backed actions behind a signed session cookie, with the SPA prompting for it — and stays completely inert when unconfigured (completed 2026-09-01)
 - [x] **Phase 15: PR Coverage-Diff Comment** - Every same-repo PR carries one always-current, never-blocking comment showing backend and frontend coverage and their delta versus the main baseline (completed 2026-09-03)
-- [ ] **Phase 16: Rollback-Safe Migrations** - CI proves the previously-released image still boots healthy against the current branch's schema, and the expand/contract rule becomes a documented standing constraint
+- [x] **Phase 16: Rollback-Safe Migrations** - CI proves the previously-released image still boots healthy against the current branch's schema, and the expand/contract rule becomes a documented standing constraint (completed 2026-09-05)
 - [ ] **Phase 17: Automated VPS Deploy with Health-Gated Rollback** - Merging to main ships the released image to a provisioned HTTPS VPS unattended, and a bad release restores the previous one by itself
 
 ## Phase Details
@@ -212,7 +212,7 @@ Phases execute in numeric order: 14 → 15 → 16 → 17
 |-------|----------------|--------|-----------|
 | 14. Instance Passphrase Gate | 7/7 | Complete    | 2026-09-01 |
 | 15. PR Coverage-Diff Comment | 3/3 | Complete    | 2026-09-03 |
-| 16. Rollback-Safe Migrations | 5/5 | In Progress|  |
+| 16. Rollback-Safe Migrations | 5/5 | Complete    | 2026-09-05 |
 | 17. Automated VPS Deploy with Health-Gated Rollback | 0/? | Not started | - |
 
 ## Backlog

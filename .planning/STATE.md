@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Continuous Deployment
-current_phase: 16
-current_phase_name: Rollback-Safe Migrations
-status: verifying
-stopped_at: Completed 16-05-PLAN.md
-last_updated: "2026-09-04T19:51:04.109Z"
-last_activity: 2026-09-04
-last_activity_desc: Phase 16 execution started
-state_head: c79b75488230743105a608c3f12bdd348ad14604
+current_phase: 17
+current_phase_name: Automated VPS Deploy with Health-Gated Rollback
+status: planning
+stopped_at: Phase 16 complete, ready to plan Phase 17
+last_updated: "2026-09-05T17:26:45.171Z"
+last_activity: 2026-09-05
+last_activity_desc: Phase 16 complete, transitioned to Phase 17
+state_head: 82d42405b78b190af500b6faa4046fc4e5fc5f91
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 15
   completed_plans: 15
 ---
@@ -21,23 +21,23 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-03)
+See: .planning/PROJECT.md (updated 2026-09-05)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 16 — Rollback-Safe Migrations
+**Current focus:** Phase 17 — Automated VPS Deploy with Health-Gated Rollback
 
 ## Current Position
 
-Phase: 16 (Rollback-Safe Migrations) — EXECUTING
-Plan: 5 of 5
-Status: Phase 16 UAT PASSED (2026-09-05). Gap G-16-1 (n1-boot false-red in the guard-adoption window) fixed by quick task 260905-et1 and confirmed live on CI runs 33978945980 (guardcheck fires) + 33979094225 (build-scan runs); blocking trivy-fs CVEs fixed by 260905-fa4. 16-VERIFICATION.md → passed. Ready for phase transition (/gsd-verify-work 16 to finalize, or transition inline).
-Last activity: 2026-09-05 — Phase 16 UAT closed: G-16-1 fixed + confirmed live, trivy-fs green
+Phase: 17 — Automated VPS Deploy with Health-Gated Rollback
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-05 — Phase 16 complete, transitioned to Phase 17
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 67
+- Total plans completed: 72
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -60,6 +60,7 @@ Last activity: 2026-09-05 — Phase 16 UAT closed: G-16-1 fixed + confirmed live
 | 13 | 3 | - | - |
 | 14 | 7 | - | - |
 | 15 | 3 | - | - |
+| 16 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -228,6 +229,8 @@ Recent decisions affecting current work:
 - [Phase 16]: [Phase 16]: [16-03] Fixed a regex-consumption bug in the original combined FROM/JOIN-plus-alias pattern (alias group could swallow the next clause's own FROM/JOIN keyword, dropping the second joined table); replaced with findFromJoinTables, a manual tokenizer over located keyword positions
 - [Phase 16]: [Phase 16]: [16-03] MGRT-01 left unmarked -- requirements.ready-ids confirms it blocked pending 16-04
 - [Phase 16]: [Phase 16]: [16-05] Documented the allow-destructive annotation grammar verbatim from Plan 02's locked checkpoint; README's five sections plus a doc-presence test close MGRT-02
+- [Phase 16 UAT, closed 2026-09-05]: The single human-verification item (live scratch-branch CI run: destructive migration, docs-only push, additive migration) ran and surfaced gap G-16-1 — `n1-boot` false-reds on *every* migration-touching branch because the N-1 image (`v1.7.0`) predates the ahead-of-source guard this phase introduced. Fixed by quick task 260905-et1 (gated `guardcheck` step that skip-greens inside the guard-adoption window, self-clearing once a guard-carrying release becomes N-1) + 260905-fa4 (blocking trivy-fs HIGH CVEs). Confirmed live on runs 33978945980 (guardcheck notice fires) and 33979094225 (build-scan runs). 16-VERIFICATION.md → passed.
+- [Phase 16 Security]: `/gsd-secure-phase 16` (State B, ASVS L1, block_on high) — 31 threats across the 5 plans' STRIDE registers verified by the gsd-security-auditor (opus): 24 `mitigate` confirmed in code, 7 `accept` confirmed reasonable, `threats_open: 0`. Two non-blocking unregistered flags: UF-1 (the post-plan `guardcheck` skip path is new, always-active attack surface with verified compensating controls — recommend a Phase 17 follow-up to re-assert the probe once a guard-carrying tag is N-1) and UF-2 (`guardcheck` shells `git show` directly, bypassing the Go tool's path allowlist — not injectable). See 16-SECURITY.md.
 
 ### Pending Todos
 
@@ -241,6 +244,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 
 - ⚠️ [Phase 03] musicbrainz.org's TLS handshake fails from this developer's WSL2 network path (confirmed environmental via plain curl, not app code) -- Deezer unaffected. If future live testing on this machine needs real MusicBrainz data, expect the same failure; see PROJECT.md Context and Broken Windows Ledger entry #3 (waived).
 - ⚠️ [Phase 17, v1.3] No VPS is provisioned yet, and the TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel) is undecided. Both block Phase 17's first real deploy and its rollback drill. Resolve in Phase 17's discuss/spec pass before planning.
+- ⚠️ [Phase 16 → 17] `n1-boot`'s `guardcheck` skip path (G-16-1 fix) stays active until a release carrying the ahead-of-source guard becomes the N-1 rollback target — i.e. the first v1.3 release after Phase 16. Until then the N-1 boot probe is inert on migration branches. Phase 17 follow-up (security UF-1): re-assert the probe once a guard-carrying tag is N-1, and add an alarm if the guard-adoption window stays open unexpectedly.
 
 ### Quick Tasks Completed
 
@@ -294,16 +298,16 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-04T17:39:34.282Z
-Stopped at: Completed 16-05-PLAN.md
+Last session: 2026-09-05T17:30:00.000Z
+Stopped at: Phase 16 complete (UAT passed, security verified, transitioned), ready to plan Phase 17
 Resume file: None
 
 ## Operator Next Steps
 
-- `/clear` then `/gsd-plan-phase 16` — Rollback-Safe Migrations. Context is revised and ready (grill pass done 2026-09-04; `16-CONTEXT.md` `<revisions>` holds S1-S8 + D-15..D-19). CI-only phase: prove the previously-released image still boots healthy against the current branch's schema; expand/contract becomes a documented standing constraint.
-- Planner: sequence the D-02/D-18 seam + SC #4 ahead-of-source test **first** as a checkpoint — if `migrate.Up()` errors instead of `ErrNoChange` against an ahead-of-source DB, stop and escalate (no plan B; Phase 17 auto-rollback depends on it).
-- RESEARCH.md must scope D-15's `queries/*.sql` identifier extraction (previous-release column-reference set) and its blind spots — it's the largest addition to `cmd/migration-check`.
-- Phase 16's edit target is `.github/workflows/full-pipeline.yml` — the same shared file Phases 15 and 17 touch; keep the 15 → 16 → 17 order. Phase 17 additionally needs the `release` job to expose `outputs.version`.
-- Before planning Phase 17, run its discuss/spec pass — the TLS reverse-proxy choice (recommended: Caddy on-VPS) blocks the first deploy, and no VPS is provisioned yet.
-- Non-blocking follow-up from Phase 14 security: consider `Cache-Control: no-store` on the gated response path (T-14-CACHE-01 / 14-REVIEW WR-01)
-- Non-blocking from Phase 15: `15-VALIDATION.md` is `nyquist_compliant: false` (PARTIAL — validated strategy, audit complete, 2 gaps filled); revisit at milestone audit if deeper feedback-sampling coverage is wanted.
+- `/clear` then `/gsd-discuss-phase 17` — Automated VPS Deploy with Health-Gated Rollback. Run the discuss/spec pass **before** planning: the TLS reverse-proxy choice (recommended: Caddy on-VPS) blocks the first deploy, and no VPS is provisioned yet. Also lock: documented-and-accepted swap-gap downtime vs. mitigation, and post-deploy image-prune policy.
+- Phase 17's edit target is `.github/workflows/full-pipeline.yml` (same shared file as 15/16) plus a small `release`-job change to expose `outputs.version`. Deploy job needs `needs: [release]` + `push`/`refs/heads/main` guard + own `concurrency` group (`cancel-in-progress: false`) + a `production` GitHub Environment for the SSH secrets.
+- Fold the basic Postgres backup + restore procedure into the Phase 17 runbook (DPLY-07 / OPS-04 basics) — it's the recovery path when an image rollback also needs the schema restored (PITFALLS #8).
+- Phase 17 follow-up from Phase 16 security (UF-1): re-assert the `n1-boot` probe once a guard-carrying release is the N-1 rollback target, and alarm if the guard-adoption window stays open.
+- Non-blocking follow-up from Phase 14 security: consider `Cache-Control: no-store` on the gated response path (T-14-CACHE-01 / 14-REVIEW WR-01).
+- Non-blocking from Phase 15: `15-VALIDATION.md` is `nyquist_compliant: false` (PARTIAL); revisit at milestone audit if deeper feedback-sampling coverage is wanted.
+- Two minor pending todos filed 2026-09-05 (stale `web/package-lock.json`; `shadcn` in frontend `dependencies`) — cleanup only, not security.
