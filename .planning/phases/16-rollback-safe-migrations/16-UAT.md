@@ -3,7 +3,7 @@ status: complete
 phase: 16-rollback-safe-migrations
 source: [16-VERIFICATION.md]
 started: 2026-09-04T00:00:00Z
-updated: 2026-09-05T15:40:00Z
+updated: 2026-09-05T17:10:00Z
 ---
 
 ## Current Test
@@ -65,13 +65,36 @@ reported: |
   no-op guard (`maxSourceVersion` in internal/db/migrate.go) that Phase 16 itself introduced,
   so that binary always fails golang-migrate's "DB version not present in source" check.
   Contradicts Truth #1 ("passes only if that older binary starts and stays healthy").
-severity: major
+
+  --- RESOLVED 2026-09-05 (quick task 260905-et1, confirmed live) ---
+  Fix: new gated `guardcheck` step in n1-boot (commit 865c162) that statically inspects the
+  resolved N-1 tag's internal/db/migrate.go for the guard token; if absent, skip-greens with
+  a ::notice:: naming the tag and G-16-1, ANDed into all 8 expensive steps. Self-clears once
+  a guard-carrying release becomes N-1. Also fixed the blocking trivy-fs CVEs (quick task
+  260905-fa4, commit 18c36db) that had prevented a clean build-scan observation.
+
+  Live confirmation on scratch/verify-n1boot-trivy-fixes (deleted after):
+  - run 33978945980 (additive migration 000008): n1-boot GREEN — guardcheck fired, emitted
+    "the previously-released image v1.7.0 predates the ahead-of-source migration guard ...
+    (G-16-1). This self-clears ... once a guard-carrying release becomes the N-1 rollback
+    target.", all probe steps skipped. migration-check GREEN. trivy-fs GREEN (was 6 HIGH).
+  - run 33979094225 (test-assertion bump only): trivy-fs GREEN, test GREEN, n1-boot GREEN
+    (7s, migrations_changed=false), **build-scan RAN (1m20s, produced a dockerbuild
+    artifact)** — the skip-propagation fix and build-scan-runs both confirmed. release
+    skipped (scratch branch, expected).
+  Together the runs prove: guardcheck skip path works, both guards finish `success` not
+  `skipped`, build-scan runs when its needs are green, and trivy-fs is clean.
+result: pass
+resolution: |
+  Gap G-16-1 closed by quick task 260905-et1 and confirmed live (runs 33978945980 +
+  33979094225). Truth #1 now holds within the guard-adoption window via the documented
+  skip-green path (internal/db/migrations/README.md + 16-CONTEXT.md amendment 2026-09-05).
 
 ## Summary
 
 total: 1
-passed: 0
-issues: 1
+passed: 1
+issues: 0
 pending: 0
 skipped: 0
 blocked: 0
@@ -80,7 +103,10 @@ blocked: 0
 
 - gap_id: G-16-1
   truth: "A CI check boots the previously-released image against a database migrated to the current branch's schema and passes only if that older binary starts and stays healthy (n1-boot); a safe additive migration must leave it green."
-  status: failed
+  status: resolved
+  resolved_by: "quick task 260905-et1 (commits 865c162, 9876c4e) — new n1-boot guardcheck step"
+  resolved_at: 2026-09-05
+  confirmed_live: "runs 33978945980 (guardcheck fires + notice) and 33979094225 (build-scan runs)"
   reason: |
     User reported: n1-boot reds on EVERY migration-touching branch regardless of migration
     safety. Both a destructive DROP COLUMN (run 33974299591) and a purely additive nullable
@@ -99,10 +125,12 @@ blocked: 0
 
 ## Notes (not gaps)
 
-- `trivy-fs` is red on `main` (6 HIGH CVEs: browserslist CVE-2026-73088/73089, fast-uri
+- `trivy-fs` was red on `main` (6 HIGH CVEs: browserslist CVE-2026-73088/73089, fast-uri
   CVE-2026-75899/75931/75975/76172) — frontend transitive deps, new disclosures, unrelated
-  to Phase 16. It blocked a clean end-to-end "build-scan runs" observation in test (b).
-  Worth its own quick task (dependency bump) but out of scope for Phase 16 UAT.
+  to Phase 16. Fixed out-of-band by quick task 260905-fa4 (commit 18c36db: caret `overrides:`
+  in web/pnpm-workspace.yaml → browserslist 4.28.9 / fast-uri 3.1.7); confirmed green on
+  runs 33978945980 / 33979094225. Two follow-up hygiene todos filed (delete stale
+  web/package-lock.json; reclassify `shadcn` out of dependencies).
 - Parts of test 1 DID pass as designed and should not be re-verified:
   migration-check's two-class DDL detection, the D-15 previous-release query cross-reference
   (names tag + query), the "explain the rule" failure messages on both jobs, the

@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-09-03)
 
 Phase: 16 (Rollback-Safe Migrations) — EXECUTING
 Plan: 5 of 5
-Status: Phase complete — UAT run 2026-09-05, gap G-16-1 found (n1-boot false-red during guard-adoption window); fix quick task 260905-et1 landed (static only — G-16-1 stays open pending a live migration-touching push)
-Last activity: 2026-09-05 — Completed quick task 260905-fa4: bump browserslist/fast-uri past trivy-fs HIGH CVEs
+Status: Phase 16 UAT PASSED (2026-09-05). Gap G-16-1 (n1-boot false-red in the guard-adoption window) fixed by quick task 260905-et1 and confirmed live on CI runs 33978945980 (guardcheck fires) + 33979094225 (build-scan runs); blocking trivy-fs CVEs fixed by 260905-fa4. 16-VERIFICATION.md → passed. Ready for phase transition (/gsd-verify-work 16 to finalize, or transition inline).
+Last activity: 2026-09-05 — Phase 16 UAT closed: G-16-1 fixed + confirmed live, trivy-fs green
 
 ## Performance Metrics
 
@@ -234,7 +234,8 @@ Recent decisions affecting current work:
 - [minor] Delete the stale tracked `web/package-lock.json` — a drifting second lockfile Trivy also scans. `.planning/todos/pending/2026-09-05-delete-stale-web-package-lock-json.md`
 - [minor] Move `shadcn` out of `web/package.json` `dependencies` (it's a CLI no code imports) — cleanup only, NOT a security fix; reclassifying hides Trivy findings without fixing them. `.planning/todos/pending/2026-09-05-move-shadcn-out-of-frontend-dependencies.md`
 
-_Closed 2026-09-05: trivy-fs HIGH CVE bump (browserslist/fast-uri) — quick task 260905-fa4. Local Trivy green; CI-green confirmation pending a scratch-branch push._
+_Closed 2026-09-05: trivy-fs HIGH CVE bump (browserslist/fast-uri) — quick task 260905-fa4. Confirmed CI-green on runs 33978945980 / 33979094225._
+_Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick task 260905-et1. Confirmed live (guardcheck notice on run 33978945980; build-scan runs on 33979094225)._
 
 ### Blockers/Concerns
 

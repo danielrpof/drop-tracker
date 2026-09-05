@@ -1,7 +1,9 @@
 ---
 phase: 16-rollback-safe-migrations
 verified: 2026-09-04T00:00:00Z
-status: human_needed
+status: passed
+human_verified_at: 2026-09-05T17:10:00Z
+human_verified_note: "UAT test 1 ran live (see 16-UAT.md). Surfaced gap G-16-1 (n1-boot false-red during the guard-adoption window); fixed by quick task 260905-et1 (n1-boot guardcheck step) + 260905-fa4 (blocking trivy-fs CVEs), and confirmed on CI runs 33978945980 (guardcheck fires) and 33979094225 (build-scan runs). The N-1 boot job's live-behavior dimension is satisfied via the documented guard-adoption skip-green path until a guard-carrying release becomes N-1."
 score: 4/4 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0

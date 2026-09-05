@@ -45,3 +45,18 @@ Prefer the narrowest override that clears the CVEs; check whether a direct depen
 already offers a newer minor that pulls the fixed transitive versions without an override.
 
 Handle via `/gsd-quick`.
+
+## Resolution — 2026-09-05 (quick task 260905-fa4)
+
+Caret `overrides:` (`browserslist: '^4.28.7'`, `fast-uri: '^3.1.6'`) added to the existing
+block in `web/pnpm-workspace.yaml` (NOT `package.json` — pnpm 10+ reads overrides from the
+workspace file; repo precedent `f6647ec`), lockfile regenerated with the Dockerfile-pinned
+`pnpm@11.8.0`. Resolved: browserslist 4.28.2→4.28.9, fast-uri 3.1.5→3.1.7. Local
+`aquasec/trivy:0.70.0` scan: 6 HIGH → 0. Commit `18c36db`.
+
+All 4 verification steps satisfied, including **step 4**: scratch branch
+`scratch/verify-n1boot-trivy-fixes` — `trivy-fs` GREEN and `build-scan` RAN on runs
+33978945980 / 33979094225.
+
+Two follow-up hygiene todos filed: `2026-09-05-delete-stale-web-package-lock-json.md`,
+`2026-09-05-move-shadcn-out-of-frontend-dependencies.md`.
