@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-09-03)
 
 Phase: 16 (Rollback-Safe Migrations) — EXECUTING
 Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-09-04 — Phase 16 execution started
+Status: Phase complete — UAT run 2026-09-05, gap G-16-1 found (n1-boot false-red during guard-adoption window); fix quick task 260905-et1 landed (static only — G-16-1 stays open pending a live migration-touching push)
+Last activity: 2026-09-05 — Completed quick task 260905-et1: n1-boot guard-adoption skip
 
 ## Performance Metrics
 
@@ -264,6 +264,7 @@ Recent decisions affecting current work:
 | 20 | Add comment-conciseness rule to CLAUDE.md + CONVENTIONS.md (stop multi-paragraph comment essays; authStore.ts cited as anti-pattern) | 2026-09-01 | 5de010b | — |
 | 260901-muu | Trim essay-style comments in 6 most comment-dense files (authStore.ts + config/pool/detector/musicbrainz/notifier) — 999→349 comment lines, no logic changes, diff-gated comments-only | 2026-09-01 | eed828a | [260901-muu-trim-essay-style-code-comments-in-6-file](./quick/260901-muu-trim-essay-style-code-comments-in-6-file/) |
 | 260901-rl9 | Remove orphaned envExamplePlaceholder ("caliber") apparatus from internal/authgate — const + doc comment + knownDefaults entry + TestWeakPassphrase_EnvExamplePlaceholderOnDenylist + table case; orphaned by 465260c blanking .env.example's INSTANCE_PASSPHRASE placeholder. Generic denylist + 16-rune floor untouched; IsWeakPassphrase behavior byte-for-byte unchanged (91.0% coverage held) | 2026-09-01 | e555b34 | [260901-rl9-remove-orphaned-envexampleplaceholder-ap](./quick/260901-rl9-remove-orphaned-envexampleplaceholder-ap/) |
+| 260905-et1 | n1-boot skip-greens when the previous release image predates the ahead-of-source migration guard (Phase 16 gap G-16-1). New gated `guardcheck` step in full-pipeline.yml + README/16-CONTEXT docs. Static fix only — G-16-1 stays open until a live migration push confirms green. | 2026-09-05 | 9876c4e | [260905-et1-n1-boot-skip-greens-when-the-previous-re](./quick/260905-et1-n1-boot-skip-greens-when-the-previous-re/) |
 
 ### Roadmap Evolution
 
