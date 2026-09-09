@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Operator Observability
 status: planning
-last_updated: "2026-09-09T05:08:20.447Z"
+last_updated: "2026-09-09T12:00:00.000Z"
 last_activity: 2026-09-09
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-09)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Starting v1.4 Operator Observability (Option C — `/ready` probe, `poll_runs` + `/status`, then a System panel). Phase 17 (VPS deploy) deferred pending hardware.
+**Current focus:** v1.4 Operator Observability roadmapped — Phase 18 (backend: `/ready`, `poll_runs` + `RunRecorder`, gated `/status`) then Phase 19 (SPA System view). Phase 17 (VPS deploy) deferred pending hardware.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 18 — Backend: Readiness, Poll-Run History & Status API (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-09-09 — Milestone v1.4 started
+Status: Roadmap complete — ready to plan Phase 18
+Last activity: 2026-09-09 — v1.4 roadmap created (Phases 18-19, 12/12 requirements mapped)
 
 ## Performance Metrics
 
@@ -207,7 +207,6 @@ Recent decisions affecting current work:
 - [Phase 14]: [14-06] gateActive persisted to sessionStorage (key dt_gate_active, value "1"): seeded once at module load via a typeof+try/catch guarded reader, written through by both mark* functions; isGateActive still returns the cached module boolean (useSyncExternalStore contract); authed stays volatile/unpersisted (D-16); root.tsx unchanged. Closes G-14-2 — Log out control survives a document reload for the browser session.
 - [Phase 14]: [14-07] G-14-3 closed: gate.Authenticate sets X-Instance-Gated: 1 on its proven-valid-cookie path (before next.ServeHTTP, never on the 401 returns); apiFetch latches it via new authStore.markGateActive() — a one-way latch that never reads/writes authed (D-16) and never clears. Marker registered only in server.go's gate != nil branch, so D-18's ungated guarantee now holds structurally. root.tsx and internal/httpserver/server.go unmodified.
 - [Phase 14]: [14-07] D-18's gateActive trigger set is now three: an observed 401, a completed login, or an observed gated response (X-Instance-Gated marker). The third strengthens the ungated guarantee (marker only exists on the gated code path) rather than weakening it. Recorded in SUMMARY, not by editing 14-CONTEXT.md.
-- [Phase 14]: [14-07] WR-01 retired: the typeof sessionStorage probe moved inside the existing try in readPersistedGateActive/persistGateActive, covered by a jsdom test that redefines the global with a throwing getter. One catch now covers all three storage failure modes (absent, throwing methods, throwing accessor).
 - [Phase 14 UAT, closed 2026-09-01]: All 5 UAT tests pass. Test 5 (G-14-3 re-run: carried-cookie fresh gated session renders the Log out control on first authed view, survives refresh/tab-nav/add-artist, absent on an ungated instance) confirmed by the operator in a real browser against `docker compose up --build`. G-14-1/G-14-2/G-14-3 all resolved. Phase 14 marked complete, transitioned to Phase 15.
 - [Phase 14 Security]: `/gsd-secure-phase 14` (State B, ASVS L1, block_on high) — 67 threats across the 7 plans' STRIDE registers, 66 closed, `threats_open: 0`. No auditor spawn (short-circuit: register authored at plan time + L1). One below-threshold open item recorded as T-14-CACHE-01 (14-REVIEW WR-01): gated authenticated 2xx responses set no `Cache-Control: no-store` / `Vary: Cookie` — medium, non-blocking, recommendation logged for the same middleware that stamps `X-Instance-Gated`. See 14-SECURITY.md.
 - [Phase 15]: [Phase 15-01] cmd/coverage-report is stdlib-only with three --mode arms; the comment renderer emits only compile-time literals, tool-computed 2-dp numbers, a tool-generated RFC3339 timestamp, and a 7-40-lowercase-hex-validated short SHA — validSHA is the single gate for every SHA into the body. Sidecar pct is a json.RawMessage of the same %.2f string total mode prints, so gate and comment can never disagree. Comment mode never returns an error: every bad input degrades to an 'unavailable' row and exits 0.
@@ -227,6 +226,13 @@ Recent decisions affecting current work:
 - [Phase 16]: [Phase 16]: [16-05] Documented the allow-destructive annotation grammar verbatim from Plan 02's locked checkpoint; README's five sections plus a doc-presence test close MGRT-02
 - [Phase 16 UAT, closed 2026-09-05]: The single human-verification item (live scratch-branch CI run: destructive migration, docs-only push, additive migration) ran and surfaced gap G-16-1 — `n1-boot` false-reds on *every* migration-touching branch because the N-1 image (`v1.7.0`) predates the ahead-of-source guard this phase introduced. Fixed by quick task 260905-et1 (gated `guardcheck` step that skip-greens inside the guard-adoption window, self-clearing once a guard-carrying release becomes N-1) + 260905-fa4 (blocking trivy-fs HIGH CVEs). Confirmed live on runs 33978945980 (guardcheck notice fires) and 33979094225 (build-scan runs). 16-VERIFICATION.md → passed.
 - [Phase 16 Security]: `/gsd-secure-phase 16` (State B, ASVS L1, block_on high) — 31 threats across the 5 plans' STRIDE registers verified by the gsd-security-auditor (opus): 24 `mitigate` confirmed in code, 7 `accept` confirmed reasonable, `threats_open: 0`. Two non-blocking unregistered flags: UF-1 (the post-plan `guardcheck` skip path is new, always-active attack surface with verified compensating controls — recommend a Phase 17 follow-up to re-assert the probe once a guard-carrying tag is N-1) and UF-2 (`guardcheck` shells `git show` directly, bypassing the Go tool's path allowlist — not injectable). See 16-SECURITY.md.
+- [v1.4 Roadmap]: 2 phases derived from the 12 v1.4 requirements — Phase 18 (backend: `/ready`, `poll_runs` + `RunRecorder`, gated `/status`; RDY-01…03, RUN-01…04, STAT-01/02) and Phase 19 (SPA System view; SYS-01…03). Phase numbering continues from v1.3's Phase 17 (deferred, not deleted — it stays archived and carries forward), so v1.4 starts at 18.
+- [v1.4 Roadmap]: The research's 18.1–18.4 breakdown (`/ready` → migration+sqlc → RunRecorder/runCycle → StatusStore+`/status`) is **plan-level wave structure inside Phase 18**, not four roadmap phases. Splitting it would produce single-requirement phases whose success criteria read as tasks, and 18.1–18.4 share one composition-root wiring change.
+- [v1.4 Roadmap]: Split at the API boundary (18 backend / 19 frontend) because `web/app/lib/api.ts`'s stated discipline is to type against the real Go response body. The `/status` JSON contract must be frozen by the end of Phase 18 before Phase 19 starts, so the frontend never re-guesses it. Phase 19 carries a UI hint — run `/gsd-ui-phase 19` for its UI-SPEC before planning.
+- [v1.4 Roadmap]: Three decisions deliberately left open for the Phase 18 planner to lock: (a) `/ready` condition `applied == expected` vs `applied >= expected && !dirty` (research leans `>=` — Phase 16's ahead-of-source guard intentionally lets a rolled-back binary serve against a newer additive schema, and `==` would flap the future Phase 17 deploy gate); (b) `events_recorded` via widening the `EventRecorder` seam to `(int, error)` vs a downstream `SELECT count(*) FROM events WHERE source=$1 AND created_at >= started_at`; (c) retention `N` for `poll_runs` as a compile-time constant (research suggests 50-100 per source).
+- [v1.4 Roadmap]: Highest-risk item of the milestone is aggregating the per-cycle counters across `runCycle`'s worker goroutines with `go test -race` unavailable on the dev box **and** absent from CI. Phase 18's plan must carry an explicit concurrency-correctness section (atomics or channel fold, panic path counted as errored, looped exact-equality invariant test) — the usual race-detector backstop does not exist here.
+- [v1.4 Roadmap]: Contract tension flagged for the Phase 18 planner rather than silently resolved — RUN-01/RUN-02 require a `skipped_overlap` row for an overlap-skipped tick; the research (Pitfall #4) argues skipped ticks should write no row so a burst of skips can't evict real history through the prune. Requirements are the contract; either satisfy them (outcome value in the CHECK constraint + an answer for burst eviction) or amend RUN-02 explicitly.
+- [v1.4 Roadmap]: Migration `000008_poll_runs` is pure-additive (bare `CREATE TABLE` + plain `CREATE INDEX`, CHECK constraints inline, `.down.sql` paired) — it produces zero `cmd/migration-check` findings and satisfies N-1 automatically because the previous release's binary never queries it. `make sqlc-check` has no CI counterpart, so the `queries/pollruns.sql` codegen must be regenerated and committed locally or CI stays green over a drifted tree.
 
 ### Pending Todos
 
@@ -241,6 +247,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 - ⚠️ [Phase 03] musicbrainz.org's TLS handshake fails from this developer's WSL2 network path (confirmed environmental via plain curl, not app code) -- Deezer unaffected. If future live testing on this machine needs real MusicBrainz data, expect the same failure; see PROJECT.md Context and Broken Windows Ledger entry #3 (waived).
 - ⚠️ [Phase 17, v1.3] No VPS is provisioned yet, and the TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel) is undecided. Both block Phase 17's first real deploy and its rollback drill. Resolve in Phase 17's discuss/spec pass before planning.
 - ⚠️ [Phase 16 → 17] `n1-boot`'s `guardcheck` skip path (G-16-1 fix) stays active until a release carrying the ahead-of-source guard becomes the N-1 rollback target — i.e. the first v1.3 release after Phase 16. Until then the N-1 boot probe is inert on migration branches. Phase 17 follow-up (security UF-1): re-assert the probe once a guard-carrying tag is N-1, and add an alarm if the guard-adoption window stays open unexpectedly.
+- ⚠️ [Phase 18, v1.4] `go test -race` is unavailable on this dev box and absent from CI, and Phase 18's riskiest change (per-cycle counters aggregated across `runCycle`'s worker goroutines) is exactly the class of bug the race detector exists to catch. The plan's explicit concurrency-correctness reasoning plus a looped exact-equality invariant test is the substitute — treat it as a required deliverable, not a nice-to-have.
 
 ### Quick Tasks Completed
 
@@ -280,6 +287,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 - v1.3 milestone opened (2026-08-27): Phases 14-17 added — Instance Passphrase Gate, PR Coverage-Diff Comment, Rollback-Safe Migrations, Automated VPS Deploy with Health-Gated Rollback. Phase numbering continued from 13 rather than resetting.
 - Phase 16 (Rollback-Safe Migrations) split out of the research-recommended single deploy phase so the N-1 schema-compatibility guarantee is in force before anything can auto-roll-back.
 - Phase 16 context revised (2026-09-04) after a `/grill-with-docs` pass — 8 findings (S1-S8) resolved, new decisions D-15..D-19: (S1) static guard now cross-references the previous release's `queries/*.sql` + boot job adds a `POST /watchlist` write assertion — GET-only missed the poller's write paths; (S2) a `changes` prelude job computes the diff base per event (`github.event.before..github.sha` for push) — the old merge-base approach was a no-op on direct-to-main; (S3) unexported `runMigrationsWithSource` seam so the SC #4 test drives the real boot path; (S4) `ADD COLUMN NOT NULL` reclassified as unsafe-forward (deploy hazard), not an N-1 break — two-class guard messages; (S5) Phase 17 rollback constrained to strictly N-1 (D-17) + annotation tag validated; (S6) N-1 boot job path-filtered to migration PRs; (S7) both checks stay blocking, transient-ghcr risk accepted; (S8) `HTTP_PORT` not `PORT`, `fetch-depth: 0` + tags a hard req. See `16-CONTEXT.md` `<revisions>`.
+- v1.4 milestone opened (2026-09-09): Phases 18-19 added — Backend (Readiness, Poll-Run History & Status API) and Frontend (System View). Phase numbering continued from 17 (deferred, archived, still carried forward) rather than resetting. Deliberately a two-phase split: the research's 18.1-18.4 breakdown is plan-level wave structure inside Phase 18, not separate roadmap phases, and the 18/19 boundary is the frozen `/status` JSON contract.
 
 ## Deferred Items
 
@@ -297,14 +305,16 @@ Items acknowledged and carried forward from previous milestone close:
 | Tooling (todo) | Resolve D-15 prev-release query/schema files from `--prev-tag`, not CWD | pending — `/gsd-quick` | v1.3 close (2026-09-09) |
 | Tooling (todo) | Unify `internal/sqlscan`'s two hand-rolled quote/dollar-quote state machines | pending — `/gsd-quick` | v1.3 close (2026-09-09) |
 | Deferred item | Phase 14: bare `tsc --noEmit` fails on stale react-router typegen artifact (CI/Docker build path unaffected) | acknowledged | v1.3 close (2026-09-09) |
+| Observability | OBS-01…OBS-05 — auto-refresh, "poll now" trigger, paginated run history, poll-failure alerting, and the rejected `events_recorded` approach | Future requirements | v1.4 roadmap (2026-09-09) |
 
 ## Session Continuity
 
-Last session: 2026-09-09 — v1.3 closed (partial), starting v1.4
-Stopped at: v1.3 milestone archived; v1.4 milestone kickoff next
+Last session: 2026-09-09 — v1.4 roadmap created (Phases 18-19)
+Stopped at: ROADMAP.md + STATE.md + REQUIREMENTS.md traceability written; Phase 18 not yet planned
 Resume file: —
 
 ## Operator Next Steps
 
-- v1.4 "Operator Observability" kickoff in progress (`/gsd-new-milestone`) — Phases 18 (backend: `/ready`, `poll_runs`, `/status`) and 19 (UI: System panel)
+- Plan Phase 18 — `/gsd-discuss-phase 18` then `/gsd-plan-phase 18`. Three decisions need locking at discuss/plan time: `/ready` `>=` vs `==`, the `events_recorded` source, and retention `N`. The plan must also carry an explicit concurrency-correctness section for the `runCycle` counters (no `-race` available) and settle the RUN-02 `skipped_overlap` tension with the research's Pitfall #4.
+- Phase 19 is gated on Phase 18's frozen `/status` contract, and needs `/gsd-ui-phase 19` for its UI-SPEC before planning.
 - Phase 17 (VPS deploy) stays deferred — un-defer as its own milestone once a VPS + domain exist; context archived at `.planning/milestones/v1.3-phases/17-*`
