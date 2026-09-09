@@ -71,21 +71,29 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 ## Phase Details
 
 ### Phase 18: Backend — Readiness, Status Surface & App Version
+
 **Goal**: An operator (or a machine) can tell a live drop-tracker apart from a merely-running process, and the `/status` JSON contract Phase 19 types against exists and is frozen — all without touching the poll cycle's hot path.
 **Depends on**: Nothing (builds on shipped v1.3 code)
 **Requirements**: RDY-01, RDY-02, RDY-03, RUN-02 (skip signal), RUN-04, STAT-01, STAT-02
 **Success Criteria** (what must be TRUE):
+
   1. An unauthenticated `GET /ready` against a healthy instance returns `200` carrying `schema_applied` and `schema_expected`; with Postgres stopped, or the schema behind or dirty, the same request returns `503` with a machine reason (`db_unreachable` / `schema_behind` / `schema_dirty`) and no DSN, driver text, or internal path — and it answers identically (never `401`) on a passphrase-gated instance carrying no session cookie.
   2. `/health` on the same build answers exactly as it did in v1.3 — same status code, same body, same timeout behaviour. Readiness was added beside liveness, not on top of it.
   3. `GET /status` behind the gate returns JSON with: the last run per source, the last N runs per source, each source's last-skipped timestamp + consecutive-skip count, the current watchlist size, the configured poll interval, and an `instance` block (`app_version`, `schema_applied`, `schema_expected`). The same request without a session returns `401`. On a fresh instance with no cycles yet the run lists are empty (not an error). No response field on any path contains a DSN, webhook URL, filesystem path, or raw driver error string.
   4. `app_version` is the build's short commit SHA on a CI-built image and `"dev"` on a flagless local build; the image the `release` job pushes is byte-for-byte the one `build-scan` scanned (the single-build guarantee, 07-REVIEW CR-02, is intact).
   5. `internal/pollruns.Store` holds the last N (=50) run entries per source in memory behind a mutex; the `poller.RunRecorder` seam interface exists and is wired to the real store, inert only because `runCycle` does not call it yet (that is Phase 18.1). `StatusStore` reads the buffer for `/status`.
+
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 18-01-PLAN.md — `/ready` probe: `db.ExpectedSchemaVersion` + `db.SchemaVersion`, the `SchemaVersioner` seam, `handleReady`, root-router registration in both branches, boot wiring (wave 1)
 - [ ] 18-02-PLAN.md — `internal/pollruns` ring buffer + the `poller.RunRecorder` seam, no-op default and `WithRunRecorder` — declared and inert, `runCycle` untouched (wave 1)
 - [ ] 18-03-PLAN.md — app version: `internal/buildinfo`, Dockerfile `VERSION` argument + link flag, CI build argument and a provenance assertion (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 18-04-PLAN.md — gated `GET /status`: `CountWatchlist`, the `StatusStore`/`WatchlistCounter` seams, `handleStatus`, the frozen contract in `docs/api/status-contract.md`, composition-root wiring (wave 2)
 
 **Notes for the phase planner**
@@ -103,15 +111,18 @@ Plans:
 *Security posture (non-negotiable, inherited).* Run entries carry **counts + an outcome enum + a composed summary string only** — no free-text error, no driver text. Per-artist failure detail stays in the `cycle_id`-correlated structured logs. `/ready` and `/status` DB failures log raw to `httplog.SetAttrs` and return a fixed body. No `redactDSN`/`redactError` promotion needed because nothing free-text is stored.
 
 ### Phase 18.1: Poll-Cycle Instrumentation
+
 **Goal**: Every poll cycle records exactly one run entry through the `RunRecorder` seam — with correct counts even under the worker fan-out — and polling stays green no matter what the recorder does.
 **Depends on**: Phase 18 (the `pollruns.Store`, the `RunRecorder` seam interface, and `RunResult` all exist; this phase makes `runCycle` call them)
 **Requirements**: RUN-01, RUN-02 (cancelled entry), RUN-03
 **Success Criteria** (what must be TRUE):
+
   1. After a poll interval elapses, the run buffer holds exactly one entry per source per cycle carrying source, started/finished, artists checked, artists skipped, artists errored, events recorded, an outcome, and a leak-free summary — and a shutdown-interrupted cycle appears with a `cancelled` outcome rather than going missing.
   2. An overlap-skipped tick records **no** run entry; it bumps that source's consecutive-skip count and last-skipped timestamp (visible in `/status`), and the next real run resets the count.
   3. The per-cycle `artists_checked` / `artists_skipped` / `artists_errored` / `events_recorded` counts are exact under the worker fan-out: a looped (~1000×) invariant test with a fake source where K artists error and P panic asserts `checked == errored + succeeded` and `errored == K + P` every iteration. Aggregation is a **channel fold** (each worker emits exactly one result value; the parent folds single-threaded after `wg.Wait()`), not shared mutable ints — `go test -race` is unavailable locally and absent from CI, so correctness is by construction, not by detector.
   4. Polling stays green regardless of the recorder: a recorder that errors still leaves the cycle logging "poll cycle complete" and returning its normal result; the `RecordRun` call never wedges a source's overlap guard (`defer running.Store(false)`) and never measurably extends shutdown.
   5. `events_recorded` is real: `EventRecorder.DetectMusicBrainz` / `DetectDeezer` return `(int, error)`; the count threads back through both `fetchAndRecord` closures and is folded with the other counters. It is never hard-coded to 0 while displayed.
+
 **Plans**: TBD
 
 **Notes for the phase planner**
@@ -127,15 +138,18 @@ Plans:
 *Concurrency-correctness section is a required plan deliverable* (the project's stated substitute for `-race`). It must spell out: the channel is buffered to the dispatched count so no worker blocks on send; every worker path emits exactly one result (success / errored / panicked / ctx-bailed); the fold is single-threaded; the looped ~1000× exact-equality test with erroring *and* panicking fake artists.
 
 ### Phase 19: Frontend — System View
+
 **Goal**: An operator opens the app and can see, on one screen, whether the scheduler is doing its job — per source, right now and over the last N cycles.
 **Depends on**: Phase 18 (freezes the `/status` JSON contract — `web/app/lib/api.ts`'s discipline is to type against the real Go response body, not a guess). Phase 18.1 populates the run data but does not change the contract, so Phase 19 can start once Phase 18 lands; the first-run empty state it must build anyway covers the window before 18.1.
 **Requirements**: SYS-01, SYS-02, SYS-03
 **Success Criteria** (what must be TRUE):
+
   1. A "System" tab in the SPA's main navigation opens a System view showing, for each source, the last run's time, outcome, duration, and counts, plus how long it has been since that source's last successful run.
   2. The same view shows a recent-runs history table, the current watchlist size, the configured poll interval, and an about block (app version, schema version, database reachable).
   3. On a freshly deployed or freshly migrated instance with no poll history yet — the normal state for the first poll interval after every deploy — the view shows explicit first-run copy, distinct from both the error state and the loaded-but-empty state. No endless spinner, no blank card, no "Invalid Date".
   4. The view fetches once on mount and otherwise only when the operator clicks Refresh; leaving the tab open produces no steady `/status` traffic, and the panel shows an explicit "as of" timestamp so the operator can tell how fresh it is.
   5. When the session expires, the view yields to the existing passphrase screen and re-fetches after login, with no stray requests firing behind the login screen.
+
 **Plans**: TBD
 **UI hint**: yes
 

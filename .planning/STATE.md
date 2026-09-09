@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 18
-current_phase_name: "Backend: Readiness, Status Surface & App Version"
+current_phase_name: Backend — Readiness, Status Surface & App Version
 status: planning
 stopped_at: Phase 18 context revised post-grilling; ready to plan
-last_updated: "2026-09-09T21:30:00.000Z"
+last_updated: "2026-09-09T22:54:28.298Z"
 last_activity: 2026-09-09
-last_activity_desc: "Design grilling split Phase 18 → 18 + 18.1; poll_runs table → ring buffer (ADR-0001)"
-state_head: ba85cb2
+last_activity_desc: Design grilling split Phase 18 → 18 + 18.1; poll_runs table → ring buffer (ADR-0001)
+state_head: c0b0ae7ac2bc083c542743847f70d61e61bff539
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 0
+  total_plans: 4
   completed_plans: 0
   percent: 0
 ---
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 
 ## Current Position
 
-Phase: 18 — Backend: Readiness, Status Surface & App Version (not started)
+Phase: 18 (Backend — Readiness, Status Surface & App Version) — READY TO EXECUTE
 Plan: —
 Status: Context revised post-grilling — ready to plan Phase 18 (then 18.1, then 19)
 Last activity: 2026-09-09 — grilling split Phase 18 → 18 + 18.1; poll_runs table → ring buffer (ADR-0001); REQUIREMENTS RUN-01..04 reworded

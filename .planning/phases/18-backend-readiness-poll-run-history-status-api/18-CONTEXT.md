@@ -49,122 +49,125 @@ ones; where a prior D-NN is superseded it is marked.
 
 ### `/ready` probe
 
-- **D-01 (unchanged): Ready condition is `!dirty && applied >= expected`.**
-  Phase 16's ahead-of-source guard (`migrate.go:298-302`) deliberately lets a
-  rolled-back binary boot and serve against a newer additive schema; strict
-  `==` would report that healthy instance not-ready forever and flap the
-  deferred Phase 17 deploy gate. `expected` = the existing `maxSourceVersion`
-  walk, exported as `db.ExpectedSchemaVersion()`, called once at boot.
-  Rationale one-liner + the Phase-16 reference go in the handler comment.
+- **D-01: ready-condition is not-dirty AND applied >= expected.** Phase 16's
+  ahead-of-source guard (`migrate.go:298-302`) deliberately lets a rolled-back
+  binary boot and serve against a newer additive schema; strict `==` would
+  report that healthy instance not-ready forever and flap the deferred Phase
+  17 deploy gate. `expected` = the existing `maxSourceVersion` walk, exported
+  as `db.ExpectedSchemaVersion()`, called once at boot. Rationale one-liner +
+  the Phase-16 reference go in the handler comment. (unchanged from the
+  pre-grilling context.)
 
-- **D-02 (unchanged): `503` body carries a machine reason enum** — exactly one
-  of `db_unreachable`, `schema_behind`, `schema_dirty`. No DSN, driver text,
-  path, or free-form message. Raw cause → `httplog.SetAttrs` only.
+- **D-02: /ready 503 body carries a machine reason enum.** Exactly one of
+  `db_unreachable`, `schema_behind`, `schema_dirty`. No DSN, driver text,
+  path, or free-form message. Raw cause goes to `httplog.SetAttrs` only.
+  (unchanged.)
 
-- **D-03 (unchanged): `/ready` body shape** — `200`:
-  `{"status":"ready","schema_applied":<int>,"schema_expected":<int>}`. `503`:
-  the same fields best-effort (`schema_applied` may be null if the DB is
-  unreachable) **plus** `"reason":"<enum>"`. Key names locked — Phase 19's
-  readiness badge parses this directly.
+- **D-03: /ready body shape with locked key names.** `200` →
+  `{"status":"ready","schema_applied":<int>,"schema_expected":<int>}`. `503` →
+  the same fields best-effort (`schema_applied` may be null when the DB is
+  unreachable) plus `"reason":"<enum>"`. Key names are locked because Phase
+  19's readiness badge parses this body directly. (unchanged.)
 
-- **D-04 (unchanged): `/ready` mirrors `/health`'s registration** — root
-  router, **both** the gate-configured and inert branches (structural
+- **D-04: /ready mirrors /health registration in both gate branches.** Root
+  router, both the gate-configured and inert branches (a structural
   exemption, never a path-string match), 3s-bounded DB check on the shared
   pool, no side effects, never `401` on a gated instance with no cookie.
+  (unchanged.)
 
-- **NEW: schema-version read is shared with `/status`.** One
-  `db.SchemaVersion(ctx, pool)` helper — hand-rolled pgx
-  `SELECT version, dirty FROM schema_migrations` (that table is
-  golang-migrate-owned, outside the schema dir, so it cannot be a sqlc
-  query). `/ready` and `/status`'s `instance` block both call it.
+- **D-15: one shared db.SchemaVersion helper for /ready and /status.** A
+  hand-rolled pgx `SELECT version, dirty FROM schema_migrations` (that table
+  is golang-migrate-owned, outside the schema dir, so it cannot be a sqlc
+  query). Both `/ready` and `/status`'s `instance` block call the same
+  helper. (new — added post-grilling.)
 
 ### Run-history store (was "poll_runs history")
 
-- **D-05 SUPERSEDED — skip-overlap coalescing is gone.** A skipped tick is
-  **not** a run entry. It bumps a per-source `consecutiveSkips` counter and
-  stamps `lastSkippedAt` on the store; both are surfaced in `/status`. The
-  next real run resets `consecutiveSkips` to 0. (The store field + method
-  land here; the `RecordSkip` *call* from `runCycle` is Phase 18.1.)
-  REQUIREMENTS RUN-02 was reworded to match.
+- **D-05: skipped-overlap is a per-source signal, not a run entry.** A
+  skipped tick bumps a per-source `consecutiveSkips` counter and stamps
+  `lastSkippedAt` on the store; both surface in `/status`. The next real run
+  resets `consecutiveSkips` to 0. The store field + method land in this
+  phase; the `RecordSkip` call from `runCycle` is Phase 18.1. REQUIREMENTS
+  RUN-02 was reworded to match. (supersedes the pre-grilling skip-coalescing
+  decision.)
 
-- **D-06 SUPERSEDED — no `outcome` CHECK constraint.** No table, no SQL. The
-  `Outcome` field is a Go string, valid values `ok` / `error` / `cancelled`
-  (no `partial`, no `skipped_overlap`), validated in Go if at all.
+- **D-08: run history is an in-process ring buffer, N=50 per source.**
+  `internal/pollruns.Store` holds `[]RunResult` per source, cap `const N = 50`
+  (named const in the `pollruns` package, one-line comment on the number). No
+  table, no prune query, no INSERT+DELETE CTE, no cross-source-deadlock
+  surface. Correctness under two sources recording near-simultaneously is one
+  `sync.Mutex` (or `RWMutex`) on the store. See `docs/adr/0001`. (supersedes
+  the pre-grilling pruned-table decision.)
 
-- **D-07 SUPERSEDED — no detached context.** `RecordRun` is a synchronous
-  in-memory mutex append that returns in microseconds; a shutdown-cancelled
-  cycle records its entry with no `context.WithoutCancel` dance. `ctx` stays
-  in the seam signature for symmetry with `EventRecorder` / `Notifier`, but
-  it is not load-bearing. (The call semantics — log-and-swallow — are
-  Phase 18.1.)
+- **D-09: Summary is a deterministic string built from counts and outcome.**
+  e.g. `ok — 12 checked, 1 errored, 3 events`. Never from a driver
+  error, upstream response, DSN, webhook URL, or path. Held on the
+  `RunResult` value and recomposed by `RecordRun` itself. (unchanged in
+  intent; the `CHECK`-constraint enforcement it used to reference died with
+  the table.)
 
-- **D-08 SUPERSEDED — ring buffer, not a pruned table.**
-  `internal/pollruns.Store` holds `[]RunResult` per source, cap `const N =
-  50` (named const in the `pollruns` package, one-line comment on the
-  number). No prune query, no INSERT+DELETE CTE, no cross-source-deadlock
-  surface. Correct under two sources recording near-simultaneously = one
-  `sync.Mutex` (or `RWMutex`) on the store.
+- **D-10: RunResult is a plain struct; the one new sqlc query is CountWatchlist.**
+  `RunResult` fields — `Source`, `CycleID`,
+  `StartedAt`, `FinishedAt`, `DurationMS`, `ArtistsChecked` (entries
+  dispatched to a worker), `ArtistsSkipped`, `ArtistsErrored`,
+  `EventsRecorded`, `Outcome`, `Summary`. No migration. The one new sqlc
+  query this phase adds is `CountWatchlist` in `queries/watchlist.sql` for
+  `/status`'s `watchlist_size` — regenerate sqlc and run `make sqlc-check`
+  locally (no CI counterpart).
 
-- **D-09 (unchanged): `Summary` is a stored string, composed deterministically
-  from the counts + outcome enum at record time** — e.g. `"ok — 12 checked,
-  1 errored, 3 events"`. Never from a driver error, upstream response, DSN,
-  webhook URL, or path. Held on the `RunResult` value.
+- **D-06 [folded]: no outcome CHECK constraint.** Folded into D-08 — no
+  table, so `Outcome` is a Go string (`ok` / `error` / `cancelled`; no
+  `partial`, no `skipped_overlap`), normalized in Go.
 
-- **D-10 SUPERSEDED — no migration, no sqlc for run history.** `RunResult`
-  is a plain Go struct: `Source`, `CycleID`, `StartedAt`, `FinishedAt`,
-  `DurationMS`, `ArtistsChecked` (= entries dispatched to a worker),
-  `ArtistsSkipped`, `ArtistsErrored`, `EventsRecorded`, `Outcome`, `Summary`.
-  The **only** new sqlc query this phase adds is `CountWatchlist` in
-  `queries/watchlist.sql` for `/status`'s `watchlist_size` — regenerate and
-  run `make sqlc-check` locally (no CI counterpart).
+- **D-07 [folded]: no detached context for RecordRun.** Folded into D-08 —
+  `RecordRun` is a synchronous in-memory mutex append that returns in
+  microseconds, so a shutdown-cancelled cycle records its entry with no
+  `context.WithoutCancel` dance. `ctx` stays in the seam signature for
+  symmetry with `EventRecorder` / `Notifier` but is not load-bearing.
 
 ### `/status` API (contract frozen here)
 
-- **D-11 (adjusted): `/status` returns** — `runs` (last per source),
-  `history` (last N per source, newest first), a per-source skip signal
-  (`last_skipped_at`, `consecutive_skips`), `watchlist_size`, `poll_interval`,
-  and `instance` (`app_version`, `schema_applied`, `schema_expected`). Empty
-  `runs`/`history` on a fresh instance is a valid `200`, not an error. Key
-  names, `poll_interval` encoding, and whether `instance` reuses `/ready`'s
-  key names — planner's call, kept internally consistent and **documented for
-  Phase 19** (contract-freeze point).
+- **D-11: /status response shape and contract freeze.** Returns `runs` (last
+  per source), `history` (last N per source, newest first), a per-source skip
+  signal (`last_skipped_at`, `consecutive_skips`), `watchlist_size`,
+  `poll_interval`, and `instance` (`app_version`, `schema_applied`,
+  `schema_expected`). Empty `runs`/`history` on a fresh instance is a valid
+  `200`, not an error. Exact key names, `poll_interval` encoding, and whether
+  `instance` reuses `/ready`'s key names were left to the planner and are
+  frozen in `18-04-PLAN.md` + `docs/api/status-contract.md` as the Phase 19
+  freeze point. (adjusted from the pre-grilling context.)
 
-- **D-12 (unchanged): `/status` leaks nothing** — counts, timestamps, enum
-  values, the composed `Summary`, the app version, two integers. `401`
-  without a session (unchanged gate enforcement). DB failure → raw to
-  `httplog.SetAttrs`, fixed body.
+- **D-12: /status leaks nothing.** Counts, timestamps, enum values, the
+  composed `Summary`, the app version, and two integers only. `401` without a
+  session (gate enforcement unchanged). A DB failure serving `/status` logs
+  raw to `httplog.SetAttrs` and returns a fixed body. (unchanged.)
 
 ### App version
 
-- **D-13 CHANGED — `${{ github.sha }}` build-arg, not the svu tag.** The
+- **D-13: app version via github.sha build-arg, release job untouched.** The
   pipeline builds the image once in `build-scan`, saves the tarball, and
   `release` pushes it byte-for-byte (07-REVIEW CR-02). The svu `next` tag is
-  computed in `release`, *after* the build — injecting it would mean either
+  computed in `release`, after the build, so injecting it would mean
   computing svu inside the sensitive `build-scan` job or rebuilding in
-  `release` (breaking the single-build guarantee). Instead: pass
-  `--build-arg VERSION=${{ github.sha }}` on `build-scan`'s
-  `docker/build-push-action` step (SHA is free, no svu, no `fetch-depth`
-  change), `ARG VERSION` + `-ldflags "-X …=$VERSION"` in the Dockerfile
-  builder stage, `"dev"` fallback. Show a short SHA in the about block.
-  Touches `.github/workflows/full-pipeline.yml` + `Dockerfile` (shared-file
-  hazard, but one line each, `release` job untouched).
+  `release` (breaking the single-build guarantee). Instead: `--build-arg
+  VERSION=${{ github.sha }}` on `build-scan`'s `docker/build-push-action`
+  step, `ARG VERSION` + `-ldflags -X <full-module-path>` in the Dockerfile
+  builder stage, `"dev"` fallback, short SHA in the about block. Touches
+  `.github/workflows/full-pipeline.yml` + `Dockerfile` only; the `release`
+  job is not modified. (changed from the pre-grilling svu-tag decision.)
 
-### Concurrency
+### Deferred to Phase 18.1
 
-- **D-14 MOVED to Phase 18.1.** The `runCycle` counter aggregation is the
-  whole reason for the split. This phase's `pollruns.Store` mutex is trivial
-  and inspectable; the fan-out counter correctness lives in 18.1 with the
-  looped invariant test.
+- **D-14 [deferred]: runCycle counter aggregation.** Moved to Phase 18.1 —
+  the whole reason for the split. This phase's `pollruns.Store` mutex is
+  trivial and inspectable; the fan-out counter correctness (channel-fold, the
+  looped invariant test) lives in 18.1.
 
-### `events_recorded` source — LOCKED (was Claude's discretion)
-
-- **Widen the `EventRecorder` seam** (`DetectMusicBrainz` / `DetectDeezer`)
-  to `(int, error)`. The downstream `SELECT count(*) … WHERE created_at >=
-  started_at` alternative was rejected — `started_at` is the app process's
-  wall clock and `events.created_at` is Postgres's, so positive app-vs-DB
-  skew silently undercounts. The widening happens in **Phase 18.1** (it
-  touches `internal/detection` + `runCycle`); this phase's `RunResult` just
-  carries the `EventsRecorded int` field.
+- **D-16 [deferred]: widen EventRecorder to (int, error).** For
+  `events_recorded`. Phase 18.1 — it touches `internal/detection` +
+  `runCycle`. The downstream `SELECT count(*)` alternative was rejected
+  (app-vs-DB clock skew silently undercounts). This phase's `RunResult` just
+  carries the `EventsRecorded int` field, populated to 0 until 18.1.
 
 </decisions>
 
