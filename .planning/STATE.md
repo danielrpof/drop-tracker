@@ -21,10 +21,10 @@ current_phase_name: Automated VPS Deploy with Health-Gated Rollback
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-05)
+See: .planning/PROJECT.md (updated 2026-09-09)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 17 — Automated VPS Deploy with Health-Gated Rollback
+**Current focus:** Starting v1.4 Operator Observability (Option C — `/ready` probe, `poll_runs` + `/status`, then a System panel). Phase 17 (VPS deploy) deferred pending hardware.
 
 ## Current Position
 
@@ -304,10 +304,11 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-05T23:31:59.589Z
-Stopped at: Phase 17 context gathered
-Resume file: .planning/phases/17-automated-vps-deploy-with-health-gated-rollback/17-CONTEXT.md
+Last session: 2026-09-09 — v1.3 closed (partial), starting v1.4
+Stopped at: v1.3 milestone archived; v1.4 milestone kickoff next
+Resume file: —
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- v1.4 "Operator Observability" kickoff in progress (`/gsd-new-milestone`) — Phases 18 (backend: `/ready`, `poll_runs`, `/status`) and 19 (UI: System panel)
+- Phase 17 (VPS deploy) stays deferred — un-defer as its own milestone once a VPS + domain exist; context archived at `.planning/milestones/v1.3-phases/17-*`
