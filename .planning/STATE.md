@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Continuous Deployment
-current_phase: 17
-current_phase_name: Automated VPS Deploy with Health-Gated Rollback
-status: planning
+status: Awaiting next milestone
 stopped_at: Phase 17 context gathered
-last_updated: "2026-09-05T23:32:00.830Z"
-last_activity: 2026-09-05
-last_activity_desc: Phase 16 complete, transitioned to Phase 17
-state_head: 0dbf092367dd81466a9882a64f11e81b9049872e
+last_updated: "2026-09-09T05:03:22.081Z"
+last_activity: 2026-09-09
+last_activity_desc: Milestone v1.3 completed and archived
+state_head: 0be81dd326eb6621dd630e0c2ec980682a78bcac
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 15
   completed_plans: 15
+current_phase: 17
+current_phase_name: Automated VPS Deploy with Health-Gated Rollback
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-09-05)
 
 ## Current Position
 
-Phase: 17 — Automated VPS Deploy with Health-Gated Rollback
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-09-05 — Completed quick task 260905-kfv (extract internal/sqlscan)
+Phase: Milestone v1.3 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-09-09 — Milestone v1.3 completed and archived
 
 ## Performance Metrics
 
@@ -310,10 +310,4 @@ Resume file: .planning/phases/17-automated-vps-deploy-with-health-gated-rollback
 
 ## Operator Next Steps
 
-- `/clear` then `/gsd-discuss-phase 17` — Automated VPS Deploy with Health-Gated Rollback. Run the discuss/spec pass **before** planning: the TLS reverse-proxy choice (recommended: Caddy on-VPS) blocks the first deploy, and no VPS is provisioned yet. Also lock: documented-and-accepted swap-gap downtime vs. mitigation, and post-deploy image-prune policy.
-- Phase 17's edit target is `.github/workflows/full-pipeline.yml` (same shared file as 15/16) plus a small `release`-job change to expose `outputs.version`. Deploy job needs `needs: [release]` + `push`/`refs/heads/main` guard + own `concurrency` group (`cancel-in-progress: false`) + a `production` GitHub Environment for the SSH secrets.
-- Fold the basic Postgres backup + restore procedure into the Phase 17 runbook (DPLY-07 / OPS-04 basics) — it's the recovery path when an image rollback also needs the schema restored (PITFALLS #8).
-- Phase 17 follow-up from Phase 16 security (UF-1): re-assert the `n1-boot` probe once a guard-carrying release is the N-1 rollback target, and alarm if the guard-adoption window stays open.
-- Non-blocking follow-up from Phase 14 security: consider `Cache-Control: no-store` on the gated response path (T-14-CACHE-01 / 14-REVIEW WR-01).
-- Non-blocking from Phase 15: `15-VALIDATION.md` is `nyquist_compliant: false` (PARTIAL); revisit at milestone audit if deeper feedback-sampling coverage is wanted.
-- Two minor pending todos filed 2026-09-05 (stale `web/package-lock.json`; `shadcn` in frontend `dependencies`) — cleanup only, not security.
+- Start the next milestone with /gsd-new-milestone

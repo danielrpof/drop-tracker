@@ -10,23 +10,21 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 ## Current State
 
-**Shipped:** v1.2 Cleanup & Display Fixes (2026-08-24)
+**Shipped:** v1.3 Continuous Deployment — partial (2026-09-09)
 
-v1.0's four peer-reviewed gaps are closed without changing user-facing behavior: the frontend has a real Vitest + RTL test suite, CI now blocks merges on coverage regressions (80% backend / 70% frontend), event history has a configurable retention window with zero data loss to detection state, and polling runs several artists at a time per source through a bounded, race-safe worker pool. A follow-on tech-debt phase (11.1) closed everything the milestone audit flagged, including a real accessibility bug in the History filter UI.
+v1.3 delivered everything in the deployment-readiness chain that does not need a physical host: an optional single-passphrase instance gate (HMAC-signed cookie, inert when unconfigured) that keeps a public instance from being briefly open (Phase 14); a report-only PR comment showing backend/frontend coverage deltas vs. the main baseline, sharing one measurement algorithm with the merge gate (Phase 15); and rollback-safe migrations — an ahead-of-source no-op guard plus a CI `migration-check` + `n1-boot` pair that proves the previous release still boots against the current schema (Phase 16). The one remaining phase, **Phase 17 (automated VPS deploy with health-gated rollback), is deferred** — it needs a provisioned VPS + domain the developer does not have yet. DPLY-01…08 carry forward to a future milestone; the discuss-phase context already gathered for it is archived under `v1.3-phases/17-*`.
 
-v1.2 then closed the backlog and outstanding display bugs: Phase 12 fixed the `CoverArt.tsx` error-state-never-resets bug and added Deezer-fan-count-based search popularity ranking with MusicBrainz country-fallback (absorbing backlog Phase 999.1). Phase 13 fixed three more user-facing display/data bugs — History cards with no release date, guest-feature cards with no album art, and MusicBrainz artist art never rendering — the last via a new hand-rolled `internal/artistart` matcher (strict close-name + guarded tie-break, fail-closed by default) wired into both add-time and a cooldown-bounded startup backfill sweep (absorbing backlog Phase 999.2).
-
-## Current Milestone: v1.3 Continuous Deployment
+<details>
+<summary>Milestone v1.3 Continuous Deployment (shipped partial 2026-09-09)</summary>
 
 **Goal:** Ship the app automatically to a self-hosted VPS on every merge to main, behind a passphrase gate, and close the last CI reporting gap.
 
-**Target features:**
-- GitHub Actions deploy job: after the release job publishes the versioned image to ghcr.io, SSH to the VPS, `docker compose pull` + `up -d` the new pinned tag, poll `/health`, auto-rollback to the previous image on failure (DPLY-01)
-- Instance passphrase gate — chi middleware, one env-var passphrase + session cookie, applied to all routes except `/health` — protects the watchlist and Discord webhook on a public URL
-- Boot-time migrations remain the migration path; the `/health` deploy gate + rollback catches a bad migration; migrations must stay backward-compatible (expand/contract) so a rollback is safe
-- PR comment reporting backend + frontend coverage diff vs. the main baseline (CICD-13)
+**Delivered:** passphrase gate (Phase 14), PR coverage-diff comment (Phase 15), rollback-safe migrations (Phase 16).
+**Deferred:** Phase 17 automated VPS deploy + health-gated rollback (DPLY-01…08) — blocked on VPS hardware.
 
-**Considered and rejected this cycle:** a multi-user profile system (accounts, per-user watchlists, cross-device sync). Self-host-per-person plus the existing server-side Postgres already delivers data isolation and cross-device access once DPLY-01 lands; multi-user auth stays out of scope (see below).
+**Considered and rejected this cycle:** a multi-user profile system (accounts, per-user watchlists, cross-device sync). Self-host-per-person plus the existing server-side Postgres already delivers data isolation and cross-device access; multi-user auth stays out of scope (see below).
+
+</details>
 
 <details>
 <summary>Previous Milestone: v1.2 Cleanup & Display Fixes (shipped 2026-08-24)</summary>
@@ -86,7 +84,7 @@ v1.2 then closed the backlog and outstanding display bugs: Phase 12 fixed the `C
 
 ### Active
 
-- [ ] VPS SSH-based deploy step, automated on merge to main, with `/health`-gated auto-rollback (v1.3 — DPLY-01)
+- [ ] VPS SSH-based deploy step, automated on merge to main, with `/health`-gated auto-rollback, plus its provisioning runbook, SSH host-key pinning, `production` environment secrets, and serialized deploys (DPLY-01…08) — **deferred**, blocked on a provisioned VPS + domain; Phase 17 discuss context archived under `v1.3-phases/17-*`
 
 ### Out of Scope
 
@@ -106,7 +104,9 @@ v1.2 then closed the backlog and outstanding display bugs: Phase 12 fixed the `C
 - MusicBrainz and Deezer clients should be real, testable HTTP clients — tests mock the external calls with `httptest.Server`, not fake/stub business logic.
 - musicbrainz.org's TLS handshake fails with an `unexpected eof`/server `decode_error` alert from this developer's WSL2 network path specifically — reproduced identically with plain `curl` (bypassing drop-tracker's Go client entirely), confirmed environmental (not a code defect) during Phase 03 UAT. Deezer is unaffected. If a future phase's live testing hits the same MusicBrainz-only TLS failure on this machine, this is already a known, accepted limitation — see `.planning/phases/03-external-clients-search/03-VERIFICATION.md` Acknowledged Gaps and Broken Windows Ledger entry #3 (waived).
 - Config/settings library (pydantic-settings equivalent — e.g. envconfig/viper) and exact structured-logging setup are implementation details left to phase research/planning rather than locked here.
-- Current codebase size (as of Phase 13 close, 2026-08-24): ~26,900 LOC Go across 82 files, ~4,000 LOC TypeScript/TSX across 38 files (`web/app/`, excludes generated build output).
+- Current codebase size (as of Phase 13 close, 2026-08-24): ~26,900 LOC Go across 82 files, ~4,000 LOC TypeScript/TSX across 38 files (`web/app/`, excludes generated build output). Phases 14-16 added `internal/authgate`, `cmd/coverage-report`, `cmd/migration-check`, and `internal/sqlscan`.
+- CI's `svu`-computed image tags have run ahead of the milestone-doc versioning for a while (git tags reach `v1.8.x` while milestone cycles are at v1.3) — the two numbering schemes are independent by design; the milestone label is the planning cycle, the git tag is the published image.
+- Phase 17's deploy health-gate was always meant to poll a readiness endpoint, not liveness. The `/ready` probe planned for the next milestone (Operator Observability) is being built partly so Phase 17 has it to consume when it is un-deferred.
 - The `CoverArt.tsx` image-load-error-never-resets bug (noted at v1.1 close as pre-existing, non-blocking tech debt) was fixed in Phase 12.
 - Windows dev-machine limitations remain (`go test -race` unusable — ThreadSanitizer allocation failure under memory pressure; musicbrainz.org TLS handshake fails over WSL2). Both are documented, waived, environmental, not code defects. See `.planning/WINDOWS.md`.
 
@@ -182,4 +182,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-05 after Phase 16*
+*Last updated: 2026-09-09 after v1.3 milestone (partial — Phase 17 deferred)*
