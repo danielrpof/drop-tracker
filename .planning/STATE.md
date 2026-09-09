@@ -4,12 +4,12 @@ milestone: v1.4
 milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 18
 current_phase_name: Backend — Readiness, Status Surface & App Version
-status: planning
-stopped_at: Phase 18 context revised post-grilling; ready to plan
-last_updated: "2026-09-09T22:54:28.298Z"
+status: ready_to_execute
+stopped_at: Phase 18 planned — 4 plans, 2 waves, all coverage gates green
+last_updated: "2026-09-09T23:10:00.000Z"
 last_activity: 2026-09-09
-last_activity_desc: Design grilling split Phase 18 → 18 + 18.1; poll_runs table → ring buffer (ADR-0001)
-state_head: c0b0ae7ac2bc083c542743847f70d61e61bff539
+last_activity_desc: "Phase 18 planned (4 plans / 2 waves); research + pattern-map + plan-check all passed"
+state_head: cf7d8f8
 progress:
   total_phases: 3
   completed_phases: 0
@@ -31,8 +31,8 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 
 Phase: 18 (Backend — Readiness, Status Surface & App Version) — READY TO EXECUTE
 Plan: —
-Status: Context revised post-grilling — ready to plan Phase 18 (then 18.1, then 19)
-Last activity: 2026-09-09 — grilling split Phase 18 → 18 + 18.1; poll_runs table → ring buffer (ADR-0001); REQUIREMENTS RUN-01..04 reworded
+Status: Phase 18 planned — 4 plans across 2 waves, ready to execute. Then Phase 18.1 (runCycle instrumentation), then Phase 19 (System view).
+Last activity: 2026-09-09 — Phase 18 planned; research + pattern-map + plan-check passed; decision & requirement coverage gates green (12/12, 7/7)
 
 ## Performance Metrics
 
