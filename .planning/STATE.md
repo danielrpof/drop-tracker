@@ -1,20 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: Continuous Deployment
-status: Awaiting next milestone
-stopped_at: Phase 17 context gathered
-last_updated: "2026-09-09T05:03:22.081Z"
+milestone: v1.4
+milestone_name: Operator Observability
+status: planning
+last_updated: "2026-09-09T05:08:20.447Z"
 last_activity: 2026-09-09
-last_activity_desc: Milestone v1.3 completed and archived
-state_head: 0be81dd326eb6621dd630e0c2ec980682a78bcac
 progress:
-  total_phases: 4
-  completed_phases: 3
-  total_plans: 15
-  completed_plans: 15
-current_phase: 17
-current_phase_name: Automated VPS Deploy with Health-Gated Rollback
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 
 ## Current Position
 
-Phase: Milestone v1.3 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-09-09 — Milestone v1.3 completed and archived
+Status: Defining requirements
+Last activity: 2026-09-09 — Milestone v1.4 started
 
 ## Performance Metrics
 

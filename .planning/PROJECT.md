@@ -14,6 +14,20 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 v1.3 delivered everything in the deployment-readiness chain that does not need a physical host: an optional single-passphrase instance gate (HMAC-signed cookie, inert when unconfigured) that keeps a public instance from being briefly open (Phase 14); a report-only PR comment showing backend/frontend coverage deltas vs. the main baseline, sharing one measurement algorithm with the merge gate (Phase 15); and rollback-safe migrations — an ahead-of-source no-op guard plus a CI `migration-check` + `n1-boot` pair that proves the previous release still boots against the current schema (Phase 16). The one remaining phase, **Phase 17 (automated VPS deploy with health-gated rollback), is deferred** — it needs a provisioned VPS + domain the developer does not have yet. DPLY-01…08 carry forward to a future milestone; the discuss-phase context already gathered for it is archived under `v1.3-phases/17-*`.
 
+## Current Milestone: v1.4 Operator Observability
+
+**Goal:** A drop-tracker operator can see the scheduler working — last poll cycle per source, what it checked and found, whether it errored — and a deploy or uptime monitor can tell "process up" from "ready to serve".
+
+**Target features:**
+- `/ready` endpoint (public, alongside `/health`) — returns 200 only when the DB is reachable *and* the schema is at the expected migration version; distinct from `/health`'s liveness check. Built so a future Phase 17 deploy health-gate can poll it.
+- `poll_runs` table + a `RunRecorder` seam — one row per poll-cycle invocation (source, started/finished, artists checked, artists errored, events recorded, outcome); the poller stays DB-connection-free in principle via the seam, mirroring the existing `EventRecorder`; retention by pruning to last N rows per source on insert (no new env var).
+- `GET /status` (gated) — JSON: last run per source, recent run history, watchlist size, poll interval.
+- A "System" view in the SPA rendering `/status` as an operator status panel, with its own UI-SPEC.
+
+**Structure:** Phase 18 (backend) → Phase 19 (UI).
+
+**Out of scope this cycle:** Prometheus `/metrics` / the Grafana stack (still deferred), historical charts/graphs, poll-failure alerting.
+
 <details>
 <summary>Milestone v1.3 Continuous Deployment (shipped partial 2026-09-09)</summary>
 
@@ -182,4 +196,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-09 after v1.3 milestone (partial — Phase 17 deferred)*
+*Last updated: 2026-09-09 — v1.4 Operator Observability milestone opened*
