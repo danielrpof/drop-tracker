@@ -81,6 +81,53 @@
 
 ---
 
+## Milestone: v1.3 — Continuous Deployment (partial)
+
+**Shipped:** 2026-09-09 (partial — Phase 17 deferred)
+**Phases:** 4 planned (14-17) | **Plans:** 15 | **Tasks:** 46 | **Sessions:** not tracked
+
+### What Was Built
+
+- Optional single-passphrase instance gate — `internal/authgate` (HMAC-SHA256 signed cookie, `Manager` middleware, `/session` handlers, `Alerter` seam), `httpserver.WithAuthGate` moving the six data routes behind a protected chi Group, per-IP login throttle + fixed comparison delay + alert-only brute-force counter, a framework-free SPA `authStore` + `PassphraseScreen` + gateActive-gated Log out control; fully inert when `INSTANCE_PASSPHRASE` is unset (Phase 14)
+- `cmd/coverage-report` (stdlib-only) plus CI wiring: a report-only `coverage-comment` job that sticky-upserts one same-repo PR comment showing backend/frontend coverage and the pp delta vs. a SHA-keyed main baseline, sharing one measurement algorithm with `make coverage-gate` (D-17); never blocks a merge (Phase 15)
+- Rollback-safe migrations — an ahead-of-source no-op guard in `internal/db/migrate.go` (`maxSourceVersion` + `runMigrationsWithSource`), `cmd/migration-check` (stdlib-only SQL tokenizer flagging backward-incompatible / unsafe-forward DDL with README-citing messages + a non-overridable previous-release query cross-reference), and unconditional `migration-check` / `n1-boot` CI jobs with step-gated expensive work; `internal/db/migrations/README.md` documents the expand/contract rule (Phase 16)
+- `internal/sqlscan` extracted from `cmd/migration-check` as a reusable SQL lexing module
+
+### What Worked
+
+- **Splitting Phase 16 (rollback safety) out of the deploy phase** so the cross-cutting migration rule landed *before* auto-rollback exists rather than as the last task inside the heaviest phase — the discipline is now in force for every future migration regardless of when Phase 17 lands
+- **Verifying research assumptions against the actual pinned dependency during planning**, not just from docs — Phase 16 caught two false founding assumptions this way: `migrate.Up()` against an ahead-of-source schema returns a hard error (not `ErrNoChange`), and a skipped `needs:` job skips its dependents (not counts as success). Both would have been production or CI bugs
+- **The report-only CI job shape** (real job, job-scoped write permission, in no `needs:` graph, `continue-on-error: true`) cleanly delivered CICD-13's "never-blocking" property — proven live when a deliberate coverage drop turned `frontend-test` red while `coverage-comment` stayed green
+- Gap-closure plans (14-05/06/07) closed UAT gaps inside Phase 14 rather than deferring them, continuing the pattern v1.1/v1.2 identified
+
+### What Was Inefficient
+
+- **Phase 14 needed three separate gap-closure rounds.** G-14-1: the gate shipped *inert* (container booted with an empty `INSTANCE_PASSPHRASE`) and survived an entire UAT round unnoticed because the inert path was silent. G-14-2 and G-14-3: two more Log-out-control bugs, the deeper one (no gated-load signal for a session already holding a valid cookie) present since plan 14-03 but not found until a third UAT pass. A boot-status log line and a gated-load signal both belonged in the original plan.
+- **Two Phase 14 debug sessions were fixed in gap-closure plans but never filed as resolved** — they surfaced as open-artifact noise at this milestone's close and had to be reconciled by hand (mirrors v1.1/v1.2's manual-correction findings, one layer down).
+- **Phase 17 was roadmapped as a milestone phase despite depending on hardware the developer does not have.** v1.3 therefore cannot fully ship. It should have been its own milestone gated on "a VPS + domain exist", not a phase inside a milestone that was otherwise complete weeks earlier.
+- Windows dev-machine limitations (`go test -race`, MusicBrainz TLS over WSL2) recurred again as a known, documented cost.
+
+### Patterns Established
+
+- **Verify a research finding against the pinned dependency's real behavior during planning** — a hermetic RED→GREEN proof against the actual library version, not a docs citation, for any assumption a phase's design rests on
+- **stdlib-only Go CLI tools for CI logic** (`cmd/coverage-report`, `cmd/migration-check`, backed by `internal/sqlscan`) — unit-testable, zero new deps, greppable call sites; the default shape for new pipeline checks
+- **Report-only CI job** = real job + job-scoped permission + no `needs:` membership + `continue-on-error: true`, for anything that must inform without ever blocking
+- **A security feature's inert/disabled path must be observable** — emit one boot line stating active/inert, so "it does nothing" cannot pass a UAT round silently
+
+### Key Lessons
+
+1. Do not roadmap a phase whose critical dependency is external infrastructure you do not control. Make it its own milestone, gated on the prerequisite actually existing — otherwise the whole milestone hangs on it.
+2. File a debug session as `resolved` (and move it to `debug/resolved/`) the moment its fix lands in a plan, not only when a debug cycle formally closes it. Orphaned `diagnosed` / `awaiting_human_verify` sessions become milestone-close noise.
+3. An inert or disabled security control is invisible without an explicit status signal. The boot-status log line added in Phase 14 gap closure should have been in plan 14-01.
+
+### Cost Observations
+
+- Model mix: not tracked this milestone
+- Sessions: not tracked
+- Notable: no cost/efficiency telemetry captured for v1.3, consistent with v1.0–v1.2
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -90,6 +137,7 @@
 | v1.0 | not tracked | 7 | Initial MVP; milestone never formally closed via `/gsd-complete-milestone` |
 | v1.1 | not tracked | 5 (08-11.1) | First milestone closed via the full `/gsd-complete-milestone` workflow; added a dedicated tech-debt-closure phase pattern |
 | v1.2 | not tracked | 2 (12-13) | Ad-hoc post-v1.1 cleanup phases (no REQUIREMENTS.md, version assigned only at close) closed via `/gsd-complete-milestone`; required manual archive/MILESTONES.md correction since the phases weren't pre-grouped under a milestone heading |
+| v1.3 | not tracked | 4 planned (14-17), 3 shipped | First **partial** milestone close — Phase 17 deferred for lack of a VPS; debug-session and todo backlog acknowledged and carried forward at close |
 
 ### Cumulative Quality
 
@@ -98,9 +146,12 @@
 | v1.0 | not measured | not enforced | — |
 | v1.1 | backend 83.5%+, frontend 70%+ (both CI-enforced) | 80% backend / 70% frontend gate | buffered-channel semaphore (no worker-pool lib), hand-rolled accessible combobox (no UI lib) |
 | v1.2 | backend/frontend suites extended, gates held at 80%/70% throughout | 80% backend / 70% frontend gate (unchanged) | `internal/artistart` fail-closed matcher + `ActivityGate` primitive (stdlib-only, no new deps) |
+| v1.3 | suites extended for authgate + the two CI tools; gates held at 80%/70% (backend cutover margin measured 10pp above floor) | 80% backend / 70% frontend gate (unchanged) | `internal/authgate` signed-cookie gate, `cmd/coverage-report`, `cmd/migration-check`, `internal/sqlscan` — all stdlib-only, no new deps |
 
 ### Top Lessons (Verified Across Milestones)
 
 1. Close out a milestone's archival step promptly after shipping — letting phase directories accumulate un-archived corrupts the next milestone's close (v1.1).
 2. Assign a milestone version and group phases under it in ROADMAP.md as soon as post-ship work starts, not just when `/gsd-complete-milestone` runs — otherwise both humans and the close automation lose track of which phases belong to which version (v1.2).
-3. Fixing code-review/UAT-surfaced warnings inline, in the same phase they're found, beats deferring them — held true across both v1.1 and v1.2.
+3. Fixing code-review/UAT-surfaced warnings inline, in the same phase they're found, beats deferring them — held true across v1.1, v1.2, and v1.3.
+4. Don't roadmap a phase gated on infrastructure you don't control — it holds the whole milestone hostage. Make it its own milestone gated on the prerequisite existing (v1.3 / Phase 17).
+5. File debug sessions as resolved when the fix ships in a plan, not only when a debug cycle closes them, or they resurface as milestone-close noise (v1.3).
