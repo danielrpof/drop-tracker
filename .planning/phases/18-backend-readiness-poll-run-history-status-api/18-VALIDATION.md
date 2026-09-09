@@ -78,15 +78,21 @@ created: "2026-09-09"
 
 ## Wave 0 Requirements
 
-- [ ] `internal/httpserver/ready_test.go` — RDY-01, RDY-02 (gated-no-401, timeout, ahead-of-source, no-leak)
-- [ ] `internal/httpserver/status_test.go` — STAT-01, STAT-02, RUN-02 skip-signal surfacing
-- [ ] `internal/pollruns/pollruns_test.go` — RUN-04 (ring bound, two-source concurrent looped), RUN-02 (skip counter + reset)
-- [ ] `internal/db/schema_version_test.go` — `ExpectedSchemaVersion` (unit) + `SchemaVersion` (integration)
-- [ ] `internal/db/` — `CountWatchlist` integration test (may join an existing watchlist-query test file)
-- [ ] `internal/poller/poller_test.go` — add `fakeRunRecorder` (mirror `fakeEventRecorder`/`fakeNotifier`) + wiring/inert test
-- [ ] `internal/buildinfo/buildinfo_test.go` — default `"dev"`
-- [ ] Fakes: `fakeSchemaVersioner`, `fakeStatusStore`, `fakeWatchlistCounter` in `internal/httpserver` (mirror `stubPinger`, `stubEventsStore`)
-- [ ] Recommended: CI smoke assertion that a `build-scan`-built image reports non-`"dev"` `app_version`
+Plan ownership assigned by `/gsd-plan-phase` (2026-09-09). Every Wave 0 file is created by a
+named task, so there is no test scaffold left unowned.
+
+| Wave 0 file / gap | Owned by | Covers |
+|---|---|---|
+| `internal/httpserver/ready_test.go` | 18-01 tasks 2 and 3 | RDY-01, RDY-02 (healthy, ahead-of-source, three failure reasons, empty `schema_migrations`, not-configured, no-leak, gated-no-401, inert branch, timeout, exact-path) |
+| `internal/db/schema_version_test.go` | 18-01 task 3 | `ExpectedSchemaVersion` (unit), `SchemaVersion` (integration), reader delegation |
+| `internal/httpserver/boot_e2e_test.go` additions | 18-01 task 1, 18-04 task 1 | real-Postgres `/ready` and `/status` end-to-end |
+| `internal/pollruns/pollruns_test.go` | 18-02 tasks 2 and 3 | RUN-04 (bound, newest-first, empty store, snapshot isolation, two-source looped 1000x), RUN-02 (skip counter, per-source isolation, reset), summary composition, outcome normalization |
+| `internal/poller/poller_test.go` — `fakeRunRecorder` | 18-02 tasks 1 and 3 | seam wiring through `WithRunRecorder`, and the inert-this-phase assertion |
+| `internal/buildinfo/buildinfo_test.go` | 18-03 task 1 | default `dev`, `Short` truncation, and the injected-value gate run under `go test -ldflags` |
+| CI smoke assertion for a non-`dev` app version | 18-03 task 2 | RESEARCH assumption A6 — a `build-scan` step extracts the binary from the image it just built and greps it for the commit SHA |
+| `internal/httpserver/status_test.go` | 18-04 tasks 2 and 3 | STAT-01, STAT-02, RUN-02 surfacing, RUN-04 surfacing, gated 401, not-configured, empty-error-message, asymmetric failure handling |
+| `internal/db/watchlist_count_test.go` | 18-04 task 2 | `CountWatchlist` against a real database |
+| Fakes: `fakeSchemaVersioner`, `fakeStatusStore`, `fakeWatchlistCounter` | 18-01 task 2 (schema), 18-04 task 2 (store, counter) | one schema-versioner fake shared across `ready_test.go` and `status_test.go`, gated by an acceptance criterion |
 
 ---
 

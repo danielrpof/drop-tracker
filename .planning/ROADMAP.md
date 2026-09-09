@@ -80,7 +80,13 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   3. `GET /status` behind the gate returns JSON with: the last run per source, the last N runs per source, each source's last-skipped timestamp + consecutive-skip count, the current watchlist size, the configured poll interval, and an `instance` block (`app_version`, `schema_applied`, `schema_expected`). The same request without a session returns `401`. On a fresh instance with no cycles yet the run lists are empty (not an error). No response field on any path contains a DSN, webhook URL, filesystem path, or raw driver error string.
   4. `app_version` is the build's short commit SHA on a CI-built image and `"dev"` on a flagless local build; the image the `release` job pushes is byte-for-byte the one `build-scan` scanned (the single-build guarantee, 07-REVIEW CR-02, is intact).
   5. `internal/pollruns.Store` holds the last N (=50) run entries per source in memory behind a mutex; the `poller.RunRecorder` seam interface exists and is wired to the real store, inert only because `runCycle` does not call it yet (that is Phase 18.1). `StatusStore` reads the buffer for `/status`.
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 18-01-PLAN.md — `/ready` probe: `db.ExpectedSchemaVersion` + `db.SchemaVersion`, the `SchemaVersioner` seam, `handleReady`, root-router registration in both branches, boot wiring (wave 1)
+- [ ] 18-02-PLAN.md — `internal/pollruns` ring buffer + the `poller.RunRecorder` seam, no-op default and `WithRunRecorder` — declared and inert, `runCycle` untouched (wave 1)
+- [ ] 18-03-PLAN.md — app version: `internal/buildinfo`, Dockerfile `VERSION` argument + link flag, CI build argument and a provenance assertion (wave 1)
+- [ ] 18-04-PLAN.md — gated `GET /status`: `CountWatchlist`, the `StatusStore`/`WatchlistCounter` seams, `handleStatus`, the frozen contract in `docs/api/status-contract.md`, composition-root wiring (wave 2)
 
 **Notes for the phase planner**
 
@@ -149,7 +155,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 18. Backend — Readiness, Status Surface & App Version | 0/TBD | Not started | - |
+| 18. Backend — Readiness, Status Surface & App Version | 0/4 | Planned | - |
 | 18.1. Poll-Cycle Instrumentation | 0/TBD | Not started | - |
 | 19. Frontend — System View | 0/TBD | Not started | - |
 
