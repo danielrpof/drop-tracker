@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.4
-milestone_name: Operator Observability (Phases 18-19) — IN PROGRESS
+milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 18
-current_phase_name: "Backend: Readiness, Poll-Run History & Status API"
+current_phase_name: "Backend: Readiness, Status Surface & App Version"
 status: planning
-stopped_at: Phase 18 context gathered
-last_updated: "2026-09-09T19:55:00.826Z"
+stopped_at: Phase 18 context revised post-grilling; ready to plan
+last_updated: "2026-09-09T21:30:00.000Z"
 last_activity: 2026-09-09
-last_activity_desc: v1.4 roadmap created (Phases 18-19, 12/12 requirements mapped)
-state_head: 97dd91600eb8673cdeb0f1b598c702578c098357
+last_activity_desc: "Design grilling split Phase 18 → 18 + 18.1; poll_runs table → ring buffer (ADR-0001)"
+state_head: ba85cb2
 progress:
-  total_phases: 2
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-09)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** v1.4 Operator Observability roadmapped — Phase 18 (backend: `/ready`, `poll_runs` + `RunRecorder`, gated `/status`) then Phase 19 (SPA System view). Phase 17 (VPS deploy) deferred pending hardware.
+**Current focus:** v1.4 Operator Observability. A design grilling split the backend work: **Phase 18** (`/ready`, in-process run-history ring buffer + seams, gated `/status` with the contract frozen, SHA app version — all additive), **Phase 18.1** (the risky `runCycle` instrumentation: widened `EventRecorder`, channel-fold counters, `RecordRun`/`RecordSkip`, concurrency test), then **Phase 19** (SPA System view). `poll_runs` is now an in-process ring buffer, not a table (`docs/adr/0001`). Phase 17 (VPS deploy) deferred pending hardware.
 
 ## Current Position
 
-Phase: 18 — Backend: Readiness, Poll-Run History & Status API (not started)
+Phase: 18 — Backend: Readiness, Status Surface & App Version (not started)
 Plan: —
-Status: Roadmap complete — ready to plan Phase 18
-Last activity: 2026-09-09 — v1.4 roadmap created (Phases 18-19, 12/12 requirements mapped)
+Status: Context revised post-grilling — ready to plan Phase 18 (then 18.1, then 19)
+Last activity: 2026-09-09 — grilling split Phase 18 → 18 + 18.1; poll_runs table → ring buffer (ADR-0001); REQUIREMENTS RUN-01..04 reworded
 
 ## Performance Metrics
 

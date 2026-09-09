@@ -115,3 +115,56 @@
 - OBS-05 — the non-chosen `events_recorded` approach.
 - A dedicated `/version` endpoint — rejected in favour of `/status`'s `instance` block.
 - Promoting `redactDSN` / `redactError` to a shared exported package — only if a free-text error must be stored; D-09 avoids that.
+
+---
+
+## 2026-09-09 — Design grilling (`/grill-with-docs`) → Phase 18 split + ring buffer
+
+A relentless-grilling pass over the gathered Phase 18 context, with the codebase
+read (`runCycle`, `health.go`, `server.go`, `migrate.go`, the `AdvanceGroupTrackCountBaseline`
+CTE, the `build-scan`/`release` job structure). Outcome: the phase was
+restructured, not replaced.
+
+### Findings that drove changes (ranked by impact)
+
+1. **D-08's prune mechanism was technically wrong.** It called for a single
+   INSERT+DELETE CTE "mirroring `AdvanceGroupTrackCountBaseline`". The research's
+   own ARCHITECTURE.md Anti-Pattern 2 rules that shape out (a data-modifying CTE
+   can't see its own insert), and `AdvanceGroupTrackCountBaseline` is a
+   `SELECT … FOR UPDATE` + `UPDATE` on an existing row — an unrelated pattern.
+2. **The phase was oversized** — migration + 2 endpoints + shared-CI-file change
+   + the codebase's single riskiest concurrency change (`runCycle` counters, no
+   `-race` anywhere).
+3. **`poll_runs` as a table was unnecessary.** A ring buffer kills Pitfalls #2
+   (prune race), #4 (skip eviction), and half of #3 (hung write wedging the
+   guard), plus the migration and the local-only `sqlc-check` gate.
+4. **`skipped_overlap` coalescing (D-05) was invented complexity** — not in the
+   requirements, opposite to the research, landing in the riskiest package.
+5. **App-version `-ldflags` (D-13) fought the single-build guarantee** — the svu
+   tag is computed in `release`, after `build-scan` builds the scanned tarball.
+6. **`/ready` had no automated consumer** — `/health` already pings the DB;
+   Phase 17 (its only machine consumer) is deferred; monitors stay on `/health`.
+7. **Downstream `events` count has a clock-skew undercount** (app clock vs DB clock).
+8. **`artists_checked` was undefined** for Deezer's pre-semaphore skip.
+
+### Decisions (user-confirmed over 3 rounds)
+
+| Topic | Resolution |
+|-------|------------|
+| `/ready` | Keep it, full machine-readable probe; share the schema-version read with `/status`'s `instance` block. |
+| Run history storage | **In-process ring buffer** (`docs/adr/0001`), N=50/source. Not a table. History resets on restart (= on deploy; Phase 19's first-run state covers it). |
+| Skipped-overlap | **Separate per-source signal** (`last_skipped_at`, `consecutive_skips`), never a run entry. RUN-02 reworded. |
+| `outcome` enum | `ok | error | cancelled`. No `partial` (data-quality is the `artists_errored` axis; the label is Phase 19's job). No `skipped_overlap`. |
+| `events_recorded` | **Widen `EventRecorder` to `(int, error)`** — reject downstream count (clock skew). |
+| `artists_checked` | Entries dispatched to a worker. Add `artists_skipped` (Deezer nil-`deezer_id`). |
+| App version | `--build-arg VERSION=${{ github.sha }}` on `build-scan`, `-ldflags -X`, short SHA in the about block. No svu, `release` job untouched. |
+| Phase split | **Phase 18** = `/ready` + ring buffer + seams + `/status` + version (additive). **Phase 18.1** = `EventRecorder` widening + `runCycle` instrumentation + channel-fold counters + concurrency test. |
+| "health history" | The poll-run ring buffer is it; no separate readiness-event log (that would be OBS). |
+| REQUIREMENTS.md | RUN-01/02/03/04 reworded storage-agnostic; OBS-05 resolved into 18.1; Out-of-Scope adds "a `poll_runs` table". |
+| ADR | `docs/adr/0001-in-process-ring-buffer-for-poll-run-history.md` created. |
+
+### Superseded CONTEXT decisions
+D-05 (skip coalescing), D-06 (`CHECK` constraint), D-07 (detached context),
+D-08 (pruned table + CTE), D-10 (migration + `poll_runs` columns + sqlc),
+D-13 (svu `-ldflags`). D-01/02/03/04/09/11/12 stand (some adjusted for the
+ring buffer). D-14 moved to Phase 18.1.
