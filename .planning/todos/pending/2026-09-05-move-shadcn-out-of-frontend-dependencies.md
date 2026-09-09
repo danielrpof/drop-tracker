@@ -4,8 +4,13 @@ title: Move shadcn from dependencies to devDependencies in web/package.json
 area: tooling
 severity: minor
 files:
+
   - web/package.json
   - web/pnpm-lock.yaml
+
+audit_acknowledged:
+  milestone: v1.3
+  at: 2026-09-09
 ---
 
 ## Problem

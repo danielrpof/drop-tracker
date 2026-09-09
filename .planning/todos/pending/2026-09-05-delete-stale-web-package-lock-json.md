@@ -4,7 +4,12 @@ title: Delete the stale tracked web/package-lock.json
 area: tooling
 severity: minor
 files:
+
   - web/package-lock.json
+
+audit_acknowledged:
+  milestone: v1.3
+  at: 2026-09-09
 ---
 
 ## Problem

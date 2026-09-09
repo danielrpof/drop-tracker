@@ -296,6 +296,11 @@ Items acknowledged and carried forward from previous milestone close:
 | Deployment | DPLY-09 — near-zero-downtime deploy (connection draining / second container) | Future requirement | v1.3 roadmap |
 | Access Gate | GATE-08 — session signing-key rotation without logging everyone out | Future requirement | v1.3 roadmap |
 | CI/CD | CICD-15 — patch/diff-level coverage in the PR comment | Future requirement | v1.3 roadmap |
+| Tooling (todo) | Delete stale tracked `web/package-lock.json` | pending — `/gsd-quick` | v1.3 close (2026-09-09) |
+| Tooling (todo) | Move `shadcn` from dependencies to devDependencies | pending — `/gsd-quick` | v1.3 close (2026-09-09) |
+| Tooling (todo) | Resolve D-15 prev-release query/schema files from `--prev-tag`, not CWD | pending — `/gsd-quick` | v1.3 close (2026-09-09) |
+| Tooling (todo) | Unify `internal/sqlscan`'s two hand-rolled quote/dollar-quote state machines | pending — `/gsd-quick` | v1.3 close (2026-09-09) |
+| Deferred item | Phase 14: bare `tsc --noEmit` fails on stale react-router typegen artifact (CI/Docker build path unaffected) | acknowledged | v1.3 close (2026-09-09) |
 
 ## Session Continuity
 

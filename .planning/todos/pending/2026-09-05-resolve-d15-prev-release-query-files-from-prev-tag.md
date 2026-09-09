@@ -4,7 +4,12 @@ title: Resolve the D-15 previous-release schema and query files from --prev-tag,
 area: tooling
 severity: minor
 files:
+
   - cmd/migration-check/main.go
+
+audit_acknowledged:
+  milestone: v1.3
+  at: 2026-09-09
 ---
 
 ## Problem

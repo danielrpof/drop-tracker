@@ -1,9 +1,19 @@
 ---
-status: awaiting_human_verify
+status: resolved
 trigger: "fail, no log out button present"
 created: 2026-09-01T00:00:00Z
-updated: 2026-09-01T00:00:00Z
+updated: 2026-09-08T00:00:00Z
 ---
+
+## Close-out (v1.3 milestone close, 2026-09-08)
+
+Resolved by Phase 14 gap-closure plan **14-07** (UAT G-14-3), which shipped the
+"server emits a gating signal, client latches it" direction recommended below:
+`gate.Authenticate` sets a fixed `X-Instance-Gated` header on every gated 2xx,
+`apiFetch` latches it into a new `authStore.markGateActive()` that never touches
+`authed`, plus the WR-01 storage-guard hardening and a UAT Test 5 re-run
+sequence. Filed here after the fact — the session was left at
+`awaiting_human_verify` when the fix landed in a Phase 14 plan.
 
 ## Current Focus
 

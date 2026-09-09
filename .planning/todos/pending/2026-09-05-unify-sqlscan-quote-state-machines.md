@@ -4,7 +4,12 @@ title: Unify sqlscan's two hand-rolled quote/dollar-quote state machines
 area: tooling
 severity: minor
 files:
+
   - internal/sqlscan/lex.go
+
+audit_acknowledged:
+  milestone: v1.3
+  at: 2026-09-09
 ---
 
 ## Problem

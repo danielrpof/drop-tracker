@@ -15,3 +15,4 @@
   unaffected — only a bare `tsc` invocation without a prior typegen trips it.
 - **Suggested fix:** a separate quick task to run `react-router typegen` as a pretest/pretypecheck
   step (or add `.react-router/types` regeneration to the `make`/CI typecheck target).
+  status: acknowledged

@@ -1,6 +1,14 @@
+---
+status: resolved
+---
+
 # GSD Debug Knowledge Base
 
 Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypotheses at the start of new investigations (Phase 0), before any file reading or hypothesis formation.
+
+<!-- The `status: resolved` frontmatter above is a scanner marker only: this is
+     a living reference index, not a debug session. Without it the milestone-close
+     open-artifact audit flags this file as an unresolved session every close. -->
 
 A match here is a **hypothesis candidate, not a diagnosis** — test it first, but do not assume it is correct or skip other hypotheses.
 

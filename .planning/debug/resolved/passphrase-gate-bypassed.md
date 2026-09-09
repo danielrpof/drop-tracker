@@ -1,9 +1,17 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Phase 14 added an instance passphrase gate. With INSTANCE_PASSPHRASE configured, opening the app should show a passphrase form and block all access until unlocked. Instead, the app loads straight to the watchlist with no passphrase form and everything is accessible."
 created: 2026-08-31T00:00:00Z
-updated: 2026-08-31T00:00:00Z
+updated: 2026-09-08T00:00:00Z
 ---
+
+## Close-out (v1.3 milestone close, 2026-09-08)
+
+Resolved by Phase 14 gap-closure plan **14-05** (UAT G-14-1): compose host-shell
+pass-through for the gate env vars plus a secret-free boot log line reporting the
+gate as active/inert. The recommended hardening in the fix note below shipped as
+part of that plan. Filed here after the fact — the session was left at
+`diagnosed` when the fix landed in a Phase 14 plan rather than a debug cycle.
 
 ## Current Focus
 
