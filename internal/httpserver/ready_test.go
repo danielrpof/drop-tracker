@@ -217,6 +217,116 @@ func TestReady_NotConfigured(t *testing.T) {
 	}
 }
 
+func TestReady_GatedNo401(t *testing.T) {
+	// A passphrase-gated instance carrying no cookie must still reach the
+	// probe (RDY-02, D-04) -- the exemption is structural, not a cookie check.
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger(),
+		httpserver.WithAuthGate("a-real-passphrase", false, nil),
+		httpserver.WithReadiness(schemaAt(7, false), 7))
+	t.Cleanup(srv.Close)
+
+	code, body, raw := getReady(t, srv)
+	if code == http.StatusUnauthorized {
+		t.Fatalf("GET /ready on a gated instance returned 401 (body %s)", raw)
+	}
+	if code != http.StatusOK || body.Status != "ready" {
+		t.Fatalf("status = %d / %q, want 200 / ready (body %s)", code, body.Status, raw)
+	}
+}
+
+func TestReady_InertBranch(t *testing.T) {
+	// The same registration serves the inert (no-gate) branch too.
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger(),
+		httpserver.WithReadiness(schemaAt(7, false), 7))
+
+	code, body, _ := getReady(t, srv)
+	if code == http.StatusUnauthorized {
+		t.Fatal("GET /ready returned 401 on an ungated instance")
+	}
+	if code != http.StatusOK || body.Status != "ready" {
+		t.Fatalf("status = %d / %q, want 200 / ready", code, body.Status)
+	}
+}
+
+func TestReady_Timeout(t *testing.T) {
+	// A ping that never returns until its context is cancelled must surface
+	// as 503 db_unreachable within readyCheckTimeout, not hang the request.
+	pinger := stubPinger{pingFunc: func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	srv := httpserver.New(pinger, stubStore{}, stubEventsStore{}, nil, discardLogger(),
+		httpserver.WithReadiness(schemaAt(7, false), 7))
+
+	code, body, raw := getReady(t, srv)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (body %s)", code, raw)
+	}
+	if body.Status != "not_ready" || body.Reason != "db_unreachable" {
+		t.Fatalf("status/reason = %q/%q, want not_ready/db_unreachable", body.Status, body.Reason)
+	}
+}
+
+func TestReady_ExactPathOnly(t *testing.T) {
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger(),
+		httpserver.WithReadiness(schemaAt(7, false), 7))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	for _, path := range []string{"/readyz", "/ready/details"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if strings.Contains(string(raw), "schema_expected") {
+			t.Fatalf("GET %s returned the readiness payload: %s", path, raw)
+		}
+	}
+}
+
+// TestHealth_ContractUnchanged pins the exact GET /health response bytes for
+// both the up and down cases (RDY-03). health_test.go asserts those bodies by
+// decoded field, not byte-for-byte, so this golden pin is added here rather
+// than by editing that file.
+func TestHealth_ContractUnchanged(t *testing.T) {
+	cases := []struct {
+		name   string
+		pinger httpserver.Pinger
+		code   int
+		body   string
+	}{
+		{"up", noopPinger{}, http.StatusOK, `{"status":"ok","db":"up"}` + "\n"},
+		{"down", stubPinger{pingFunc: func(context.Context) error { return errors.New("down") }},
+			http.StatusServiceUnavailable, `{"status":"degraded","db":"down"}` + "\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httpserver.New(tc.pinger, stubStore{}, stubEventsStore{}, nil, discardLogger())
+			ts := httptest.NewServer(srv.Router())
+			defer ts.Close()
+
+			resp, err := http.Get(ts.URL + "/health")
+			if err != nil {
+				t.Fatalf("GET /health: %v", err)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+
+			if resp.StatusCode != tc.code {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.code)
+			}
+			if resp.Header.Get("Content-Type") != "application/json" {
+				t.Fatalf("Content-Type = %q, want application/json", resp.Header.Get("Content-Type"))
+			}
+			if string(raw) != tc.body {
+				t.Fatalf("body = %q, want %q", raw, tc.body)
+			}
+		})
+	}
+}
+
 func TestReady_NoLeak(t *testing.T) {
 	const dsn = "postgres://tracker:Sup3rSecret@db.internal:5432/drop_tracker?sslmode=disable"
 	const webhook = "https://discord.com/api/webhooks/123456789/abcdefSECRETtoken"
