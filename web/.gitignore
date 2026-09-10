@@ -2,6 +2,10 @@
 .env*
 node_modules
 
+# pnpm is the only package manager here (Dockerfile, CI, DoD) — keep npm's
+# lockfile from silently returning as a second, drifting security-scan input.
+package-lock.json
+
 # React Router
 .react-router
 build
