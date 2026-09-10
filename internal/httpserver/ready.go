@@ -3,8 +3,11 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/go-chi/httplog/v3"
 )
 
 // SchemaVersioner is the minimal surface handleReady needs to read the
@@ -29,6 +32,11 @@ type readyResponse struct {
 	Reason         string `json:"reason,omitempty"`
 }
 
+// reasonDBUnreachable is the single 503 reason shared by the ping-failure and
+// the schema-read-failure branches (D-02): a caller cannot tell, and need not
+// tell, which of the two database interactions failed.
+const reasonDBUnreachable = "db_unreachable"
+
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readyCheckTimeout)
 	defer cancel()
@@ -36,26 +44,35 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	resp := readyResponse{Status: "ready", SchemaExpected: s.expectedSchema}
 	code := http.StatusOK
 
-	setNotReady := func() {
-		resp.Status = "not_ready"
+	fail := func(reason string, applied *uint) {
+		resp.Status, resp.Reason, resp.SchemaApplied = "not_ready", reason, applied
 		code = http.StatusServiceUnavailable
 	}
 
 	if s.schema == nil {
-		setNotReady()
+		// WithReadiness was not supplied. Kept so the route table is identical
+		// with and without the option; a cmd/server binary wires it always.
+		fail("not_configured", nil)
 	} else if err := s.db.Ping(ctx); err != nil {
-		setNotReady()
-	} else if applied, dirty, verr := s.schema.SchemaVersion(ctx); verr != nil {
-		setNotReady()
+		httplog.SetAttrs(r.Context(), slog.String("ready_db_error", err.Error()))
+		fail(reasonDBUnreachable, nil)
+	} else if applied, dirty, serr := s.schema.SchemaVersion(ctx); serr != nil {
+		httplog.SetAttrs(r.Context(), slog.String("ready_schema_error", serr.Error()))
+		fail(reasonDBUnreachable, nil)
 	} else {
-		a := applied
-		resp.SchemaApplied = &a
-		// D-01: ready is applied-at-or-above-expected and not dirty, never
-		// equality. Phase 16's ahead-of-source guard (internal/db/migrate.go)
-		// lets a rolled-back binary serve a newer additive schema; == would
-		// flap the deferred Phase 17 deploy gate.
-		if ready := !dirty && applied >= s.expectedSchema; !ready {
-			setNotReady()
+		switch {
+		case dirty:
+			// Checked before the version comparison: a dirty-and-behind
+			// database reports schema_dirty.
+			fail("schema_dirty", &applied)
+		case applied < s.expectedSchema:
+			// D-01: ready is applied-at-or-above-expected, never equality.
+			// Phase 16's ahead-of-source guard (internal/db/migrate.go) lets a
+			// rolled-back binary serve a newer additive schema; == would flap
+			// the deferred Phase 17 deploy gate.
+			fail("schema_behind", &applied)
+		default:
+			resp.SchemaApplied = &applied
 		}
 	}
 
