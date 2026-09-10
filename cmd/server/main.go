@@ -138,6 +138,14 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 
+	// Computed once here from the embedded migration source, then handed to
+	// the readiness option below so GET /ready compares the applied schema
+	// version against it per request without re-walking the embedded FS (D-01).
+	expectedSchema, err := db.ExpectedSchemaVersion()
+	if err != nil {
+		return fmt.Errorf("determine expected schema version: %w", err)
+	}
+
 	// cfg.MusicBrainzPollWorkers + cfg.DeezerPollWorkers is the maximum number
 	// of DB-touching goroutines both poll cycles can produce at once (G-11-1)
 	// -- passing it through is what lets db.NewPool size the pool's MaxConns
@@ -235,7 +243,13 @@ func run(ctx context.Context) error {
 	srv := httpserver.New(pool, store, eventsStore, []httpserver.SearchSource{
 		httpserver.NewMusicBrainzSource(mbClient),
 		httpserver.NewDeezerSource(dzClient),
-	}, logger, httpserver.WithAuthGate(cfg.InstancePassphrase, cfg.TrustProxyHeaders, authgate.SelectAlerter(cfg.DiscordWebhookURL, logger)))
+	}, logger,
+		httpserver.WithAuthGate(cfg.InstancePassphrase, cfg.TrustProxyHeaders, authgate.SelectAlerter(cfg.DiscordWebhookURL, logger)),
+		// db.NewSchemaVersionReader wraps this same pool -- /ready reads
+		// schema_migrations on the shared handle, opening no connection of its
+		// own (RDY-02).
+		httpserver.WithReadiness(db.NewSchemaVersionReader(pool), expectedSchema),
+	)
 	// Close stops the gate's per-IP limiter-map sweeper goroutine (plan 14-02);
 	// a no-op when the gate is disabled. Deferred here so it runs on every
 	// return path from run().

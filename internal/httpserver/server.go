@@ -28,12 +28,14 @@ type Pinger interface {
 
 // Server holds the dependencies the router needs to answer requests.
 type Server struct {
-	db        Pinger
-	watchlist watchlist.Store
-	events    events.Store
-	sources   []SearchSource
-	router    http.Handler
-	gate      *authgate.Manager
+	db             Pinger
+	watchlist      watchlist.Store
+	events         events.Store
+	sources        []SearchSource
+	router         http.Handler
+	gate           *authgate.Manager
+	schema         SchemaVersioner
+	expectedSchema uint
 }
 
 // serverConfig collects the optional settings New applies before building
@@ -43,6 +45,8 @@ type serverConfig struct {
 	gatePassphrase    string
 	gateAlerter       authgate.Alerter
 	trustProxyHeaders bool
+	schema            SchemaVersioner
+	expectedSchema    uint
 }
 
 // Option customises New, mirroring internal/poller's and internal/notifier's
@@ -68,6 +72,19 @@ func WithAuthGate(passphrase string, trustProxyHeaders bool, alerter authgate.Al
 		c.gatePassphrase = passphrase
 		c.trustProxyHeaders = trustProxyHeaders
 		c.gateAlerter = alerter
+	}
+}
+
+// WithReadiness supplies the schema-version seam and the binary's expected
+// migration version that GET /ready compares applied-at-or-above-expected
+// against (RDY-01, D-01). It is the sole owner of the schema seam on Server;
+// plan 18-04's /status reads the same two fields for its instance block.
+// Absent, /ready answers 503 with no reason -- a cmd/server binary always
+// supplies it, so a configured instance never sees that path.
+func WithReadiness(schema SchemaVersioner, expectedSchema uint) Option {
+	return func(c *serverConfig) {
+		c.schema = schema
+		c.expectedSchema = expectedSchema
 	}
 }
 
@@ -115,6 +132,8 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 		gate = authgate.NewManager(cfg.gatePassphrase, cfg.gateAlerter, logger)
 	}
 	s.gate = gate
+	s.schema = cfg.schema
+	s.expectedSchema = cfg.expectedSchema
 
 	r := chi.NewRouter()
 
@@ -162,6 +181,10 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	// literal "/health", never a prefix, so /healthz and /health/details fall
 	// through to the SPA fallback and never see the health payload.
 	r.Get("/health", s.handleHealth)
+	// /ready inherits /health's exact structural exemption (D-04): registered
+	// on the root router, outside the gate branch below, so one registration
+	// serves both the gated and inert configurations and it is never 401.
+	r.Get("/ready", s.handleReady)
 
 	if gate != nil {
 		// /session is exempt (registered outside the Group): the login form

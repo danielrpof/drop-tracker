@@ -317,6 +317,25 @@ func runMigrationsOnce(ctx context.Context, dsn string, src source.Driver) error
 	}
 }
 
+// ExpectedSchemaVersion returns the highest migration version in the embedded
+// source. It builds the same iofs source RunMigrations builds and reuses the
+// same maxSourceVersion walk the ahead-of-source guard uses, so the number
+// can never drift from what RunMigrations would apply. cmd/server calls this
+// once at boot and hands the value to httpserver.WithReadiness (D-01).
+func ExpectedSchemaVersion() (uint, error) {
+	src, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return 0, fmt.Errorf("load embedded migrations: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+
+	v, ok := maxSourceVersion(src)
+	if !ok {
+		return 0, errors.New("db: embedded migration source is empty")
+	}
+	return v, nil
+}
+
 // maxSourceVersion walks src to its highest migration version, returning
 // (0, false) if the source is empty or an unexpected error interrupts the
 // walk. It does not string-match golang-migrate's error text (RESEARCH.md

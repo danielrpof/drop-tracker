@@ -98,6 +98,65 @@ func TestBootToHealth_EndToEnd(t *testing.T) {
 	}
 }
 
+// TestBootToReady_EndToEnd wires one GET /ready request from an HTTP client
+// through the router, the SchemaVersioner seam, and the shared pool to the
+// real schema_migrations row and back -- the healthy path, against a real
+// migrated Postgres (RDY-01).
+func TestBootToReady_EndToEnd(t *testing.T) {
+	dsn := testutil.RequirePostgresDSN(t)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.Background()
+
+	if err := db.RunMigrations(ctx, dsn, logger); err != nil {
+		t.Fatalf("db.RunMigrations: %v", err)
+	}
+
+	expected, err := db.ExpectedSchemaVersion()
+	if err != nil {
+		t.Fatalf("db.ExpectedSchemaVersion: %v", err)
+	}
+
+	pool, err := db.NewPool(ctx, dsn, 0)
+	if err != nil {
+		t.Fatalf("db.NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	store := watchlist.NewService(sqlc.New(pool))
+	eventsStore := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(pool, store, eventsStore, nil, logger,
+		httpserver.WithReadiness(db.NewSchemaVersionReader(pool), expected))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/ready")
+	if err != nil {
+		t.Fatalf("http.Get /ready: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body struct {
+		Status         string `json:"status"`
+		SchemaApplied  *uint  `json:"schema_applied"`
+		SchemaExpected uint   `json:"schema_expected"`
+		Reason         string `json:"reason"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if body.Status != "ready" {
+		t.Fatalf("status = %q, want ready (reason=%q)", body.Status, body.Reason)
+	}
+	if body.SchemaApplied == nil || *body.SchemaApplied != body.SchemaExpected {
+		t.Fatalf("schema_applied=%v schema_expected=%d, want equal and non-nil", body.SchemaApplied, body.SchemaExpected)
+	}
+}
+
 func TestBootToHealth_MigrationsAreIdempotent(t *testing.T) {
 	dsn := testutil.RequirePostgresDSN(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
