@@ -1,7 +1,7 @@
 ---
 phase: "19"
 slug: frontend-system-view
-status: draft
+status: approved
 shadcn_initialized: true
 preset: base-maia
 created: "2026-09-10"
@@ -31,11 +31,11 @@ different semantic axis (release-type chip vs run-health) and they never co-rend
 one screen (History card vs System panel).
 
 > **This document was re-derived 2026-09-10 (re-run of `/gsd-ui-phase 19`) after a
-> design grill reopened D-04 / D-06 / D-07 / D-08 / D-09 / D-11 / D-13.** The body below
-> now fully integrates those amendments — it is the single source of truth. The prior
-> 7/7 checker approval is retired; the "Checker Sign-Off" section is reset to pending
-> and this spec needs one more checker pass before `/gsd-plan-phase 19`. The amendment
-> list is preserved at the bottom for audit only.
+> design grill reopened D-04 / D-06 / D-07 / D-08 / D-09 / D-11 / D-13**, then
+> re-verified by gsd-ui-checker (6/7 PASS, 1 non-blocking FLAG on Dimension 7) and
+> re-probed for state coverage. The body below fully integrates those amendments — it
+> is the single source of truth. Approved for `/gsd-plan-phase 19`. The amendment list
+> is preserved at the bottom for audit only.
 
 **Upstream contract (read first):**
 - `.planning/phases/19-frontend-system-view/19-CONTEXT.md` — decisions **D-01…D-13**
@@ -330,10 +330,13 @@ A failed **initial** load is the full `error` state above, not this line.
 
 Shape-rooted UI **state** coverage for the System view. Empty/error/first-run **copy** lives in
 the Copywriting Contract above; this section covers state *coverage* and references those rows.
-Categories enumerated by the GSD ui-consideration probe (9 surfaces × 8 categories = 69 applicable);
-resolved below, deduplicated by shared root.
+Categories enumerated by the GSD ui-consideration probe — re-run 2026-09-10 against 8 surfaces
+(header row, About block, per-source panel, history table, empty-watchlist Alert, render-state
+surfaces, System nav tab, refresh-failure line) → 56 applicable considerations; resolved below,
+deduplicated by shared root.
 
-Applicable state considerations resolved: **18 covered, 2 backstop, 0 unresolved.**
+Applicable state considerations resolved: **19 covered, 2 backstop, 3 dismissed (nav tab —
+no data states), 0 unresolved.**
 (Post-grill additions: latest-run `cancelled` + escalation line, unrecognised
 `outcome` fallback, `loaded` → `first-run` on a buffer reset between fetches.)
 
@@ -359,12 +362,14 @@ Applicable state considerations resolved: **18 covered, 2 backstop, 0 unresolved
 | overflow | `loaded` view whose buffer emptied on a restart between fetches | ✅ covered | State machine recomputed on every successful fetch → transitions `loaded` → `first-run` (D-04). Not latched. |
 | overflow | ring buffer at the 50 cap | ✅ covered | `<TableCaption>`: `Showing the 50 most recent cycles … Older history isn't retained`. |
 | overflow | wide table on a narrow viewport | ✅ covered | shadcn `Table` self-wraps in `overflow-x-auto`; numeric columns `tabular-nums` right-aligned; `whitespace-nowrap` cells (component default). |
-| long-text | `cycle_id` / `app_version` / `SourceName` / `summary` | 🧪 backstop | All bounded by construction — `cycle_id` is `{source}-{int}`, `app_version` is a short SHA or literal `dev`, `SourceName` is from the fixed lookup. `summary` **is** rendered (verbatim, last-run line) but is store-composed from counts + a closed outcome set (≈ `ok — 12 checked, 1 errored, 3 events`); no free-text error ever reaches it (ROADMAP security note). Held-out long-text visual test guards regressions. |
+| long-text | `cycle_id` / `app_version` / `SourceName` / `summary` / `as of` stamp / empty-watchlist Alert copy | 🧪 backstop | All bounded by construction — `cycle_id` is `{source}-{int}`, `app_version` is a short SHA or literal `dev`, `SourceName` is from the fixed lookup, the `as of {HH:MM:SS}` stamp is a fixed-width client-clock string, and the Alert title/description are locked verbatim copy. `summary` **is** rendered (verbatim, last-run line) but is store-composed from counts + a closed outcome set (≈ `ok — 12 checked, 1 errored, 3 events`); no free-text error ever reaches it (ROADMAP security note). Held-out long-text visual test guards regressions. |
 | zero-one-many | `watchlist_size`, `consecutive_skips`, `history.length` 0 / 1 / many | ✅ covered | Pluralized copy (`artist{s}`, `cycle{s}`); 0 handled by dedicated copy rows above. |
+| loading / error / overflow / long-text | System nav tab (`<NavLink>` in `root.tsx`) | ⊘ dismissed | No data states apply — the tab renders a fixed `System` label with no fetch, no async content, and no user-supplied text. It appears with the rest of the nav on first paint; a `/status` failure or session expiry never removes or alters it. The active-state indigo underline is inherited unchanged from `tabLinkClassName`. |
 
 <!-- Status vocabulary:
      ✅ covered   → plain truth string lifted into must_haves.truths
      🧪 backstop  → { statement, verification: backstop }; no evidence at verify → human_needed
+     ⊘ dismissed  → category does not apply; reason column is the audit trail
      ⚠ unresolved → explicit planner assumption -->
 
 ---
@@ -382,18 +387,25 @@ No third-party registries are declared for this phase. `web/components.json` `re
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
+- [~] Dimension 7 Inventory Provenance: FLAG (non-blocking)
 
-**Approval:** pending — re-review after the 2026-09-10 post-grill re-derivation.
+**Approval:** approved 2026-09-10 — gsd-ui-checker, re-review of the post-grill
+re-derivation. 6/7 PASS; Dimension 7 carries one non-blocking FLAG: the Component
+Inventory provenance line documents the enumeration commands + counts + date but no
+`<package>@<version>` token, because the `shadcn` CLI is npx-only and unpinnable
+offline. The line already states this and points to the re-runnable registry fetch as
+the audit substitute; a future pass may reformulate it to the
+`Could not enumerate: <reason>` template. Planning may proceed.
+
 (Prior state: approved 2026-09-10, gsd-ui-checker 7/7 — retired because D-04 / D-06 /
 D-07 / D-08 / D-09 / D-11 / D-13 changed materially after that pass. All changes are
-now integrated into the body above; this is a fresh review, not a diff review.)
+now integrated into the body above; this was a fresh review, not a diff review.)
 
 ---
 
@@ -426,4 +438,4 @@ Changes folded into the body during the 2026-09-10 re-derivation:
   `routes.ts` / `root.tsx` fixed in the same change; `app.css` gets a one-line
   comment on the two-greens coexistence.
 
-Researcher re-derivation complete 2026-09-10. **Run the gsd-ui-checker pass before `/gsd-plan-phase 19`.**
+Researcher re-derivation complete 2026-09-10; gsd-ui-checker pass complete (approved, 1 non-blocking FLAG); state-coverage probe re-run. **Ready for `/gsd-plan-phase 19`.**
