@@ -123,7 +123,12 @@ Plans:
   4. Polling stays green regardless of the recorder: a recorder that errors still leaves the cycle logging "poll cycle complete" and returning its normal result; the `RecordRun` call never wedges a source's overlap guard (`defer running.Store(false)`) and never measurably extends shutdown.
   5. `events_recorded` is real: `EventRecorder.DetectMusicBrainz` / `DetectDeezer` return `(int, error)`; the count threads back through both `fetchAndRecord` closures and is folded with the other counters. It is never hard-coded to 0 while displayed.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 18.1-01-PLAN.md — widen the `EventRecorder` seam to `(int, error)` and record one real run entry end-to-end (tracer)
+- [ ] 18.1-02-PLAN.md — the remaining exit paths: skipped ticks, skipped entries, list failures, cancellation, and a misbehaving recorder
+- [ ] 18.1-03-PLAN.md — the `-race` substitute: looped counter-invariant test, phase gate, race waiver
 
 **Notes for the phase planner**
 
