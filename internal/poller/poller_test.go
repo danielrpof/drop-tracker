@@ -3080,3 +3080,137 @@ func TestRunRecorder_ErrorSwallowed(t *testing.T) {
 		}
 	})
 }
+
+// TestRunCycle_CounterInvariant is the contracted -race substitute for the
+// runCycle counter fold (D-14): 1000 iterations of a full fan-out with
+// erroring and panicking artists, exact-equality assertions every iteration.
+// A shared-counter regression, a dropped panic result, or an undersized
+// result-channel buffer each fail it by iteration index. Never an inequality:
+// a race manifests as an occasional undercount an "at least" check would hide.
+func TestRunCycle_CounterInvariant(t *testing.T) {
+	const (
+		iterations = 1000 // three runs deep under -count=3
+		M          = 20   // synthetic watchlist entries per iteration
+		K          = 3    // artists whose source fetch returns a sentinel error
+		P          = 2    // artists whose source fetch panics
+		S          = 4    // Deezer entries carrying a nil deezer_id
+		E          = 2    // events recorded per successful artist
+	)
+
+	sentinel := errors.New("counter-invariant: designated fetch error")
+	errMBIDs := map[string]bool{"mbid-1": true, "mbid-2": true, "mbid-3": true}
+	panicMBIDs := map[string]bool{"mbid-4": true, "mbid-5": true}
+
+	makeEntries := func() []watchlist.Entry {
+		out := make([]watchlist.Entry, 0, M)
+		for n := 1; n < M+1; n++ {
+			entry := watchlist.Entry{MBID: fmt.Sprintf("mbid-%d", n), Name: fmt.Sprintf("Artist %d", n)}
+			if n < M-S+1 { // the last S entries carry no deezer_id
+				entry.DeezerID = deezerID(fmt.Sprintf("%d", 1000+n))
+			}
+			out = append(out, entry)
+		}
+		return out
+	}
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("musicbrainz: erroring and panicking artists", func(t *testing.T) {
+		if len(errMBIDs) != K || len(panicMBIDs) != P {
+			t.Fatalf("test setup: want K=%d P=%d, designated %d error + %d panic mbids", K, P, len(errMBIDs), len(panicMBIDs))
+		}
+		var last *Poller
+		for i := 0; i < iterations; i++ {
+			store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return makeEntries(), nil }}
+			mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+				switch {
+				case errMBIDs[mbid]:
+					return nil, sentinel
+				case panicMBIDs[mbid]:
+					panic("counter-invariant: designated worker panic")
+				default:
+					return nil, nil
+				}
+			}}
+			events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
+				return E, nil
+			}}
+			var result pollruns.RunResult
+			rec := &fakeRunRecorder{runFn: func(ctx context.Context, r pollruns.RunResult) error {
+				result = r
+				return nil
+			}}
+
+			p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(8), WithRunRecorder(rec))
+			if err != nil {
+				t.Fatalf("iteration %d: New: %v", i, err)
+			}
+			if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+				t.Fatalf("iteration %d: RunMusicBrainzCycle returned %v -- a panicking artist is an errored artist, not a failed cycle", i, err)
+			}
+
+			if result.ArtistsChecked != M {
+				t.Fatalf("iteration %d: ArtistsChecked = %d, want %d", i, result.ArtistsChecked, M)
+			}
+			if result.ArtistsErrored != K+P {
+				t.Fatalf("iteration %d: ArtistsErrored = %d, want %d (K=%d errors + P=%d panics)", i, result.ArtistsErrored, K+P, K, P)
+			}
+			if result.ArtistsChecked-result.ArtistsErrored != M-K-P {
+				t.Fatalf("iteration %d: checked-errored = %d, want %d", i, result.ArtistsChecked-result.ArtistsErrored, M-K-P)
+			}
+			if result.EventsRecorded != (M-K-P)*E {
+				t.Fatalf("iteration %d: EventsRecorded = %d, want %d", i, result.EventsRecorded, (M-K-P)*E)
+			}
+			if result.ArtistsSkipped != 0 {
+				t.Fatalf("iteration %d: ArtistsSkipped = %d, want 0 (MusicBrainz dispatches every entry)", i, result.ArtistsSkipped)
+			}
+			if result.Outcome != pollruns.OutcomeOK {
+				t.Fatalf("iteration %d: Outcome = %q, want %q", i, result.Outcome, pollruns.OutcomeOK)
+			}
+			last = p
+		}
+		if last.mbRunning.Load() {
+			t.Fatal("mbRunning still held after the loop -- a panicking worker must not wedge the overlap guard")
+		}
+	})
+
+	t.Run("deezer: nil-deezer_id entries are skipped, not checked", func(t *testing.T) {
+		var last *Poller
+		for i := 0; i < iterations; i++ {
+			store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return makeEntries(), nil }}
+			events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error) {
+				return E, nil
+			}}
+			var result pollruns.RunResult
+			rec := &fakeRunRecorder{runFn: func(ctx context.Context, r pollruns.RunResult) error {
+				result = r
+				return nil
+			}}
+
+			p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(8), WithRunRecorder(rec))
+			if err != nil {
+				t.Fatalf("iteration %d: New: %v", i, err)
+			}
+			if err := p.RunDeezerCycle(context.Background()); err != nil {
+				t.Fatalf("iteration %d: RunDeezerCycle: %v", i, err)
+			}
+
+			if result.ArtistsSkipped != S {
+				t.Fatalf("iteration %d: ArtistsSkipped = %d, want %d", i, result.ArtistsSkipped, S)
+			}
+			if result.ArtistsChecked != M-S {
+				t.Fatalf("iteration %d: ArtistsChecked = %d, want %d", i, result.ArtistsChecked, M-S)
+			}
+			if result.ArtistsChecked+result.ArtistsSkipped != M {
+				t.Fatalf("iteration %d: checked+skipped = %d, want %d", i, result.ArtistsChecked+result.ArtistsSkipped, M)
+			}
+			if result.Outcome != pollruns.OutcomeOK {
+				t.Fatalf("iteration %d: Outcome = %q, want %q", i, result.Outcome, pollruns.OutcomeOK)
+			}
+			last = p
+		}
+		if last.dzRunning.Load() {
+			t.Fatal("dzRunning still held after the loop")
+		}
+	})
+}
