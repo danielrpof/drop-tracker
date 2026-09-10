@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 7
+open_count: 8
 waived_count: 2
 fixed_count: 3
-total_count: 12
-last_updated: 2026-09-10T06:09:10.315Z
+total_count: 13
+last_updated: 2026-09-10T08:23:47.828Z
 ---
 
 # Broken Windows Ledger
@@ -27,6 +27,7 @@ last_updated: 2026-09-10T06:09:10.315Z
 | 10 | 18 | deviation | internal/buildinfo/buildinfo.go |  | 18-03: make test -race substituted with plain go test ./... (race detector unusable on this box, absent from CI); coverage-gate ran unchanged at 90.43%. Same precedent as 11.1/15/16/18-01/18-02. | open |  | 2026-09-10T01:36:42.632Z |  |
 | 11 | 18 | unrun-verify | .github/workflows/full-pipeline.yml |  | 18-03: build-scan 'Verify build provenance landed in the binary' step is unverified against the real GitHub Actions runner until the first push to main after this phase merges (18-VALIDATION.md human-check). | open |  | 2026-09-10T01:36:43.340Z |  |
 | 12 | 18.1 | deviation | internal/poller/poller.go |  | 18.1-01: make test -race substituted with plain go test (race detector unusable on this box, absent from CI); make coverage-gate ran at 90.69%, sqlc-check clean. Channel-fold counter aggregation is correct-by-construction (D-14); TestRunCycle_CounterInvariant (plan 18.1-03) is the contracted looped exact-equality substitute. Same precedent as 11.1/15/16/18-01/18-02/18-03. | open |  | 2026-09-10T06:09:10.315Z |  |
+| 13 | 18.1 | deviation | internal/poller/poller_test.go |  | 18.1-03: make test -race step substituted with plain go test ./... -count=1 (race detector unusable on this WSL2 box, absent from CI); make coverage-gate ran unchanged at 90.73%, make sqlc-check clean. TestRunCycle_CounterInvariant (internal/poller/poller_test.go) is the contracted compensating control for this phase's new concurrent runCycle counter fold: 1000 iterations, exact-equality assertions, K erroring + P panicking artists, run at -count=3. Same precedent as entries 9/10/12 (11.1/15/16/18/18.1-01). | open |  | 2026-09-10T08:23:47.828Z |  |
 
 ````json
 [
@@ -172,6 +173,18 @@ last_updated: 2026-09-10T06:09:10.315Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-10T06:09:10.315Z",
+    "resolved_at": null
+  },
+  {
+    "id": 13,
+    "kind": "deviation",
+    "phase": "18.1",
+    "file": "internal/poller/poller_test.go",
+    "line": null,
+    "description": "18.1-03: make test -race step substituted with plain go test ./... -count=1 (race detector unusable on this WSL2 box, absent from CI); make coverage-gate ran unchanged at 90.73%, make sqlc-check clean. TestRunCycle_CounterInvariant (internal/poller/poller_test.go) is the contracted compensating control for this phase's new concurrent runCycle counter fold: 1000 iterations, exact-equality assertions, K erroring + P panicking artists, run at -count=3. Same precedent as entries 9/10/12 (11.1/15/16/18/18.1-01).",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-10T08:23:47.828Z",
     "resolved_at": null
   }
 ]
