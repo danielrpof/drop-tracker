@@ -31,8 +31,12 @@ func TestDetectDeezer_NewRelease(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if _, err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
+	gotCount, err := d.DetectDeezer(ctx, testLogger(), entry, albums)
+	if err != nil {
 		t.Fatalf("DetectDeezer: %v", err)
+	}
+	if gotCount != 2 {
+		t.Fatalf("DetectDeezer returned count = %d, want 2 (one per inserted new_release row)", gotCount)
 	}
 
 	rows, err := pool.Query(ctx, `SELECT external_id, release_group_mbid, title, artist_name,

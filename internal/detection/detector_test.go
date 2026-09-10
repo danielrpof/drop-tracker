@@ -210,8 +210,12 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	gotCount, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups)
+	if err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+	if gotCount != 2 {
+		t.Fatalf("DetectMusicBrainz returned count = %d, want 2 (one per inserted new_release row)", gotCount)
 	}
 
 	rows, err := pool.Query(ctx, `SELECT external_id, release_group_mbid, title, artist_name,
@@ -470,8 +474,12 @@ func TestDetectMusicBrainz_ReDetectionInsertsNothing(t *testing.T) {
 	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("first DetectMusicBrainz: %v", err)
 	}
-	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	reCount, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups)
+	if err != nil {
 		t.Fatalf("second DetectMusicBrainz: %v", err)
+	}
+	if reCount != 0 {
+		t.Fatalf("re-detection returned count = %d, want 0 (nothing new inserted)", reCount)
 	}
 
 	var count int
@@ -871,8 +879,15 @@ func TestDetectMusicBrainz_GuestFeature(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings}, &fakeReleaseDetailSource{})
-	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	gotCount, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil)
+	if err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
+	}
+	// nil groups -> zero new_release inserts, so a count of 1 can only come
+	// from the guest-feature pass being summed in (A2). A new_release-only
+	// count would be 0 here.
+	if gotCount != 1 {
+		t.Fatalf("DetectMusicBrainz returned count = %d, want 1 (the guest-feature insert must be summed)", gotCount)
 	}
 
 	var eventType, source, externalID, title, artistName string

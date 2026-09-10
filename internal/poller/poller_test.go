@@ -931,9 +931,10 @@ func TestPoller_RunMusicBrainzCycle_RecordsNewRelease(t *testing.T) {
 		}, nil
 	}}
 	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{}, fakeReleaseDetailSource{})
+	runs := pollruns.NewStore()
 	logger, _ := newTestLogger()
 
-	p, err := New(store, mb, &fakeAlbumSource{}, recorder, &fakeNotifier{}, 15*time.Minute, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, recorder, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -950,6 +951,21 @@ func TestPoller_RunMusicBrainzCycle_RecordsNewRelease(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("event row count = %d, want 2 (the seam must actually be wired into RunMusicBrainzCycle)", count)
+	}
+
+	// events_recorded must match the rows that actually landed, not a fake.
+	lr := runs.Snapshot()[pollruns.SourceMusicBrainz].LastRun
+	if lr == nil {
+		t.Fatal("LastRun is nil after a completed MusicBrainz cycle")
+	}
+	if lr.EventsRecorded != count {
+		t.Fatalf("RunResult.EventsRecorded = %d, want %d (the inserted row count)", lr.EventsRecorded, count)
+	}
+	if lr.ArtistsChecked != 1 {
+		t.Fatalf("RunResult.ArtistsChecked = %d, want 1 (one dispatched entry)", lr.ArtistsChecked)
+	}
+	if lr.Outcome != pollruns.OutcomeOK {
+		t.Fatalf("RunResult.Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeOK)
 	}
 }
 
@@ -984,9 +1000,10 @@ func TestPoller_RunDeezerCycle_RecordsNewRelease(t *testing.T) {
 		}, nil
 	}}
 	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{}, fakeReleaseDetailSource{})
+	runs := pollruns.NewStore()
 	logger, _ := newTestLogger()
 
-	p, err := New(store, &fakeReleaseGroupSource{}, dz, recorder, &fakeNotifier{}, 15*time.Minute, logger)
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, recorder, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1003,6 +1020,21 @@ func TestPoller_RunDeezerCycle_RecordsNewRelease(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("event row count = %d, want 2 (the seam must actually be wired into RunDeezerCycle)", count)
+	}
+
+	// events_recorded must match the rows that actually landed, not a fake.
+	lr := runs.Snapshot()[pollruns.SourceDeezer].LastRun
+	if lr == nil {
+		t.Fatal("LastRun is nil after a completed Deezer cycle")
+	}
+	if lr.EventsRecorded != count {
+		t.Fatalf("RunResult.EventsRecorded = %d, want %d (the inserted row count)", lr.EventsRecorded, count)
+	}
+	if lr.ArtistsChecked != 1 {
+		t.Fatalf("RunResult.ArtistsChecked = %d, want 1 (one dispatched entry)", lr.ArtistsChecked)
+	}
+	if lr.Outcome != pollruns.OutcomeOK {
+		t.Fatalf("RunResult.Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeOK)
 	}
 }
 
