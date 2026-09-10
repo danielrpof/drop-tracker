@@ -171,6 +171,16 @@ Pills (About block) use the same tinted-fill pattern at body size:
 
 ---
 
+## Visual Hierarchy
+
+The About block anchors the page — first in content flow, directly under the `<h1>`. The
+**Refresh** control is the primary CTA (top-right of the header row, indigo focus ring). The
+per-source panels are peer components below, descending in fixed source order (MusicBrainz,
+then Deezer); within a panel the last-run summary reads before its history table. The
+run-outcome badge is the only status signal in a table row.
+
+---
+
 ## Copywriting Contract
 
 All strings are **locked** — the executor pulls them verbatim from this table (project
@@ -298,8 +308,10 @@ A failed **initial** load is the full `error` state above, not this line.
 
 Shape-rooted UI **state** coverage for the System view. Empty/error/first-run **copy** lives in
 the Copywriting Contract above; this section covers state *coverage* and references those rows.
+Categories enumerated by the GSD ui-consideration probe (9 surfaces × 8 categories = 69 applicable);
+resolved below, deduplicated by shared root.
 
-Applicable state considerations resolved: **13 covered, 2 backstop, 0 unresolved.**
+Applicable state considerations resolved: **15 covered, 2 backstop, 0 unresolved.**
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
@@ -307,16 +319,20 @@ Applicable state considerations resolved: **13 covered, 2 backstop, 0 unresolved
 | empty | one source has runs, the other has none | ✅ covered | The runless source's panel shows `No poll cycles recorded for {SourceName} yet.`; the other renders normally. Not a whole-page state. |
 | empty | watchlist size 0 | ✅ covered | Inline `<Alert>` callout (D-05) with a link to `/`; panels + tables still render around it. |
 | empty | no successful run in the ring buffer | ✅ covered | `No successful run in recent history` literal (D-08), not a blank or a date. |
+| empty | history table with zero rows | ✅ covered | No `<Table>` at all — the `No poll cycles recorded for {SourceName} yet.` line stands in (Copywriting → history-table caption, `history.length === 0` row). |
 | loading | initial fetch in flight | 🧪 backstop | Skeleton mirrors the loaded layout: header (static, Refresh disabled) → About-block card skeleton (5 short bars) → 2 source-panel card skeletons (title bar + 3 summary bars + a 3-row table shimmer). Held-out visual state test. |
+| loading | Refresh in flight (non-initial) | ✅ covered | Button → `Refreshing…`, `disabled`, `aria-busy`, `Loader2` spinner, **same width / no layout shift**; all existing content stays on screen (D-11). No skeleton on refresh. |
+| populated | loaded happy path (`200`, not first-run) | ✅ covered | About block + one panel per source, each with last-run summary + history table at typical volume (2–50 rows). Layout + copy fully specified in Copywriting render-states (`loaded`) and Visual Hierarchy. |
 | error | initial `/status` non-401 failure | ✅ covered | `Couldn't load system status.` `EmptyState` + `Retry` (`reloadToken`, `history.tsx` pattern). |
 | error | Refresh (non-initial) non-401 failure | ✅ covered | Stale data kept, `aria-live` `Couldn't refresh — still showing data as of {time}.` line (D-12); "as of" holds. |
 | error | 401 at any point | ✅ covered | No view code — `apiFetch` D-16 interceptor → `<PassphraseScreen>`; re-fetch on `<Outlet>` remount (D-04 session-expired). |
 | partial | schema drift (`applied !== expected`) | ✅ covered | About-block `Schema` row: `applied N · expects M` in `status-warn` + icon (D-02). |
 | partial | DB blip (`schema_applied === null`, still `200`) | ✅ covered | `Database unreachable` `destructive` pill (D-01); `Schema` row shows `—`; run history + counts still render (that's the payload's point). |
 | partial | source skipping only (runs null, `last_skipped_at` set, `consecutive_skips > 0`) | ✅ covered | Panel shows the "no cycles recorded" line **and** the `status-warn` consecutive-skips line. |
+| partial | any `null` timestamp in a run/history row | ✅ covered | Renders `—` (em dash), never blank, never "Invalid Date" (Copywriting → per-source panel). |
 | overflow | ring buffer at the 50 cap | ✅ covered | `<TableCaption>`: `Showing the 50 most recent cycles … Older history isn't retained`. |
 | overflow | wide table on a narrow viewport | ✅ covered | shadcn `Table` self-wraps in `overflow-x-auto`; numeric columns `tabular-nums` right-aligned; `whitespace-nowrap` cells (component default). |
-| overflow | long `summary` / `cycle_id` strings | 🧪 backstop | `summary` is not rendered in the table (only in the future-proofed panel context if the planner adds it); `cycle_id` is `{source}-{int}`, bounded. Held-out long-text visual test. |
+| long-text | `cycle_id` / `app_version` / `SourceName` | 🧪 backstop | All bounded by construction — `cycle_id` is `{source}-{int}`, `app_version` is a short SHA or literal `dev`, `SourceName` is title-cased from the fixed `musicbrainz`/`deezer` keys. `summary` is not rendered. Held-out long-text visual test guards regressions. |
 | zero-one-many | `watchlist_size`, `consecutive_skips`, `history.length` 0 / 1 / many | ✅ covered | Pluralized copy (`artist{s}`, `cycle{s}`); 0 handled by dedicated copy rows above. |
 
 <!-- Status vocabulary:
@@ -339,12 +355,12 @@ No third-party registries are declared for this phase. `web/components.json` `re
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS (FLAG resolved — Visual Hierarchy section added)
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-09-10 (gsd-ui-checker, 7/7)
