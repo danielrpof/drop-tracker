@@ -294,6 +294,51 @@ func (p *Poller) Stop(ctx context.Context) error {
 	}
 }
 
+// artistResult is one worker's contribution to the runCycle fold. Exactly
+// one is produced per dispatched entry: success, fetch/detect error, panic,
+// or ctx-bail.
+type artistResult struct {
+	checked bool // false only when the worker bailed on ctx.Err() before fetching
+	errored bool // fetchAndRecord returned non-nil, OR the worker panicked
+	events  int  // events recorded for this artist (0 on error / panic / bail)
+}
+
+// runOneArtist runs one dispatched entry's fetch+record under its own
+// recover, so a panicking artist yields an errored result rather than
+// crashing the process -- panics do not cross goroutine boundaries, the
+// isolation PERF-03 depends on. A panicked artist was dispatched, so it
+// counts as both checked and errored (D-14); the panic value goes to the
+// correlated log and never near a run entry.
+func runOneArtist(
+	ctx context.Context,
+	logger *slog.Logger,
+	entry watchlist.Entry,
+	fetchAndRecord func(context.Context, *slog.Logger, watchlist.Entry) (int, error),
+) (res artistResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("poll worker panicked",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("artist_name", entry.Name),
+				slog.Any("panic_value", r),
+			)
+			res = artistResult{checked: true, errored: true}
+		}
+	}()
+
+	// Mirrors the sequential loop's per-iteration ctx.Err() check: a worker
+	// whose slot was acquired before cancellation must still not fetch.
+	if err := ctx.Err(); err != nil {
+		return artistResult{} // not checked, not errored -- a ctx-bail
+	}
+
+	events, err := fetchAndRecord(ctx, logger, entry)
+	if err != nil {
+		return artistResult{checked: true, errored: true, events: events}
+	}
+	return artistResult{checked: true, events: events}
+}
+
 // runCycle carries the bounded-fan-out-with-overlap-guard mechanics shared
 // by RunMusicBrainzCycle and RunDeezerCycle: it CAS-guards against an
 // overlapping cycle for the same source, reads the live watchlist,
@@ -313,6 +358,7 @@ func (p *Poller) runCycle(ctx context.Context, running *atomic.Bool, source stri
 	// process's lifetime.
 	if !running.CompareAndSwap(false, true) {
 		p.logger.Warn("skipping poll cycle: previous cycle still in progress", slog.String("source", source))
+		p.runs.RecordSkip(source) // RUN-02: a skipped tick is a signal, not a run entry.
 		return ErrCycleInProgress
 	}
 	defer running.Store(false)
@@ -321,9 +367,55 @@ func (p *Poller) runCycle(ctx context.Context, running *atomic.Bool, source stri
 	logger := p.logger.With(slog.String("source", source), slog.String("cycle_id", cycleID))
 	cycleStart := time.Now()
 
+	// Counters folded single-threaded after wg.Wait() (D-14); the recorder
+	// defer closes over all of them plus cycleErr and the end-of-cycle
+	// timestamps captured at the "poll cycle complete" log point.
+	var (
+		artistsChecked, artistsSkipped, artistsErrored, eventsRecorded int
+		cycleErr                                                       error
+		runFinishedAt                                                  time.Time
+		runDurationMS                                                  int64
+	)
+
+	// RUN-01/02/03: exactly one run entry per post-CAS cycle. Registered
+	// after defer running.Store(false) so LIFO runs it first, with the
+	// overlap guard still held. A recorder error is logged and swallowed --
+	// an observability write never turns a green cycle red (mirrors
+	// NotifyPending below).
+	defer func() {
+		if runFinishedAt.IsZero() { // e.g. the store.List error path returned before the capture below
+			runFinishedAt = time.Now()
+			runDurationMS = runFinishedAt.Sub(cycleStart).Milliseconds()
+		}
+		outcome := pollruns.OutcomeOK
+		switch {
+		case errors.Is(cycleErr, context.Canceled), errors.Is(cycleErr, context.DeadlineExceeded):
+			outcome = pollruns.OutcomeCancelled
+		case cycleErr != nil:
+			outcome = pollruns.OutcomeError
+		}
+		if err := p.runs.RecordRun(ctx, pollruns.RunResult{
+			Source:         source,
+			CycleID:        cycleID,
+			StartedAt:      cycleStart,
+			FinishedAt:     runFinishedAt,
+			DurationMS:     runDurationMS,
+			ArtistsChecked: artistsChecked,
+			ArtistsSkipped: artistsSkipped,
+			ArtistsErrored: artistsErrored,
+			EventsRecorded: eventsRecorded,
+			Outcome:        outcome,
+			// Summary intentionally unset -- the store composes it from the
+			// counts and the outcome enum alone (ASVS V7: no free text).
+		}); err != nil {
+			logger.Error("record poll run failed", slog.String("run_recorder_error", err.Error()))
+		}
+	}()
+
 	entries, err := p.store.List(ctx)
 	if err != nil {
-		return fmt.Errorf("poller: list watchlist: %w", err)
+		cycleErr = fmt.Errorf("poller: list watchlist: %w", err)
+		return cycleErr
 	}
 
 	// Bounded fan-out (PERF-01): sem is a buffered-channel semaphore sized
@@ -339,12 +431,17 @@ func (p *Poller) runCycle(ctx context.Context, running *atomic.Bool, source stri
 	// skip wg.Wait() below, so instead the cancellation error is recorded
 	// and the loop breaks, always reaching wg.Wait().
 	sem := make(chan struct{}, workers)
+	// Capacity is len(entries) and nothing else: >= the dispatched sender
+	// count, so no worker ever blocks on send, every worker reaches
+	// wg.Done(), and wg.Wait() always returns (see the plan's
+	// concurrency-correctness section, point 3).
+	resultCh := make(chan artistResult, len(entries))
 	var wg sync.WaitGroup
-	var cycleErr error
 
 dispatch:
 	for _, entry := range entries {
 		if !shouldDispatch(entry, logger) {
+			artistsSkipped++ // single-threaded: dispatch loop only, never the fold
 			continue
 		}
 
@@ -359,44 +456,25 @@ dispatch:
 		go func(entry watchlist.Entry) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			// A panic inside this goroutine can never be recovered by a
-			// caller's own defer/recover -- panics do not cross goroutine
-			// boundaries in Go, unlike the sequential loop this replaces,
-			// where a panic on one artist would unwind through the same
-			// call stack the caller's own would run on. Left unrecovered
-			// here, one artist's panic (e.g. a malformed upstream response
-			// triggering a nil pointer/index-out-of-range) would crash the
-			// entire process instead of costing only that artist's own
-			// result -- the exact failure mode PERF-03's per-artist
-			// isolation exists to prevent, just via panic instead of a
-			// returned error.
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("poll worker panicked",
-						slog.String("artist_mbid", entry.MBID),
-						slog.String("artist_name", entry.Name),
-						slog.Any("panic_value", r),
-					)
-				}
-			}()
-
-			// A worker whose slot was acquired before cancellation but
-			// which has not yet started its fetch must still not issue
-			// one -- when workers is large enough that the dispatch loop
-			// above never blocks on sem (e.g. worker count >= entry
-			// count), a cancellation racing the dispatch loop would
-			// otherwise go unobserved by every already-dispatched worker,
-			// silently fetching all of them despite the cancelled
-			// context. This mirrors the sequential loop's own
-			// per-iteration ctx.Err() check.
-			if err := ctx.Err(); err != nil {
-				return
-			}
-
-			_, _ = fetchAndRecord(ctx, logger, entry)
+			resultCh <- runOneArtist(ctx, logger, entry, fetchAndRecord)
 		}(entry)
 	}
 	wg.Wait()
+	close(resultCh)
+
+	// Single-threaded fold (D-14): every counter the run entry carries is
+	// derived here, after every worker has joined -- no counter is ever
+	// written from inside a worker goroutine.
+	for r := range resultCh {
+		if !r.checked {
+			continue // ctx-bail: dispatched but never fetched
+		}
+		artistsChecked++
+		if r.errored {
+			artistsErrored++
+		}
+		eventsRecorded += r.events
+	}
 
 	// cycleErr is only set when the dispatch loop itself observed
 	// cancellation while waiting for a semaphore slot -- when workers is
@@ -412,9 +490,15 @@ dispatch:
 		cycleErr = ctx.Err()
 	}
 
+	// Capture finish time here -- after wg.Wait(), before NotifyPending --
+	// so the recorded duration_ms excludes notifier delivery, matching this
+	// log line. The recorder defer reads these captured values, never a
+	// fresh timestamp.
+	runFinishedAt = time.Now()
+	runDurationMS = runFinishedAt.Sub(cycleStart).Milliseconds()
 	logger.Info("poll cycle complete",
 		slog.Int("artist_count", len(entries)),
-		slog.Int64("duration_ms", time.Since(cycleStart).Milliseconds()),
+		slog.Int64("duration_ms", runDurationMS),
 	)
 
 	if cycleErr != nil {

@@ -85,11 +85,13 @@ func TestWithRunRecorder_WiresRealStore(t *testing.T) {
 	}
 }
 
-// TestRunRecorderInertThisPhase pins the phase split: the RunRecorder seam is
-// wired through WithRunRecorder but runCycle never calls it in Phase 18. When
-// Phase 18.1 adds the call, this is the assertion that must be inverted -- a
-// future reader should not mistake a zero count here for a bug.
-func TestRunRecorderInertThisPhase(t *testing.T) {
+// TestRunRecorder_RecordsOneRunPerCycle pins the Phase 18.1 wiring that
+// inverts Phase 18's inert-seam pin: runCycle now records exactly one run
+// entry per completed cycle through the RunRecorder seam -- one RecordRun
+// per RunMusicBrainzCycle, one per RunDeezerCycle, and zero RecordSkip when
+// no overlap occurs. The real-store leg proves the event count that came
+// out of the widened EventRecorder seam lands in a live pollruns.Store.
+func TestRunRecorder_RecordsOneRunPerCycle(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	rec := &fakeRunRecorder{}
 	logger, _ := newTestLogger()
@@ -102,15 +104,66 @@ func TestRunRecorderInertThisPhase(t *testing.T) {
 	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
 		t.Fatalf("RunMusicBrainzCycle: %v", err)
 	}
+	if got := rec.runCalls.Load(); got != 1 {
+		t.Fatalf("RecordRun call count after RunMusicBrainzCycle = %d, want 1", got)
+	}
+
 	if err := p.RunDeezerCycle(context.Background()); err != nil {
 		t.Fatalf("RunDeezerCycle: %v", err)
 	}
-
-	if got := rec.runCalls.Load(); got != 0 {
-		t.Fatalf("RecordRun call count = %d, want 0 (the seam is inert until Phase 18.1)", got)
+	if got := rec.runCalls.Load(); got != 2 {
+		t.Fatalf("RecordRun call count after RunDeezerCycle = %d, want 2 (one per cycle)", got)
 	}
 	if got := rec.skipCalls.Load(); got != 0 {
-		t.Fatalf("RecordSkip call count = %d, want 0 (the seam is inert until Phase 18.1)", got)
+		t.Fatalf("RecordSkip call count = %d, want 0 (no overlap occurred)", got)
+	}
+
+	// Real-store leg: the count from the widened EventRecorder seam must
+	// reach a live pollruns.Store, folded across the worker fan-out.
+	realStore := pollruns.NewStore()
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
+		return 3, nil
+	}}
+	p2, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(realStore))
+	if err != nil {
+		t.Fatalf("New (real store): %v", err)
+	}
+	if err := p2.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle (real store): %v", err)
+	}
+
+	snap := realStore.Snapshot()[pollruns.SourceMusicBrainz]
+	if len(snap.History) != 1 {
+		t.Fatalf("MusicBrainz history length = %d, want exactly 1", len(snap.History))
+	}
+	lr := snap.LastRun
+	if lr == nil {
+		t.Fatal("LastRun is nil after a completed MusicBrainz cycle")
+	}
+	if lr.ArtistsChecked != 3 {
+		t.Fatalf("ArtistsChecked = %d, want 3", lr.ArtistsChecked)
+	}
+	if lr.ArtistsErrored != 0 {
+		t.Fatalf("ArtistsErrored = %d, want 0", lr.ArtistsErrored)
+	}
+	if lr.EventsRecorded != 9 {
+		t.Fatalf("EventsRecorded = %d, want 9 (3 entries x 3 events each, folded)", lr.EventsRecorded)
+	}
+	if lr.Outcome != pollruns.OutcomeOK {
+		t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeOK)
+	}
+	if lr.CycleID == "" {
+		t.Fatal("CycleID is empty")
+	}
+	if lr.FinishedAt.Before(lr.StartedAt) {
+		t.Fatalf("FinishedAt %s is before StartedAt %s", lr.FinishedAt, lr.StartedAt)
+	}
+	if lr.DurationMS < 0 {
+		t.Fatalf("DurationMS = %d, want >= 0", lr.DurationMS)
+	}
+	const wantSummary = "ok — 3 checked, 0 errored, 9 events"
+	if lr.Summary != wantSummary {
+		t.Fatalf("Summary = %q, want %q", lr.Summary, wantSummary)
 	}
 }
 
