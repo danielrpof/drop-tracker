@@ -143,6 +143,9 @@ func TestRunRecorder_RecordsOneRunPerCycle(t *testing.T) {
 	if lr.ArtistsChecked != 3 {
 		t.Fatalf("ArtistsChecked = %d, want 3", lr.ArtistsChecked)
 	}
+	if lr.ArtistsSkipped != 0 {
+		t.Fatalf("ArtistsSkipped = %d, want 0 (MusicBrainz dispatches every entry)", lr.ArtistsSkipped)
+	}
 	if lr.ArtistsErrored != 0 {
 		t.Fatalf("ArtistsErrored = %d, want 0", lr.ArtistsErrored)
 	}
@@ -1047,8 +1050,12 @@ func TestPoller_RunDeezerCycle_SkipsNilDeezerID(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	dz := &fakeAlbumSource{}
 	events := &fakeEventRecorder{}
+	runs := pollruns.NewStore()
 	logger, _ := newTestLogger()
-	p := newTestPoller(t, store, &fakeReleaseGroupSource{}, dz, logger, events)
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	if err := p.RunDeezerCycle(context.Background()); err != nil {
 		t.Fatalf("RunDeezerCycle: %v", err)
@@ -1067,6 +1074,19 @@ func TestPoller_RunDeezerCycle_SkipsNilDeezerID(t *testing.T) {
 		if mbid == "mbid-2" {
 			t.Fatalf("DetectDeezer called for mbid-2, which has a nil DeezerID and must be skipped entirely")
 		}
+	}
+
+	// artists_skipped counts exactly the shouldDispatch-rejected entries; the
+	// nil-DeezerID mbid-2 is rejected, the other two are dispatched (RUN-01).
+	lr := runs.Snapshot()[pollruns.SourceDeezer].LastRun
+	if lr == nil {
+		t.Fatal("LastRun is nil after a completed Deezer cycle")
+	}
+	if lr.ArtistsSkipped != 1 {
+		t.Fatalf("ArtistsSkipped = %d, want 1 (the nil-DeezerID entry)", lr.ArtistsSkipped)
+	}
+	if lr.ArtistsChecked != 2 {
+		t.Fatalf("ArtistsChecked = %d, want 2 (the two non-nil DeezerID entries)", lr.ArtistsChecked)
 	}
 }
 
@@ -2736,5 +2756,150 @@ func TestPoller_StartStop_LifecycleWithRealCronTick(t *testing.T) {
 	after := atomic.LoadInt32(&store.listCalls)
 	if after != before {
 		t.Fatalf("store.listCalls changed from %d to %d after Stop -- no further calls should arrive once Stop has returned", before, after)
+	}
+}
+
+// --- Run recorder: the non-recording paths and the error outcome (18.1-02) ---
+
+// startBlockedMusicBrainzCycle builds a Poller whose MusicBrainz source blocks
+// every worker inside its fetch until the returned release func is called, and
+// launches one RunMusicBrainzCycle in a goroutine that is guaranteed to hold
+// the overlap guard by the time this helper returns. The release func is also
+// registered with t.Cleanup so a failed assertion can never leak the goroutine.
+func startBlockedMusicBrainzCycle(t *testing.T, rec RunRecorder) (p *Poller, done chan error, release func()) {
+	t.Helper()
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	releaseCh := make(chan struct{})
+	started := make(chan struct{}, 1)
+	var once sync.Once
+	release = func() { once.Do(func() { close(releaseCh) }) }
+	t.Cleanup(release)
+
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-releaseCh
+		return []musicbrainz.ReleaseGroup{}, nil
+	}}
+	logger, _ := newTestLogger()
+	var err error
+	p, err = New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(rec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done = make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the first cycle to block inside the source call")
+	}
+	return p, done, release
+}
+
+// TestRunRecorder_SkipRecordsNoEntry proves an overlap-skipped tick is a
+// signal, never a history entry (RUN-02): RecordSkip fires on the pre-CAS
+// branch, before cycleID/cycleStart or either defer exists, so a burst of
+// skips during one slow cycle can never evict real history from the 50-deep
+// ring (threat T-18.1-08).
+func TestRunRecorder_SkipRecordsNoEntry(t *testing.T) {
+	t.Run("fake recorder", func(t *testing.T) {
+		rec := &fakeRunRecorder{}
+		p, done, release := startBlockedMusicBrainzCycle(t, rec)
+
+		err := p.RunMusicBrainzCycle(context.Background())
+		if !errors.Is(err, ErrCycleInProgress) {
+			t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
+		}
+		if got := rec.skipCalls.Load(); got != 1 {
+			t.Fatalf("RecordSkip call count = %d, want exactly 1", got)
+		}
+		if got := rec.runCalls.Load(); got != 0 {
+			t.Fatalf("RecordRun call count during the skipped tick = %d, want 0 (the held cycle has not finished)", got)
+		}
+
+		release()
+		if err := <-done; err != nil {
+			t.Fatalf("first RunMusicBrainzCycle: %v", err)
+		}
+		if got := rec.runCalls.Load(); got != 1 {
+			t.Fatalf("RecordRun call count after the held cycle finished = %d, want 1", got)
+		}
+		if got := rec.skipCalls.Load(); got != 1 {
+			t.Fatalf("RecordSkip call count = %d after the cycle finished, want still 1 (the skip added nothing)", got)
+		}
+	})
+
+	t.Run("real store", func(t *testing.T) {
+		store := pollruns.NewStore()
+		p, done, release := startBlockedMusicBrainzCycle(t, store)
+
+		err := p.RunMusicBrainzCycle(context.Background())
+		if !errors.Is(err, ErrCycleInProgress) {
+			t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
+		}
+		snap := store.Snapshot()[pollruns.SourceMusicBrainz]
+		if len(snap.History) != 0 {
+			t.Fatalf("history length = %d during the skipped tick, want 0 (a skip is never an entry)", len(snap.History))
+		}
+		if snap.ConsecutiveSkips != 1 {
+			t.Fatalf("ConsecutiveSkips = %d, want 1", snap.ConsecutiveSkips)
+		}
+
+		release()
+		if err := <-done; err != nil {
+			t.Fatalf("first RunMusicBrainzCycle: %v", err)
+		}
+
+		// One more clean cycle: the consecutive-skip count resets inside the
+		// store's RecordRun (pollruns.go), not inside runCycle.
+		if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+			t.Fatalf("third RunMusicBrainzCycle: %v", err)
+		}
+		snap = store.Snapshot()[pollruns.SourceMusicBrainz]
+		if len(snap.History) != 2 {
+			t.Fatalf("history length = %d, want 2 (the released cycle + one clean cycle; the skip added none)", len(snap.History))
+		}
+		if snap.ConsecutiveSkips != 0 {
+			t.Fatalf("ConsecutiveSkips = %d after a completed RecordRun, want 0", snap.ConsecutiveSkips)
+		}
+	})
+}
+
+// TestRunRecorder_RecordsErrorOutcomeOnListFailure proves a watchlist List
+// failure still records exactly one entry, with outcome error, all four
+// counters 0, and no part of the underlying driver error in the entry
+// (RUN-01, threat T-18.1-07).
+func TestRunRecorder_RecordsErrorOutcomeOnListFailure(t *testing.T) {
+	sentinel := errors.New("watchlist-driver-sentinel-9c3f2a")
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, sentinel }}
+	runs := pollruns.NewStore()
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if cycleErr := p.RunMusicBrainzCycle(context.Background()); cycleErr == nil {
+		t.Fatal("RunMusicBrainzCycle returned nil, want a non-nil error when store.List fails")
+	}
+
+	snap := runs.Snapshot()[pollruns.SourceMusicBrainz]
+	if len(snap.History) != 1 {
+		t.Fatalf("history length = %d, want exactly 1 (a List failure still records one entry)", len(snap.History))
+	}
+	lr := snap.LastRun
+	if lr.Outcome != pollruns.OutcomeError {
+		t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeError)
+	}
+	if lr.ArtistsChecked != 0 || lr.ArtistsSkipped != 0 || lr.ArtistsErrored != 0 || lr.EventsRecorded != 0 {
+		t.Fatalf("counters = {checked:%d skipped:%d errored:%d events:%d}, want all 0 for a cycle that never ran",
+			lr.ArtistsChecked, lr.ArtistsSkipped, lr.ArtistsErrored, lr.EventsRecorded)
+	}
+	if strings.Contains(lr.Summary, sentinel.Error()) || strings.Contains(lr.Summary, "sentinel") {
+		t.Fatalf("Summary %q leaks part of the underlying driver error text", lr.Summary)
 	}
 }
