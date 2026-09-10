@@ -16,7 +16,10 @@
 # value: internal/config/config.go documents the process environment as the
 # single source of truth at runtime, and a baked value here would both
 # break that invariant and risk a secret landing in a committed image layer
-# (T-07-01).
+# (T-07-01). The file's sole ARG, VERSION, is not an exception to that rule:
+# it carries no default and is non-secret build-provenance metadata (the
+# commit SHA) linked into the binary via -ldflags -X, never read at runtime
+# as configuration (Phase 18 D-13).
 
 # ---- Stage 1: build the SPA ----
 FROM node:26-alpine3.24@sha256:aadf416b2cdce311a8811ba3f0608a61b77dbf997500e2eafe781b51f6a0b019 AS web-build
@@ -57,7 +60,14 @@ RUN rm -rf ./internal/webassets/build/client && \
     mkdir -p ./internal/webassets/build
 COPY --from=web-build /src/web/build/client ./internal/webassets/build/client
 
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" \
+# VERSION is the commit SHA, passed by CI's build-scan job (Phase 18 D-13).
+# Declared bare (no default) so the header's no-baked-value rule holds
+# literally; the link flag substitutes "dev" when it is unset, matching
+# internal/buildinfo.Version's own package default. The fully-qualified module
+# path is load-bearing — a wrong path is silently ignored by the Go linker.
+ARG VERSION
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags="-w -s -X github.com/danielrpof/drop-tracker/internal/buildinfo.Version=${VERSION:-dev}" \
     -o /out/server ./cmd/server
 
 # ---- Stage 3: minimal non-root runtime ----

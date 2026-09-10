@@ -18,6 +18,7 @@ import (
 
 	"github.com/danielrpof/drop-tracker/internal/artistart"
 	"github.com/danielrpof/drop-tracker/internal/authgate"
+	"github.com/danielrpof/drop-tracker/internal/buildinfo"
 	"github.com/danielrpof/drop-tracker/internal/config"
 	"github.com/danielrpof/drop-tracker/internal/db"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
@@ -112,6 +113,11 @@ func run(ctx context.Context) error {
 	}
 
 	logger := logging.New(cfg)
+
+	// Build provenance at boot: the commit SHA injected via -ldflags -X, or
+	// "dev" for a flagless build. Referencing buildinfo here also links it into
+	// the binary so -X takes effect (Phase 18 D-13); 18-04 surfaces it in /status.
+	logger.Info("build info", "version", buildinfo.Short())
 
 	// D-11 boot-time weak-passphrase WARN: if INSTANCE_PASSPHRASE is set and
 	// looks weak (too short, or a known default -- including the .env.example
