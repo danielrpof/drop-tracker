@@ -2050,8 +2050,9 @@ func TestPoller_RunMusicBrainzCycle_EmptyWatchlist(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
 	mb := &fakeReleaseGroupSource{}
 	events := &fakeEventRecorder{}
+	runs := pollruns.NewStore()
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2064,6 +2065,25 @@ func TestPoller_RunMusicBrainzCycle_EmptyWatchlist(t *testing.T) {
 	}
 	if p.mbRunning.Load() {
 		t.Fatal("guard must be released after an empty-watchlist cycle")
+	}
+
+	// The zero-length-input edge: a zero-capacity result channel with zero
+	// senders is valid and the fold is a no-op, yet the cycle still records
+	// exactly one ok entry with all four counters 0 (RUN-01, probe RUN-01 empty).
+	snap := runs.Snapshot()[pollruns.SourceMusicBrainz]
+	if len(snap.History) != 1 {
+		t.Fatalf("history length = %d, want exactly 1 (every invocation records one entry)", len(snap.History))
+	}
+	lr := snap.LastRun
+	if lr.Outcome != pollruns.OutcomeOK {
+		t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeOK)
+	}
+	if lr.ArtistsChecked != 0 || lr.ArtistsSkipped != 0 || lr.ArtistsErrored != 0 || lr.EventsRecorded != 0 {
+		t.Fatalf("counters = {checked:%d skipped:%d errored:%d events:%d}, want all 0",
+			lr.ArtistsChecked, lr.ArtistsSkipped, lr.ArtistsErrored, lr.EventsRecorded)
+	}
+	if lr.FinishedAt.Before(lr.StartedAt) {
+		t.Fatalf("FinishedAt %s is before StartedAt %s", lr.FinishedAt, lr.StartedAt)
 	}
 }
 
@@ -2902,4 +2922,83 @@ func TestRunRecorder_RecordsErrorOutcomeOnListFailure(t *testing.T) {
 	if strings.Contains(lr.Summary, sentinel.Error()) || strings.Contains(lr.Summary, "sentinel") {
 		t.Fatalf("Summary %q leaks part of the underlying driver error text", lr.Summary)
 	}
+}
+
+// TestRunRecorder_RecordsCancelledOutcome proves a shutdown-cancelled cycle
+// still records exactly one entry with outcome cancelled -- both when
+// cancellation lands mid-cycle and when it precedes any dispatch (RUN-02).
+// The store ignores its context argument, so no detached context is needed.
+func TestRunRecorder_RecordsCancelledOutcome(t *testing.T) {
+	t.Run("cancelled mid-cycle", func(t *testing.T) {
+		var served atomic.Int32
+		ctx, cancel := context.WithCancel(context.Background())
+		store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+		mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+			if mbid == "mbid-1" {
+				cancel()
+			}
+			served.Add(1)
+			return []musicbrainz.ReleaseGroup{}, nil
+		}}
+		runs := pollruns.NewStore()
+		logger, _ := newTestLogger()
+		p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(1), WithRunRecorder(runs))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		cycleErr := p.RunMusicBrainzCycle(ctx)
+		if !errors.Is(cycleErr, context.Canceled) {
+			t.Fatalf("RunMusicBrainzCycle error = %v, want context.Canceled", cycleErr)
+		}
+
+		snap := runs.Snapshot()[pollruns.SourceMusicBrainz]
+		if len(snap.History) != 1 {
+			t.Fatalf("history length = %d, want exactly 1 (a cancelled cycle still records)", len(snap.History))
+		}
+		lr := snap.LastRun
+		if lr.Outcome != pollruns.OutcomeCancelled {
+			t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeCancelled)
+		}
+		if lr.ArtistsChecked < 1 {
+			t.Fatalf("ArtistsChecked = %d, want >= 1 (mbid-1 was fetched before cancellation landed)", lr.ArtistsChecked)
+		}
+		if lr.ArtistsChecked != lr.ArtistsErrored+int(served.Load()) {
+			t.Fatalf("ArtistsChecked (%d) != ArtistsErrored (%d) + fake-served (%d)", lr.ArtistsChecked, lr.ArtistsErrored, served.Load())
+		}
+	})
+
+	t.Run("cancelled before dispatch", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+		mb := &fakeReleaseGroupSource{}
+		runs := pollruns.NewStore()
+		logger, _ := newTestLogger()
+		p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(1), WithRunRecorder(runs))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		cycleErr := p.RunMusicBrainzCycle(ctx)
+		if !errors.Is(cycleErr, context.Canceled) {
+			t.Fatalf("RunMusicBrainzCycle error = %v, want context.Canceled", cycleErr)
+		}
+
+		snap := runs.Snapshot()[pollruns.SourceMusicBrainz]
+		if len(snap.History) != 1 {
+			t.Fatalf("history length = %d, want exactly 1", len(snap.History))
+		}
+		lr := snap.LastRun
+		if lr.Outcome != pollruns.OutcomeCancelled {
+			t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeCancelled)
+		}
+		if lr.ArtistsChecked != 0 || lr.ArtistsSkipped != 0 || lr.ArtistsErrored != 0 || lr.EventsRecorded != 0 {
+			t.Fatalf("counters = {checked:%d skipped:%d errored:%d events:%d}, want all 0 (cancelled before any dispatch)",
+				lr.ArtistsChecked, lr.ArtistsSkipped, lr.ArtistsErrored, lr.EventsRecorded)
+		}
+		if got := atomic.LoadInt32(&mb.calls); got != 0 {
+			t.Fatalf("mb.calls = %d, want 0 (every dispatched worker ctx-bails before fetching)", got)
+		}
+	})
 }
