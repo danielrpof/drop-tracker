@@ -31,6 +31,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/detection"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
+	"github.com/danielrpof/drop-tracker/internal/pollruns"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
@@ -40,6 +41,49 @@ import (
 // or production poller.go) so internal/poller itself stays free of a
 // detection import (04-01 acceptance criteria).
 var _ EventRecorder = (*detection.Detector)(nil)
+
+// var _ RunRecorder = (*pollruns.Store)(nil) asserts the real store satisfies
+// the seam poller.go declares, kept here so internal/poller itself stays free
+// of anything but the pollruns DTO import.
+var _ RunRecorder = (*pollruns.Store)(nil)
+
+// TestWithRunRecorder_WiresRealStore is the tracer's end-to-end proof: a
+// RunResult handed to a Poller's RunRecorder-typed field -- wired only through
+// the public WithRunRecorder option -- comes back out of the real store's
+// snapshot carrying the same CycleID and the summary the store composed.
+func TestWithRunRecorder_WiresRealStore(t *testing.T) {
+	store := pollruns.NewStore()
+	logger, _ := newTestLogger()
+
+	p, err := New(&stubStore{}, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(store))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	want := pollruns.RunResult{
+		Source:         pollruns.SourceMusicBrainz,
+		CycleID:        "musicbrainz-1",
+		ArtistsChecked: 12,
+		ArtistsErrored: 1,
+		EventsRecorded: 3,
+		Outcome:        pollruns.OutcomeOK,
+	}
+	if err := p.runs.RecordRun(context.Background(), want); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+
+	snap := store.Snapshot()[pollruns.SourceMusicBrainz]
+	if snap.LastRun == nil {
+		t.Fatal("LastRun is nil after a RecordRun through the seam")
+	}
+	if snap.LastRun.CycleID != want.CycleID {
+		t.Fatalf("CycleID = %q, want %q", snap.LastRun.CycleID, want.CycleID)
+	}
+	const wantSummary = "ok — 12 checked, 1 errored, 3 events"
+	if snap.LastRun.Summary != wantSummary {
+		t.Fatalf("Summary = %q, want %q", snap.LastRun.Summary, wantSummary)
+	}
+}
 
 // newTestLogger builds a *slog.Logger writing newline-delimited JSON into
 // buf, so a test can decode each emitted record and assert on its

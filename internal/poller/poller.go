@@ -27,6 +27,7 @@ import (
 
 	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
+	"github.com/danielrpof/drop-tracker/internal/pollruns"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
@@ -100,6 +101,28 @@ type Notifier interface {
 	NotifyPending(ctx context.Context, logger *slog.Logger) error
 }
 
+// RunRecorder is the narrow seam the poll cycle will use to record one
+// RunResult per completed cycle and to signal an overlap-skipped tick --
+// declared here, in the consumer, exactly as EventRecorder and Notifier are.
+// cmd/server/main.go injects the concrete *pollruns.Store at the composition
+// root; New defaults the field to an inert no-op so the call site never
+// nil-checks it. The recorder is wired but not yet called from runCycle --
+// that instrumentation is Phase 18.1.
+type RunRecorder interface {
+	RecordRun(ctx context.Context, result pollruns.RunResult) error
+	RecordSkip(source string)
+}
+
+// noopRunRecorder is the never-nil default for the runs field: it records
+// nothing, mirroring notifier.NoOp.
+type noopRunRecorder struct{}
+
+func (noopRunRecorder) RecordRun(context.Context, pollruns.RunResult) error { return nil }
+
+func (noopRunRecorder) RecordSkip(string) {}
+
+var _ RunRecorder = noopRunRecorder{}
+
 // Option customizes a Poller's construction, mirroring internal/db's
 // RetryOption functional-option pattern (New builds a Poller from its
 // defaults and then applies each supplied option in order, so the
@@ -122,6 +145,17 @@ func WithDeezerWorkers(n int) Option {
 	return func(p *Poller) { p.dzWorkers = n }
 }
 
+// WithRunRecorder injects the poll-run history store the cycle will record
+// into (RUN-02, RUN-04). A nil argument is ignored so the inert no-op default
+// stands.
+func WithRunRecorder(r RunRecorder) Option {
+	return func(p *Poller) {
+		if r != nil {
+			p.runs = r
+		}
+	}
+}
+
 // nextCycleID is a package-level counter rendered into each cycle's
 // correlation id (musicbrainz-<n> / deezer-<n>) so every log line emitted
 // within one cycle can be grouped, and two successive cycles for the same
@@ -139,6 +173,7 @@ type Poller struct {
 	dz       AlbumSource
 	events   EventRecorder
 	notifier Notifier
+	runs     RunRecorder
 
 	logger   *slog.Logger
 	interval time.Duration
@@ -186,6 +221,7 @@ func New(store watchlist.Store, mb ReleaseGroupSource, dz AlbumSource, events Ev
 		dz:        dz,
 		events:    events,
 		notifier:  notifier,
+		runs:      noopRunRecorder{},
 		logger:    logger,
 		interval:  interval,
 		cron:      cron.New(),
