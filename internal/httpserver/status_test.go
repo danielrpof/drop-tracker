@@ -11,6 +11,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -329,3 +331,136 @@ func TestStatus_WatchlistSize(t *testing.T) {
 }
 
 func cycleID(i int) string { return "musicbrainz-" + string(rune('a'+i)) }
+
+func TestStatus_Gated401(t *testing.T) {
+	// A passphrase-gated instance carrying no session cookie must get 401
+	// from the gate before the handler runs -- never a partial body (STAT-01).
+	srv := newStatusServer(t, statusOpts{
+		passphrase: "a-real-passphrase",
+		counter:    fakeWatchlistCounter{fn: func(context.Context) (int64, error) { return 3, nil }},
+	})
+	code, raw := getStatusRaw(t, srv)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (body %s)", code, raw)
+	}
+	for _, leak := range []string{"poll_interval_seconds", "watchlist_size", "\"sources\""} {
+		if strings.Contains(raw, leak) {
+			t.Fatalf("401 body leaked %q: %s", leak, raw)
+		}
+	}
+}
+
+func TestStatus_Ungated200(t *testing.T) {
+	srv := newStatusServer(t, statusOpts{})
+	code, _, raw := getStatus(t, srv)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 on an inert server (body %s)", code, raw)
+	}
+}
+
+func TestStatus_NoLeak(t *testing.T) {
+	const dsn = "postgres://tracker:Sup3rSecret@db.internal:5432/drop_tracker?sslmode=disable"
+	const webhook = "https://discord.com/api/webhooks/123456789/abcdefSECRETtoken"
+	countErr := fmt.Errorf("query failed against %s (webhook %s)", dsn, webhook)
+	schemaErr := fmt.Errorf("read schema_migrations on %s failed; %s", dsn, webhook)
+
+	cases := []struct {
+		name     string
+		srv      *httpserver.Server
+		wantCode int
+	}{
+		{"watchlist-count", newStatusServer(t, statusOpts{
+			counter: fakeWatchlistCounter{fn: func(context.Context) (int64, error) { return 0, countErr }},
+		}), http.StatusInternalServerError},
+		{"schema-read", newStatusServer(t, statusOpts{
+			schema:   fakeSchemaVersioner{fn: func(context.Context) (uint, bool, error) { return 0, false, schemaErr }},
+			expected: 7,
+		}), http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, raw := getStatusRaw(t, tc.srv)
+			if code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body %s)", code, tc.wantCode, raw)
+			}
+			for _, leak := range []string{
+				dsn, webhook, "Sup3rSecret", "SECRETtoken", "://", "password",
+				countErr.Error(), schemaErr.Error(),
+			} {
+				if strings.Contains(raw, leak) {
+					t.Fatalf("response body leaked %q: %s", leak, raw)
+				}
+			}
+		})
+	}
+}
+
+func TestStatus_EmptyErrorMessage(t *testing.T) {
+	// A counter error whose message is the empty string must still produce
+	// the fixed 500 body -- the handler never dereferences an error to build
+	// a field.
+	srv := newStatusServer(t, statusOpts{
+		counter: fakeWatchlistCounter{fn: func(context.Context) (int64, error) { return 0, errors.New("") }},
+	})
+	code, raw := getStatusRaw(t, srv)
+	if code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body %s)", code, raw)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatalf("decode body %q: %v", raw, err)
+	}
+	if body.Error != "internal error" {
+		t.Fatalf("error = %q, want %q", body.Error, "internal error")
+	}
+}
+
+func TestStatus_SchemaErrorStillTwoHundred(t *testing.T) {
+	// The two database failures are deliberately not symmetric: a schema-read
+	// failure degrades to a null applied version with a 200 (the run history
+	// and counts are the payload's point, and /ready is what turns red on a
+	// blip), while a watchlist-count failure is a 500. Do not "fix" this.
+	schemaFails := newStatusServer(t, statusOpts{
+		schema:   fakeSchemaVersioner{fn: func(context.Context) (uint, bool, error) { return 0, false, errors.New("boom") }},
+		expected: 7,
+	})
+	code, body, raw := getStatus(t, schemaFails)
+	if code != http.StatusOK {
+		t.Fatalf("schema-fail status = %d, want 200 (body %s)", code, raw)
+	}
+	if body.Instance.SchemaApplied != nil {
+		t.Fatalf("schema_applied = %v, want null", *body.Instance.SchemaApplied)
+	}
+	if body.Instance.SchemaExpected != 7 {
+		t.Fatalf("schema_expected = %d, want 7", body.Instance.SchemaExpected)
+	}
+
+	counterFails := newStatusServer(t, statusOpts{
+		counter: fakeWatchlistCounter{fn: func(context.Context) (int64, error) { return 0, errors.New("boom") }},
+	})
+	if code, raw := getStatusRaw(t, counterFails); code != http.StatusInternalServerError {
+		t.Fatalf("counter-fail status = %d, want 500 (body %s)", code, raw)
+	}
+}
+
+func TestStatus_NotConfigured(t *testing.T) {
+	// A server built without WithStatus answers 503 with the shared fixed
+	// error body rather than panicking, so the route table is identical with
+	// and without the option.
+	srv := newStatusServer(t, statusOpts{omitStatus: true})
+	code, raw := getStatusRaw(t, srv)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (body %s)", code, raw)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatalf("decode body %q: %v", raw, err)
+	}
+	if body.Error == "" {
+		t.Fatalf("503 body has no error field: %s", raw)
+	}
+}
