@@ -126,8 +126,16 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 18.1-01-PLAN.md — widen the `EventRecorder` seam to `(int, error)` and record one real run entry end-to-end (tracer)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 18.1-02-PLAN.md — the remaining exit paths: skipped ticks, skipped entries, list failures, cancellation, and a misbehaving recorder
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 18.1-03-PLAN.md — the `-race` substitute: looped counter-invariant test, phase gate, race waiver
 
 **Notes for the phase planner**
