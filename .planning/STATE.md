@@ -3,19 +3,19 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 18.1
-current_phase_name: poll-cycle-instrumentation
+current_phase_name: Poll-Cycle Instrumentation
 status: executing
-stopped_at: Phase 18 complete, ready to plan Phase 18.1
-last_updated: "2026-09-10T05:49:04.481Z"
-last_activity: 2026-09-09
-last_activity_desc: Phase 18 complete, transitioned to Phase 18.1
-state_head: 7f8e5b51d05869f80ef41417a1c3f426b2ce40cc
+stopped_at: Completed 18.1-01-PLAN.md
+last_updated: "2026-09-10T06:09:50.704Z"
+last_activity: 2026-09-10
+last_activity_desc: 18.1-01 executed — EventRecorder widened to (int, error), runCycle records one run entry per cycle
+state_head: f4e1b65a5230e09e729861e00a2f0e89d28dae8b
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 7
-  completed_plans: 4
-  percent: 33
+  completed_plans: 5
+  percent: 71
 ---
 
 # Project State
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-10)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 18.1 — Poll-Cycle Instrumentation (the `runCycle` edit that fills the run-history seam Phase 18 landed inert)
+**Current focus:** Phase 18.1 — Poll-Cycle Instrumentation
 
 ## Current Position
 
-Phase: 18.1 (poll-cycle-instrumentation) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-09-09 — Phase 18 complete, transitioned to Phase 18.1
+Phase: 18.1 (Poll-Cycle Instrumentation) — EXECUTING
+Plan: 2 of 3
+Status: 18.1-01 complete; ready to execute 18.1-02
+Last activity: 2026-09-10 — 18.1-01 executed (EventRecorder widened, runCycle records one run entry per cycle)
 
 ## Performance Metrics
 
@@ -118,6 +118,7 @@ Last activity: 2026-09-09 — Phase 18 complete, transitioned to Phase 18.1
 | Phase 18 P02 | 18min | 3 tasks | 4 files |
 | Phase 18 P03 | 30m | 2 tasks | 5 files |
 | Phase 18 P04 | 30min | 3 tasks | 10 files |
+| Phase 18.1 P01 | 19 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -255,6 +256,12 @@ Recent decisions affecting current work:
 - [Phase 18]: [Phase 18][18-03] CI build-scan passes VERSION=${{ github.sha }} to the one image build and a new step greps the shipped binary for the SHA (catches Pitfall 7); release job byte-for-byte untouched, still loads+pushes the scanned tarball
 - [Phase 18]: 18-04: /status contract frozen (checkpoint option-a — per-source grouping under sources{}); written in docs/api/status-contract.md, Phase 19 types web/app/lib/api.ts against it
 - [Phase 18]: 18-04: WatchlistCounter seam method named CountWatchlist so generated *sqlc.Queries satisfies it with no adapter; one pollruns.Store wired as both poller RunRecorder and httpserver StatusStore at the composition root
+- [Phase 18.1]: [18.1-01] EventRecorder.DetectMusicBrainz/DetectDeezer widened to (int, error); DetectMusicBrainz sums all three passes (new_release + guest-feature + deluxe-change) via function-scoped newRelease + widened detectGuestFeatures/detectDeluxeChanges. 83 detection test call sites moved mechanically to `if _, err :=` in a standalone refactor commit before the logic commit.
+- [Phase 18.1]: [18.1-01] runCycle folds per-worker artistResult{checked,errored bool; events int} single-threaded off a `make(chan artistResult, len(entries))` buffer after wg.Wait() — no counter written inside a worker (D-14). Worker body extracted to runOneArtist with its own defer/recover that sets the named return to {checked:true, errored:true} so a panicked artist reaches the fold. On a fetchAndRecord error runOneArtist keeps the partial event count (A1).
+- [Phase 18.1]: [18.1-01] RecordRun is a defer registered right after `defer running.Store(false)` (LIFO → runs first, guard held, A3); outcome switch keys off the existing cycleErr (Canceled/DeadlineExceeded→cancelled, other non-nil→error, nil→ok); RunResult.Summary left unset (store composes it, ASVS V7); recorder error log-and-swallowed like NotifyPending. store.List error path now assigns cycleErr so that invocation records outcome=error. RecordSkip fires on the pre-CAS overlap branch.
+- [Phase 18.1]: [18.1-01] runFinishedAt/runDurationMS captured at the "poll cycle complete" log point (after wg.Wait(), before NotifyPending) and reused in that log line; the defer only takes a fresh timestamp as an IsZero() fallback for the early store.List-error return — notifier delivery excluded from duration_ms (Pitfall 4).
+- [Phase 18.1]: [18.1-01] `go test -race` substituted with plain `go test` (unusable on this box, absent from CI) — WINDOWS.md ledger entry 12. coverage-gate 90.69%, sqlc-check clean. TestRunCycle_CounterInvariant (plan 18.1-03) is the contracted looped exact-equality substitute.
+- [Phase 18.1]: [18.1-01] Task-1 acceptance criterion "grep -c 'p\\.runs\\.' in runCycle prints 1" is a planner miscalculation — the plan's own action text mandates BOTH p.runs.RecordSkip (pre-CAS) and p.runs.RecordRun (defer), so the region contains 2. Kept both; criterion intent (seam now live in runCycle, inverting Phase 18's 0) is satisfied.
 
 ### Pending Todos
 
@@ -331,8 +338,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10
-Stopped at: Phase 18 complete — UAT 2/2, validation (PARTIAL), security (0 open), verification passed, v1.9.0 released. Ready to plan Phase 18.1.
+Last session: 2026-09-10T06:09:50.308Z
+Stopped at: Completed 18.1-01-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
