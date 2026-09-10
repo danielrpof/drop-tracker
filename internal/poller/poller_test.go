@@ -3002,3 +3002,81 @@ func TestRunRecorder_RecordsCancelledOutcome(t *testing.T) {
 		}
 	})
 }
+
+// TestRunRecorder_ErrorSwallowed proves a misbehaving recorder can never break
+// a poll cycle (RUN-03): a recorder that errors, and one that is slow, both
+// leave runCycle returning its normal result, still logging "poll cycle
+// complete", still releasing the overlap guard, and never retrying the write
+// (threats T-18.1-09, T-18.1-10).
+func TestRunRecorder_ErrorSwallowed(t *testing.T) {
+	t.Run("recorder returns an error", func(t *testing.T) {
+		rec := &fakeRunRecorder{runFn: func(ctx context.Context, result pollruns.RunResult) error {
+			return errors.New("recorder write failed")
+		}}
+		store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+		logger, buf := newTestLogger()
+		p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(rec))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+			t.Fatalf("RunMusicBrainzCycle = %v, want nil (an observability write must never turn a green cycle red -- RUN-03)", err)
+		}
+
+		var sawComplete, sawRecorderFail bool
+		for _, logRec := range decodeLogRecords(t, buf) {
+			switch logRec["msg"] {
+			case "poll cycle complete":
+				sawComplete = true
+			case "record poll run failed":
+				sawRecorderFail = true
+				if _, ok := logRec["run_recorder_error"]; !ok {
+					t.Fatalf("'record poll run failed' record has no run_recorder_error attribute: %v", logRec)
+				}
+			}
+		}
+		if !sawComplete {
+			t.Fatal("no 'poll cycle complete' log record -- the cycle must still log its normal completion")
+		}
+		if !sawRecorderFail {
+			t.Fatal("no 'record poll run failed' log record -- the recorder error must be logged once")
+		}
+		if got := rec.runCalls.Load(); got != 1 {
+			t.Fatalf("RecordRun call count = %d, want exactly 1 (a failed write is never retried)", got)
+		}
+		if p.mbRunning.Load() {
+			t.Fatal("mbRunning is still held after an erroring recorder -- the overlap guard must release regardless")
+		}
+	})
+
+	t.Run("recorder is slow", func(t *testing.T) {
+		rec := &fakeRunRecorder{runFn: func(ctx context.Context, result pollruns.RunResult) error {
+			time.Sleep(50 * time.Millisecond)
+			return nil
+		}}
+		store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+		logger, _ := newTestLogger()
+		p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(rec))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		done := make(chan error, 1)
+		go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("RunMusicBrainzCycle = %v, want nil", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("RunMusicBrainzCycle did not return -- a slow recorder must not block the cycle unboundedly")
+		}
+		if p.mbRunning.Load() {
+			t.Fatal("mbRunning is still held after a slow recorder returned")
+		}
+		if got := rec.runCalls.Load(); got != 1 {
+			t.Fatalf("RecordRun call count = %d, want exactly 1", got)
+		}
+	})
+}
