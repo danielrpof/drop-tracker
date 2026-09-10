@@ -85,6 +85,35 @@ func TestWithRunRecorder_WiresRealStore(t *testing.T) {
 	}
 }
 
+// TestRunRecorderInertThisPhase pins the phase split: the RunRecorder seam is
+// wired through WithRunRecorder but runCycle never calls it in Phase 18. When
+// Phase 18.1 adds the call, this is the assertion that must be inverted -- a
+// future reader should not mistake a zero count here for a bug.
+func TestRunRecorderInertThisPhase(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	rec := &fakeRunRecorder{}
+	logger, _ := newTestLogger()
+
+	p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(rec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+
+	if got := rec.runCalls.Load(); got != 0 {
+		t.Fatalf("RecordRun call count = %d, want 0 (the seam is inert until Phase 18.1)", got)
+	}
+	if got := rec.skipCalls.Load(); got != 0 {
+		t.Fatalf("RecordSkip call count = %d, want 0 (the seam is inert until Phase 18.1)", got)
+	}
+}
+
 // newTestLogger builds a *slog.Logger writing newline-delimited JSON into
 // buf, so a test can decode each emitted record and assert on its
 // attributes directly.
@@ -283,6 +312,35 @@ func (f *fakeNotifier) NotifyPending(ctx context.Context, logger *slog.Logger) e
 }
 
 var _ Notifier = (*fakeNotifier)(nil)
+
+// fakeRunRecorder is a file-local double for poller.RunRecorder in
+// fakeNotifier's shape -- two call counters and optional func hooks. This
+// phase asserts both counters stay zero after a full cycle (the seam is
+// deliberately inert until Phase 18.1); 18.1 inverts that assertion.
+type fakeRunRecorder struct {
+	runFn  func(ctx context.Context, result pollruns.RunResult) error
+	skipFn func(source string)
+
+	runCalls  atomic.Int32
+	skipCalls atomic.Int32
+}
+
+func (f *fakeRunRecorder) RecordRun(ctx context.Context, result pollruns.RunResult) error {
+	f.runCalls.Add(1)
+	if f.runFn != nil {
+		return f.runFn(ctx, result)
+	}
+	return nil
+}
+
+func (f *fakeRunRecorder) RecordSkip(source string) {
+	f.skipCalls.Add(1)
+	if f.skipFn != nil {
+		f.skipFn(source)
+	}
+}
+
+var _ RunRecorder = (*fakeRunRecorder)(nil)
 
 // testArtistMBID derives a short, unique-per-test artist mbid from
 // t.Name(), matching internal/watchlist/service_test.go's testMBID

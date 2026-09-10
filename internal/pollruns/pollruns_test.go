@@ -3,6 +3,7 @@ package pollruns_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -158,6 +159,123 @@ func TestStore_SnapshotDoesNotAlias(t *testing.T) {
 	}
 	if held[0].CycleID != heldFirst {
 		t.Fatalf("held slice first element changed from %q to %q — Snapshot aliased the ring", heldFirst, held[0].CycleID)
+	}
+}
+
+func TestStore_Skip(t *testing.T) {
+	s := pollruns.NewStore()
+	ctx := context.Background()
+
+	s.RecordSkip(pollruns.SourceMusicBrainz)
+	snap := s.Snapshot()[pollruns.SourceMusicBrainz]
+	if snap.ConsecutiveSkips != 1 {
+		t.Fatalf("after one skip: ConsecutiveSkips = %d, want 1", snap.ConsecutiveSkips)
+	}
+	if snap.LastSkippedAt == nil || snap.LastSkippedAt.IsZero() {
+		t.Fatalf("after one skip: LastSkippedAt = %v, want a non-zero stamp", snap.LastSkippedAt)
+	}
+	if len(snap.History) != 0 {
+		t.Fatalf("after one skip: History len = %d, want 0 (a skip is a signal, not a run)", len(snap.History))
+	}
+
+	s.RecordSkip(pollruns.SourceMusicBrainz)
+	s.RecordSkip(pollruns.SourceMusicBrainz)
+	snap = s.Snapshot()[pollruns.SourceMusicBrainz]
+	if snap.ConsecutiveSkips != 3 {
+		t.Fatalf("after three skips: ConsecutiveSkips = %d, want 3", snap.ConsecutiveSkips)
+	}
+	stampBefore := *snap.LastSkippedAt
+
+	if err := s.RecordRun(ctx, mkRun(pollruns.SourceMusicBrainz, 0)); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+	snap = s.Snapshot()[pollruns.SourceMusicBrainz]
+	if snap.ConsecutiveSkips != 0 {
+		t.Fatalf("after a run: ConsecutiveSkips = %d, want 0 (the run resets the counter)", snap.ConsecutiveSkips)
+	}
+	if snap.LastSkippedAt == nil || !snap.LastSkippedAt.Equal(stampBefore) {
+		t.Fatalf("after a run: LastSkippedAt = %v, want it still %v (the run resets the count but never clears the stamp)", snap.LastSkippedAt, stampBefore)
+	}
+	if len(snap.History) != 1 {
+		t.Fatalf("after a run: History len = %d, want 1", len(snap.History))
+	}
+}
+
+func TestStore_SkipIsPerSource(t *testing.T) {
+	s := pollruns.NewStore()
+
+	s.RecordSkip(pollruns.SourceMusicBrainz)
+	s.RecordSkip(pollruns.SourceMusicBrainz)
+
+	snap := s.Snapshot()
+	if got := snap[pollruns.SourceMusicBrainz].ConsecutiveSkips; got != 2 {
+		t.Fatalf("musicbrainz ConsecutiveSkips = %d, want 2", got)
+	}
+	dz := snap[pollruns.SourceDeezer]
+	if dz.ConsecutiveSkips != 0 {
+		t.Fatalf("deezer ConsecutiveSkips = %d, want 0 (one source's skip must not touch the other)", dz.ConsecutiveSkips)
+	}
+	if dz.LastSkippedAt != nil {
+		t.Fatalf("deezer LastSkippedAt = %v, want nil", dz.LastSkippedAt)
+	}
+}
+
+func TestStore_SummaryAlwaysComposed(t *testing.T) {
+	s := pollruns.NewStore()
+	ctx := context.Background()
+
+	const secret = "postgres://user:hunter2@db.internal:5432/drop_tracker?sslmode=disable"
+	r := pollruns.RunResult{
+		Source:         pollruns.SourceDeezer,
+		CycleID:        "deezer-7",
+		ArtistsChecked: 9,
+		ArtistsErrored: 4,
+		EventsRecorded: 0,
+		Outcome:        pollruns.OutcomeError,
+		Summary:        secret,
+	}
+	if err := s.RecordRun(ctx, r); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+
+	snap := s.Snapshot()[pollruns.SourceDeezer]
+	const want = "error — 9 checked, 4 errored, 0 events"
+	if snap.LastRun.Summary != want {
+		t.Fatalf("Summary = %q, want %q (composed from counts + outcome, never the caller's text)", snap.LastRun.Summary, want)
+	}
+	rendered := fmt.Sprintf("%+v", snap)
+	if strings.Contains(rendered, "hunter2") || strings.Contains(rendered, secret) {
+		t.Fatalf("snapshot leaked the caller-supplied Summary text: %s", rendered)
+	}
+}
+
+func TestStore_OutcomeNormalized(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("unknown normalizes to error", func(t *testing.T) {
+		s := pollruns.NewStore()
+		r := mkRun(pollruns.SourceMusicBrainz, 1)
+		r.Outcome = "kaboom"
+		if err := s.RecordRun(ctx, r); err != nil {
+			t.Fatalf("RecordRun: %v", err)
+		}
+		if got := s.Snapshot()[pollruns.SourceMusicBrainz].LastRun.Outcome; got != pollruns.OutcomeError {
+			t.Fatalf("Outcome = %q, want %q", got, pollruns.OutcomeError)
+		}
+	})
+
+	for _, oc := range []string{pollruns.OutcomeOK, pollruns.OutcomeError, pollruns.OutcomeCancelled} {
+		t.Run(oc+" round-trips unchanged", func(t *testing.T) {
+			s := pollruns.NewStore()
+			r := mkRun(pollruns.SourceMusicBrainz, 1)
+			r.Outcome = oc
+			if err := s.RecordRun(ctx, r); err != nil {
+				t.Fatalf("RecordRun: %v", err)
+			}
+			if got := s.Snapshot()[pollruns.SourceMusicBrainz].LastRun.Outcome; got != oc {
+				t.Fatalf("Outcome = %q, want %q", got, oc)
+			}
+		})
 	}
 }
 
