@@ -5,16 +5,16 @@ milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 18
 current_phase_name: Backend — Readiness, Status Surface & App Version
 status: executing
-stopped_at: Completed 18-01-PLAN.md (GET /ready)
-last_updated: "2026-09-10T01:11:08.873Z"
+stopped_at: Completed 18-02-PLAN.md (pollruns.Store + RunRecorder seam)
+last_updated: "2026-09-10T01:25:12.266Z"
 last_activity: 2026-09-09
 last_activity_desc: Phase 18 execution resumed (wave continue)
-state_head: f009dc7fbb4ba3878352fc93d2ebdcc172923d6d
+state_head: ddb1eeeef1774b3f1ac72b5f02ec94172d447e50
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 ## Current Position
 
 Phase: 18 (Backend — Readiness, Status Surface & App Version) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-09-09 — Phase 18 execution resumed (wave continue)
 
@@ -114,6 +114,7 @@ Last activity: 2026-09-09 — Phase 18 execution resumed (wave continue)
 | Phase 16 P05 | 25min | 2 tasks | 3 files |
 | Phase 16 P04 | ~8min | 3 tasks | 1 files |
 | Phase 18 P01 | 35m | 3 tasks | 8 files |
+| Phase 18 P02 | 18min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -242,6 +243,10 @@ Recent decisions affecting current work:
 - [Phase 18]: [Phase 18][18-01] GET /ready ships: 200 {status,schema_applied,schema_expected} when !dirty && applied>=expected (D-01, never ==); 503 with reason db_unreachable|schema_behind|schema_dirty|not_configured. Raw cause to httplog.SetAttrs only, never the body.
 - [Phase 18]: [Phase 18][18-01] db.SchemaVersion is the one hand-rolled 'SELECT version, dirty FROM schema_migrations' read (RowQuerier seam), shared with plan 18-04's /status (D-15). db.ExpectedSchemaVersion reads the embedded migration max so it can't drift. Negative-version guard added for gosec G115.
 - [Phase 18]: [Phase 18][18-01] /ready registered on the root router right after /health, outside the gate branch — structural exemption, never a path allowlist; never 401. readyCheckTimeout is a separate 3s const equal to healthPingTimeout so retuning readiness never retunes liveness. -race still unusable on this box; substituted plain go test, coverage 90.35%.
+- [Phase 18]: [Phase 18][18-02] pollruns.Store is an in-process mutex-guarded ring (N=50/source, ADR-0001); RecordRun owns Summary composition + outcome normalization so caller text never reaches a snapshot; Snapshot deep-copies newest-first so /status can't alias the ring
+- [Phase 18]: [Phase 18][18-02] poller.RunRecorder seam + noopRunRecorder default + WithRunRecorder option added; runCycle untouched, seam inert until Phase 18.1 (TestRunRecorderInertThisPhase pins zero calls)
+- [Phase 18]: [Phase 18][18-02] RecordSkip implemented in task 1 not task 3 — the var _ RunRecorder = (*pollruns.Store)(nil) assertion forces the method to exist; correct-by-construction beats a one-commit stub
+- [Phase 18]: [Phase 18][18-02] TestStore_TwoSourceConcurrent: 1000-iteration exact-equality two-goroutine test is the accepted -race substitute for pollruns; backend coverage 90.41%
 
 ### Pending Todos
 
@@ -318,8 +323,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T01:11:08.818Z
-Stopped at: Completed 18-01-PLAN.md (GET /ready)
+Last session: 2026-09-10T01:24:58.891Z
+Stopped at: Completed 18-02-PLAN.md (pollruns.Store + RunRecorder seam)
 Resume file: None
 
 ## Operator Next Steps
