@@ -581,6 +581,25 @@ jobs:
           tags: drop-tracker:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.sha }}
+      # The Go linker discards a wrong -ldflags -X import path with no error or
+      # warning, so a broken version injection would ship "dev" to production
+      # indefinitely. Extract the binary from the image just built and fail the
+      # pipeline unless it carries this commit's SHA (see internal/buildinfo, Dockerfile).
+      - name: Verify build provenance landed in the binary
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cid="$(docker create drop-tracker:scan)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          docker cp "$cid:/usr/local/bin/server" /tmp/scan-server
+          if ! grep -a -q "$COMMIT_SHA" /tmp/scan-server; then
+            echo "::error::built binary does not carry commit SHA $COMMIT_SHA -- the -ldflags -X injection is broken" >&2
+            exit 1
+          fi
+          echo "build provenance OK: binary carries $COMMIT_SHA"
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
