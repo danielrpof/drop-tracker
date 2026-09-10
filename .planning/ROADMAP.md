@@ -83,7 +83,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. `app_version` is the build's short commit SHA on a CI-built image and `"dev"` on a flagless local build; the image the `release` job pushes is byte-for-byte the one `build-scan` scanned (the single-build guarantee, 07-REVIEW CR-02, is intact).
   5. `internal/pollruns.Store` holds the last N (=50) run entries per source in memory behind a mutex; the `poller.RunRecorder` seam interface exists and is wired to the real store, inert only because `runCycle` does not call it yet (that is Phase 18.1). `StatusStore` reads the buffer for `/status`.
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -94,7 +94,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 18-04-PLAN.md — gated `GET /status`: `CountWatchlist`, the `StatusStore`/`WatchlistCounter` seams, `handleStatus`, the frozen contract in `docs/api/status-contract.md`, composition-root wiring (wave 2)
+- [x] 18-04-PLAN.md — gated `GET /status`: `CountWatchlist`, the `StatusStore`/`WatchlistCounter` seams, `handleStatus`, the frozen contract in `docs/api/status-contract.md`, composition-root wiring (wave 2)
 
 **Notes for the phase planner**
 
@@ -169,7 +169,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 18. Backend — Readiness, Status Surface & App Version | 3/4 | In Progress|  |
+| 18. Backend — Readiness, Status Surface & App Version | 4/4 | In Progress|  |
 | 18.1. Poll-Cycle Instrumentation | 0/TBD | Not started | - |
 | 19. Frontend — System View | 0/TBD | Not started | - |
 

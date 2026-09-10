@@ -4,17 +4,17 @@ milestone: v1.4
 milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 18
 current_phase_name: Backend — Readiness, Status Surface & App Version
-status: executing
-stopped_at: Completed 18-03-PLAN.md (app version injection)
-last_updated: "2026-09-10T01:36:27.593Z"
+status: verifying
+stopped_at: Completed 18-04-PLAN.md
+last_updated: "2026-09-10T01:53:41.443Z"
 last_activity: 2026-09-09
 last_activity_desc: Phase 18 execution resumed (wave continue)
-state_head: b78d26482f0b74e68f23c80f84c6a02e29f72f8a
+state_head: 3118af7b452be408505a251085902bd170879407
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 
 Phase: 18 (Backend — Readiness, Status Surface & App Version) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-09 — Phase 18 execution resumed (wave continue)
 
 ## Performance Metrics
@@ -116,6 +116,7 @@ Last activity: 2026-09-09 — Phase 18 execution resumed (wave continue)
 | Phase 18 P01 | 35m | 3 tasks | 8 files |
 | Phase 18 P02 | 18min | 3 tasks | 4 files |
 | Phase 18 P03 | 30m | 2 tasks | 5 files |
+| Phase 18 P04 | 30min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -251,6 +252,8 @@ Recent decisions affecting current work:
 - [Phase 18]: [Phase 18][18-03] internal/buildinfo.Version is the -ldflags -X linker target (default "dev"); Dockerfile builder stage takes a bare ARG VERSION and substitutes "dev" when unset, so the no-baked-value rule holds literally
 - [Phase 18]: [Phase 18][18-03] cmd/server must reference buildinfo (one boot log line) or -ldflags -X is a silent no-op — the Go linker skips a package not in the binary's link graph; nothing else imports it until 18-04
 - [Phase 18]: [Phase 18][18-03] CI build-scan passes VERSION=${{ github.sha }} to the one image build and a new step greps the shipped binary for the SHA (catches Pitfall 7); release job byte-for-byte untouched, still loads+pushes the scanned tarball
+- [Phase 18]: 18-04: /status contract frozen (checkpoint option-a — per-source grouping under sources{}); written in docs/api/status-contract.md, Phase 19 types web/app/lib/api.ts against it
+- [Phase 18]: 18-04: WatchlistCounter seam method named CountWatchlist so generated *sqlc.Queries satisfies it with no adapter; one pollruns.Store wired as both poller RunRecorder and httpserver StatusStore at the composition root
 
 ### Pending Todos
 
@@ -327,8 +330,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T01:36:15.023Z
-Stopped at: Completed 18-03-PLAN.md (app version injection)
+Last session: 2026-09-10T01:53:32.676Z
+Stopped at: Completed 18-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
