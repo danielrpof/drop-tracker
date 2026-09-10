@@ -5,6 +5,7 @@ status: draft
 shadcn_initialized: true
 preset: base-maia
 created: "2026-09-10"
+amended: "2026-09-10"
 ---
 
 # Phase 19 — UI Design Contract
@@ -23,6 +24,18 @@ were fixed by the Phase 6 UI spec and live in `web/app/app.css`. This phase adds
 run-outcome status palette; justified below) and **zero** new third-party dependencies.
 It vendors **one** new shadcn registry component (`table`) from the official base-maia
 registry.
+
+The two new tokens sit next to Phase 5/6's `--color-event-*` chips, which are also
+green/yellow. A one-line comment in `web/app/app.css` records why both greens coexist:
+different semantic axis (release-type chip vs run-health) and they never co-render on
+one screen (History card vs System panel).
+
+> **This document was re-derived 2026-09-10 (re-run of `/gsd-ui-phase 19`) after a
+> design grill reopened D-04 / D-06 / D-07 / D-08 / D-09 / D-11 / D-13.** The body below
+> now fully integrates those amendments — it is the single source of truth. The prior
+> 7/7 checker approval is retired; the "Checker Sign-Off" section is reset to pending
+> and this spec needs one more checker pass before `/gsd-plan-phase 19`. The amendment
+> list is preserved at the bottom for audit only.
 
 **Upstream contract (read first):**
 - `.planning/phases/19-frontend-system-view/19-CONTEXT.md` — decisions **D-01…D-13**
@@ -48,18 +61,18 @@ registry.
 
 ## Component Inventory
 
-Enumerated by `npx shadcn@latest info` + `ls web/app/components/ui/` + registry index fetch (`https://ui.shadcn.com/r/index.json`) — 12 vendored, 64 available in the base-maia registry — `shadcn@4.16.2` — 2026-09-10.
+Enumerated by `printf '%s\n' web/app/components/ui/*.tsx | wc -l` (→ **12 vendored**) + `curl -s https://ui.shadcn.com/r/index.json | jq length` (→ **63 registry items**) + `curl -s https://ui.shadcn.com/r/styles/base-maia/table.json` (confirms `table` present in the `base-maia` style, deps `["cn"]`) — 2026-09-10. The `shadcn` CLI is invoked via `npx shadcn@latest` and is **not** an installed dependency (`web/package.json` lists it but `node_modules/shadcn` is absent), so a resolved CLI version cannot be pinned offline — the registry fetch above is the re-runnable evidence instead.
 
 This table is a **non-exhaustive** list of known-good components, not a closed allowlist —
-the executor may pull any component the base-maia registry exports (`npx shadcn@latest add <name>`).
+the executor may pull any component the shadcn / base-maia registry exports (`npx shadcn@latest add <name>`).
 
 ### Vendored today (`web/app/components/ui/`)
 
 | Component | Import path | Notes for this phase |
 |-----------|-------------|----------------------|
-| `Badge` | `~/components/ui/badge` | Run-outcome badges (D-07). Has `destructive` + `secondary` variants; `ok`/`warn` tiers pass a custom `className` (see Color). |
+| `Badge` | `~/components/ui/badge` | Run-outcome badges (D-07). Has `destructive` + `secondary` variants; the `Success` / `Completed with errors` / `Interrupted` tiers pass a custom `className` (see Color), and `Interrupted` also takes a leading icon. The `secondary` (grey) variant is now used **only** for an *unrecognised* `outcome` fallback, not for `cancelled`. |
 | `Button` | `~/components/ui/button` | The **Refresh** control and the initial-error **Retry** control. |
-| `Card`, `CardHeader`, `CardTitle`, `CardContent` | `~/components/ui/card` | The About block and each per-source panel are `<Card>` surfaces (`rounded-2xl bg-card ring-1 ring-foreground/10`). |
+| `Card`, `CardHeader`, `CardTitle`, `CardContent` | `~/components/ui/card` | The About block and each per-source panel are `<Card>` surfaces — the component already ships `rounded-2xl bg-card ring-1 ring-foreground/10` and `--card-spacing: --spacing(6)` (24px) padding, `data-[size=sm]` → 16px. **`CardTitle`'s built-in `text-base font-medium` (16px/500) must be overridden to `text-heading` (20px/600)** for the panel and About titles per Typography — or use a bare `<h2 className="text-heading">` inside `CardHeader`. |
 | `Alert`, `AlertTitle`, `AlertDescription` | `~/components/ui/alert` | The empty-watchlist callout (D-05). `default` variant (not destructive). |
 | `Separator` | `~/components/ui/separator` | Divider between a source panel's last-run summary and its history table. |
 | `Skeleton` | `~/components/ui/skeleton` | The `loading` state (D-04). |
@@ -69,13 +82,14 @@ the executor may pull any component the base-maia registry exports (`npx shadcn@
 
 | Component | Command | Notes |
 |-----------|---------|-------|
-| `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableHead`, `TableCell`, `TableCaption` | `npx shadcn@latest add table` | The recent-runs history table. Registry file `registry/base-maia/ui/table.tsx`, dep `cn` only, no `"use client"` concern (SPA). Verified present in the base-maia registry 2026-09-10. Wraps itself in `overflow-x-auto`. |
+| `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableHead`, `TableCell`, `TableCaption` | `npx shadcn@latest add table` | The recent-runs history table. Registry file `registry/base-maia/ui/table.tsx`, dep `cn` only. The registry source carries a leading `"use client"` directive; the shadcn CLI strips it at add-time because `web/components.json` has `rsc: false`, so the vendored file is directive-free (no SPA concern either way). Verified present in the `base-maia` style 2026-09-10. `Table` self-wraps in a `overflow-x-auto` container. |
 
 ### Deliberately NOT used
 
 - `chart` — time-series charts / sparklines are **permanent Out of Scope** (REQUIREMENTS.md).
-- `tooltip` — D-09's "absolute timestamp on hover" is a native `title=""` attribute on a
-  `<time>` element (matches project minimalism; no `tooltip.tsx` is vendored and none is needed).
+- `tooltip` — D-09's on-hover detail (relative phrasing + full ISO string) is a native
+  `title=""` attribute on a `<time>` element (matches project minimalism; no `tooltip.tsx`
+  is vendored and none is needed).
 - `tabs` — the System tab is one more `<NavLink>` in `root.tsx`'s `<nav>`, not the `Tabs` component.
 
 ---
@@ -90,10 +104,10 @@ utilities (`p-4` = 16px, `gap-6` = 24px, `gap-8` = 32px). **No custom spacing to
 | xs | 4px | Icon-to-text gap in the Refresh button; badge internal gap |
 | sm | 8px | Gap between a metric label and its value; gap between stacked summary lines |
 | md | 16px | `p-4` table cell rhythm; gap between About-block rows |
-| lg | 24px | `gap-6` — vertical rhythm of the page (`flex flex-col gap-6`), matching `history.tsx`; inner card padding step |
-| xl | 32px | `p-8` — page gutter and nav horizontal padding (unchanged from `history.tsx` / `root.tsx`) |
-| 2xl | 48px | `py-12` — vertical padding inside the first-run / error `EmptyState` block |
-| 3xl | 64px | `py-16` — `EmptyState`'s existing vertical padding (component-level, unchanged) |
+| lg | 24px | `gap-6` — vertical rhythm of the page (`flex flex-col gap-6 p-8`, the exact `history.tsx` container); `<Card>`'s built-in `--card-spacing` (24px) |
+| xl | 32px | `p-8` — page gutter (unchanged from `history.tsx` / `root.tsx`) |
+| 2xl | 48px | Not used in this phase — no 48px step appears in the System view |
+| 3xl | 64px | `py-16` — `EmptyState`'s fixed vertical padding (the component hard-codes `px-6 py-16 gap-4`; unchanged) |
 
 Exceptions: none.
 
@@ -137,8 +151,11 @@ Dark theme only. Base values are the locked Phase 6 `.dark` token set in `web/ap
 Add to `@theme` in `web/app/app.css`:
 
 ```css
---color-status-ok:   #22c55e; /* green-500  — "Success" badge, "Database reachable" pill */
---color-status-warn: #f59e0b; /* amber-500  — "Completed with errors" badge, schema-drift flag */
+/* Run-health status palette (Phase 19). Deliberately distinct from the Phase 5/6
+   --color-event-* release-type chips (also green/yellow): different semantic axis,
+   and the two never co-render (History card vs System panel). */
+--color-status-ok:   #22c55e; /* green-500 — "Success" badge, "Database reachable" pill */
+--color-status-warn: #f59e0b; /* amber-500 — "Completed with errors" + "Interrupted" badges, schema-drift flag, skip/escalation lines */
 ```
 
 **Why this is a legitimate second/third semantic color, not accent creep:** the System view
@@ -149,10 +166,11 @@ chip, never for buttons/nav/focus rings" and carry unrelated semantics (release 
 **must not** be reused here.
 
 **Status palette reserved for — explicit, closed list:**
-1. The run-outcome badge, 4 tiers (D-07): Success → `status-ok`; Completed with errors → `status-warn`; Failed → `destructive`; Interrupted → `secondary` (grey, `Badge variant="secondary"`).
+1. The run-outcome badge (D-07): Success → `status-ok`; Completed with errors → `status-warn`; Failed → `destructive`; Interrupted → `status-warn` **with a leading icon** to keep it apart from the "Completed with errors" amber tier; an unrecognised `outcome` → `Badge variant="secondary"` (grey) with a title-cased fallback label.
 2. The "Database reachable / unreachable" pill in the About block (D-01): reachable → `status-ok`; unreachable → `destructive`.
 3. The schema-drift flag in the About block (D-02): drift → `status-warn` text; in-sync → plain `text-foreground`, no color.
 4. The per-source "consecutive skips" line, when count > 0 (D-02-adjacent): `status-warn` text.
+5. The per-source "Interrupted" escalation line, when the latest run's `outcome === "cancelled"` (D-07): `status-warn` text with a leading `TriangleAlert`.
 
 **Status palette explicitly NOT used for:** any button fill, nav, link, border, focus ring,
 table row background, or the "as of" stamp.
@@ -164,7 +182,8 @@ Badge rendering pattern (mirrors `badge.tsx`'s own `destructive` variant — tin
 | Success | `<Badge className="bg-status-ok/15 text-status-ok">Success</Badge>` |
 | Completed with errors | `<Badge className="bg-status-warn/15 text-status-warn">Completed with errors</Badge>` |
 | Failed | `<Badge variant="destructive">Failed</Badge>` |
-| Interrupted | `<Badge variant="secondary">Interrupted</Badge>` |
+| Interrupted | `<Badge className="bg-status-warn/15 text-status-warn"><Ban className="size-3" aria-hidden />Interrupted</Badge>` — amber like "Completed with errors", but the leading `Ban` (lucide) icon disambiguates at a glance |
+| Unknown outcome | `<Badge variant="secondary">{titleCase(outcome)}</Badge>` — grey neutral fallback, never the raw enum |
 
 Pills (About block) use the same tinted-fill pattern at body size:
 `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-label bg-status-ok/15 text-status-ok">Database reachable</span>`.
@@ -194,17 +213,17 @@ convention since Phase 6). `{…}` are runtime interpolations.
 | Route heading (`<h1>`) | `System` |
 | Primary CTA — Refresh (idle) | `Refresh` — `<Button variant="secondary">` with a leading `RefreshCw` (lucide) icon |
 | Primary CTA — Refresh (in flight, D-11) | `Refreshing…` — button `disabled`, `aria-busy`, leading `Loader2` spinner (`animate-spin`), **same width, no layout shift**; existing content stays on screen |
-| Freshness stamp (D-13) | `as of {HH:MM}` — client clock at the moment the fetch **resolved**, local 24h time. Rendered as `<time dateTime={iso} title={fullLocalTimestamp}>`. **Absolute, not relative** — it is the anchor that tells the operator how stale the frozen relative times below it are, so it must not itself be a frozen "just now". Updates only on a **successful** fetch. |
+| Freshness stamp (D-13) | `as of {HH:MM:SS}` — client clock at the moment the fetch **resolved**, local 24h time (seconds precision, matching the row timestamps below it — D-09-a). Rendered as `<time dateTime={iso} title={fullLocalTimestamp}>`. **Absolute, not relative** — it is the anchor that tells the operator how stale the frozen times below it are, so it must not itself be a frozen "just now". Updates only on a **successful** fetch. Rendered in the `first-run` state as well as `loaded`. |
 
 ### Render states (D-04 — five states)
 
 | State | Trigger | Copy / treatment |
 |-------|---------|------------------|
 | `loading` | initial fetch in flight | Skeleton only (see UI Considerations). No text. Refresh button rendered but `disabled`. |
-| `error` | initial `/status` fetch threw a **non-401** | `EmptyState` — heading `Couldn't load system status.` · body `The server didn't return a status. Try again in a moment.` · action: `<Button variant="secondary">Retry</Button>` (bumps `reloadToken`, re-issues the same request — `history.tsx` pattern). Replaces all content below the page heading. |
-| `session-expired` | `/status` returned **401** | **No per-view UI.** `apiFetch`'s D-16 interceptor flips `authStore` → `<App>` early-returns `<PassphraseScreen>`. On re-auth `<Outlet>` remounts, the view re-mounts and re-fetches. No stray requests fire behind the login screen. |
-| `first-run` | `200` where **every** source has `last_run === null` **and** `history.length === 0` **and** every `history` array is empty | About block renders normally (version / schema / DB / watchlist size / poll interval are all meaningful). In place of the source panels: `EmptyState` — heading `No poll cycles yet` · body `The scheduler runs every {humanized poll_interval_seconds}. The first results will appear here after the next cycle.` · **no action button** (the header Refresh covers a manual re-check; nothing else to do but wait). |
-| `loaded` | any `200` not matching `first-run` | About block + one panel per source (see layout). |
+| `error` | initial `/status` fetch threw a **non-401** | `EmptyState` — heading `Couldn't load system status.` · body `The server didn't return a status. Try again in a moment.` · action: `<Button variant="secondary">Retry</Button>` (bumps `reloadToken`, re-issues the same request — `history.tsx` pattern). Replaces all content below the page heading. **The header Refresh control is hidden in this state** — `Retry` is the sole recovery affordance; Refresh returns once there is data to refresh. |
+| `session-expired` | `/status` returned **401** | **No per-view UI.** `apiFetch`'s D-16 interceptor flips `authStore` → `<App>` early-returns `<PassphraseScreen>`. On re-auth `<Outlet>` remounts, the view re-mounts and re-fetches. No stray requests fire behind the login screen — the mount effect *and* the Refresh handler each carry their own abort/ignore guard (D-11). |
+| `first-run` | `200` where **every** source has `last_run === null`, `history.length === 0`, **and** `consecutive_skips === 0` | About block renders normally (version / schema / DB / watchlist size / poll interval are all meaningful); the "as of" stamp shows. In place of the source panels: `EmptyState` — heading `No poll cycles yet` · body `The scheduler runs every {humanized poll_interval_seconds}. The first results will appear here after the next cycle.` · **no action button** (the header Refresh covers a manual re-check; nothing else to do but wait). **If `instance.schema_applied === null`** the body instead reads `Can't reach the database — poll results won't be recorded until it's back. See the About section below.` (the payload still loaded `200` — this is not the `error` state). **If any source has `consecutive_skips > 0`** this is **not** first-run — render `loaded` (runless sources show their "no cycles recorded" line; the skip / escalation lines carry the story). |
+| `loaded` | any `200` not matching `first-run` | About block + one panel per source (see layout). **Recomputed on every successful fetch, not latched** — a Refresh right after a restart can move `loaded` → `first-run` when the in-process buffer has reset, and that transition must happen. |
 
 ### Empty-watchlist callout (D-05 — inline, not a whole-page state)
 
@@ -223,19 +242,22 @@ Source key is title-cased for display: `musicbrainz` → `MusicBrainz`, `deezer`
 
 | Element | Copy |
 |---------|------|
-| Panel title (`<h2>`, `text-heading`) | `{SourceName}` |
-| Last-run line — has a run | `{OutcomeBadge}` · `{relative finished_at}` (`<time>` + `title`) · `{humanized duration_ms}` |
-| Last-run counts line | `{artists_checked} checked · {artists_skipped} skipped · {artists_errored} errored · {events_recorded} events` — the `errored` figure is `text-status-warn` when `> 0`, otherwise inherits `text-foreground`; labels are `text-muted-foreground` |
-| Time since last success (D-08) — found | `Last successful run {relative finished_at of the newest history entry whose outcome === "ok"}` |
-| Time since last success (D-08) — none in buffer | `No successful run in recent history` (literal — not a date, not blank). "Recent" is honest: the ring buffer holds at most 50 per source. |
-| Source has **no** runs (`last_run === null`) | In place of the two lines above: `No poll cycles recorded for {SourceName} yet.` (`text-muted-foreground`). The skip line below still shows if applicable. |
-| Consecutive-skips line (only when `consecutive_skips > 0`) | `Skipped {consecutive_skips} consecutive cycle{s}, most recently {relative last_skipped_at}.` — `text-status-warn`, leading `TriangleAlert` icon |
+| Panel title (`<h2>`, `text-heading`) | `{SourceName}` — from the `sources.ts` display-name lookup (`musicbrainz` → `MusicBrainz`, `deezer` → `Deezer`); **not** naive title-case |
+| Last-run line — has a run | `{OutcomeBadge}` · `{absolute finished_at}` (`<time>`, relative + full ISO in `title` — D-09) · `{humanized duration_ms}` |
+| Last-run summary line | `run.summary` **rendered verbatim** (e.g. `ok — 12 checked, 1 errored, 3 events`). Store-composed from the counts + a closed outcome set, leak-safe by construction (ROADMAP security note); rendering it directly keeps the panel consistent with backend semantics instead of re-deriving them. |
+| Last-run counts line — **only when `artists_errored > 0`** | `{artists_checked} checked · {artists_skipped} skipped · {artists_errored} errored · {events_recorded} events` — the `errored` figure is `text-status-warn`; labels are `text-muted-foreground`. On a clean run this line is **omitted** — `summary` above already says it, and a second near-identical line on every healthy panel is noise. |
+| Time since last clean run (D-08) — found | `Last clean run {relative finished_at of the newest history entry whose outcome === "ok" AND artists_errored === 0}` — this line stays **relative**-primary (D-09 exception), absolute in `title` |
+| Time since last clean run (D-08) — none in buffer | `No clean run in recent history` (literal — not a date, not blank). "Recent" is honest: the ring buffer holds at most 50 per source. |
+| Source has **no** runs (`last_run === null`) | In place of the lines above: `No poll cycles recorded for {SourceName} yet.` (`text-muted-foreground`). The skip / escalation lines below still show if applicable. |
+| Consecutive-skips line (only when `consecutive_skips > 0`) | `Skipped {consecutive_skips} consecutive cycle{s}, most recently {absolute last_skipped_at}.` — `text-status-warn`, leading `TriangleAlert` icon |
+| Interrupted-escalation line (only when the latest run's `outcome === "cancelled"`) | `Recent cycles are being interrupted — check for a restart or crash loop.` — `text-status-warn`, leading `TriangleAlert` icon. Per source, latest-run-driven (D-07). |
 | `null` timestamp anywhere | render `—` (em dash), never blank, never "Invalid Date" |
 
-> **D-08 subtlety to make explicit for the executor:** a "Completed with errors" run still has
-> `outcome === "ok"` (the amber tier is a *client-derived label*, not stored data — ROADMAP 18.1
-> note: no `partial` outcome exists). So a "Completed with errors" run **counts as** the last
-> successful run for this line. Scan `history` on `outcome === "ok"`, ignore `artists_errored`.
+> **D-08 subtlety to make explicit for the executor:** a "Completed with errors" run has
+> `outcome === "ok"` but `artists_errored > 0`, and it wears the amber badge. It is **not** a
+> clean run — labelling that same run "last successful run" would contradict its own badge.
+> Scan `history` on `outcome === "ok"` **AND `artists_errored === 0`**. A source whose only
+> `ok` runs all errored some artists shows `No clean run in recent history`.
 
 ### Recent-runs history table (SYS-02)
 
@@ -250,8 +272,8 @@ Columns (left to right), `<th scope="col">`:
 | Header | Cell content | Alignment |
 |--------|--------------|-----------|
 | `Cycle` | `cycle_id` in `font-mono text-label text-muted-foreground` | left |
-| `Started` | `{relative started_at}`, `<time dateTime title>` | left |
-| `Outcome` | `{OutcomeBadge}` (same 4-tier component as the panel) | left |
+| `Started` | `{absolute started_at}` (D-09-a: `HH:MM:SS` today / `MMM D, HH:MM` earlier), `<time dateTime={iso} title={iso + relative}>` | left |
+| `Outcome` | `{OutcomeBadge}` (same component as the panel — Success / Completed with errors / Interrupted / Failed / unknown-fallback) | left |
 | `Duration` | `{humanized duration_ms}` (`3.1s` for ≥ 1000 ms, `840ms` otherwise) | right, `tabular-nums` |
 | `Checked` | `artists_checked` | right, `tabular-nums` |
 | `Skipped` | `artists_skipped` | right, `tabular-nums` |
@@ -293,8 +315,8 @@ text-destructive`, inside an `aria-live="polite"` region:
 
 | Element | Copy |
 |---------|------|
-| Failed-refresh line | `Couldn't refresh — still showing data as of {HH:MM of the last successful fetch}.` |
-| Recovery | Press **Refresh** again. The "as of" stamp holds at the last success until a refresh succeeds. |
+| Failed-refresh line | `Couldn't refresh — still showing data as of {HH:MM:SS of the last successful fetch}.` |
+| Recovery | Press **Refresh** again. The "as of" stamp holds at the last success until a refresh succeeds. The refresh handler carries its own abort/ignore guard so a resolve-after-unmount or resolve-after-401 touches nothing (D-11). |
 
 A failed **initial** load is the full `error` state above, not this line.
 
@@ -311,28 +333,33 @@ the Copywriting Contract above; this section covers state *coverage* and referen
 Categories enumerated by the GSD ui-consideration probe (9 surfaces × 8 categories = 69 applicable);
 resolved below, deduplicated by shared root.
 
-Applicable state considerations resolved: **15 covered, 2 backstop, 0 unresolved.**
+Applicable state considerations resolved: **18 covered, 2 backstop, 0 unresolved.**
+(Post-grill additions: latest-run `cancelled` + escalation line, unrecognised
+`outcome` fallback, `loaded` → `first-run` on a buffer reset between fetches.)
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
-| empty | first-run (no cycles anywhere) | ✅ covered | Renders the `No poll cycles yet` `EmptyState` (D-04 first-run); About block still renders; distinct from both error and loaded-empty. |
+| empty | first-run (no cycles anywhere) | ✅ covered | Renders the `No poll cycles yet` `EmptyState` (D-04 first-run — requires `last_run` null, `history` empty, **and** `consecutive_skips === 0` on both sources); About block + "as of" stamp still render; distinct from both error and loaded-empty. |
 | empty | one source has runs, the other has none | ✅ covered | The runless source's panel shows `No poll cycles recorded for {SourceName} yet.`; the other renders normally. Not a whole-page state. |
 | empty | watchlist size 0 | ✅ covered | Inline `<Alert>` callout (D-05) with a link to `/`; panels + tables still render around it. |
-| empty | no successful run in the ring buffer | ✅ covered | `No successful run in recent history` literal (D-08), not a blank or a date. |
+| empty | no clean run in the ring buffer | ✅ covered | `No clean run in recent history` literal (D-08 — scan `outcome === "ok" && artists_errored === 0`), not a blank or a date. |
 | empty | history table with zero rows | ✅ covered | No `<Table>` at all — the `No poll cycles recorded for {SourceName} yet.` line stands in (Copywriting → history-table caption, `history.length === 0` row). |
 | loading | initial fetch in flight | 🧪 backstop | Skeleton mirrors the loaded layout: header (static, Refresh disabled) → About-block card skeleton (5 short bars) → 2 source-panel card skeletons (title bar + 3 summary bars + a 3-row table shimmer). Held-out visual state test. |
-| loading | Refresh in flight (non-initial) | ✅ covered | Button → `Refreshing…`, `disabled`, `aria-busy`, `Loader2` spinner, **same width / no layout shift**; all existing content stays on screen (D-11). No skeleton on refresh. |
+| loading | Refresh in flight (non-initial) | ✅ covered | Button → `Refreshing…`, `disabled`, `aria-busy`, `Loader2` spinner, **same width / no layout shift**; all existing content stays on screen (D-11). No skeleton on refresh. Handler carries its own abort/ignore guard (D-11) — a resolve after unmount / after a 401 touches nothing. |
 | populated | loaded happy path (`200`, not first-run) | ✅ covered | About block + one panel per source, each with last-run summary + history table at typical volume (2–50 rows). Layout + copy fully specified in Copywriting render-states (`loaded`) and Visual Hierarchy. |
-| error | initial `/status` non-401 failure | ✅ covered | `Couldn't load system status.` `EmptyState` + `Retry` (`reloadToken`, `history.tsx` pattern). |
+| error | initial `/status` non-401 failure | ✅ covered | `Couldn't load system status.` `EmptyState` + `Retry` (`reloadToken`, `history.tsx` pattern); the header Refresh control is **hidden** in this state. |
 | error | Refresh (non-initial) non-401 failure | ✅ covered | Stale data kept, `aria-live` `Couldn't refresh — still showing data as of {time}.` line (D-12); "as of" holds. |
 | error | 401 at any point | ✅ covered | No view code — `apiFetch` D-16 interceptor → `<PassphraseScreen>`; re-fetch on `<Outlet>` remount (D-04 session-expired). |
 | partial | schema drift (`applied !== expected`) | ✅ covered | About-block `Schema` row: `applied N · expects M` in `status-warn` + icon (D-02). |
-| partial | DB blip (`schema_applied === null`, still `200`) | ✅ covered | `Database unreachable` `destructive` pill (D-01); `Schema` row shows `—`; run history + counts still render (that's the payload's point). |
-| partial | source skipping only (runs null, `last_skipped_at` set, `consecutive_skips > 0`) | ✅ covered | Panel shows the "no cycles recorded" line **and** the `status-warn` consecutive-skips line. |
+| partial | DB blip (`schema_applied === null`, still `200`) | ✅ covered | `Database unreachable` `destructive` pill (D-01); `Schema` row shows `—`; run history + counts still render (that's the payload's point). In the `first-run` state the `EmptyState` body swaps to the "Can't reach the database…" copy (D-06 exception). |
+| partial | source skipping only (runs null, `last_skipped_at` set, `consecutive_skips > 0`) | ✅ covered | Forces `loaded`, **not** first-run (D-04 skips clause). Panel shows the `No poll cycles recorded for {SourceName} yet.` line **and** the `status-warn` consecutive-skips line. |
 | partial | any `null` timestamp in a run/history row | ✅ covered | Renders `—` (em dash), never blank, never "Invalid Date" (Copywriting → per-source panel). |
+| partial | latest run `cancelled` (crash loop / repeated shutdown mid-poll) | ✅ covered | Amber "Interrupted" badge + icon (D-07), **and** the per-source `status-warn` escalation line "Recent cycles are being interrupted…". |
+| partial | unrecognised `outcome` (N-1/N deploy skew) | ✅ covered | Grey `secondary` badge with a title-cased fallback label (D-07); `run.summary` line still renders; no white-screen. |
+| overflow | `loaded` view whose buffer emptied on a restart between fetches | ✅ covered | State machine recomputed on every successful fetch → transitions `loaded` → `first-run` (D-04). Not latched. |
 | overflow | ring buffer at the 50 cap | ✅ covered | `<TableCaption>`: `Showing the 50 most recent cycles … Older history isn't retained`. |
 | overflow | wide table on a narrow viewport | ✅ covered | shadcn `Table` self-wraps in `overflow-x-auto`; numeric columns `tabular-nums` right-aligned; `whitespace-nowrap` cells (component default). |
-| long-text | `cycle_id` / `app_version` / `SourceName` | 🧪 backstop | All bounded by construction — `cycle_id` is `{source}-{int}`, `app_version` is a short SHA or literal `dev`, `SourceName` is title-cased from the fixed `musicbrainz`/`deezer` keys. `summary` is not rendered. Held-out long-text visual test guards regressions. |
+| long-text | `cycle_id` / `app_version` / `SourceName` / `summary` | 🧪 backstop | All bounded by construction — `cycle_id` is `{source}-{int}`, `app_version` is a short SHA or literal `dev`, `SourceName` is from the fixed lookup. `summary` **is** rendered (verbatim, last-run line) but is store-composed from counts + a closed outcome set (≈ `ok — 12 checked, 1 errored, 3 events`); no free-text error ever reaches it (ROADMAP security note). Held-out long-text visual test guards regressions. |
 | zero-one-many | `watchlist_size`, `consecutive_skips`, `history.length` 0 / 1 / many | ✅ covered | Pluralized copy (`artist{s}`, `cycle{s}`); 0 handled by dedicated copy rows above. |
 
 <!-- Status vocabulary:
@@ -355,12 +382,48 @@ No third-party registries are declared for this phase. `web/components.json` `re
 
 ## Checker Sign-Off
 
-- [x] Dimension 1 Copywriting: PASS
-- [x] Dimension 2 Visuals: PASS (FLAG resolved — Visual Hierarchy section added)
-- [x] Dimension 3 Color: PASS
-- [x] Dimension 4 Typography: PASS
-- [x] Dimension 5 Spacing: PASS
-- [x] Dimension 6 Registry Safety: PASS
-- [x] Dimension 7 Inventory Provenance: PASS
+- [ ] Dimension 1 Copywriting: PASS
+- [ ] Dimension 2 Visuals: PASS
+- [ ] Dimension 3 Color: PASS
+- [ ] Dimension 4 Typography: PASS
+- [ ] Dimension 5 Spacing: PASS
+- [ ] Dimension 6 Registry Safety: PASS
+- [ ] Dimension 7 Inventory Provenance: PASS
 
-**Approval:** approved 2026-09-10 (gsd-ui-checker, 7/7)
+**Approval:** pending — re-review after the 2026-09-10 post-grill re-derivation.
+(Prior state: approved 2026-09-10, gsd-ui-checker 7/7 — retired because D-04 / D-06 /
+D-07 / D-08 / D-09 / D-11 / D-13 changed materially after that pass. All changes are
+now integrated into the body above; this is a fresh review, not a diff review.)
+
+---
+
+### Amendment history (audit only — not a to-do list)
+
+Changes folded into the body during the 2026-09-10 re-derivation:
+
+- **D-09 / D-09-a** — timestamps flipped to **absolute-primary** (`HH:MM:SS` today /
+  `MMM D, HH:MM` earlier), relative + full ISO in `title`; only the "last clean run"
+  line stays relative. New shared `web/app/lib/format.ts` formatter contract
+  (relative w/ `<0 → "just now"` clamp, absolute, `duration_ms` incl. a `≥60s`
+  minutes bucket, interval humanization) + co-located tests.
+- **D-07** — `cancelled` moved grey → **amber + leading icon**; `secondary` (grey)
+  now only the *unrecognised `outcome`* fallback; new per-source
+  **Interrupted-escalation line** when the latest run is `cancelled`.
+- **D-08** — "last successful run" → **"last clean run"**, scan on
+  `outcome === "ok" && artists_errored === 0`; "No clean run in recent history".
+  The D-08-subtlety callout is inverted.
+- **D-06 (render `summary`)** — `run.summary` rendered **verbatim** as the last-run
+  line; the per-field counts line is now shown **only when `artists_errored > 0`**.
+- **D-04** — `first-run` trigger gains `consecutive_skips === 0` (both sources); a
+  skipping-but-runless instance renders `loaded`. State machine **recomputed every
+  successful fetch** (buffer reset → `loaded` → `first-run`). Unknown-`outcome`
+  grey fallback. Header **Refresh hidden** in the `error` state.
+- **D-06** — DB-unreachable (`schema_applied === null`) first-run copy variant.
+- **D-13** — `as of` → `HH:MM:SS`, rendered in `first-run` too.
+- **D-11** — the Refresh handler must carry its own abort/ignore guard
+  (the mount-effect `cancelled` flag does not cover it).
+- `sources.ts` gains a source display-name lookup; stale "two tabs" comments in
+  `routes.ts` / `root.tsx` fixed in the same change; `app.css` gets a one-line
+  comment on the two-greens coexistence.
+
+Researcher re-derivation complete 2026-09-10. **Run the gsd-ui-checker pass before `/gsd-plan-phase 19`.**
