@@ -13,9 +13,9 @@ Make the scheduler observable without reading container logs, and let a deploy o
 
 ### Readiness
 
-- [ ] **RDY-01**: `GET /ready` returns `200` when the database is reachable **and** the applied schema version is current (at or ahead of the binary's expected migration version) and not dirty; it returns `503` otherwise, with a minimal JSON body carrying no secrets or raw driver error text.
-- [ ] **RDY-02**: `/ready` is reachable unauthenticated at that exact path in both gate-configured and inert modes (mirroring `/health`), bounds its database check with a short timeout, queries the shared pool (no new connection), and has no side effects.
-- [ ] **RDY-03**: `/health` keeps its existing v1.3 behaviour and contract unchanged — readiness is a new, separate endpoint, not a change to liveness.
+- [x] **RDY-01**: `GET /ready` returns `200` when the database is reachable **and** the applied schema version is current (at or ahead of the binary's expected migration version) and not dirty; it returns `503` otherwise, with a minimal JSON body carrying no secrets or raw driver error text.
+- [x] **RDY-02**: `/ready` is reachable unauthenticated at that exact path in both gate-configured and inert modes (mirroring `/health`), bounds its database check with a short timeout, queries the shared pool (no new connection), and has no side effects.
+- [x] **RDY-03**: `/health` keeps its existing v1.3 behaviour and contract unchanged — readiness is a new, separate endpoint, not a change to liveness.
 
 ### Poll Run History
 
@@ -77,9 +77,9 @@ Phase 18 was split into **18** (readiness, status surface, app version — addit
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RDY-01 | Phase 18 | Pending |
-| RDY-02 | Phase 18 | Pending |
-| RDY-03 | Phase 18 | Pending |
+| RDY-01 | Phase 18 | Complete |
+| RDY-02 | Phase 18 | Complete |
+| RDY-03 | Phase 18 | Complete |
 | RUN-01 | Phase 18.1 | Pending |
 | RUN-02 | Phase 18 (skip signal) + Phase 18.1 (cancelled entry) | Pending |
 | RUN-03 | Phase 18.1 | Pending |

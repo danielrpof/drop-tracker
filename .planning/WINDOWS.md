@@ -1,10 +1,10 @@
 ---
 schema_version: 1
 open_count: 4
-waived_count: 1
+waived_count: 2
 fixed_count: 3
-total_count: 8
-last_updated: 2026-09-02T22:44:55.675Z
+total_count: 9
+last_updated: 2026-09-10T01:11:46.455Z
 ---
 
 # Broken Windows Ledger
@@ -23,6 +23,7 @@ last_updated: 2026-09-02T22:44:55.675Z
 | 6 | 15 | deviation | cmd/coverage-report/testdata/baseline-metrics-backend.json |  | Task 1 baseline sidecar fixtures carried 41-char sha fields; corrected to valid 40-char in 20e6d68 (resolved) | fixed |  | 2026-09-02T22:19:13.272Z | 2026-09-02T22:19:34.900Z |
 | 7 | 15 | deviation | cmd/coverage-report/main.go |  | backendTotalPct summed numStmts per profile line, inflating the denominator ~10x on a real merged go-test profile (reported 7.97% vs go tool cover 90.0%); fixed in b1967f6 by merging blocks by position (resolved) | fixed |  | 2026-09-02T22:30:17.794Z | 2026-09-02T22:30:26.122Z |
 | 8 | 15 | unrun-verify | .github/workflows/full-pipeline.yml |  | SC #1-#5 (one sticky comment; three pushes -> one comment; no-baseline degrades to absolute+footer; sub-gate coverage still posts + stays mergeable; merge publishes baseline, no PR recompute) require a live scratch-branch PR against a throwaway target branch -- not automatable, not runnable from this box. actionlint + all per-task static gates pass; the cache/artifact/comment runtime behavior is unverified until the walkthrough. | open |  | 2026-09-02T22:44:55.675Z |  |
+| 9 | 18 | deviation | internal/db/schema_version.go |  | make test -race substituted with plain go test (race detector unusable on this box, absent from CI); coverage-gate ran unchanged at 90.35% | waived | Standing environmental limitation documented in STATE.md Blockers since Phase 11.1: go test -race triggers a ThreadSanitizer allocation failure on this dev box and -race is absent from CI. Same substitution precedent as Phases 11.1/15/16. Full go test ./... green, make coverage-gate unchanged at 90.35%. pollruns concurrency (plan 18-02) uses a looped invariant test as the stated substitute. | 2026-09-10T01:11:27.008Z | 2026-09-10T01:11:46.455Z |
 
 ````json
 [
@@ -121,6 +122,18 @@ last_updated: 2026-09-02T22:44:55.675Z
     "reason": "",
     "recorded_at": "2026-09-02T22:44:55.675Z",
     "resolved_at": null
+  },
+  {
+    "id": 9,
+    "kind": "deviation",
+    "phase": "18",
+    "file": "internal/db/schema_version.go",
+    "line": null,
+    "description": "make test -race substituted with plain go test (race detector unusable on this box, absent from CI); coverage-gate ran unchanged at 90.35%",
+    "status": "waived",
+    "reason": "Standing environmental limitation documented in STATE.md Blockers since Phase 11.1: go test -race triggers a ThreadSanitizer allocation failure on this dev box and -race is absent from CI. Same substitution precedent as Phases 11.1/15/16. Full go test ./... green, make coverage-gate unchanged at 90.35%. pollruns concurrency (plan 18-02) uses a looped invariant test as the stated substitute.",
+    "recorded_at": "2026-09-10T01:11:27.008Z",
+    "resolved_at": "2026-09-10T01:11:46.455Z"
   }
 ]
 ````

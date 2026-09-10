@@ -4,17 +4,17 @@ milestone: v1.4
 milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 18
 current_phase_name: Backend — Readiness, Status Surface & App Version
-status: ready_to_execute
-stopped_at: Phase 18 planned — 4 plans, 2 waves, all coverage gates green
-last_updated: "2026-09-09T23:10:00.000Z"
+status: executing
+stopped_at: Completed 18-01-PLAN.md (GET /ready)
+last_updated: "2026-09-10T01:11:08.873Z"
 last_activity: 2026-09-09
-last_activity_desc: "Phase 18 planned (4 plans / 2 waves); research + pattern-map + plan-check all passed"
-state_head: cf7d8f8
+last_activity_desc: Phase 18 execution resumed (wave continue)
+state_head: f009dc7fbb4ba3878352fc93d2ebdcc172923d6d
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-09)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** v1.4 Operator Observability. A design grilling split the backend work: **Phase 18** (`/ready`, in-process run-history ring buffer + seams, gated `/status` with the contract frozen, SHA app version — all additive), **Phase 18.1** (the risky `runCycle` instrumentation: widened `EventRecorder`, channel-fold counters, `RecordRun`/`RecordSkip`, concurrency test), then **Phase 19** (SPA System view). `poll_runs` is now an in-process ring buffer, not a table (`docs/adr/0001`). Phase 17 (VPS deploy) deferred pending hardware.
+**Current focus:** Phase 18 — Backend — Readiness, Status Surface & App Version
 
 ## Current Position
 
-Phase: 18 (Backend — Readiness, Status Surface & App Version) — READY TO EXECUTE
-Plan: —
-Status: Phase 18 planned — 4 plans across 2 waves, ready to execute. Then Phase 18.1 (runCycle instrumentation), then Phase 19 (System view).
-Last activity: 2026-09-09 — Phase 18 planned; research + pattern-map + plan-check passed; decision & requirement coverage gates green (12/12, 7/7)
+Phase: 18 (Backend — Readiness, Status Surface & App Version) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-09-09 — Phase 18 execution resumed (wave continue)
 
 ## Performance Metrics
 
@@ -113,6 +113,7 @@ Last activity: 2026-09-09 — Phase 18 planned; research + pattern-map + plan-ch
 | Phase 16 P03 | 20min | 3 tasks | 13 files |
 | Phase 16 P05 | 25min | 2 tasks | 3 files |
 | Phase 16 P04 | ~8min | 3 tasks | 1 files |
+| Phase 18 P01 | 35m | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -238,6 +239,9 @@ Recent decisions affecting current work:
 - [v1.4 Roadmap]: Highest-risk item of the milestone is aggregating the per-cycle counters across `runCycle`'s worker goroutines with `go test -race` unavailable on the dev box **and** absent from CI. Phase 18's plan must carry an explicit concurrency-correctness section (atomics or channel fold, panic path counted as errored, looped exact-equality invariant test) — the usual race-detector backstop does not exist here.
 - [v1.4 Roadmap]: Contract tension flagged for the Phase 18 planner rather than silently resolved — RUN-01/RUN-02 require a `skipped_overlap` row for an overlap-skipped tick; the research (Pitfall #4) argues skipped ticks should write no row so a burst of skips can't evict real history through the prune. Requirements are the contract; either satisfy them (outcome value in the CHECK constraint + an answer for burst eviction) or amend RUN-02 explicitly.
 - [v1.4 Roadmap]: Migration `000008_poll_runs` is pure-additive (bare `CREATE TABLE` + plain `CREATE INDEX`, CHECK constraints inline, `.down.sql` paired) — it produces zero `cmd/migration-check` findings and satisfies N-1 automatically because the previous release's binary never queries it. `make sqlc-check` has no CI counterpart, so the `queries/pollruns.sql` codegen must be regenerated and committed locally or CI stays green over a drifted tree.
+- [Phase 18]: [Phase 18][18-01] GET /ready ships: 200 {status,schema_applied,schema_expected} when !dirty && applied>=expected (D-01, never ==); 503 with reason db_unreachable|schema_behind|schema_dirty|not_configured. Raw cause to httplog.SetAttrs only, never the body.
+- [Phase 18]: [Phase 18][18-01] db.SchemaVersion is the one hand-rolled 'SELECT version, dirty FROM schema_migrations' read (RowQuerier seam), shared with plan 18-04's /status (D-15). db.ExpectedSchemaVersion reads the embedded migration max so it can't drift. Negative-version guard added for gosec G115.
+- [Phase 18]: [Phase 18][18-01] /ready registered on the root router right after /health, outside the gate branch — structural exemption, never a path allowlist; never 401. readyCheckTimeout is a separate 3s const equal to healthPingTimeout so retuning readiness never retunes liveness. -race still unusable on this box; substituted plain go test, coverage 90.35%.
 
 ### Pending Todos
 
@@ -314,9 +318,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-09T19:55:00.792Z
-Stopped at: Phase 18 context gathered
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/18-backend-readiness-poll-run-history-status-api/18-CONTEXT.md
+Last session: 2026-09-10T01:11:08.818Z
+Stopped at: Completed 18-01-PLAN.md (GET /ready)
+Resume file: None
 
 ## Operator Next Steps
 
