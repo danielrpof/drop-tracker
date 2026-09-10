@@ -1,7 +1,7 @@
 ---
 phase: 18-backend-readiness-poll-run-history-status-api
 verified: 2026-09-09T00:00:00Z
-status: human_needed
+status: passed
 score: 5/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -9,6 +9,7 @@ re_verification:
   previous_status: none
   previous_score: n/a
 human_verification:
+
   - test: "On the first push to `main` after this phase merges, open the CI run and inspect the `build-scan` job."
     expected: "The 'Verify build provenance landed in the binary' step runs and passes (the extracted binary contains the commit SHA), and the `release` job shows a `docker load` of the scanned tarball with no `docker build` of its own."
     why_human: "Only observable against the real GitHub Actions runner; no unit or local test exercises the CI-built image path end to end (18-03 coverage D4, 18-VALIDATION Manual-Only)."
