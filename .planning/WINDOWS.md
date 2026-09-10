@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 4
+open_count: 6
 waived_count: 2
 fixed_count: 3
-total_count: 9
-last_updated: 2026-09-10T01:11:46.455Z
+total_count: 11
+last_updated: 2026-09-10T01:36:43.340Z
 ---
 
 # Broken Windows Ledger
@@ -24,6 +24,8 @@ last_updated: 2026-09-10T01:11:46.455Z
 | 7 | 15 | deviation | cmd/coverage-report/main.go |  | backendTotalPct summed numStmts per profile line, inflating the denominator ~10x on a real merged go-test profile (reported 7.97% vs go tool cover 90.0%); fixed in b1967f6 by merging blocks by position (resolved) | fixed |  | 2026-09-02T22:30:17.794Z | 2026-09-02T22:30:26.122Z |
 | 8 | 15 | unrun-verify | .github/workflows/full-pipeline.yml |  | SC #1-#5 (one sticky comment; three pushes -> one comment; no-baseline degrades to absolute+footer; sub-gate coverage still posts + stays mergeable; merge publishes baseline, no PR recompute) require a live scratch-branch PR against a throwaway target branch -- not automatable, not runnable from this box. actionlint + all per-task static gates pass; the cache/artifact/comment runtime behavior is unverified until the walkthrough. | open |  | 2026-09-02T22:44:55.675Z |  |
 | 9 | 18 | deviation | internal/db/schema_version.go |  | make test -race substituted with plain go test (race detector unusable on this box, absent from CI); coverage-gate ran unchanged at 90.35% | waived | Standing environmental limitation documented in STATE.md Blockers since Phase 11.1: go test -race triggers a ThreadSanitizer allocation failure on this dev box and -race is absent from CI. Same substitution precedent as Phases 11.1/15/16. Full go test ./... green, make coverage-gate unchanged at 90.35%. pollruns concurrency (plan 18-02) uses a looped invariant test as the stated substitute. | 2026-09-10T01:11:27.008Z | 2026-09-10T01:11:46.455Z |
+| 10 | 18 | deviation | internal/buildinfo/buildinfo.go |  | 18-03: make test -race substituted with plain go test ./... (race detector unusable on this box, absent from CI); coverage-gate ran unchanged at 90.43%. Same precedent as 11.1/15/16/18-01/18-02. | open |  | 2026-09-10T01:36:42.632Z |  |
+| 11 | 18 | unrun-verify | .github/workflows/full-pipeline.yml |  | 18-03: build-scan 'Verify build provenance landed in the binary' step is unverified against the real GitHub Actions runner until the first push to main after this phase merges (18-VALIDATION.md human-check). | open |  | 2026-09-10T01:36:43.340Z |  |
 
 ````json
 [
@@ -134,6 +136,30 @@ last_updated: 2026-09-10T01:11:46.455Z
     "reason": "Standing environmental limitation documented in STATE.md Blockers since Phase 11.1: go test -race triggers a ThreadSanitizer allocation failure on this dev box and -race is absent from CI. Same substitution precedent as Phases 11.1/15/16. Full go test ./... green, make coverage-gate unchanged at 90.35%. pollruns concurrency (plan 18-02) uses a looped invariant test as the stated substitute.",
     "recorded_at": "2026-09-10T01:11:27.008Z",
     "resolved_at": "2026-09-10T01:11:46.455Z"
+  },
+  {
+    "id": 10,
+    "kind": "deviation",
+    "phase": "18",
+    "file": "internal/buildinfo/buildinfo.go",
+    "line": null,
+    "description": "18-03: make test -race substituted with plain go test ./... (race detector unusable on this box, absent from CI); coverage-gate ran unchanged at 90.43%. Same precedent as 11.1/15/16/18-01/18-02.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-10T01:36:42.632Z",
+    "resolved_at": null
+  },
+  {
+    "id": 11,
+    "kind": "unrun-verify",
+    "phase": "18",
+    "file": ".github/workflows/full-pipeline.yml",
+    "line": null,
+    "description": "18-03: build-scan 'Verify build provenance landed in the binary' step is unverified against the real GitHub Actions runner until the first push to main after this phase merges (18-VALIDATION.md human-check).",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-10T01:36:43.340Z",
+    "resolved_at": null
   }
 ]
 ````

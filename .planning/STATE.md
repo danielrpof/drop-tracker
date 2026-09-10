@@ -5,16 +5,16 @@ milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 18
 current_phase_name: Backend — Readiness, Status Surface & App Version
 status: executing
-stopped_at: Completed 18-02-PLAN.md (pollruns.Store + RunRecorder seam)
-last_updated: "2026-09-10T01:25:12.266Z"
+stopped_at: Completed 18-03-PLAN.md (app version injection)
+last_updated: "2026-09-10T01:36:27.593Z"
 last_activity: 2026-09-09
 last_activity_desc: Phase 18 execution resumed (wave continue)
-state_head: ddb1eeeef1774b3f1ac72b5f02ec94172d447e50
+state_head: b78d26482f0b74e68f23c80f84c6a02e29f72f8a
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 ## Current Position
 
 Phase: 18 (Backend — Readiness, Status Surface & App Version) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-09-09 — Phase 18 execution resumed (wave continue)
 
@@ -115,6 +115,7 @@ Last activity: 2026-09-09 — Phase 18 execution resumed (wave continue)
 | Phase 16 P04 | ~8min | 3 tasks | 1 files |
 | Phase 18 P01 | 35m | 3 tasks | 8 files |
 | Phase 18 P02 | 18min | 3 tasks | 4 files |
+| Phase 18 P03 | 30m | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -247,6 +248,9 @@ Recent decisions affecting current work:
 - [Phase 18]: [Phase 18][18-02] poller.RunRecorder seam + noopRunRecorder default + WithRunRecorder option added; runCycle untouched, seam inert until Phase 18.1 (TestRunRecorderInertThisPhase pins zero calls)
 - [Phase 18]: [Phase 18][18-02] RecordSkip implemented in task 1 not task 3 — the var _ RunRecorder = (*pollruns.Store)(nil) assertion forces the method to exist; correct-by-construction beats a one-commit stub
 - [Phase 18]: [Phase 18][18-02] TestStore_TwoSourceConcurrent: 1000-iteration exact-equality two-goroutine test is the accepted -race substitute for pollruns; backend coverage 90.41%
+- [Phase 18]: [Phase 18][18-03] internal/buildinfo.Version is the -ldflags -X linker target (default "dev"); Dockerfile builder stage takes a bare ARG VERSION and substitutes "dev" when unset, so the no-baked-value rule holds literally
+- [Phase 18]: [Phase 18][18-03] cmd/server must reference buildinfo (one boot log line) or -ldflags -X is a silent no-op — the Go linker skips a package not in the binary's link graph; nothing else imports it until 18-04
+- [Phase 18]: [Phase 18][18-03] CI build-scan passes VERSION=${{ github.sha }} to the one image build and a new step greps the shipped binary for the SHA (catches Pitfall 7); release job byte-for-byte untouched, still loads+pushes the scanned tarball
 
 ### Pending Todos
 
@@ -323,8 +327,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T01:24:58.891Z
-Stopped at: Completed 18-02-PLAN.md (pollruns.Store + RunRecorder seam)
+Last session: 2026-09-10T01:36:15.023Z
+Stopped at: Completed 18-03-PLAN.md (app version injection)
 Resume file: None
 
 ## Operator Next Steps
