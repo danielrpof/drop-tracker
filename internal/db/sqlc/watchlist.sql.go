@@ -11,6 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countWatchlist = `-- name: CountWatchlist :one
+SELECT count(*) FROM watchlist
+`
+
+// Backs GET /status watchlist_size (STAT-01). A count(*), not len(ListWatchlist)
+// in Go -- ListWatchlist JOINs artists and returns every row's full projection,
+// so counting its result would pull every row just to discard it.
+func (q *Queries) CountWatchlist(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countWatchlist)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createWatchlistEntry = `-- name: CreateWatchlistEntry :one
 INSERT INTO watchlist (artist_id, release_types, muted_event_types)
 VALUES ($1, $2, $3)

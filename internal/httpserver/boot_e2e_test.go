@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/config"
 	"github.com/danielrpof/drop-tracker/internal/db"
@@ -20,6 +21,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/events"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/logging"
+	"github.com/danielrpof/drop-tracker/internal/pollruns"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
@@ -154,6 +156,107 @@ func TestBootToReady_EndToEnd(t *testing.T) {
 	}
 	if body.SchemaApplied == nil || *body.SchemaApplied != body.SchemaExpected {
 		t.Fatalf("schema_applied=%v schema_expected=%d, want equal and non-nil", body.SchemaApplied, body.SchemaExpected)
+	}
+}
+
+// TestBootToStatus_EndToEnd wires one GET /status request from a client
+// through the gated route (built here with no gate), across the run store,
+// the watchlist counter, and the schema seam, and back as the complete
+// frozen envelope, against a real migrated Postgres (STAT-01, RUN-04).
+func TestBootToStatus_EndToEnd(t *testing.T) {
+	dsn := testutil.RequirePostgresDSN(t)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.Background()
+
+	if err := db.RunMigrations(ctx, dsn, logger); err != nil {
+		t.Fatalf("db.RunMigrations: %v", err)
+	}
+
+	expected, err := db.ExpectedSchemaVersion()
+	if err != nil {
+		t.Fatalf("db.ExpectedSchemaVersion: %v", err)
+	}
+
+	pool, err := db.NewPool(ctx, dsn, 0)
+	if err != nil {
+		t.Fatalf("db.NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	runs := pollruns.NewStore()
+	started := time.Now().Add(-3 * time.Second).UTC()
+	if err := runs.RecordRun(ctx, pollruns.RunResult{
+		Source:         pollruns.SourceMusicBrainz,
+		CycleID:        "musicbrainz-1",
+		StartedAt:      started,
+		FinishedAt:     started.Add(3 * time.Second),
+		DurationMS:     3000,
+		ArtistsChecked: 4,
+		Outcome:        pollruns.OutcomeOK,
+	}); err != nil {
+		t.Fatalf("runs.RecordRun: %v", err)
+	}
+
+	store := watchlist.NewService(sqlc.New(pool))
+	eventsStore := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(pool, store, eventsStore, nil, logger,
+		httpserver.WithReadiness(db.NewSchemaVersionReader(pool), expected),
+		httpserver.WithStatus(httpserver.StatusDeps{
+			Store:        runs,
+			Counter:      sqlc.New(pool),
+			AppVersion:   "dev",
+			PollInterval: 15 * time.Minute,
+		}))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/status")
+	if err != nil {
+		t.Fatalf("http.Get /status: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body struct {
+		PollIntervalSeconds int   `json:"poll_interval_seconds"`
+		WatchlistSize       int64 `json:"watchlist_size"`
+		Instance            struct {
+			AppVersion     string `json:"app_version"`
+			SchemaApplied  *uint  `json:"schema_applied"`
+			SchemaExpected uint   `json:"schema_expected"`
+		} `json:"instance"`
+		Sources map[string]struct {
+			LastRun *struct {
+				CycleID string `json:"cycle_id"`
+				Outcome string `json:"outcome"`
+			} `json:"last_run"`
+			History          []json.RawMessage `json:"history"`
+			ConsecutiveSkips int               `json:"consecutive_skips"`
+		} `json:"sources"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.PollIntervalSeconds != 900 {
+		t.Fatalf("poll_interval_seconds = %d, want 900", body.PollIntervalSeconds)
+	}
+	for _, src := range []string{"musicbrainz", "deezer"} {
+		if _, ok := body.Sources[src]; !ok {
+			t.Fatalf("sources missing key %q: %+v", src, body.Sources)
+		}
+	}
+	mb := body.Sources["musicbrainz"]
+	if mb.LastRun == nil || mb.LastRun.CycleID != "musicbrainz-1" || mb.LastRun.Outcome != "ok" {
+		t.Fatalf("musicbrainz.last_run = %+v, want the recorded musicbrainz-1 ok run", mb.LastRun)
+	}
+	if body.Instance.SchemaApplied == nil || *body.Instance.SchemaApplied != expected || body.Instance.SchemaExpected != expected {
+		t.Fatalf("instance schema applied/expected = %v/%d, want %d/%d",
+			body.Instance.SchemaApplied, body.Instance.SchemaExpected, expected, expected)
 	}
 }
 

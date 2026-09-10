@@ -30,6 +30,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 	"github.com/danielrpof/drop-tracker/internal/notifier"
 	"github.com/danielrpof/drop-tracker/internal/poller"
+	"github.com/danielrpof/drop-tracker/internal/pollruns"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
@@ -236,6 +237,16 @@ func run(ctx context.Context) error {
 	// every List call actually applies.
 	eventsStore := events.NewService(sqlc.New(pool), cfg.EventRetentionDays)
 
+	// One pollruns.Store instance is deliberately shared by both consumers:
+	// the poller writes to it (poller.WithRunRecorder below) and the HTTP
+	// server reads from it (httpserver.WithStatus below). This mirrors how
+	// mbClient is shared between httpserver.New and poller.New -- a second
+	// store would give the poller and /status divergent histories, and an
+	// eternally empty /status would look exactly like a healthy fresh
+	// instance (RUN-04). The RecordRun/RecordSkip calls from runCycle are
+	// Phase 18.1; the store is wired but inert this phase.
+	runs := pollruns.NewStore()
+
 	// WithAuthGate engages the instance passphrase gate (GATE-01..06) when
 	// INSTANCE_PASSPHRASE is set; with it empty the option is inert and every
 	// route behaves exactly as v1.2 (GATE-07). Without this argument the gate
@@ -255,6 +266,16 @@ func run(ctx context.Context) error {
 		// schema_migrations on the shared handle, opening no connection of its
 		// own (RDY-02).
 		httpserver.WithReadiness(db.NewSchemaVersionReader(pool), expectedSchema),
+		// GET /status: the shared run-history store, a fresh stateless
+		// sqlc.Queries over the same pool as the watchlist counter, the short
+		// build SHA, and the configured poll interval rendered as
+		// poll_interval_seconds. The schema seam is WithReadiness's above.
+		httpserver.WithStatus(httpserver.StatusDeps{
+			Store:        runs,
+			Counter:      sqlc.New(pool),
+			AppVersion:   buildinfo.Short(),
+			PollInterval: cfg.PollInterval,
+		}),
 	)
 	// Close stops the gate's per-IP limiter-map sweeper goroutine (plan 14-02);
 	// a no-op when the gate is disabled. Deferred here so it runs on every
@@ -275,7 +296,7 @@ func run(ctx context.Context) error {
 	// budget: search traffic and poll traffic draw from the same token
 	// bucket, so a burst of /search calls can never push the combined
 	// outbound rate past what the operator configured (D-07).
-	pollr, err := poller.New(store, mbClient, dzClient, detector, notif, cfg.PollInterval, logger, poller.WithMusicBrainzWorkers(cfg.MusicBrainzPollWorkers), poller.WithDeezerWorkers(cfg.DeezerPollWorkers))
+	pollr, err := poller.New(store, mbClient, dzClient, detector, notif, cfg.PollInterval, logger, poller.WithMusicBrainzWorkers(cfg.MusicBrainzPollWorkers), poller.WithDeezerWorkers(cfg.DeezerPollWorkers), poller.WithRunRecorder(runs))
 	if err != nil {
 		return fmt.Errorf("build poller: %w", err)
 	}

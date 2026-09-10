@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -33,9 +34,13 @@ type Server struct {
 	events         events.Store
 	sources        []SearchSource
 	router         http.Handler
-	gate           *authgate.Manager
-	schema         SchemaVersioner
-	expectedSchema uint
+	gate             *authgate.Manager
+	schema           SchemaVersioner
+	expectedSchema   uint
+	statusStore      StatusStore
+	watchlistCounter WatchlistCounter
+	appVersion       string
+	pollInterval     time.Duration
 }
 
 // serverConfig collects the optional settings New applies before building
@@ -47,6 +52,10 @@ type serverConfig struct {
 	trustProxyHeaders bool
 	schema            SchemaVersioner
 	expectedSchema    uint
+	statusStore       StatusStore
+	watchlistCounter  WatchlistCounter
+	appVersion        string
+	pollInterval      time.Duration
 }
 
 // Option customises New, mirroring internal/poller's and internal/notifier's
@@ -85,6 +94,21 @@ func WithReadiness(schema SchemaVersioner, expectedSchema uint) Option {
 	return func(c *serverConfig) {
 		c.schema = schema
 		c.expectedSchema = expectedSchema
+	}
+}
+
+// WithStatus supplies the dependencies the gated GET /status surface needs
+// beyond the schema seam WithReadiness already owns: the shared poll-run
+// history store, the watchlist counter, the short build version string, and
+// the configured poll interval (STAT-01, RUN-04). Absent, /status answers
+// 503 with the shared fixed error body so the route table is identical with
+// and without the option; a cmd/server binary always wires it.
+func WithStatus(deps StatusDeps) Option {
+	return func(c *serverConfig) {
+		c.statusStore = deps.Store
+		c.watchlistCounter = deps.Counter
+		c.appVersion = deps.AppVersion
+		c.pollInterval = deps.PollInterval
 	}
 }
 
@@ -134,6 +158,10 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	s.gate = gate
 	s.schema = cfg.schema
 	s.expectedSchema = cfg.expectedSchema
+	s.statusStore = cfg.statusStore
+	s.watchlistCounter = cfg.watchlistCounter
+	s.appVersion = cfg.appVersion
+	s.pollInterval = cfg.pollInterval
 
 	r := chi.NewRouter()
 
@@ -213,7 +241,7 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	return s
 }
 
-// registerDataRoutes registers the six gated data routes on r. It is called
+// registerDataRoutes registers the gated data routes on r. It is called
 // on the protected sub-router when the gate is enabled and directly on the
 // root router otherwise, so the route set is identical in both cases -- the
 // only difference is whether authgate.Manager.Authenticate runs first.
@@ -224,6 +252,10 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	r.Patch("/watchlist/{id}", s.handleUpdateWatchlist)
 	r.Delete("/watchlist/{id}", s.handleRemoveWatchlist)
 	r.Get("/events", s.handleListEvents)
+	// /status inherits gate.Authenticate + gate.RequireCSRFHeader + the
+	// X-Instance-Gated header on the gated path exactly as /events does; it is
+	// a read verb, so the CSRF-header requirement is a no-op for it.
+	r.Get("/status", s.handleStatus)
 }
 
 // securityResponseHeaders sets response headers that apply to every route in

@@ -37,6 +37,10 @@ type Querier interface {
 	// new_release row's own track_count that the removed write query mutated,
 	// so this statement reads exactly the value the old pair wrote.
 	AdvanceGroupTrackCountBaseline(ctx context.Context, arg AdvanceGroupTrackCountBaselineParams) ([]*int32, error)
+	// Backs GET /status watchlist_size (STAT-01). A count(*), not len(ListWatchlist)
+	// in Go -- ListWatchlist JOINs artists and returns every row's full projection,
+	// so counting its result would pull every row just to discard it.
+	CountWatchlist(ctx context.Context) (int64, error)
 	CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error)
 	// :execrows returns the affected row count in one round trip, which is what
 	// lets the service distinguish "deleted" from "there was nothing to delete"
