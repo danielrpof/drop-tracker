@@ -85,8 +85,8 @@ var _ AlbumSource = (*deezer.Client)(nil)
 // substitute a fake with no real database connection (Phase 4, DTCT-01;
 // DetectDeezer added in plan 04-02).
 type EventRecorder interface {
-	DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error
-	DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) error
+	DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error)
+	DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) (int, error)
 }
 
 // Notifier is the narrow seam RunMusicBrainzCycle and RunDeezerCycle depend
@@ -303,7 +303,7 @@ func (p *Poller) Stop(ctx context.Context) error {
 // used both as the guard's identity for logging and as the cycle_id prefix
 // (D-08's per-source independence lives in the caller's choice of running
 // pointer and workers count, not in this method).
-func (p *Poller) runCycle(ctx context.Context, running *atomic.Bool, source string, workers int, shouldDispatch func(entry watchlist.Entry, logger *slog.Logger) bool, fetchAndRecord func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry)) error {
+func (p *Poller) runCycle(ctx context.Context, running *atomic.Bool, source string, workers int, shouldDispatch func(entry watchlist.Entry, logger *slog.Logger) bool, fetchAndRecord func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry) (int, error)) error {
 	// Compare-and-swap, not a mutex: a tick that arrives during a run must
 	// be *skipped*, not queued behind it (D-09) -- a mutex would serialise
 	// ticks into a backlog and eventually run every missed cycle back to
@@ -393,7 +393,7 @@ dispatch:
 				return
 			}
 
-			fetchAndRecord(ctx, logger, entry)
+			_, _ = fetchAndRecord(ctx, logger, entry)
 		}(entry)
 	}
 	wg.Wait()
@@ -450,7 +450,7 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 		return true
 	}
 
-	fetchAndRecord := func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry) {
+	fetchAndRecord := func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry) (int, error) {
 		groups, err := p.mb.ReleaseGroupsByArtist(ctx, entry.MBID)
 		if err != nil {
 			logger.Error("poll artist failed",
@@ -458,7 +458,7 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 				slog.String("artist_name", entry.Name),
 				slog.String("musicbrainz_error", err.Error()),
 			)
-			return
+			return 0, err
 		}
 
 		logger.Info("poll result",
@@ -467,14 +467,16 @@ func (p *Poller) RunMusicBrainzCycle(ctx context.Context) error {
 			slog.Int("item_count", len(groups)),
 		)
 
-		if err := p.events.DetectMusicBrainz(ctx, logger, entry, groups); err != nil {
+		events, err := p.events.DetectMusicBrainz(ctx, logger, entry, groups)
+		if err != nil {
 			logger.Error("detection failed",
 				slog.String("artist_mbid", entry.MBID),
 				slog.String("artist_name", entry.Name),
 				slog.String("detection_error", err.Error()),
 			)
-			return
+			return events, err
 		}
+		return events, nil
 	}
 
 	return p.runCycle(ctx, &p.mbRunning, sourceMusicBrainz, p.mbWorkers, shouldDispatch, fetchAndRecord)
@@ -509,7 +511,7 @@ func (p *Poller) RunDeezerCycle(ctx context.Context) error {
 		return true
 	}
 
-	fetchAndRecord := func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry) {
+	fetchAndRecord := func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry) (int, error) {
 		albums, err := p.dz.ArtistAlbums(ctx, *entry.DeezerID, deezerAlbumPageSize)
 		if err != nil {
 			logger.Error("poll artist failed",
@@ -517,7 +519,7 @@ func (p *Poller) RunDeezerCycle(ctx context.Context) error {
 				slog.String("artist_name", entry.Name),
 				slog.String("deezer_error", err.Error()),
 			)
-			return
+			return 0, err
 		}
 
 		logger.Info("poll result",
@@ -526,14 +528,16 @@ func (p *Poller) RunDeezerCycle(ctx context.Context) error {
 			slog.Int("item_count", len(albums)),
 		)
 
-		if err := p.events.DetectDeezer(ctx, logger, entry, albums); err != nil {
+		events, err := p.events.DetectDeezer(ctx, logger, entry, albums)
+		if err != nil {
 			logger.Error("detection failed",
 				slog.String("artist_mbid", entry.MBID),
 				slog.String("artist_name", entry.Name),
 				slog.String("detection_error", err.Error()),
 			)
-			return
+			return events, err
 		}
+		return events, nil
 	}
 
 	return p.runCycle(ctx, &p.dzRunning, sourceDeezer, p.dzWorkers, shouldDispatch, fetchAndRecord)

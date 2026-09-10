@@ -43,17 +43,23 @@ const (
 // rate limiter (D-07). isSeedMode and preCycleSeenGroups are each captured ONCE
 // before any pass inserts: reading them lazily would flip the answer mid-call
 // (D-13) and hand a just-discovered group a release-detail fetch (D-04).
-func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 	seedMode, err := d.isSeedMode(ctx, entry.ArtistID, sourceMusicBrainz)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	notify := newNotifyGate(seedMode, d.notifyMaxReleaseAgeDays, time.Now().UTC())
 
 	preCycleSeenGroups, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceMusicBrainz, eventTypeNewRelease)
 	if err != nil {
-		return err
+		return 0, err
 	}
+
+	// newRelease is function-scoped so the tail return can sum it with the
+	// guest-feature and deluxe-change pass counts (A2): reporting only this
+	// pass under-counts events_recorded on any cycle that finds a feature or
+	// a deluxe edition (RUN-01).
+	newRelease := 0
 
 	if eventTypeMuted(entry, eventTypeNewRelease) {
 		logger.Info("detection result",
@@ -67,7 +73,6 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 	} else {
 		seen := preCycleSeenGroups
 
-		inserted := 0
 		filtered := 0
 		// range only -- groups is externally-supplied (T-04-01, ASVS V5).
 		for _, g := range groups {
@@ -98,10 +103,10 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 				WatchedArtistName: &watchedName,
 			})
 			if err != nil {
-				return fmt.Errorf("detection: detect musicbrainz: %w", err)
+				return newRelease, fmt.Errorf("detection: detect musicbrainz: %w", err)
 			}
 			if newly {
-				inserted++
+				newRelease++
 			}
 		}
 
@@ -109,17 +114,19 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 			slog.String("artist_mbid", entry.MBID),
 			slog.String("event_type", eventTypeNewRelease),
 			slog.Int("candidate_count", len(groups)),
-			slog.Int("inserted_count", inserted),
+			slog.Int("inserted_count", newRelease),
 			slog.Int("filtered_count", filtered),
 			slog.Bool("seed_mode", seedMode),
 		)
 	}
 
-	if err := d.detectGuestFeatures(ctx, logger, entry, seedMode, notify); err != nil {
-		return err
+	gf, err := d.detectGuestFeatures(ctx, logger, entry, seedMode, notify)
+	if err != nil {
+		return newRelease + gf, err
 	}
 
-	return d.detectDeluxeChanges(ctx, logger, entry, groups, preCycleSeenGroups, notify)
+	dc, err := d.detectDeluxeChanges(ctx, logger, entry, groups, preCycleSeenGroups, notify)
+	return newRelease + gf + dc, err
 }
 
 // detectGuestFeatures diffs entry's recordings-by-artist-credit browse (D-05)
@@ -130,7 +137,7 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 // returns nil -- a failed browse must not discard the cycle's new_release rows.
 // isGuestFeature filters every recording first (04-RESEARCH.md Pitfall #3):
 // RecordingsByArtist returns every credit, not just guest ones.
-func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, seedMode bool, notify notifyGate) error {
+func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, seedMode bool, notify notifyGate) (int, error) {
 	if eventTypeMuted(entry, eventTypeGuestFeature) {
 		logger.Info("detection result",
 			slog.String("artist_mbid", entry.MBID),
@@ -141,7 +148,7 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 			slog.Bool("muted", true),
 			slog.Bool("page_ceiling_reached", false),
 		)
-		return nil
+		return 0, nil
 	}
 
 	recordings, err := d.recordings.RecordingsByArtist(ctx, entry.MBID)
@@ -151,12 +158,12 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 			slog.String("artist_name", entry.Name),
 			slog.String("musicbrainz_error", err.Error()),
 		)
-		return nil
+		return 0, nil
 	}
 
 	seen, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceMusicBrainz, eventTypeGuestFeature)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	inserted := 0
@@ -226,7 +233,7 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 
 		newly, err := d.insertEvent(ctx, params)
 		if err != nil {
-			return fmt.Errorf("detection: detect guest features: %w", err)
+			return inserted, fmt.Errorf("detection: detect guest features: %w", err)
 		}
 		if newly {
 			inserted++
@@ -249,7 +256,7 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 		slog.Int("guest_feature_lookup_cap_reached_at", lookupCapReachedAt),
 	)
 
-	return nil
+	return inserted, nil
 }
 
 // detectDeluxeChanges compares the max TrackCount() of every freshGroup already
@@ -260,12 +267,12 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 // becomes the baseline silently (04-RESEARCH.md Pitfall #1); a real increase
 // fires a deluxe_change keyed on the winning release MBID (D-10). Residual: a
 // crash between baseline commit and event insert permanently loses that alert.
-func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, freshGroups []musicbrainz.ReleaseGroup, preCycleSeen map[string]struct{}, notify notifyGate) error {
+func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, freshGroups []musicbrainz.ReleaseGroup, preCycleSeen map[string]struct{}, notify notifyGate) (int, error) {
 	if !deluxeDetectionEnabled(entry) {
-		return nil
+		return 0, nil
 	}
 	if eventTypeMuted(entry, eventTypeDeluxeChange) {
-		return nil
+		return 0, nil
 	}
 
 	detailFetchCount := 0
@@ -324,7 +331,7 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 
 		advanced, hadBaseline, previousBaseline, err := d.advanceGroupBaseline(ctx, g.MBID, maxCount)
 		if err != nil {
-			return err
+			return inserted, err
 		}
 
 		switch {
@@ -375,7 +382,7 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 					slog.String("window", "baseline_advanced_insert_failed"),
 					slog.String("error", err.Error()),
 				)
-				return fmt.Errorf("detection: detect deluxe changes: %w", err)
+				return inserted, fmt.Errorf("detection: detect deluxe changes: %w", err)
 			}
 			if newly {
 				inserted++
@@ -393,7 +400,7 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 		slog.Bool("page_ceiling_reached", pageCeilingReached),
 	)
 
-	return nil
+	return inserted, nil
 }
 
 // isGuestFeature implements D-06's positional rule: rec is a guest appearance

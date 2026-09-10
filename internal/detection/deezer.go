@@ -30,7 +30,7 @@ const sourceDeezer = "deezer"
 // Deezer's client has no track- or credit-level fetch at all (D-08), and
 // Deezer's Album.Tracklist field is a URL, not real track data (D-03). This
 // is a deliberate scope decision, not an oversight.
-func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) error {
+func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) (int, error) {
 	if eventTypeMuted(entry, eventTypeNewRelease) {
 		logger.Info("detection result",
 			slog.String("artist_mbid", entry.MBID),
@@ -41,18 +41,18 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 			slog.Int("filtered_count", len(albums)),
 			slog.Bool("muted", true),
 		)
-		return nil
+		return 0, nil
 	}
 
 	seedMode, err := d.isSeedMode(ctx, entry.ArtistID, sourceDeezer)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	notify := newNotifyGate(seedMode, d.notifyMaxReleaseAgeDays, time.Now().UTC())
 
 	seen, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceDeezer, eventTypeNewRelease)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	inserted := 0
@@ -93,7 +93,7 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 			WatchedArtistName: &watchedName,
 		})
 		if err != nil {
-			return fmt.Errorf("detection: detect deezer: %w", err)
+			return inserted, fmt.Errorf("detection: detect deezer: %w", err)
 		}
 		if newly {
 			inserted++
@@ -110,5 +110,5 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 		slog.Bool("seed_mode", seedMode),
 	)
 
-	return nil
+	return inserted, nil
 }

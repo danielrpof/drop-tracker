@@ -254,8 +254,8 @@ func (f *fakeReleaseGroupSource) ReleaseGroupsByArtist(ctx context.Context, mbid
 // deezerFn are nil by default (a silent no-op success), matching what a real
 // Detector with nothing new to record would do.
 type fakeEventRecorder struct {
-	fn       func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error
-	deezerFn func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error
+	fn       func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error)
+	deezerFn func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error)
 
 	calls       int32
 	deezerCalls int32
@@ -265,7 +265,7 @@ type fakeEventRecorder struct {
 	deezerMBIDs []string
 }
 
-func (f *fakeEventRecorder) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+func (f *fakeEventRecorder) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 	atomic.AddInt32(&f.calls, 1)
 	f.mu.Lock()
 	f.mbids = append(f.mbids, entry.MBID)
@@ -274,10 +274,10 @@ func (f *fakeEventRecorder) DetectMusicBrainz(ctx context.Context, logger *slog.
 	if f.fn != nil {
 		return f.fn(ctx, entry, groups)
 	}
-	return nil
+	return 0, nil
 }
 
-func (f *fakeEventRecorder) DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) error {
+func (f *fakeEventRecorder) DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) (int, error) {
 	atomic.AddInt32(&f.deezerCalls, 1)
 	f.mu.Lock()
 	f.deezerMBIDs = append(f.deezerMBIDs, entry.MBID)
@@ -286,7 +286,7 @@ func (f *fakeEventRecorder) DetectDeezer(ctx context.Context, logger *slog.Logge
 	if f.deezerFn != nil {
 		return f.deezerFn(ctx, entry, albums)
 	}
-	return nil
+	return 0, nil
 }
 
 var _ EventRecorder = (*fakeEventRecorder)(nil)
@@ -1432,13 +1432,13 @@ func TestPoller_RunMusicBrainzCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 	mb := &fakeReleaseGroupSource{}
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
-	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 		select {
 		case started <- struct{}{}:
 		default:
 		}
 		<-release
-		return nil
+		return 0, nil
 	}}
 	logger, _ := newTestLogger()
 	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -1483,8 +1483,8 @@ func TestPoller_RunMusicBrainzCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 func TestPoller_RunMusicBrainzCycle_GuardReleasedAfterDetectionError(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	mb := &fakeReleaseGroupSource{}
-	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
-		return errors.New("detection exploded")
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
+		return 0, errors.New("detection exploded")
 	}}
 	logger, _ := newTestLogger()
 	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -1512,13 +1512,13 @@ func TestPoller_RunDeezerCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 	dz := &fakeAlbumSource{}
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
-	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error {
+	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error) {
 		select {
 		case started <- struct{}{}:
 		default:
 		}
 		<-release
-		return nil
+		return 0, nil
 	}}
 	logger, _ := newTestLogger()
 	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -1564,8 +1564,8 @@ func TestPoller_RunDeezerCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 func TestPoller_RunDeezerCycle_GuardReleasedAfterDetectionError(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	dz := &fakeAlbumSource{}
-	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error {
-		return errors.New("detection exploded")
+	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error) {
+		return 0, errors.New("detection exploded")
 	}}
 	logger, _ := newTestLogger()
 	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -1597,11 +1597,11 @@ func TestPoller_RunMusicBrainzCycle_DetectionErrorIsolatedPerArtist(t *testing.T
 	}}
 	mb := &fakeReleaseGroupSource{}
 	failOn := "mbid-1"
-	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 		if entry.MBID == failOn {
-			return errors.New("detection exploded for this artist")
+			return 0, errors.New("detection exploded for this artist")
 		}
-		return nil
+		return 0, nil
 	}}
 	logger, buf := newTestLogger()
 	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -1738,11 +1738,11 @@ func TestMusicBrainzCycle_SimultaneousDetectionErrorsDoNotAbortCycle(t *testing.
 	failSet := failFirstThree(entries)
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
 	mb := &fakeReleaseGroupSource{}
-	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 		if failSet[entry.MBID] {
-			return errors.New("detection exploded")
+			return 0, errors.New("detection exploded")
 		}
-		return nil
+		return 0, nil
 	}}
 	logger, buf := newTestLogger()
 	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
@@ -1828,11 +1828,11 @@ func TestDeezerCycle_SimultaneousDetectionErrorsDoNotAbortCycle(t *testing.T) {
 	failSet := failFirstThree(entries)
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
 	dz := &fakeAlbumSource{}
-	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error {
+	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error) {
 		if failSet[entry.MBID] {
-			return errors.New("detection exploded")
+			return 0, errors.New("detection exploded")
 		}
-		return nil
+		return 0, nil
 	}}
 	logger, buf := newTestLogger()
 	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(3))
@@ -1967,13 +1967,13 @@ func TestPoller_CyclesAreIndependentAcrossSources(t *testing.T) {
 	mb := &fakeReleaseGroupSource{}
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
-	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 		select {
 		case started <- struct{}{}:
 		default:
 		}
 		<-release
-		return nil
+		return 0, nil
 	}}
 	dz := &fakeAlbumSource{}
 	logger, _ := newTestLogger()

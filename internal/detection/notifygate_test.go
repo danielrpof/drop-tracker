@@ -267,7 +267,7 @@ func TestDetectMusicBrainz_NonSeedCycle_BacklogNewReleaseNeverGoesPending(t *tes
 		Name:         "Backlog Artist",
 		ReleaseTypes: []string{"album", "single", "ep"},
 	}
-	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -339,7 +339,7 @@ func TestDetectGuestFeatures_PastLookupCap_BacklogNeverGoesPending(t *testing.T)
 		Name:         "Featured Artist",
 		ReleaseTypes: []string{"album", "single", "ep"},
 	}
-	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -388,7 +388,7 @@ func TestDetectGuestFeatures_NonSeedCycle_FreshFeatureStillDelivered(t *testing.
 		Name:         "Fresh Feature Artist",
 		ReleaseTypes: []string{"album", "single", "ep"},
 	}
-	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 

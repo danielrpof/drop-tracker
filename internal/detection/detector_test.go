@@ -210,7 +210,7 @@ func TestDetectMusicBrainz_NewRelease(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -295,7 +295,7 @@ func TestDetectMusicBrainz_NewRelease_EmptyInput(t *testing.T) {
 	entry := watchlist.Entry{ArtistID: artistID, MBID: mbid, Name: "Empty Input Artist"}
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz with nil groups: %v", err)
 	}
 
@@ -320,7 +320,7 @@ func TestDetectMusicBrainz_NewRelease_UndatedGroup(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -467,10 +467,10 @@ func TestDetectMusicBrainz_ReDetectionInsertsNothing(t *testing.T) {
 	}
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("first DetectMusicBrainz: %v", err)
 	}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("second DetectMusicBrainz: %v", err)
 	}
 
@@ -499,11 +499,11 @@ func TestDetectMusicBrainz_PartialCycleResumes(t *testing.T) {
 
 	// Simulate a cycle that crashed after writing only the first group
 	// (D-19: recovery is re-derivation, not resume state).
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, all[:1]); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, all[:1]); err != nil {
 		t.Fatalf("partial DetectMusicBrainz: %v", err)
 	}
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, all); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, all); err != nil {
 		t.Fatalf("full re-derivation DetectMusicBrainz: %v", err)
 	}
 
@@ -537,7 +537,7 @@ func TestDetectMusicBrainz_InsertionOrderIsStable(t *testing.T) {
 		{MBID: mbid + "-rg3", Title: "Album Three", PrimaryType: "Album"},
 	}
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -617,7 +617,7 @@ func TestDetector_SeedMode_FirstCyclePreNotifies(t *testing.T) {
 
 	q := sqlc.New(pool)
 	d := detection.New(q, fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -664,7 +664,7 @@ func TestDetector_SecondCycleLeavesNotifiedAtNull(t *testing.T) {
 
 	q := sqlc.New(pool)
 	d := detection.New(q, fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, seedGroups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, seedGroups); err != nil {
 		t.Fatalf("seed DetectMusicBrainz: %v", err)
 	}
 
@@ -672,7 +672,7 @@ func TestDetector_SecondCycleLeavesNotifiedAtNull(t *testing.T) {
 	// is about seed-vs-non-seed semantics, not about freshness.
 	nextGroups := append(append([]musicbrainz.ReleaseGroup{}, seedGroups...),
 		musicbrainz.ReleaseGroup{MBID: mbid + "-rg4", Title: "Album Four", PrimaryType: "Album", FirstReleaseDate: todayReleaseDate})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nextGroups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nextGroups); err != nil {
 		t.Fatalf("second DetectMusicBrainz: %v", err)
 	}
 
@@ -712,7 +712,7 @@ func TestDetector_SeedModeIsPerSource(t *testing.T) {
 
 	q := sqlc.New(pool)
 	d := detection.New(q, fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -751,7 +751,7 @@ func TestDetector_ReAddDoesNotReSeed(t *testing.T) {
 
 	q := sqlc.New(pool)
 	d := detection.New(q, fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, seedGroups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, seedGroups); err != nil {
 		t.Fatalf("seed DetectMusicBrainz: %v", err)
 	}
 
@@ -770,7 +770,7 @@ func TestDetector_ReAddDoesNotReSeed(t *testing.T) {
 	// that would otherwise be deliverable.
 	nextGroups := append(append([]musicbrainz.ReleaseGroup{}, seedGroups...),
 		musicbrainz.ReleaseGroup{MBID: mbid + "-rg2", Title: "Album Two", PrimaryType: "Album", FirstReleaseDate: todayReleaseDate})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nextGroups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nextGroups); err != nil {
 		t.Fatalf("post-re-add DetectMusicBrainz: %v", err)
 	}
 
@@ -797,7 +797,7 @@ func TestDetector_SeedModeRespectsFilters(t *testing.T) {
 
 	q := sqlc.New(pool)
 	d := detection.New(q, fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -825,7 +825,7 @@ func TestDetector_SeedRowsShareOneTimestamp(t *testing.T) {
 
 	q := sqlc.New(pool)
 	d := detection.New(q, fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -871,7 +871,7 @@ func TestDetectMusicBrainz_GuestFeature(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -963,7 +963,7 @@ func TestDetectMusicBrainz_GuestFeatureStoresReleaseDateAndCoverArt(t *testing.T
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings, releasesForRecording: releasesForRecording}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -1001,7 +1001,7 @@ func TestDetectMusicBrainz_GuestFeature_SkipsOwnPrimaryCredit(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -1039,7 +1039,7 @@ func TestDetectMusicBrainz_GuestFeature_LogsTruncation(t *testing.T) {
 		}
 
 		d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings}, &fakeReleaseDetailSource{})
-		if err := d.DetectMusicBrainz(ctx, logger, entry, nil); err != nil {
+		if _, err := d.DetectMusicBrainz(ctx, logger, entry, nil); err != nil {
 			t.Fatalf("DetectMusicBrainz: %v", err)
 		}
 
@@ -1070,7 +1070,7 @@ func TestDetectMusicBrainz_GuestFeature_LogsTruncation(t *testing.T) {
 		}
 
 		d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: full}, &fakeReleaseDetailSource{})
-		if err := d.DetectMusicBrainz(ctx, logger, entry, nil); err != nil {
+		if _, err := d.DetectMusicBrainz(ctx, logger, entry, nil); err != nil {
 			t.Fatalf("DetectMusicBrainz: %v", err)
 		}
 
@@ -1127,7 +1127,7 @@ func TestDetectMusicBrainz_GuestFeature_DedupesRepeatedMBID(t *testing.T) {
 	recordings := []musicbrainz.Recording{rec, rec}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -1165,7 +1165,7 @@ func TestDetectMusicBrainz_GuestFeature_Muted(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -1234,11 +1234,11 @@ func TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier(t *testin
 	// the notifier path. The seed cycle's own recording is intentionally
 	// omitted (fakeRecordingSource{} default, no-op) so it contributes no
 	// guest_feature noise.
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, seedGroups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, seedGroups); err != nil {
 		t.Fatalf("seed DetectMusicBrainz: %v", err)
 	}
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -1319,7 +1319,7 @@ func TestDetectMusicBrainz_GuestFeature_SourceErrorPreservesNewReleases(t *testi
 	groups := []musicbrainz.ReleaseGroup{{MBID: mbid + "-rg1", Title: "Album", PrimaryType: "Album"}}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{err: errors.New("recording browse failed")}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v, want nil (a recording-source error must not fail the cycle)", err)
 	}
 
@@ -1373,7 +1373,7 @@ func TestDetectMusicBrainz_GuestFeature_EarliestDateReachesDB(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings, releasesForRecording: releasesForRecording}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -1408,7 +1408,7 @@ func TestDetectMusicBrainz_GuestFeature_EmptyReleaseListInsertsWithNulls(t *test
 	// zero-value default (nil slice, nil error) mirrors a lookup that
 	// succeeds but returns no releases (D-03).
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -1456,7 +1456,7 @@ func TestDetectMusicBrainz_GuestFeature_PerRecordingLookupErrorIsolated(t *testi
 		recordings: recordings,
 		errByMBID:  map[string]error{failMBID: errors.New("recording release lookup failed")},
 	}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v, want nil (a per-recording lookup error must not fail the cycle)", err)
 	}
 
@@ -1502,7 +1502,7 @@ func TestDetectMusicBrainz_GuestFeature_PerCycleLookupCap(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{recordings: recordings, releasesForRecording: releasesForRecording}, &fakeReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -1517,7 +1517,7 @@ func TestDetectMusicBrainz_GuestFeature_PerCycleLookupCap(t *testing.T) {
 	// The excess recordings must be absent from the seen store too (not
 	// just un-inserted), so a subsequent cycle would reconsider them --
 	// re-running the same cycle must insert the remaining 5.
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, nil); err != nil {
 		t.Fatalf("DetectMusicBrainz (second cycle): %v", err)
 	}
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE artist_id = $1 AND event_type = 'guest_feature'", artistID).Scan(&count); err != nil {
@@ -1571,7 +1571,7 @@ func TestDetectMusicBrainz_DeluxeChange_FirstComparisonEstablishesBaseline(t *te
 
 	// Cycle 1: discovers the group -- new_release only, no release-detail
 	// fetch this cycle (D-04).
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 DetectMusicBrainz: %v", err)
 	}
 	if got := releases.calls(); got != 0 {
@@ -1581,7 +1581,7 @@ func TestDetectMusicBrainz_DeluxeChange_FirstComparisonEstablishesBaseline(t *te
 	// Cycle 2: the group is now already-seen -- the fetch happens, and this
 	// is the group's first-ever track-count measurement, so it must
 	// silently establish the baseline rather than firing an event.
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 DetectMusicBrainz: %v", err)
 	}
 	if got := releases.calls(); got != 1 {
@@ -1632,7 +1632,7 @@ func TestDetectMusicBrainz_DeluxeChange_SkipsGroupOutsideRecheckWindow(t *testin
 
 	// Cycle 1: discovers the group -- new_release only, no release-detail
 	// fetch this cycle regardless of date (D-04).
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 DetectMusicBrainz: %v", err)
 	}
 	if got := releases.calls(); got != 0 {
@@ -1642,7 +1642,7 @@ func TestDetectMusicBrainz_DeluxeChange_SkipsGroupOutsideRecheckWindow(t *testin
 	// Cycle 2: the group is now already-seen, but its FirstReleaseDate is
 	// outside the recheck window -- the age gate must suppress the fetch
 	// that D-04 alone would otherwise have allowed.
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 DetectMusicBrainz: %v", err)
 	}
 	if got := releases.calls(); got != 0 {
@@ -1684,7 +1684,7 @@ func TestDetectMusicBrainz_DeluxeChange_ChecksGroupInsideRecheckWindow(t *testin
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", recentDate, 12)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 DetectMusicBrainz: %v", err)
 	}
 	if got := releases.calls(); got != 0 {
@@ -1694,7 +1694,7 @@ func TestDetectMusicBrainz_DeluxeChange_ChecksGroupInsideRecheckWindow(t *testin
 	// Cycle 2: the group is already-seen and inside the recheck window --
 	// the gate must not suppress this fetch, proving it did not break the
 	// normal path.
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 DetectMusicBrainz: %v", err)
 	}
 	if got := releases.calls(); got != 1 {
@@ -1728,14 +1728,14 @@ func TestDetectMusicBrainz_DeluxeChange_UndatedGroupIsStillChecked(t *testing.T)
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", "2020-01-01", 12)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 DetectMusicBrainz: %v", err)
 	}
 	if got := releases.calls(); got != 0 {
 		t.Fatalf("cycle 1 release-detail calls = %d, want 0 (D-04)", got)
 	}
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 DetectMusicBrainz: %v", err)
 	}
 	if got := releases.calls(); got != 1 {
@@ -1757,16 +1757,16 @@ func TestDetectMusicBrainz_DeluxeChange_FiresOnIncrease(t *testing.T) {
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-orig", "Album", "2020-01-01", 12)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 (discover): %v", err)
 	}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 (establish baseline at 12): %v", err)
 	}
 
 	deluxeMBID := groupMBID + "-deluxe"
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(deluxeMBID, "Album (Deluxe)", "2020-06-01", 18)})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 3 (fires on increase to 18): %v", err)
 	}
 
@@ -1856,10 +1856,10 @@ func TestDetectMusicBrainz_DeluxeChange_InsertFailureLogsWindowSignal(t *testing
 	// The baseline-establishing cycles use the plain querier -- only the
 	// cycle under test needs the failing decorator.
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 (discover): %v", err)
 	}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 (establish baseline at 12): %v", err)
 	}
 
@@ -1871,7 +1871,7 @@ func TestDetectMusicBrainz_DeluxeChange_InsertFailureLogsWindowSignal(t *testing
 	failing := &insertEventFailingQuerier{Querier: sqlc.New(pool)}
 	dFailing := detection.New(failing, fakeRecordingSource{}, releases)
 
-	if err := dFailing.DetectMusicBrainz(ctx, logger, entry, groups); err == nil {
+	if _, err := dFailing.DetectMusicBrainz(ctx, logger, entry, groups); err == nil {
 		t.Fatal("cycle 3 (increase to 18, insert forced to fail): DetectMusicBrainz returned nil error, want non-nil")
 	}
 
@@ -1914,14 +1914,14 @@ func TestDetectMusicBrainz_DeluxeChange_NoEventOnEqualCount(t *testing.T) {
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", "2020-01-01", 12)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 (discover): %v", err)
 	}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 (establish baseline at 12): %v", err)
 	}
 	// Cycle 3: fetch reports the same 12-track release again -- no change.
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 3 (equal count): %v", err)
 	}
 
@@ -1948,17 +1948,17 @@ func TestDetectMusicBrainz_DeluxeChange_NoEventOnDecrease(t *testing.T) {
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-deluxe", "Album (Deluxe)", "2020-06-01", 18)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 (discover): %v", err)
 	}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 (establish baseline at 18): %v", err)
 	}
 
 	// Cycle 3: a lower count (an upstream data correction) must not fire
 	// and must not lower the baseline.
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", "2020-01-01", 12)})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 3 (decrease): %v", err)
 	}
 
@@ -1993,7 +1993,7 @@ func TestDetectMusicBrainz_DeluxeChange_SkipsBrandNewGroup(t *testing.T) {
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", "2020-01-01", 12)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -2038,10 +2038,10 @@ func TestDetectMusicBrainz_DeluxeChange_EmptyMediaLeavesBaseline(t *testing.T) {
 		})
 		d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-		if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 			t.Fatalf("cycle 1 (discover): %v", err)
 		}
-		if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 			t.Fatalf("cycle 2 (zero-total fetch): %v", err)
 		}
 
@@ -2076,10 +2076,10 @@ func TestDetectMusicBrainz_DeluxeChange_EmptyMediaLeavesBaseline(t *testing.T) {
 		releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", "2020-01-01", 12)})
 		d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-		if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 			t.Fatalf("cycle 1 (discover): %v", err)
 		}
-		if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 			t.Fatalf("cycle 2 (establish baseline at 12): %v", err)
 		}
 
@@ -2090,7 +2090,7 @@ func TestDetectMusicBrainz_DeluxeChange_EmptyMediaLeavesBaseline(t *testing.T) {
 			{MBID: groupMBID + "-b", Title: "Empty Media", Media: []musicbrainz.Medium{}},
 			{MBID: groupMBID + "-c", Title: "No Track Count", Media: []musicbrainz.Medium{{Format: "CD", Position: 1}}},
 		})
-		if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+		if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 			t.Fatalf("cycle 3 (malformed media): %v", err)
 		}
 
@@ -2150,10 +2150,10 @@ func TestDetectMusicBrainz_DeluxeChange_UsesGroupMaximumNotOrder(t *testing.T) {
 			releases.setReleases(groupMBID, ordered)
 			d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-			if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+			if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 				t.Fatalf("cycle 1 (discover): %v", err)
 			}
-			if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+			if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 				t.Fatalf("cycle 2 (establish baseline): %v", err)
 			}
 
@@ -2182,10 +2182,10 @@ func TestDetectMusicBrainz_DeluxeChange_RequiresDeluxePreference(t *testing.T) {
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", "2020-01-01", 12)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 (discover): %v", err)
 	}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 (group now already-seen): %v", err)
 	}
 
@@ -2222,10 +2222,10 @@ func TestDetectMusicBrainz_DeluxeChange_Muted(t *testing.T) {
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-rel1", "Album", "2020-01-01", 12)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 (discover): %v", err)
 	}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 (group now already-seen): %v", err)
 	}
 
@@ -2262,23 +2262,23 @@ func TestDetectMusicBrainz_DeluxeChange_DoesNotRefireForSameRelease(t *testing.T
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(groupMBID+"-orig", "Album", "2020-01-01", 12)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 (discover): %v", err)
 	}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 (establish baseline at 12): %v", err)
 	}
 
 	deluxeMBID := groupMBID + "-deluxe"
 	releases.setReleases(groupMBID, []musicbrainz.Release{mkRelease(deluxeMBID, "Album (Deluxe)", "2020-06-01", 18)})
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 3 (fires): %v", err)
 	}
 
 	// Cycle 4: identical input again -- must not produce a second row,
 	// both because the baseline now matches 18 and because the release
 	// MBID is already in the dedup key.
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 4 (re-run): %v", err)
 	}
 
@@ -2310,10 +2310,10 @@ func TestDetectMusicBrainz_DeluxeChange_PerGroupErrorIsolated(t *testing.T) {
 	releases.setReleases(group2, []musicbrainz.Release{mkRelease(group2+"-rel1", "Album Two", "2020-01-01", 12)})
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, releases)
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 1 (discover both): %v", err)
 	}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 2 (establish both baselines): %v", err)
 	}
 
@@ -2323,7 +2323,7 @@ func TestDetectMusicBrainz_DeluxeChange_PerGroupErrorIsolated(t *testing.T) {
 	group2DeluxeMBID := group2 + "-deluxe"
 	releases.setReleases(group2, []musicbrainz.Release{mkRelease(group2DeluxeMBID, "Album Two (Deluxe)", "2020-06-01", 18)})
 
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, groups); err != nil {
 		t.Fatalf("cycle 3 (per-group error must be isolated): %v, want nil", err)
 	}
 

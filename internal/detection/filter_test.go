@@ -264,7 +264,7 @@ func TestDetectMusicBrainz_FiltersByReleaseType(t *testing.T) {
 	}
 
 	d := New(sqlc.New(pool), noRecordingSource{}, noReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -298,7 +298,7 @@ func TestDetectMusicBrainz_SkipsMutedEventType(t *testing.T) {
 	}
 
 	d := New(sqlc.New(pool), noRecordingSource{}, noReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
