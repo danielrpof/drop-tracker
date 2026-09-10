@@ -1,0 +1,1 @@
+No external API integration: adds only drop-tracker's own internal endpoints (`GET /ready`, `GET /status`), an in-process run-history buffer, and a SHA app version. No external service capability surface.
