@@ -62,7 +62,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 
 ### 🔄 v1.4 Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 
-- [ ] **Phase 18: Backend — Readiness, Status Surface & App Version** - `/ready` probe, in-process run-history ring buffer + seams, gated `GET /status` (contract frozen here), SHA-based app version
+- [x] **Phase 18: Backend — Readiness, Status Surface & App Version** - `/ready` probe, in-process run-history ring buffer + seams, gated `GET /status` (contract frozen here), SHA-based app version (completed 2026-09-09)
 - [ ] **Phase 18.1: Poll-Cycle Instrumentation** - the `runCycle` change: widened `EventRecorder`, channel-fold counters, `RecordRun`/`RecordSkip` wiring, concurrency-invariant test
 - [ ] **Phase 19: Frontend — System View** - operator status panel in the SPA rendering `/status`
 
@@ -169,7 +169,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 18. Backend — Readiness, Status Surface & App Version | 4/4 | In Progress|  |
+| 18. Backend — Readiness, Status Surface & App Version | 4/4 | Complete    | 2026-09-09 |
 | 18.1. Poll-Cycle Instrumentation | 0/TBD | Not started | - |
 | 19. Frontend — System View | 0/TBD | Not started | - |
 

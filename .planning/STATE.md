@@ -2,43 +2,43 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
-current_phase: 18
-current_phase_name: Backend — Readiness, Status Surface & App Version
-status: verifying
-stopped_at: Completed 18-04-PLAN.md
-last_updated: "2026-09-10T01:53:41.443Z"
+current_phase: 18.1
+current_phase_name: Poll-Cycle Instrumentation
+status: planning
+stopped_at: Phase 18 complete, ready to plan Phase 18.1
+last_updated: "2026-09-10T04:23:26.307Z"
 last_activity: 2026-09-09
-last_activity_desc: Phase 18 execution resumed (wave continue)
-state_head: 3118af7b452be408505a251085902bd170879407
+last_activity_desc: Phase 18 complete, transitioned to Phase 18.1
+state_head: 6f33538c7e1759c53eed7f65ee4c42a5d1ea41da
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
   completed_plans: 4
-  percent: 0
+  percent: 33
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-09)
+See: .planning/PROJECT.md (updated 2026-09-10)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 18 — Backend — Readiness, Status Surface & App Version
+**Current focus:** Phase 18.1 — Poll-Cycle Instrumentation (the `runCycle` edit that fills the run-history seam Phase 18 landed inert)
 
 ## Current Position
 
-Phase: 18 (Backend — Readiness, Status Surface & App Version) — EXECUTING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
-Last activity: 2026-09-09 — Phase 18 execution resumed (wave continue)
+Phase: 18.1 — Poll-Cycle Instrumentation
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-09 — Phase 18 complete, transitioned to Phase 18.1
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 72
+- Total plans completed: 76
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -62,6 +62,7 @@ Last activity: 2026-09-09 — Phase 18 execution resumed (wave continue)
 | 14 | 7 | - | - |
 | 15 | 3 | - | - |
 | 16 | 5 | - | - |
+| 18 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -268,7 +269,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 - ⚠️ [Phase 03] musicbrainz.org's TLS handshake fails from this developer's WSL2 network path (confirmed environmental via plain curl, not app code) -- Deezer unaffected. If future live testing on this machine needs real MusicBrainz data, expect the same failure; see PROJECT.md Context and Broken Windows Ledger entry #3 (waived).
 - ⚠️ [Phase 17, v1.3] No VPS is provisioned yet, and the TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel) is undecided. Both block Phase 17's first real deploy and its rollback drill. Resolve in Phase 17's discuss/spec pass before planning.
 - ⚠️ [Phase 16 → 17] `n1-boot`'s `guardcheck` skip path (G-16-1 fix) stays active until a release carrying the ahead-of-source guard becomes the N-1 rollback target — i.e. the first v1.3 release after Phase 16. Until then the N-1 boot probe is inert on migration branches. Phase 17 follow-up (security UF-1): re-assert the probe once a guard-carrying tag is N-1, and add an alarm if the guard-adoption window stays open unexpectedly.
-- ⚠️ [Phase 18, v1.4] `go test -race` is unavailable on this dev box and absent from CI, and Phase 18's riskiest change (per-cycle counters aggregated across `runCycle`'s worker goroutines) is exactly the class of bug the race detector exists to catch. The plan's explicit concurrency-correctness reasoning plus a looped exact-equality invariant test is the substitute — treat it as a required deliverable, not a nice-to-have.
+- ⚠️ [Phase 18.1, v1.4] `go test -race` is unavailable on this dev box and (as of Phase 18) absent from CI. Phase 18.1's core change — per-cycle counters aggregated across `runCycle`'s worker goroutines — is exactly the class of bug the race detector exists to catch. Phase 18 handled its own concurrency surface (`pollruns.Store` mutex) with a 1000-iteration two-source exact-equality test and shipped the recorder seam **inert**; 18.1 must carry the same looped-invariant substitute for the `runCycle` edit as a required deliverable. Consider wiring `-race` into CI as part of 18.1.
 
 ### Quick Tasks Completed
 
@@ -330,8 +331,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T01:53:32.676Z
-Stopped at: Completed 18-04-PLAN.md
+Last session: 2026-09-10
+Stopped at: Phase 18 complete — UAT 2/2, validation (PARTIAL), security (0 open), verification passed, v1.9.0 released. Ready to plan Phase 18.1.
 Resume file: None
 
 ## Operator Next Steps
