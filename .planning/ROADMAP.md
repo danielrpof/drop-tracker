@@ -123,7 +123,7 @@ Plans:
   4. Polling stays green regardless of the recorder: a recorder that errors still leaves the cycle logging "poll cycle complete" and returning its normal result; the `RecordRun` call never wedges a source's overlap guard (`defer running.Store(false)`) and never measurably extends shutdown.
   5. `events_recorded` is real: `EventRecorder.DetectMusicBrainz` / `DetectDeezer` return `(int, error)`; the count threads back through both `fetchAndRecord` closures and is folded with the other counters. It is never hard-coded to 0 while displayed.
 
-**Plans**: 1/3 plans executed
+**Plans**: 2/3 plans executed
 
 Plans:
 **Wave 1**
@@ -132,7 +132,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 18.1-02-PLAN.md — the remaining exit paths: skipped ticks, skipped entries, list failures, cancellation, and a misbehaving recorder
+- [x] 18.1-02-PLAN.md — the remaining exit paths: skipped ticks, skipped entries, list failures, cancellation, and a misbehaving recorder
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -183,7 +183,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 18. Backend — Readiness, Status Surface & App Version | 4/4 | Complete    | 2026-09-09 |
-| 18.1. Poll-Cycle Instrumentation | 1/3 | In Progress|  |
+| 18.1. Poll-Cycle Instrumentation | 2/3 | In Progress|  |
 | 19. Frontend — System View | 0/TBD | Not started | - |
 
 ## Backlog

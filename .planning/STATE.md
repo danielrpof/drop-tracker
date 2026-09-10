@@ -5,17 +5,17 @@ milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 18.1
 current_phase_name: Poll-Cycle Instrumentation
 status: executing
-stopped_at: Completed 18.1-01-PLAN.md
-last_updated: "2026-09-10T06:09:50.704Z"
+stopped_at: Completed 18.1-02-PLAN.md
+last_updated: "2026-09-10T08:15:29.916Z"
 last_activity: 2026-09-10
-last_activity_desc: 18.1-01 executed — EventRecorder widened to (int, error), runCycle records one run entry per cycle
-state_head: f4e1b65a5230e09e729861e00a2f0e89d28dae8b
+last_activity_desc: 18.1-02 executed — remaining runCycle exit paths pinned (skip, list-failure, cancellation, misbehaving recorder); 4 new tests
+state_head: c059d42edadaa17d7450c58058b3bfed6694f221
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
-  percent: 71
+  completed_plans: 6
+  percent: 86
 ---
 
 # Project State
@@ -30,9 +30,9 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 18.1 (Poll-Cycle Instrumentation) — EXECUTING
-Plan: 2 of 3
-Status: 18.1-01 complete; ready to execute 18.1-02
-Last activity: 2026-09-10 — 18.1-01 executed (EventRecorder widened, runCycle records one run entry per cycle)
+Plan: 3 of 3
+Status: 18.1-01 and 18.1-02 complete; ready to execute 18.1-03 (the -race substitute: TestRunCycle_CounterInvariant + phase gate + VALIDATION fill)
+Last activity: 2026-09-10 — 18.1-02 executed (skip/list-failure/cancellation/misbehaving-recorder exit paths pinned; 4 new poller tests)
 
 ## Performance Metrics
 
@@ -119,6 +119,7 @@ Last activity: 2026-09-10 — 18.1-01 executed (EventRecorder widened, runCycle 
 | Phase 18 P03 | 30m | 2 tasks | 5 files |
 | Phase 18 P04 | 30min | 3 tasks | 10 files |
 | Phase 18.1 P01 | 19 min | 2 tasks | 8 files |
+| Phase 18.1 P02 | 22 min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -262,6 +263,9 @@ Recent decisions affecting current work:
 - [Phase 18.1]: [18.1-01] runFinishedAt/runDurationMS captured at the "poll cycle complete" log point (after wg.Wait(), before NotifyPending) and reused in that log line; the defer only takes a fresh timestamp as an IsZero() fallback for the early store.List-error return — notifier delivery excluded from duration_ms (Pitfall 4).
 - [Phase 18.1]: [18.1-01] `go test -race` substituted with plain `go test` (unusable on this box, absent from CI) — WINDOWS.md ledger entry 12. coverage-gate 90.69%, sqlc-check clean. TestRunCycle_CounterInvariant (plan 18.1-03) is the contracted looped exact-equality substitute.
 - [Phase 18.1]: [18.1-01] Task-1 acceptance criterion "grep -c 'p\\.runs\\.' in runCycle prints 1" is a planner miscalculation — the plan's own action text mandates BOTH p.runs.RecordSkip (pre-CAS) and p.runs.RecordRun (defer), so the region contains 2. Kept both; criterion intent (seam now live in runCycle, inverting Phase 18's 0) is satisfied.
+- [Phase 18.1]: [18.1-02] All three of this plan's specified production edits (RecordSkip on the pre-CAS branch, artistsSkipped++ in the dispatch loop, cycleErr on the store.List error return) already landed in 18.1-01, so all three tdd="true" tasks executed test-only — no poller.go change in any of the three commits, Task 1 committed as test(18.1-02) not feat. Same pattern as 18.1-01's own Task 2.
+- [Phase 18.1]: [18.1-02] New startBlockedMusicBrainzCycle(t, RunRecorder) helper: launches a cycle holding the overlap guard (every worker blocked in the fake source) with a sync.Once release func registered via t.Cleanup so a failed assertion can't leak the goroutine. Used by TestRunRecorder_SkipRecordsNoEntry's fake-recorder and real-store subtests.
+- [Phase 18.1]: [18.1-02] The cancel-before-dispatch subtest asserts all four counters 0 by relying on runOneArtist's entry ctx.Err() bail (checked=false, folded as no-op), not the dispatch-loop select — race-independent regardless of how the sem-vs-ctx.Done select resolves. RUN-02 and RUN-03 marked Complete; RUN-01 stays blocked pending 18.1-03.
 
 ### Pending Todos
 
@@ -338,8 +342,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T06:09:50.308Z
-Stopped at: Completed 18.1-01-PLAN.md
+Last session: 2026-09-10T08:15:29.501Z
+Stopped at: Completed 18.1-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

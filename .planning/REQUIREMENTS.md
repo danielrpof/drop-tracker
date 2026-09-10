@@ -21,7 +21,7 @@ Make the scheduler observable without reading container logs, and let a deploy o
 
 - [ ] **RUN-01**: Every poll-cycle invocation records exactly one run entry for its source, capturing: source, started/finished timestamps, artists checked, artists skipped, artists errored, events recorded, an outcome (`ok`, `cancelled`, `error`), and a short outcome summary that contains no DSN, webhook URL, internal path, or raw driver error string.
 - [x] **RUN-02**: A cycle skipped by the overlap guard is recorded as a per-source signal (last-skipped timestamp + consecutive-skip count) surfaced in `/status`, not as a run entry; a cycle interrupted by shutdown still records its run entry with a `cancelled` outcome.
-- [ ] **RUN-03**: The poller records runs through a seam and holds no database handle itself; a recorder failure is logged and never fails, blocks, or delays the poll cycle.
+- [x] **RUN-03**: The poller records runs through a seam and holds no database handle itself; a recorder failure is logged and never fails, blocks, or delays the poll cycle.
 - [x] **RUN-04**: Run history is bounded to the last N entries per source (a compile-time constant, no new environment variable), correct under the two sources recording near-simultaneously.
 
 > Storage note (see `docs/adr/0001-in-process-ring-buffer-for-poll-run-history.md`): run history lives in an in-process ring buffer, not a `poll_runs` table. RUN-01/03/04 are worded storage-agnostically; history resets on process restart by design.
@@ -82,7 +82,7 @@ Phase 18 was split into **18** (readiness, status surface, app version — addit
 | RDY-03 | Phase 18 | Complete |
 | RUN-01 | Phase 18.1 | Pending |
 | RUN-02 | Phase 18 (skip signal) + Phase 18.1 (cancelled entry) | Complete |
-| RUN-03 | Phase 18.1 | Pending |
+| RUN-03 | Phase 18.1 | Complete |
 | RUN-04 | Phase 18 | Complete |
 | STAT-01 | Phase 18 | Complete |
 | STAT-02 | Phase 18 | Complete |
