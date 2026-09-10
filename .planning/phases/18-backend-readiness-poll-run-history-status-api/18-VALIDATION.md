@@ -3,10 +3,11 @@ phase: "18"
 slug: "backend-readiness-poll-run-history-status-api"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: draft
+status: validated
 nyquist_compliant: false
-wave_0_complete: false
+wave_0_complete: true
 created: "2026-09-09"
+validated: "2026-09-10"
 ---
 
 # Phase 18 — Validation Strategy
@@ -108,11 +109,44 @@ named task, so there is no test scaffold left unowned.
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 90s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 90s
+- [ ] `nyquist_compliant: true` — **PARTIAL**: the `-ldflags -X` → `instance.app_version`
+      injection path is not exercised by continuous `go test` (`TestVersion_Injected`
+      SKIPs without the flag and no Make/CI target passes it). It is covered instead by
+      the CI `build-scan` "Verify build provenance landed in the binary" step and by
+      manual E2E — both verified this cycle (see audit below).
 
-**Approval:** pending
+**Approval:** validated (PARTIAL) — 2026-09-10
+
+## Validation Audit 2026-09-10
+
+Triggered by `verify:post` after `/gsd-verify-work 18` (2 UAT tests passed, 0 issues).
+
+| Metric | Count |
+|--------|-------|
+| Requirement→test entries audited | 24 |
+| MISSING gaps found | 0 |
+| PARTIAL / failing | 0 |
+| Escalated to auditor | 0 (no gaps to fill) |
+| Manual-only items | 3 (all independently verified) |
+
+**Coverage confirmed green** — `go test ./internal/httpserver/ ./internal/pollruns/
+./internal/db/ ./internal/poller/ ./internal/buildinfo/ -count=1` passes; all 8 Wave 0
+files exist (`ready_test.go`, `status_test.go`, `pollruns_test.go`, `poller_test.go`,
+`schema_version_test.go`, `watchlist_count_test.go`, `buildinfo_test.go`,
+`boot_e2e_test.go`). Every RDY-01/02/03, RUN-02, RUN-04, STAT-01/02 behavior in the map
+resolves to a named green test.
+
+**Manual-only items — status this cycle:**
+1. `-ldflags -X` → `instance.app_version` E2E — verified: CI run 34435266885 `build-scan`
+   step greps the built binary for the commit SHA and passes; UAT Test 2 confirmed
+   `instance.app_version` renders (`"dev"` on the flagless local image).
+2. `release` job pushes the byte-identical scanned image — verified: UAT Test 1, CI run
+   34435266885 `release` job does `docker load` of the scanned tarball then tag+push, no
+   `docker build`.
+3. `/ready` non-side-effecting / shared-pool — verified: `grep -nE
+   'sql\.Open|pgxpool\.New|migrate\.New' internal/httpserver/ready.go` is empty.
