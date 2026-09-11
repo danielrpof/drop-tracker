@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
-current_phase: 18.1
-current_phase_name: Poll-Cycle Instrumentation
+current_phase: 19
+current_phase_name: frontend-system-view
 status: executing
-stopped_at: Phase 19 context gathered
-last_updated: "2026-09-10T21:01:52.788Z"
+stopped_at: Phase 19 UI-SPEC approved
+last_updated: "2026-09-11T00:24:26.525Z"
 last_activity: 2026-09-10
 last_activity_desc: 18.1-03 executed — TestRunCycle_CounterInvariant (the -race substitute, 1000x exact-equality, K erroring + P panicking artists) + full DoD gate green (coverage 90.73%) + WINDOWS entry 13 + 18.1-VALIDATION signed off
-state_head: 32ea60d163ae2cd66296da11a1fdd807e3a011fd
+state_head: b76b62781fd58ef8bb4ef578c009d8b19ef1e27a
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 7
+  total_plans: 12
   completed_plans: 7
-  percent: 67
+  percent: 58
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 
 ## Current Position
 
-Phase: 18.1 (Poll-Cycle Instrumentation) — READY FOR VERIFICATION
+Phase: 19 (frontend-system-view) — READY TO EXECUTE
 Plan: 3 of 3 (all complete)
 Status: 18.1-01/02/03 all complete. The -race substitute (TestRunCycle_CounterInvariant) is committed, the full Definition-of-Done gate ran green (coverage 90.73%, sqlc-check clean, -race substituted per WINDOWS entry 13), and 18.1-VALIDATION.md is signed off. One outstanding human check: a live gated instance showing a real run entry per source via GET /status — carried to /gsd-verify-work 18.1.
 Last activity: 2026-09-10 — 18.1-03 executed (looped counter-invariant -race substitute + phase gate + race waiver + validation map)
@@ -346,9 +346,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T21:01:51.962Z
-Stopped at: Phase 19 context gathered
-Resume file: .planning/phases/19-frontend-system-view/19-CONTEXT.md
+Last session: 2026-09-10T23:41:43.062Z
+Stopped at: Phase 19 UI-SPEC approved
+Resume file: .planning/phases/19-frontend-system-view/19-UI-SPEC.md
 
 ## Operator Next Steps
 

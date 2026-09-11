@@ -166,10 +166,21 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 19-01-PLAN.md — Tracer: `/system` route + nav tab + `getStatus()` wired end-to-end through `apiFetch` (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 19-02-PLAN.md — `web/app/lib/format.ts`: the six pure display formatters + deterministic test timezone (wave 2)
 - [ ] 19-03-PLAN.md — Presentation primitives: source display names + `SOURCE_ORDER`, the two run-health theme tokens, vendored shadcn `table` (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 19-04-PLAN.md — Outcome badge tiers, the About block + empty-watchlist callout, the per-source panel (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 19-05-PLAN.md — Recent-runs table, the five-state machine + keep-stale Refresh, phase gate + embedded bundle rebuild (wave 4)
 
 **UI hint**: yes
