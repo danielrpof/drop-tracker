@@ -346,4 +346,71 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
 
     expect(authStore.isGateActive()).toBe(true)
   })
+
+  // --- plan 19-01 Task 2: getStatus() (SYS-01/02/03) ---
+
+  // The fresh-instance example body from docs/api/status-contract.md,
+  // reused verbatim so this test doubles as a contract-shape assertion.
+  const freshStatusBody = {
+    poll_interval_seconds: 900,
+    watchlist_size: 12,
+    instance: {
+      app_version: "dev",
+      schema_applied: 7,
+      schema_expected: 7,
+    },
+    sources: {
+      deezer: {
+        last_run: null,
+        history: [],
+        last_skipped_at: null,
+        consecutive_skips: 0,
+      },
+      musicbrainz: {
+        last_run: null,
+        history: [],
+        last_skipped_at: null,
+        consecutive_skips: 0,
+      },
+    },
+  }
+
+  it("getStatus() issues its request to /status", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(freshStatusBody))
+
+    await api.getStatus()
+
+    expect(fetchSpy.mock.calls[0][0]).toBe("/status")
+  })
+
+  it("getStatus() resolves a 200 to the parsed, contract-shaped body", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(freshStatusBody))
+
+    const result = await api.getStatus()
+
+    expect(result.instance.app_version).toBe("dev")
+    expect(result.instance.schema_applied).toBe(7)
+    expect(result.poll_interval_seconds).toBe(900)
+    expect(result.watchlist_size).toBe(12)
+    expect(result.sources.musicbrainz).toBeDefined()
+    expect(result.sources.deezer).toBeDefined()
+  })
+
+  it("getStatus() rejects with a real ApiError carrying status 401 on a 401 from /status", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "unauthenticated" }), {
+        status: 401,
+      })
+    )
+
+    const err = await api.getStatus().then(
+      () => {
+        throw new Error("expected getStatus() to reject")
+      },
+      (e: unknown) => e
+    )
+
+    expect(err).toBeInstanceOf(api.ApiError)
+    expect((err as InstanceType<typeof api.ApiError>).status).toBe(401)
+  })
 })

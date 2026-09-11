@@ -78,6 +78,7 @@ describe("App", () => {
         children: [
           { index: true, Component: () => <div>Watchlist page</div> },
           { path: "history", Component: () => <div>History page</div> },
+          { path: "system", Component: () => <div>System page</div> },
         ],
       },
     ])
@@ -102,6 +103,20 @@ describe("App", () => {
       "border-accent-indigo"
     )
     expect(screen.getByRole("link", { name: "Watchlist" }).className).toContain(
+      "border-transparent"
+    )
+  })
+
+  it("shows a System nav link active on /system, with Watchlist and History inactive", () => {
+    renderAppAt("/system")
+
+    expect(screen.getByRole("link", { name: "System" }).className).toContain(
+      "border-accent-indigo"
+    )
+    expect(screen.getByRole("link", { name: "Watchlist" }).className).toContain(
+      "border-transparent"
+    )
+    expect(screen.getByRole("link", { name: "History" }).className).toContain(
       "border-transparent"
     )
   })
