@@ -1,5 +1,27 @@
 # Milestones
 
+## v1.4 Operator Observability (Shipped: 2026-09-11)
+
+**Phases completed:** 3 phases, 12 plans, 31 tasks
+**Known verification overrides:** 0 newly acknowledged, 4 carried forward from a prior close (see STATE.md Deferred Items)
+
+**Key accomplishments:**
+
+- `GET /ready` — an unauthenticated, 3s-bounded readiness probe that tells a live drop-tracker apart from a merely-running process via a machine reason enum, added beside `/health` without changing liveness in any observable way.
+- `internal/pollruns.Store` — a mutex-guarded per-source ring of the last 50 `RunResult` values plus a scalar skip signal, with `RecordRun` owning summary composition and outcome normalization, and a wired-but-inert `poller.RunRecorder` seam ready for Phase 18.1's call site.
+- The shipped binary now carries the commit it was built from — `internal/buildinfo.Version` injected via `-ldflags -X` in the Dockerfile, `${{ github.sha }}` passed by CI's `build-scan` job, `"dev"` for any flagless local build, and a pipeline step that greps the built binary to catch a silently-ignored link flag.
+- `GET /status` ships as a gated JSON operator panel — poll interval, watchlist size, an instance block, and a per-source object carrying the last run, the last 50 runs newest-first, and the skip signal — with its wire shape frozen in `docs/api/status-contract.md` and one `pollruns.Store` wired at the composition root as both the poller's recorder and the server's reader.
+- `EventRecorder` widened to `(int, error)` across every layer and call site; `runCycle` now folds per-worker `artistResult` values single-threaded off a `len(entries)`-buffered channel and writes exactly one `pollruns.RunResult` per completed cycle through a `defer`-registered `RecordRun`.
+- Four new `internal/poller` unit tests pin every non-happy `runCycle` exit: an overlap-skipped tick that writes a skip signal and no history entry, a watchlist `List` failure recorded as `outcome=error` with zero counters and no leaked driver text, a shutdown-cancelled cycle (mid-flight and pre-dispatch) recorded as `outcome=cancelled`, and a recorder that errors or stalls without ever failing, retrying, or wedging the cycle.
+- `TestRunCycle_CounterInvariant` — a 1000-iteration, exact-equality invariant test that drives `runCycle`'s fan-out with 3 erroring and 2 panicking artists (plus a Deezer leg with 4 nil-`deezer_id` entries) and asserts every recorded counter reconciles on every iteration — plus a full green Definition-of-Done gate with the `-race` substitution recorded as WINDOWS.md entry 13 and `18.1-VALIDATION.md` signed off.
+- A real `/system` nav tab, route, and `getStatus()` wrapper that fetch `GET /status` once on mount through the existing `apiFetch` 401 pipeline and render `instance.app_version` as live data.
+- `web/app/lib/format.ts` — the six pure formatters D-09/D-09-a/SYS-01/SYS-02 require (relative time, absolute time, ISO title, clock stamp, duration, poll interval), table-driven-tested under a `TZ=UTC` pin proven by a self-check case.
+- `sourceDisplayName`/`SOURCE_ORDER` in `sources.ts`, two run-health `@theme` tokens in `app.css`, and a hand-written (not CLI-trusted) shadcn `Table` family in `web/app/components/ui/table.tsx` — three leaf primitives for plans 19-04/19-05 with no file overlap with 19-02.
+- The five D-07 outcome badge tiers, the schema/reachability About block, and the per-source panel (D-08 clean-run scan, skip/escalation lines) wired into `system.tsx`'s loaded body -- the phase's real operator-facing surface area.
+- The per-source recent-runs table with its cap caption, the finished five-state render machine (first-run predicate, error-hides-Refresh, keep-stale Refresh with its own re-entrancy/mounted guards, and the as-of freshness stamp), and the phase-closing embedded SPA bundle rebuild.
+
+---
+
 ## v1.3 Continuous Deployment (Shipped: 2026-09-09)
 
 **Phases completed:** 4 phases, 15 plans, 46 tasks

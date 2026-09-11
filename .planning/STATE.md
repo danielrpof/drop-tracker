@@ -1,21 +1,21 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.4
-milestone_name: Operator Observability (Phases 18, 18.1, 19) — ALL PHASES COMPLETE
-current_phase: null
-current_phase_name: null
-status: milestone_complete
+milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
+status: Awaiting next milestone
 stopped_at: All 3 phases (18, 18.1, 19) complete — ready to run /gsd-complete-milestone v1.4
-last_updated: "2026-09-11T06:28:15.758Z"
+last_updated: "2026-09-11T06:41:39.771Z"
 last_activity: 2026-09-11
-last_activity_desc: Phase 19 verified and Phase 18.1 retroactively marked complete (was executed but never transitioned) — v1.4 milestone now 100% (3/3 phases)
-state_head: 0f27e666222bb4f9f5b8f77d0aa4bfda64b731b4
+last_activity_desc: Milestone v1.4 completed and archived
+state_head: e373288eac2265447fa2cb199fb3ebfb6a0293aa
 progress:
   total_phases: 3
   completed_phases: 3
   total_plans: 12
   completed_plans: 12
   percent: 100
+current_phase: null
+current_phase_name: null
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 ## Current Position
 
-Phase: None — all v1.4 phases (18, 18.1, 19) complete
-Plan: N/A
-Status: Milestone ready to close
-Last activity: 2026-09-11 — Phase 19 verified (Nyquist-compliant, threat-secure, UI-reviewed 22/24); Phase 18.1 retroactively transitioned (fully executed, never marked complete)
+Phase: Milestone v1.4 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-09-11 — Milestone v1.4 completed and archived
 
 ## Performance Metrics
 
@@ -367,5 +367,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Close out the milestone — `/gsd-complete-milestone v1.4` — archives Phases 18/18.1/19 planning artifacts and prepares the next cycle.
-- Phase 17 (VPS deploy) stays deferred — un-defer as its own milestone once a VPS + domain exist; context archived at `.planning/milestones/v1.3-phases/17-*`
+- Start the next milestone with /gsd-new-milestone

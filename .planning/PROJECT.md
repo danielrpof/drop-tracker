@@ -10,26 +10,23 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 ## Current State
 
-**Shipped:** v1.3 Continuous Deployment — partial (2026-09-09)
+**Shipped:** v1.4 Operator Observability (2026-09-11)
 
-v1.3 delivered everything in the deployment-readiness chain that does not need a physical host: an optional single-passphrase instance gate (HMAC-signed cookie, inert when unconfigured) that keeps a public instance from being briefly open (Phase 14); a report-only PR comment showing backend/frontend coverage deltas vs. the main baseline, sharing one measurement algorithm with the merge gate (Phase 15); and rollback-safe migrations — an ahead-of-source no-op guard plus a CI `migration-check` + `n1-boot` pair that proves the previous release still boots against the current schema (Phase 16). The one remaining phase, **Phase 17 (automated VPS deploy with health-gated rollback), is deferred** — it needs a provisioned VPS + domain the developer does not have yet. DPLY-01…08 carry forward to a future milestone; the discuss-phase context already gathered for it is archived under `v1.3-phases/17-*`.
+v1.4 made the running service legible without reading container logs. `GET /ready` (RDY-01…03) tells a live instance apart from a merely-running one — 200 only when Postgres is reachable and the schema is current and not dirty, 503 with a machine reason otherwise, unauthenticated and unchanged from `/health`'s own contract. Poll-cycle history moved into an in-process, mutex-guarded ring buffer (`internal/pollruns.Store`, `docs/adr/0001`) rather than a `poll_runs` table — a design grilling found the table version carried a prune-on-insert race, a cross-source deadlock, and a skip-row-eviction hazard for history that resets on restart by design anyway. That grilling also split the original Phase 18 into 18 (additive: `/ready`, the store, app version, the frozen `/status` contract) and 18.1 (the milestone's riskiest change — wiring `runCycle` to record through the seam via a channel-fold, proven correct by a 1000-iteration invariant test standing in for the `go test -race` this dev box can't run). `GET /status` ships gated behind the existing passphrase gate, and Phase 19 gives it a face: a "System" tab in the SPA showing per-source run health, a recent-runs table, and an About block, built as a five-state render machine with a keep-stale manual Refresh. Phase 17 (VPS deploy) remains deferred, still blocked on a provisioned VPS + domain — the `/ready` probe this milestone built is what its health-gate will poll once un-deferred.
 
-## Current Milestone: v1.4 Operator Observability
+<details>
+<summary>Milestone v1.4 Operator Observability (shipped 2026-09-11)</summary>
 
 **Goal:** A drop-tracker operator can see the scheduler working — last poll cycle per source, what it checked and found, whether it errored — and a deploy or uptime monitor can tell "process up" from "ready to serve".
 
-**Target features:**
-- `/ready` endpoint (public, alongside `/health`) — returns 200 only when the DB is reachable *and* the schema is at the expected migration version; distinct from `/health`'s liveness check. Built so a future Phase 17 deploy health-gate can poll it.
-- `poll_runs` table + a `RunRecorder` seam — one row per poll-cycle invocation (source, started/finished, artists checked, artists errored, events recorded, outcome); the poller stays DB-connection-free in principle via the seam, mirroring the existing `EventRecorder`; retention by pruning to last N rows per source on insert (no new env var).
-- `GET /status` (gated) — JSON: last run per source, recent run history, watchlist size, poll interval.
-- A "System" view in the SPA rendering `/status` as an operator status panel, with its own UI-SPEC.
+**Delivered:** `/ready` readiness probe distinct from `/health` liveness (Phase 18); in-process poll-run ring buffer + `RunRecorder` seam, wired inert (Phase 18) then live via `runCycle` instrumentation (Phase 18.1); gated `GET /status` JSON contract + SHA-based app version (Phase 18); SPA "System" view rendering it all (Phase 19).
 
-**Structure:** Phase 18 (backend) → Phase 19 (UI).
+**Considered and rejected this cycle:** a `poll_runs` Postgres table (ADR-0001 — an in-process ring buffer avoids the migration plus three concurrency hazards the table version carried, and cross-restart persistence isn't needed for a single-instance tool); a run-history retention env var (N stays a compile-time constant); Prometheus `/metrics` (still deferred in favor of the bespoke `/status` + UI).
 
-**Out of scope this cycle:** Prometheus `/metrics` / the Grafana stack (still deferred), historical charts/graphs, poll-failure alerting.
+</details>
 
 <details>
-<summary>Milestone v1.3 Continuous Deployment (shipped partial 2026-09-09)</summary>
+<summary>Previous Milestone: v1.3 Continuous Deployment (shipped partial 2026-09-09)</summary>
 
 **Goal:** Ship the app automatically to a self-hosted VPS on every merge to main, behind a passphrase gate, and close the last CI reporting gap.
 
@@ -120,9 +117,9 @@ v1.3 delivered everything in the deployment-readiness chain that does not need a
 - MusicBrainz and Deezer clients should be real, testable HTTP clients — tests mock the external calls with `httptest.Server`, not fake/stub business logic.
 - musicbrainz.org's TLS handshake fails with an `unexpected eof`/server `decode_error` alert from this developer's WSL2 network path specifically — reproduced identically with plain `curl` (bypassing drop-tracker's Go client entirely), confirmed environmental (not a code defect) during Phase 03 UAT. Deezer is unaffected. If a future phase's live testing hits the same MusicBrainz-only TLS failure on this machine, this is already a known, accepted limitation — see `.planning/phases/03-external-clients-search/03-VERIFICATION.md` Acknowledged Gaps and Broken Windows Ledger entry #3 (waived).
 - Config/settings library (pydantic-settings equivalent — e.g. envconfig/viper) and exact structured-logging setup are implementation details left to phase research/planning rather than locked here.
-- Current codebase size (as of Phase 13 close, 2026-08-24): ~26,900 LOC Go across 82 files, ~4,000 LOC TypeScript/TSX across 38 files (`web/app/`, excludes generated build output). Phases 14-16 added `internal/authgate`, `cmd/coverage-report`, `cmd/migration-check`, and `internal/sqlscan`.
-- CI's `svu`-computed image tags have run ahead of the milestone-doc versioning for a while (git tags reach `v1.8.x` while milestone cycles are at v1.3) — the two numbering schemes are independent by design; the milestone label is the planning cycle, the git tag is the published image.
-- Phase 17's deploy health-gate was always meant to poll a readiness endpoint, not liveness. The `/ready` probe planned for the next milestone (Operator Observability) is being built partly so Phase 17 has it to consume when it is un-deferred.
+- Current codebase size (as of v1.4 close, 2026-09-11): ~40,600 LOC Go across 128 files including tests (~12,300 LOC / 62 files excluding tests), ~3,950 LOC TypeScript/TSX across 37 files (`web/app/`, excludes tests and generated build output). Phases 14-16 added `internal/authgate`, `cmd/coverage-report`, `cmd/migration-check`, and `internal/sqlscan`; Phase 18/18.1 added `internal/pollruns` and `internal/buildinfo`.
+- CI's `svu`-computed image tags have run ahead of the milestone-doc versioning for a while (git tags reach `v1.8.x`+ while milestone cycles are at v1.4) — the two numbering schemes are independent by design; the milestone label is the planning cycle, the git tag is the published image.
+- Phase 17's deploy health-gate was always meant to poll a readiness endpoint, not liveness. The `/ready` probe it needs now exists (shipped v1.4, Phase 18) — un-defer Phase 17 as its own milestone once a VPS + domain exist.
 - The `CoverArt.tsx` image-load-error-never-resets bug (noted at v1.1 close as pre-existing, non-blocking tech debt) was fixed in Phase 12.
 - Windows dev-machine limitations remain (`go test -race` unusable — ThreadSanitizer allocation failure under memory pressure; musicbrainz.org TLS handshake fails over WSL2). Both are documented, waived, environmental, not code defects. See `.planning/WINDOWS.md`.
 
@@ -202,4 +199,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-11 — after Phase 19 (Frontend — System View)*
+*Last updated: 2026-09-11 — after v1.4 Operator Observability milestone close*
