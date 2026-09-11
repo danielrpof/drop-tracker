@@ -16,6 +16,12 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
+    // Pins the test-runner process timezone (19-RESEARCH.md Pitfall 4).
+    // format.ts's HH:MM:SS formatters render *local* time -- without this,
+    // an assertion built from a fixed UTC instant is green on a UTC CI
+    // runner and red on any developer machine west/east of UTC. A
+    // self-check case in format.test.ts proves the pin actually took.
+    env: { TZ: "UTC" },
     // mockReset is load-bearing, not hygiene: every test file sets a
     // per-test resolved/rejected value on an auto-mocked ~/lib/api (D-06).
     // Without a per-test reset, one test's queued mock value would silently
