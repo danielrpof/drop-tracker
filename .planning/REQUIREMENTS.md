@@ -53,32 +53,42 @@ Explicitly excluded. Documented to prevent scope creep.
 
 ## Traceability
 
-Populated during roadmap creation.
+Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4's Phase 19.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DGST-01 | TBD | Pending |
-| DGST-02 | TBD | Pending |
-| DGST-03 | TBD | Pending |
-| DGST-04 | TBD | Pending |
-| DGST-05 | TBD | Pending |
-| DGST-06 | TBD | Pending |
-| DGST-07 | TBD | Pending |
-| DGST-08 | TBD | Pending |
-| DGST-09 | TBD | Pending |
-| DGST-10 | TBD | Pending |
-| DGST-11 | TBD | Pending |
-| DGST-12 | TBD | Pending |
-| DGST-13 | TBD | Pending |
-| DGST-14 | TBD | Pending |
-| DGST-15 | TBD | Pending |
-| DGST-16 | TBD | Pending |
+| DGST-01 | Phase 20 | Pending |
+| DGST-02 | Phase 20 | Pending |
+| DGST-03 | Phase 20 | Pending |
+| DGST-04 | Phase 20 | Pending |
+| DGST-05 | Phase 22 | Pending |
+| DGST-06 | Phase 22 | Pending |
+| DGST-07 | Phase 22 | Pending |
+| DGST-08 | Phase 22 | Pending |
+| DGST-09 | Phase 22 | Pending |
+| DGST-10 | Phase 23 | Pending |
+| DGST-11 | Phase 23 | Pending |
+| DGST-12 | Phase 23 | Pending |
+| DGST-13 | Phase 21 | Pending |
+| DGST-14 | Phase 21 | Pending |
+| DGST-15 | Phase 22 | Pending |
+| DGST-16 | Phase 20 | Pending |
+
+**Per-phase coverage:**
+
+| Phase | Name | Requirements |
+|-------|------|--------------|
+| 20 | Digest Settings & Operator Control | DGST-01, DGST-02, DGST-03, DGST-04, DGST-16 |
+| 21 | Real-Time ↔ Digest Mutual Exclusion | DGST-13, DGST-14 |
+| 22 | Scheduled Digest Send | DGST-05, DGST-06, DGST-07, DGST-08, DGST-09, DGST-15 |
+| 23 | Digest Readability & Discord Limits | DGST-10, DGST-11, DGST-12 |
 
 **Coverage:**
 - v1.5 requirements: 16 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 16 ⚠️ (resolved by roadmapper)
+- Mapped to phases: 16 ✓
+- Unmapped: 0 ✓
+- Duplicated across phases: 0 ✓
 
 ---
 *Requirements defined: 2026-09-11*
-*Last updated: 2026-09-11 after initial v1.5 definition*
+*Last updated: 2026-09-11 — traceability populated by roadmap (Phases 20-23)*
