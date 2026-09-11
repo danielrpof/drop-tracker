@@ -87,4 +87,75 @@ describe("System route", () => {
       screen.queryByRole("heading", { name: "Couldn't load system status." })
     ).not.toBeInTheDocument()
   })
+
+  it("renders a single schema line when schema_applied equals schema_expected", async () => {
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        instance: {
+          app_version: "a1b2c3d4e5f6",
+          schema_applied: 7,
+          schema_expected: 7,
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText("schema 7")
+  })
+
+  it("renders both schema numbers when schema_applied and schema_expected differ", async () => {
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        instance: {
+          app_version: "a1b2c3d4e5f6",
+          schema_applied: 8,
+          schema_expected: 7,
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText(/applied 8/)
+    expect(screen.getByText(/expects 7/)).toBeInTheDocument()
+  })
+
+  it("renders the unreachable pill and an em-dash schema row when schema_applied is null", async () => {
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        instance: {
+          app_version: "a1b2c3d4e5f6",
+          schema_applied: null,
+          schema_expected: 7,
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText("Database unreachable")
+    expect(screen.getByText("—")).toBeInTheDocument()
+  })
+
+  it("shows the empty-watchlist callout with a link to the watchlist root when watchlist_size is zero", async () => {
+    mockGetStatus.mockResolvedValueOnce(makeStatus({ watchlist_size: 0 }))
+
+    renderRoute(System, "/system")
+
+    await screen.findByText("Nothing to poll")
+    const link = screen.getByRole("link", { name: "Go to the Watchlist" })
+    expect(link).toHaveAttribute("href", "/")
+  })
+
+  it("hides the empty-watchlist callout when watchlist_size is greater than zero", async () => {
+    mockGetStatus.mockResolvedValueOnce(makeStatus({ watchlist_size: 12 }))
+
+    renderRoute(System, "/system")
+
+    await screen.findByRole("heading", { name: "System" })
+    await screen.findByText("a1b2c3d4e5f6")
+
+    expect(screen.queryByText("Nothing to poll")).not.toBeInTheDocument()
+  })
 })

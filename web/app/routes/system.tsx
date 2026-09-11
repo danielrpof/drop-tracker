@@ -1,16 +1,22 @@
+import { TriangleAlert } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { Link } from "react-router"
 
 import { EmptyState } from "~/components/common/EmptyState"
+import { AboutInstance } from "~/components/system/AboutInstance"
+import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert"
 import { Button } from "~/components/ui/button"
 import { Skeleton } from "~/components/ui/skeleton"
 import { ApiError, getStatus, type StatusResponse } from "~/lib/api"
 
-// System is the SYS-01/02/03 operator status view. This tracer proves the
-// full route/nav/fetch/render stack end to end with one real payload field
-// (instance.app_version) -- panels, badges, formatters, and the history
-// table are later plans' expansion of the same render-precedence chain
-// established here. Fetch happens on mount and on a Retry bump only (D-10):
-// no background refresh mechanism exists anywhere in this file, by design.
+// System is the SYS-01/02/03 operator status view. Plan 19-01's tracer
+// proved the full route/nav/fetch/render stack end to end with one real
+// payload field; this plan replaces that bare Version row with the real
+// About block (D-01/D-02/D-03) and the empty-watchlist callout (D-05).
+// Per-source panels (Task 3) and the first-run/loaded shape derivation
+// (plan 19-05) build on the same render-precedence chain established here.
+// Fetch happens on mount and on a Retry bump only (D-10): no background
+// refresh mechanism exists anywhere in this file, by design.
 export default function System() {
   const [data, setData] = useState<StatusResponse | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
@@ -75,12 +81,30 @@ export default function System() {
       )}
 
       {!loadError && data && (
-        <div className="flex flex-col gap-2">
-          <span className="text-label text-muted-foreground">Version</span>
-          <span className="font-mono text-body text-foreground">
-            {data.instance.app_version}
-          </span>
-        </div>
+        <>
+          <AboutInstance
+            instance={data.instance}
+            watchlistSize={data.watchlist_size}
+            pollIntervalSeconds={data.poll_interval_seconds}
+          />
+
+          {data.watchlist_size === 0 && (
+            <Alert>
+              <TriangleAlert aria-hidden="true" />
+              <AlertTitle>Nothing to poll</AlertTitle>
+              <AlertDescription>
+                No artists on your watchlist — the scheduler has nothing to
+                check each cycle.{" "}
+                <Link
+                  to="/"
+                  className="text-primary underline-offset-4 hover:underline"
+                >
+                  Go to the Watchlist
+                </Link>
+              </AlertDescription>
+            </Alert>
+          )}
+        </>
       )}
     </div>
   )
