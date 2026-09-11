@@ -99,6 +99,57 @@ export interface SearchResponse {
   sources: Record<string, SourceResult>
 }
 
+// KnownOutcome is the wire's closed set (ok | error | cancelled), widened
+// with a bare-string arm so an N-1/N deploy value keeps literal autocomplete
+// without breaking typecheck (D-04, D-07 of 19-CONTEXT.md).
+export type KnownOutcome = "ok" | "error" | "cancelled"
+
+// StatusRun mirrors internal/httpserver/status.go's statusRun exactly. Used
+// by both StatusSource.last_run and every StatusSource.history element --
+// the run object carries no source key, since the source name is already
+// the map key in StatusResponse.sources.
+export interface StatusRun {
+  cycle_id: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
+  artists_checked: number
+  artists_skipped: number
+  artists_errored: number
+  events_recorded: number
+  outcome: KnownOutcome | (string & {})
+  summary: string
+}
+
+// StatusSource mirrors statusSource. history is allocated zero-length by
+// the handler, so it always encodes as an array, never null.
+export interface StatusSource {
+  last_run: StatusRun | null
+  history: StatusRun[]
+  last_skipped_at: string | null
+  consecutive_skips: number
+}
+
+// StatusInstance mirrors statusInstance. schema_applied is null only when
+// the database was unreachable at request time; schema_expected is a plain
+// Go uint and is never absent.
+export interface StatusInstance {
+  app_version: string
+  schema_applied: number | null
+  schema_expected: number
+}
+
+// StatusResponse mirrors internal/httpserver/status.go's statusResponse --
+// the frozen GET /status contract (docs/api/status-contract.md). sources is
+// always keyed by exactly "musicbrainz" and "deezer", including on a fresh
+// instance with no recorded cycles.
+export interface StatusResponse {
+  poll_interval_seconds: number
+  watchlist_size: number
+  instance: StatusInstance
+  sources: Record<string, StatusSource>
+}
+
 // ---- Error type ---------------------------------------------------------
 
 // ApiError carries the HTTP status and the server's fixed {"error": "..."}
@@ -285,4 +336,14 @@ export async function createSession(passphrase: string): Promise<void> {
 // Set-Cookie Max-Age=0 (GATE-06, D-10 -- client-local logout only).
 export async function deleteSession(): Promise<void> {
   await apiFetch<void>("/session", { method: "DELETE" })
+}
+
+// ---- Status (operator observability) --------------------------------------
+
+// getStatus fetches the gated operator status surface (SYS-01, SYS-02,
+// SYS-03). Routed through apiFetch so it inherits the D-16 401 interceptor
+// and the X-Instance-Gated latch -- the System view needs no per-view auth
+// code.
+export async function getStatus(): Promise<StatusResponse> {
+  return apiFetch<StatusResponse>("/status")
 }

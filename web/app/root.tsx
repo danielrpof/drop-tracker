@@ -88,9 +88,9 @@ function LogoutButton() {
   )
 }
 
-// App is the root layout: D-01's two-tab bar (Watchlist, History) above the
-// routed page content. The two tabs stay fully decoupled per D-03/D-04 --
-// neither route's component references the other's data.
+// App is the root layout: the tab bar (Watchlist, History, System) above
+// the routed page content. The tabs stay fully decoupled per D-03/D-04 --
+// no route's component references another's data.
 //
 // GATE-05 / D-16: when the shared auth store reports unauthenticated, App
 // returns <PassphraseScreen /> before any nav markup. That early return is
@@ -114,6 +114,9 @@ export default function App() {
         </NavLink>
         <NavLink to="/history" className={tabLinkClassName}>
           History
+        </NavLink>
+        <NavLink to="/system" className={tabLinkClassName}>
+          System
         </NavLink>
         {gateActive && <LogoutButton />}
       </nav>
