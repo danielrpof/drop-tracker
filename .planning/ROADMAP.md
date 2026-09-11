@@ -163,7 +163,7 @@ Plans:
   4. The view fetches once on mount and otherwise only when the operator clicks Refresh; leaving the tab open produces no steady `/status` traffic, and the panel shows an explicit "as of" timestamp so the operator can tell how fresh it is.
   5. When the session expires, the view yields to the existing passphrase screen and re-fetches after login, with no stray requests firing behind the login screen.
 
-**Plans**: 4/5 plans executed
+**Plans**: 5/5 plans executed
 
 Plans:
 **Wave 1**
@@ -181,7 +181,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 19-05-PLAN.md — Recent-runs table, the five-state machine + keep-stale Refresh, phase gate + embedded bundle rebuild (wave 4)
+- [x] 19-05-PLAN.md — Recent-runs table, the five-state machine + keep-stale Refresh, phase gate + embedded bundle rebuild (wave 4)
 
 **UI hint**: yes
 
@@ -203,7 +203,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 18. Backend — Readiness, Status Surface & App Version | 4/4 | Complete    | 2026-09-09 |
 | 18.1. Poll-Cycle Instrumentation | 3/3 | In Progress|  |
-| 19. Frontend — System View | 4/5 | In Progress|  |
+| 19. Frontend — System View | 5/5 | In Progress|  |
 
 ## Backlog
 
