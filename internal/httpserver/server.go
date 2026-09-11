@@ -269,7 +269,7 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	// X-Instance-Gated header on the gated path exactly as /events does; it is
 	// a read verb, so the CSRF-header requirement is a no-op for it.
 	r.Get("/status", s.handleStatus)
-	// GET/PUT /settings/notifications (DGST-01..04, T-20-01): registered
+	// The digest settings resource (DGST-01..04, T-20-01) is registered
 	// here, next to the other data routes, so both verbs inherit
 	// gate.Authenticate and gate.RequireCSRFHeader with no new middleware
 	// and no path allowlist -- structural gating, not a code-path decision.
