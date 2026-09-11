@@ -14,6 +14,17 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 v1.4 made the running service legible without reading container logs. `GET /ready` (RDY-01…03) tells a live instance apart from a merely-running one — 200 only when Postgres is reachable and the schema is current and not dirty, 503 with a machine reason otherwise, unauthenticated and unchanged from `/health`'s own contract. Poll-cycle history moved into an in-process, mutex-guarded ring buffer (`internal/pollruns.Store`, `docs/adr/0001`) rather than a `poll_runs` table — a design grilling found the table version carried a prune-on-insert race, a cross-source deadlock, and a skip-row-eviction hazard for history that resets on restart by design anyway. That grilling also split the original Phase 18 into 18 (additive: `/ready`, the store, app version, the frozen `/status` contract) and 18.1 (the milestone's riskiest change — wiring `runCycle` to record through the seam via a channel-fold, proven correct by a 1000-iteration invariant test standing in for the `go test -race` this dev box can't run). `GET /status` ships gated behind the existing passphrase gate, and Phase 19 gives it a face: a "System" tab in the SPA showing per-source run health, a recent-runs table, and an About block, built as a five-state render machine with a keep-stale manual Refresh. Phase 17 (VPS deploy) remains deferred, still blocked on a provisioned VPS + domain — the `/ready` probe this milestone built is what its health-gate will poll once un-deferred.
 
+## Current Milestone: v1.5 Digest Notifications
+
+**Goal:** An operator can switch the instance from today's one-Discord-message-per-event notifications to a batched daily-or-weekly digest, without losing the real-time behavior as the default.
+
+**Target features:**
+- Instance-wide digest toggle (on/off + daily/weekly cadence), configurable from the SPA and persisted in Postgres — changeable without a redeploy, unlike the env-var-only config used elsewhere in the app.
+- When digest mode is on, every event type (new release, guest feature, deluxe/tracklist change) batches into one scheduled Discord message instead of firing individually; default stays real-time/off, matching today's behavior.
+- Uses only the existing `events` table as its data source — no new polling, no change to MusicBrainz/Deezer request volume.
+
+**Out of scope this cycle:** multi-channel notification sinks (RSS/webhook/email — parked Option A), per-event-type digest overrides, upcoming-release calendar (Option D), watchlist tags/notes/bulk-add (Option E).
+
 <details>
 <summary>Milestone v1.4 Operator Observability (shipped 2026-09-11)</summary>
 
@@ -199,4 +210,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-11 — after v1.4 Operator Observability milestone close*
+*Last updated: 2026-09-11 — v1.5 Digest Notifications milestone opened*

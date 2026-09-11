@@ -1,21 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
-status: Awaiting next milestone
-stopped_at: All 3 phases (18, 18.1, 19) complete — ready to run /gsd-complete-milestone v1.4
-last_updated: "2026-09-11T06:41:39.771Z"
+milestone: v1.5
+milestone_name: Digest Notifications
+status: planning
+last_updated: "2026-09-11T14:22:08.860Z"
 last_activity: 2026-09-11
-last_activity_desc: Milestone v1.4 completed and archived
-state_head: e373288eac2265447fa2cb199fb3ebfb6a0293aa
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 12
-  completed_plans: 12
-  percent: 100
-current_phase: null
-current_phase_name: null
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -29,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 ## Current Position
 
-Phase: Milestone v1.4 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-09-11 — Milestone v1.4 completed and archived
+Status: Defining requirements
+Last activity: 2026-09-11 — Milestone v1.5 started
 
 ## Performance Metrics
 
