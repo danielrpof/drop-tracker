@@ -5,16 +5,16 @@ milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 19
 current_phase_name: Frontend — System View
 status: executing
-stopped_at: Completed 19-01-PLAN.md
-last_updated: "2026-09-11T01:39:14.213Z"
+stopped_at: Completed 19-02-PLAN.md
+last_updated: "2026-09-11T01:52:55.073Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 19 execution started
-state_head: 617cfe9f96dd7c29a5f783014b571f0a2bcd3dc2
+state_head: abb7a39b2958c1910257122b3e37d6abc17d1a17
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 8
+  completed_plans: 9
   percent: 67
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 19 (Frontend — System View) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-09-10 — Phase 19 execution started
 
@@ -122,6 +122,7 @@ Last activity: 2026-09-10 — Phase 19 execution started
 | Phase 18.1 P02 | 22 min | 3 tasks | 1 files |
 | Phase 18.1 P03 | 15 min | 2 tasks | 3 files |
 | Phase 19 P01 | 15min | 2 tasks | 7 files |
+| Phase 19 P02 | 20min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -272,6 +273,8 @@ Recent decisions affecting current work:
 - [Phase 18.1]: [18.1-03] Plan executed test-only: the runCycle fold, runOneArtist recover, artistsSkipped++ and RecordRun/RecordSkip wiring all shipped in 18.1-01, so Task 1 is a pinning-test-after-implementation test(18.1-03) commit (no RED/GREEN split) — same pattern as 18.1-01 Task 2 and all of 18.1-02.
 - [Phase 18.1]: [18.1-03] Phase gate closed: -race substituted with plain go test ./... -count=1 (WINDOWS entry 13), make coverage-gate 90.73% (floor 80%), sqlc-check clean, status-contract.md + web/ byte-identical since phase base d77b3a7. 18.1-VALIDATION.md: wave_0_complete + nyquist_compliant true, per-task map filled, one live-instance /status human check outstanding.
 - [Phase 19]: [Phase 19]: [19-01] End-to-end /system tracer shipped: getStatus() + StatusResponse/StatusInstance/StatusSource/StatusRun wire types (character-for-character against status.go json tags), /system route + System nav tab, and system.tsx's mount-effect render-precedence chain rendering instance.app_version as the one live field. mountedRef seeded now for a later plan's Refresh handler.
+- [Phase 19]: [Phase 19]: [19-02] Timezone strategy resolved as the vitest.config.ts TZ=UTC pin (not the in-test-Intl fallback) -- the self-check case passed immediately, so RESEARCH's documented fallback was never needed.
+- [Phase 19]: [Phase 19]: [19-02] hourCycle: h23 used instead of hour12: false on every Intl.DateTimeFormat call in format.ts, avoiding a known ICU quirk where hour12:false can render midnight as 24:00:00.
 
 ### Pending Todos
 
@@ -348,8 +351,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T01:39:13.465Z
-Stopped at: Completed 19-01-PLAN.md
+Last session: 2026-09-11T01:52:54.292Z
+Stopped at: Completed 19-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

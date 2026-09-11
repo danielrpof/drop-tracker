@@ -163,7 +163,7 @@ Plans:
   4. The view fetches once on mount and otherwise only when the operator clicks Refresh; leaving the tab open produces no steady `/status` traffic, and the panel shows an explicit "as of" timestamp so the operator can tell how fresh it is.
   5. When the session expires, the view yields to the existing passphrase screen and re-fetches after login, with no stray requests firing behind the login screen.
 
-**Plans**: 1/5 plans executed
+**Plans**: 2/5 plans executed
 
 Plans:
 **Wave 1**
@@ -172,7 +172,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 19-02-PLAN.md — `web/app/lib/format.ts`: the six pure display formatters + deterministic test timezone (wave 2)
+- [x] 19-02-PLAN.md — `web/app/lib/format.ts`: the six pure display formatters + deterministic test timezone (wave 2)
 - [ ] 19-03-PLAN.md — Presentation primitives: source display names + `SOURCE_ORDER`, the two run-health theme tokens, vendored shadcn `table` (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -203,7 +203,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 18. Backend — Readiness, Status Surface & App Version | 4/4 | Complete    | 2026-09-09 |
 | 18.1. Poll-Cycle Instrumentation | 3/3 | In Progress|  |
-| 19. Frontend — System View | 1/5 | In Progress|  |
+| 19. Frontend — System View | 2/5 | In Progress|  |
 
 ## Backlog
 
