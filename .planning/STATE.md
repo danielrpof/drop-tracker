@@ -1,44 +1,44 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.4
-milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
-current_phase: 19
-current_phase_name: Frontend — System View
-status: verifying
-stopped_at: Completed 19-05-PLAN.md
-last_updated: "2026-09-11T02:40:38.163Z"
-last_activity: 2026-09-10
-last_activity_desc: Phase 19 execution started
-state_head: 433ad77a393d6e1007a2eb405856e649cde5f588
+milestone_name: Operator Observability (Phases 18, 18.1, 19) — ALL PHASES COMPLETE
+current_phase: null
+current_phase_name: null
+status: milestone_complete
+stopped_at: All 3 phases (18, 18.1, 19) complete — ready to run /gsd-complete-milestone v1.4
+last_updated: "2026-09-11T06:28:15.758Z"
+last_activity: 2026-09-11
+last_activity_desc: Phase 19 verified and Phase 18.1 retroactively marked complete (was executed but never transitioned) — v1.4 milestone now 100% (3/3 phases)
+state_head: 0f27e666222bb4f9f5b8f77d0aa4bfda64b731b4
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 12
   completed_plans: 12
-  percent: 67
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-10)
+See: .planning/PROJECT.md (updated 2026-09-11)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 19 — Frontend — System View
+**Current focus:** v1.4 milestone complete — ready to close out
 
 ## Current Position
 
-Phase: 19 (Frontend — System View) — EXECUTING
-Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-09-10 — Phase 19 execution started
+Phase: None — all v1.4 phases (18, 18.1, 19) complete
+Plan: N/A
+Status: Milestone ready to close
+Last activity: 2026-09-11 — Phase 19 verified (Nyquist-compliant, threat-secure, UI-reviewed 22/24); Phase 18.1 retroactively transitioned (fully executed, never marked complete)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 76
+- Total plans completed: 84
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -63,6 +63,8 @@ Last activity: 2026-09-10 — Phase 19 execution started
 | 15 | 3 | - | - |
 | 16 | 5 | - | - |
 | 18 | 4 | - | - |
+| 19 | 5 | - | - |
+| 18.1 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -297,7 +299,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 - ⚠️ [Phase 03] musicbrainz.org's TLS handshake fails from this developer's WSL2 network path (confirmed environmental via plain curl, not app code) -- Deezer unaffected. If future live testing on this machine needs real MusicBrainz data, expect the same failure; see PROJECT.md Context and Broken Windows Ledger entry #3 (waived).
 - ⚠️ [Phase 17, v1.3] No VPS is provisioned yet, and the TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel) is undecided. Both block Phase 17's first real deploy and its rollback drill. Resolve in Phase 17's discuss/spec pass before planning.
 - ⚠️ [Phase 16 → 17] `n1-boot`'s `guardcheck` skip path (G-16-1 fix) stays active until a release carrying the ahead-of-source guard becomes the N-1 rollback target — i.e. the first v1.3 release after Phase 16. Until then the N-1 boot probe is inert on migration branches. Phase 17 follow-up (security UF-1): re-assert the probe once a guard-carrying tag is N-1, and add an alarm if the guard-adoption window stays open unexpectedly.
-- ⚠️ [Phase 18.1, v1.4] `go test -race` is unavailable on this dev box and (as of Phase 18) absent from CI. Phase 18.1's core change — per-cycle counters aggregated across `runCycle`'s worker goroutines — is exactly the class of bug the race detector exists to catch. Phase 18 handled its own concurrency surface (`pollruns.Store` mutex) with a 1000-iteration two-source exact-equality test and shipped the recorder seam **inert**; 18.1 must carry the same looped-invariant substitute for the `runCycle` edit as a required deliverable. Consider wiring `-race` into CI as part of 18.1.
+- ⚠️ [Repo-wide] `go test -race` remains unavailable on this dev box and absent from CI (ThreadSanitizer allocation failure under memory pressure). Phase 18.1 closed its specific instance of this risk with `TestRunCycle_CounterInvariant` (1000-iteration exact-equality substitute over the `runCycle` worker fold), matching Phase 18's own `pollruns.Store` precedent — but the underlying tooling gap is still open project-wide. Still worth wiring `-race` into CI on a Linux runner if a future phase needs it.
 
 ### Quick Tasks Completed
 
@@ -359,12 +361,11 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T02:40:37.372Z
-Stopped at: Completed 19-05-PLAN.md
+Last session: 2026-09-11T06:28:15.758Z
+Stopped at: v1.4 milestone (Phases 18, 18.1, 19) all complete — ready for /gsd-complete-milestone v1.4
 Resume file: None
 
 ## Operator Next Steps
 
-- Plan Phase 18 — `/gsd-discuss-phase 18` then `/gsd-plan-phase 18`. Three decisions need locking at discuss/plan time: `/ready` `>=` vs `==`, the `events_recorded` source, and retention `N`. The plan must also carry an explicit concurrency-correctness section for the `runCycle` counters (no `-race` available) and settle the RUN-02 `skipped_overlap` tension with the research's Pitfall #4.
-- Phase 19 is gated on Phase 18's frozen `/status` contract, and needs `/gsd-ui-phase 19` for its UI-SPEC before planning.
+- Close out the milestone — `/gsd-complete-milestone v1.4` — archives Phases 18/18.1/19 planning artifacts and prepares the next cycle.
 - Phase 17 (VPS deploy) stays deferred — un-defer as its own milestone once a VPS + domain exist; context archived at `.planning/milestones/v1.3-phases/17-*`

@@ -63,8 +63,8 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 ### 🔄 v1.4 Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 
 - [x] **Phase 18: Backend — Readiness, Status Surface & App Version** - `/ready` probe, in-process run-history ring buffer + seams, gated `GET /status` (contract frozen here), SHA-based app version (completed 2026-09-09)
-- [ ] **Phase 18.1: Poll-Cycle Instrumentation** - the `runCycle` change: widened `EventRecorder`, channel-fold counters, `RecordRun`/`RecordSkip` wiring, concurrency-invariant test
-- [ ] **Phase 19: Frontend — System View** - operator status panel in the SPA rendering `/status`
+- [x] **Phase 18.1: Poll-Cycle Instrumentation** - the `runCycle` change: widened `EventRecorder`, channel-fold counters, `RecordRun`/`RecordSkip` wiring, concurrency-invariant test (completed 2026-09-11)
+- [x] **Phase 19: Frontend — System View** - operator status panel in the SPA rendering `/status` (completed 2026-09-11)
 
 > **Split rationale (2026-09-09 design grilling).** The original single Phase 18 bundled a schema migration, two endpoints, a shared-CI-file change, *and* the riskiest concurrency change in the codebase (`runCycle` counter aggregation with no `go test -race` anywhere). It was split so the risky `runCycle` edit (18.1) is reviewed in isolation from the additive work (18). The grilling also replaced the `poll_runs` **table** with an **in-process ring buffer** (`docs/adr/0001`) — eliminating the prune-on-insert race, the cross-source deadlock, the skip-row-eviction hazard, the migration, and the local-only `sqlc-check` drift gate. Superseded CONTEXT decisions: D-05 (skip coalescing → separate per-source signal), D-06/D-08/D-10 (`poll_runs` table → ring buffer), D-07 (detached-context recorder call → synchronous in-memory append), D-13 (svu `-ldflags` → `${GITHUB_SHA}` build-arg). `events_recorded` is locked to seam-widening (not the downstream count — clock-skew undercount).
 
@@ -202,8 +202,8 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 18. Backend — Readiness, Status Surface & App Version | 4/4 | Complete    | 2026-09-09 |
-| 18.1. Poll-Cycle Instrumentation | 3/3 | In Progress|  |
-| 19. Frontend — System View | 5/5 | In Progress|  |
+| 18.1. Poll-Cycle Instrumentation | 3/3 | Complete    | 2026-09-11 |
+| 19. Frontend — System View | 5/5 | Complete    | 2026-09-11 |
 
 ## Backlog
 
