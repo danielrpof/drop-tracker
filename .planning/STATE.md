@@ -5,16 +5,16 @@ milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 19
 current_phase_name: Frontend — System View
 status: executing
-stopped_at: Completed 19-02-PLAN.md
-last_updated: "2026-09-11T01:52:55.073Z"
+stopped_at: Completed 19-03-PLAN.md
+last_updated: "2026-09-11T02:01:09.169Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 19 execution started
-state_head: abb7a39b2958c1910257122b3e37d6abc17d1a17
+state_head: 5ad8755d46e6087290f4c86a85599a9225edfde1
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 67
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 19 (Frontend — System View) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-09-10 — Phase 19 execution started
 
@@ -123,6 +123,7 @@ Last activity: 2026-09-10 — Phase 19 execution started
 | Phase 18.1 P03 | 15 min | 2 tasks | 3 files |
 | Phase 19 P01 | 15min | 2 tasks | 7 files |
 | Phase 19 P02 | 20min | 2 tasks | 3 files |
+| Phase 19 P03 | 15min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -275,6 +276,8 @@ Recent decisions affecting current work:
 - [Phase 19]: [Phase 19]: [19-01] End-to-end /system tracer shipped: getStatus() + StatusResponse/StatusInstance/StatusSource/StatusRun wire types (character-for-character against status.go json tags), /system route + System nav tab, and system.tsx's mount-effect render-precedence chain rendering instance.app_version as the one live field. mountedRef seeded now for a later plan's Refresh handler.
 - [Phase 19]: [Phase 19]: [19-02] Timezone strategy resolved as the vitest.config.ts TZ=UTC pin (not the in-test-Intl fallback) -- the self-check case passed immediately, so RESEARCH's documented fallback was never needed.
 - [Phase 19]: [Phase 19]: [19-02] hourCycle: h23 used instead of hour12: false on every Intl.DateTimeFormat call in format.ts, avoiding a known ICU quirk where hour12:false can render midnight as 24:00:00.
+- [Phase 19]: [Phase 19]: [19-03] npx shadcn add table mis-resolved its cn dependency as an installable npm package (added cn@0.2.6 to package.json/pnpm-lock.yaml, imported from "cn" instead of ~/lib/utils) -- reverted the manifest/lockfile and hand-wrote table.tsx per the plan's documented offline-fallback shape instead of trusting the CLI output
+- [Phase 19]: [Phase 19]: [19-03] sourceDisplayName is a lookup (not naive title-case) exported alongside SOURCE_ORDER from sources.ts, giving the module test coverage for the first time; --color-status-ok/--color-status-warn added as an additive-only run-health palette beside the Phase 5/6 event-type chip tokens
 
 ### Pending Todos
 
@@ -351,8 +354,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T01:52:54.292Z
-Stopped at: Completed 19-02-PLAN.md
+Last session: 2026-09-11T02:01:08.407Z
+Stopped at: Completed 19-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
