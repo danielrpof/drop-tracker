@@ -1,0 +1,1 @@
+function e(e){return e===`musicbrainz`}function t(e){return e===`deezer`?`deezer_id`:`mbid`}var n={musicbrainz:`MusicBrainz`,deezer:`Deezer`};function r(e){return n[e]??e}var i=[`musicbrainz`,`deezer`];export{r as i,t as n,e as r,i as t};
