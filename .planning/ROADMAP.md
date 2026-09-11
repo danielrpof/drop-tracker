@@ -163,12 +163,12 @@ Plans:
   4. The view fetches once on mount and otherwise only when the operator clicks Refresh; leaving the tab open produces no steady `/status` traffic, and the panel shows an explicit "as of" timestamp so the operator can tell how fresh it is.
   5. When the session expires, the view yields to the existing passphrase screen and re-fetches after login, with no stray requests firing behind the login screen.
 
-**Plans**: 5 plans
+**Plans**: 1/5 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 19-01-PLAN.md — Tracer: `/system` route + nav tab + `getStatus()` wired end-to-end through `apiFetch` (wave 1)
+- [x] 19-01-PLAN.md — Tracer: `/system` route + nav tab + `getStatus()` wired end-to-end through `apiFetch` (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -203,7 +203,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 18. Backend — Readiness, Status Surface & App Version | 4/4 | Complete    | 2026-09-09 |
 | 18.1. Poll-Cycle Instrumentation | 3/3 | In Progress|  |
-| 19. Frontend — System View | 0/TBD | Not started | - |
+| 19. Frontend — System View | 1/5 | In Progress|  |
 
 ## Backlog
 

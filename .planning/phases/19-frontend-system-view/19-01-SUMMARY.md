@@ -150,6 +150,10 @@ None - no external service configuration required.
 - The route/nav/fetch/render spine is proven end to end; 19-02 (formatters), 19-03 (theme tokens + table + sources display names), 19-04 (badges/About/per-source panels), and 19-05 (history table + `deriveLoadedShape`) all build directly on `system.tsx`'s render-precedence chain and `api.ts`'s wire types with no further changes needed to this plan's files.
 - No blockers or concerns.
 
+## Self-Check: PASSED
+
+All created/modified files verified present on disk; all three commit hashes (`05be452`, `e35f5c1`, `617cfe9`) verified in `git log --oneline --all`.
+
 ---
 *Phase: 19-frontend-system-view*
 *Completed: 2026-09-10*

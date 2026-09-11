@@ -3,19 +3,19 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
 current_phase: 19
-current_phase_name: frontend-system-view
+current_phase_name: Frontend — System View
 status: executing
-stopped_at: Phase 19 UI-SPEC approved
-last_updated: "2026-09-11T00:24:26.525Z"
+stopped_at: Completed 19-01-PLAN.md
+last_updated: "2026-09-11T01:39:14.213Z"
 last_activity: 2026-09-10
-last_activity_desc: 18.1-03 executed — TestRunCycle_CounterInvariant (the -race substitute, 1000x exact-equality, K erroring + P panicking artists) + full DoD gate green (coverage 90.73%) + WINDOWS entry 13 + 18.1-VALIDATION signed off
-state_head: b76b62781fd58ef8bb4ef578c009d8b19ef1e27a
+last_activity_desc: Phase 19 execution started
+state_head: 617cfe9f96dd7c29a5f783014b571f0a2bcd3dc2
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 7
-  percent: 58
+  completed_plans: 8
+  percent: 67
 ---
 
 # Project State
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-10)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 18.1 — Poll-Cycle Instrumentation
+**Current focus:** Phase 19 — Frontend — System View
 
 ## Current Position
 
-Phase: 19 (frontend-system-view) — READY TO EXECUTE
-Plan: 3 of 3 (all complete)
-Status: 18.1-01/02/03 all complete. The -race substitute (TestRunCycle_CounterInvariant) is committed, the full Definition-of-Done gate ran green (coverage 90.73%, sqlc-check clean, -race substituted per WINDOWS entry 13), and 18.1-VALIDATION.md is signed off. One outstanding human check: a live gated instance showing a real run entry per source via GET /status — carried to /gsd-verify-work 18.1.
-Last activity: 2026-09-10 — 18.1-03 executed (looped counter-invariant -race substitute + phase gate + race waiver + validation map)
+Phase: 19 (Frontend — System View) — EXECUTING
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-09-10 — Phase 19 execution started
 
 ## Performance Metrics
 
@@ -121,6 +121,7 @@ Last activity: 2026-09-10 — 18.1-03 executed (looped counter-invariant -race s
 | Phase 18.1 P01 | 19 min | 2 tasks | 8 files |
 | Phase 18.1 P02 | 22 min | 3 tasks | 1 files |
 | Phase 18.1 P03 | 15 min | 2 tasks | 3 files |
+| Phase 19 P01 | 15min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -270,6 +271,7 @@ Recent decisions affecting current work:
 - [Phase 18.1]: [18.1-03] TestRunCycle_CounterInvariant is the shipped -race substitute for the runCycle counter fold: 1000 iterations per run, -count=3, WithMusicBrainzWorkers(8) over M=20 entries with K=3 erroring + P=2 panicking artists, exact-equality (==) assertions on every RunResult counter every iteration; a Deezer leg pins ArtistsSkipped==S/ArtistsChecked==M-S. No inequality operator anywhere in the test body (an occasional undercount is exactly what == catches and >= would swallow).
 - [Phase 18.1]: [18.1-03] Plan executed test-only: the runCycle fold, runOneArtist recover, artistsSkipped++ and RecordRun/RecordSkip wiring all shipped in 18.1-01, so Task 1 is a pinning-test-after-implementation test(18.1-03) commit (no RED/GREEN split) — same pattern as 18.1-01 Task 2 and all of 18.1-02.
 - [Phase 18.1]: [18.1-03] Phase gate closed: -race substituted with plain go test ./... -count=1 (WINDOWS entry 13), make coverage-gate 90.73% (floor 80%), sqlc-check clean, status-contract.md + web/ byte-identical since phase base d77b3a7. 18.1-VALIDATION.md: wave_0_complete + nyquist_compliant true, per-task map filled, one live-instance /status human check outstanding.
+- [Phase 19]: [Phase 19]: [19-01] End-to-end /system tracer shipped: getStatus() + StatusResponse/StatusInstance/StatusSource/StatusRun wire types (character-for-character against status.go json tags), /system route + System nav tab, and system.tsx's mount-effect render-precedence chain rendering instance.app_version as the one live field. mountedRef seeded now for a later plan's Refresh handler.
 
 ### Pending Todos
 
@@ -346,9 +348,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T23:41:43.062Z
-Stopped at: Phase 19 UI-SPEC approved
-Resume file: .planning/phases/19-frontend-system-view/19-UI-SPEC.md
+Last session: 2026-09-11T01:39:13.465Z
+Stopped at: Completed 19-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

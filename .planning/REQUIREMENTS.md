@@ -33,9 +33,9 @@ Make the scheduler observable without reading container logs, and let a deploy o
 
 ### System UI
 
-- [ ] **SYS-01**: A "System" view, reachable from the SPA's main navigation, shows per source: the last run's time, outcome, duration, and counts, plus the time since the last successful run.
+- [x] **SYS-01**: A "System" view, reachable from the SPA's main navigation, shows per source: the last run's time, outcome, duration, and counts, plus the time since the last successful run.
 - [ ] **SYS-02**: The System view also shows a recent-runs history table, the watchlist size, the poll interval, and an about block (app version, schema version, database reachable).
-- [ ] **SYS-03**: The view fetches on mount with a manual Refresh control and no fast auto-polling, and reuses the existing empty-state and `401` → passphrase-screen handling.
+- [x] **SYS-03**: The view fetches on mount with a manual Refresh control and no fast auto-polling, and reuses the existing empty-state and `401` → passphrase-screen handling.
 
 ## Future Requirements
 
@@ -86,9 +86,9 @@ Phase 18 was split into **18** (readiness, status surface, app version — addit
 | RUN-04 | Phase 18 | Complete |
 | STAT-01 | Phase 18 | Complete |
 | STAT-02 | Phase 18 | Complete |
-| SYS-01 | Phase 19 | Pending |
+| SYS-01 | Phase 19 | Complete |
 | SYS-02 | Phase 19 | Pending |
-| SYS-03 | Phase 19 | Pending |
+| SYS-03 | Phase 19 | Complete |
 
 **Coverage:**
 
