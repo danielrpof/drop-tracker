@@ -3,16 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 20
+current_phase_name: digest-settings-operator-control
 status: in-progress
-stopped_at: Phase 20 context gathered
-last_updated: "2026-09-11T17:43:44.071Z"
+stopped_at: Phase 20 UI-SPEC approved
+last_updated: "2026-09-11T22:31:55.630Z"
 last_activity: 2026-09-11
 last_activity_desc: v1.5 roadmap created (Phases 20-23)
-state_head: 91d7cbdcc37855d77e9d0c7b510a4fd541d8af34
+state_head: 1331fff8a6eb1bb9d81c3460202dce98672d1358
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
+  total_plans: 4
   completed_plans: 0
   percent: 0
 ---
@@ -28,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 ## Current Position
 
-Phase: 20 - Digest Settings & Operator Control (not started)
+Phase: 20 (digest-settings-operator-control) — READY TO EXECUTE
 Plan: —
 Status: Roadmap created — 16/16 v1.5 requirements mapped across Phases 20-23
 Last activity: 2026-09-11 — v1.5 roadmap created (Phases 20-23)
@@ -291,8 +292,14 @@ Recent decisions affecting current work:
 - [v1.5 Roadmap]: DGST-16 folded into Phase 20 instead of becoming a one-requirement visibility phase — the requirement explicitly allows the new digest panel as its home, and that panel is Phase 20's deliverable.
 - [v1.5 Roadmap]: One outbox, never two. `events.notified_at IS NULL` stays the single source of delivery truth — no `digest_pending` flag, no second queue table. DGST-14 (toggle-back flush) is then correct by construction, and the digest window is defined by outbox state rather than a `created_at BETWEEN` predicate (RESEARCH Pitfall 4). The watermark decides *whether a send is due* and labels the window; it never selects the event set.
 - [v1.5 Roadmap]: RESEARCH gap #1 closed as **no** — operator-configurable local fire time and an IANA zone picker are explicitly Out of Scope in REQUIREMENTS.md, so Phase 22 ships a fixed, documented fire time. What survives from that gap: the `time/tzdata` blank import for Alpine (DGST-07) and an explicit zone at every fire-time computation instead of container-local time.
-- [v1.5 Roadmap]: Three decisions deliberately left open for the phase planners: (a) Phase 22's restart catch-up behaviour — fire an immediate catch-up send on a detected gap vs. log and wait for the next natural check (RESEARCH gap #4; outbox windowing loses nothing either way); (b) Phase 23's grouping hierarchy — by event type, by artist, or both (RESEARCH gap #2); (c) Phase 21's fail-closed direction when the settings read errors, which must be a deliberate tested branch, never an implicit `false` zero value.
 - [v1.5 Roadmap]: Phase 20 carries a UI hint — run `/gsd-ui-phase 20` before planning. Phases 21-23 are backend-only; Phase 23's operator-facing surface is the Discord message itself, not the SPA. Migration `000008` is the next free number — v1.4's sketched `poll_runs` table was rejected in favour of the in-process ring buffer (`docs/adr/0001`), so nothing occupies it. `make sqlc-check` has no CI counterpart, so Phase 20's codegen must be regenerated and committed locally.
+- [v1.5 Grilling]: A `/mattpocock-skills:grill-with-docs` session (2026-09-11) challenged the full v1.5 plan post-roadmap and resolved the three decisions the roadmap had deliberately left open, plus two further findings, direct-edited into ROADMAP.md/REQUIREMENTS.md/`20-CONTEXT.md` with explicit user sign-off to bypass `/gsd-discuss-phase`/`/gsd-phase` for this doc sync:
+  (a) **Settings-read failure posture (Phase 21) locked to fail-open real-time** — a `settings.Get` error behaves as "digest off," matching D-10's existing real-time-is-the-safe-default bias, never as a silent no-send.
+  (b) **Phase 22 restart catch-up locked to log-and-wait** — no immediate catch-up send on boot; an immediate send would arrive at an arbitrary restart time, undercutting DGST-11's "predictable window" framing more than the extra wait does. Closes RESEARCH gap #4.
+  (c) **DGST-10 (grouping hierarchy) moved from Phase 23 to Phase 22, pulled forward** — Phase 22 was going to reuse `formatEmbed` verbatim for a flat batch while Phase 23's own research lean (Description-line grouping over field-per-event embeds) would have replaced that same output; building the real grouped shape once in Phase 22 avoids the planned throwaway work. REQUIREMENTS.md traceability and both phases' success criteria/planner notes updated accordingly; Phase 23 is now window-header (DGST-11) + chunking (DGST-12) only, preserving Phase 22's grouping across a multi-message split.
+  (d) **Phase 21 and Phase 22 ship in the same release** — Phase 21 (real-time stand-down) is not merged to `main`/auto-deployed until Phase 22 (the digest sender) is also ready, closing a window where an operator could enable digest mode with a gate live but no scheduler yet built to drain the queue — real notifications going dark with no ETA.
+  (e) **Phase 20's singleton-enforcement mechanism ratified** (moved out of Claude's Discretion into `20-CONTEXT.md` D-05): `CHECK (id = 1)` + migration-time seed `INSERT`, not upsert-on-read — research's own schema sketch, no re-litigation needed.
+  Two further findings were surfaced but deliberately left as noted risks, not new decisions: no `go test -race` on this project (WINDOWS.md) for Phase 21's concurrency proof (existing invariant-test substitute stands); and the actual v1.5 watchlist scale that would make Phase 23's >10-embed chunking a routine vs. theoretical case (RESEARCH gap #3, unchanged — capture real metrics at launch).
 
 ### Pending Todos
 
@@ -371,9 +378,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T17:43:44.034Z
-Stopped at: Phase 20 context gathered
-Resume file: .planning/phases/20-digest-settings-operator-control/20-CONTEXT.md
+Last session: 2026-09-11T21:23:10.102Z
+Stopped at: Phase 20 UI-SPEC approved
+Resume file: C:/CodeProjects/drop-tracker/.planning/phases/20-digest-settings-operator-control/20-UI-SPEC.md
 
 ## Operator Next Steps
 

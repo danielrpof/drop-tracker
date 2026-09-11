@@ -101,9 +101,17 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 20-01-PLAN.md — Tracer: singleton `notification_settings` row, `internal/settings.Store`, gated `GET`/`PUT /settings/notifications` end to end
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 20-02-PLAN.md — HTTP contract hardening: rejection paths, gate 401, CSRF refusal, unconfigured 503, no-leak
 - [ ] 20-03-PLAN.md — Tracer: `DigestSettings` card on `/system` with the instant-apply digest-mode toggle and keep-stale failure posture
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 20-04-PLAN.md — Cadence control, last-sent row, vendored `select`, embedded SPA bundle rebuild
 
 **UI hint**: yes
