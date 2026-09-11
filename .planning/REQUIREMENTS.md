@@ -9,10 +9,10 @@ Requirements for the "Digest Notifications" milestone. Each maps to roadmap phas
 
 ### Digest Configuration
 
-- [ ] **DGST-01**: Operator can toggle digest mode on/off from the SPA, persisted in Postgres, taking effect without a redeploy or restart
-- [ ] **DGST-02**: Operator can choose a digest cadence — daily or weekly — from the SPA
-- [ ] **DGST-03**: Digest on/off + cadence settings survive process restart (Postgres-backed, not in-memory)
-- [ ] **DGST-04**: Default state is digest off — real-time per-event notifications remain unchanged unless the operator opts in
+- [x] **DGST-01**: Operator can toggle digest mode on/off from the SPA, persisted in Postgres, taking effect without a redeploy or restart
+- [x] **DGST-02**: Operator can choose a digest cadence — daily or weekly — from the SPA
+- [x] **DGST-03**: Digest on/off + cadence settings survive process restart (Postgres-backed, not in-memory)
+- [x] **DGST-04**: Default state is digest off — real-time per-event notifications remain unchanged unless the operator opts in
 
 ### Digest Scheduling
 
@@ -57,16 +57,16 @@ Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DGST-01 | Phase 20 | Pending |
-| DGST-02 | Phase 20 | Pending |
-| DGST-03 | Phase 20 | Pending |
-| DGST-04 | Phase 20 | Pending |
+| DGST-01 | Phase 20 | Complete |
+| DGST-02 | Phase 20 | Complete |
+| DGST-03 | Phase 20 | Complete |
+| DGST-04 | Phase 20 | Complete |
 | DGST-05 | Phase 22 | Pending |
 | DGST-06 | Phase 22 | Pending |
 | DGST-07 | Phase 22 | Pending |
 | DGST-08 | Phase 22 | Pending |
 | DGST-09 | Phase 22 | Pending |
-| DGST-10 | Phase 23 | Pending |
+| DGST-10 | Phase 22 | Pending |
 | DGST-11 | Phase 23 | Pending |
 | DGST-12 | Phase 23 | Pending |
 | DGST-13 | Phase 21 | Pending |
@@ -80,10 +80,11 @@ Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4
 |-------|------|--------------|
 | 20 | Digest Settings & Operator Control | DGST-01, DGST-02, DGST-03, DGST-04, DGST-16 |
 | 21 | Real-Time ↔ Digest Mutual Exclusion | DGST-13, DGST-14 |
-| 22 | Scheduled Digest Send | DGST-05, DGST-06, DGST-07, DGST-08, DGST-09, DGST-15 |
-| 23 | Digest Readability & Discord Limits | DGST-10, DGST-11, DGST-12 |
+| 22 | Scheduled Digest Send | DGST-05, DGST-06, DGST-07, DGST-08, DGST-09, DGST-10, DGST-15 |
+| 23 | Digest Readability & Discord Limits | DGST-11, DGST-12 |
 
 **Coverage:**
+
 - v1.5 requirements: 16 total
 - Mapped to phases: 16 ✓
 - Unmapped: 0 ✓
@@ -92,3 +93,4 @@ Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4
 ---
 *Requirements defined: 2026-09-11*
 *Last updated: 2026-09-11 — traceability populated by roadmap (Phases 20-23)*
+*Re-mapped 2026-09-11 — DGST-10 (grouping) moved from Phase 23 to Phase 22 following a grilling-session challenge to the milestone plan: building a flat, ungrouped digest in Phase 22 only to replace it with the grouped format in Phase 23 was planned throwaway work. See ROADMAP.md Phase 22/23 notes.*

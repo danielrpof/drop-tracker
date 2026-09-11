@@ -98,12 +98,12 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The digest settings routes sit behind the existing instance gate: without a session they answer `401` like every other data route, and a `PUT` carrying an unrecognised cadence or malformed body is rejected with a 4xx instead of persisting a value the scheduler would later have to interpret.
   5. There is exactly one settings row and no code path can create a second one — a read on a brand-new database returns defaults rather than "not found", and concurrent writes cannot fork the instance's configuration.
 
-**Plans**: 4 plans
+**Plans**: 1/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 20-01-PLAN.md — Tracer: singleton `notification_settings` row, `internal/settings.Store`, gated `GET`/`PUT /settings/notifications` end to end
+- [x] 20-01-PLAN.md — Tracer: singleton `notification_settings` row, `internal/settings.Store`, gated `GET`/`PUT /settings/notifications` end to end
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -204,7 +204,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 20. Digest Settings & Operator Control | 0/? | Not started | - |
+| 20. Digest Settings & Operator Control | 1/4 | In Progress|  |
 | 21. Real-Time ↔ Digest Mutual Exclusion | 0/? | Not started | - |
 | 22. Scheduled Digest Send | 0/? | Not started | - |
 | 23. Digest Readability & Discord Limits | 0/? | Not started | - |

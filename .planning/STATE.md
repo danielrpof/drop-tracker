@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 20
-current_phase_name: digest-settings-operator-control
-status: in-progress
-stopped_at: Phase 20 UI-SPEC approved
-last_updated: "2026-09-11T22:31:55.630Z"
+current_phase_name: Digest Settings & Operator Control
+status: executing
+stopped_at: Completed 20-01-PLAN.md
+last_updated: "2026-09-11T23:07:55.414Z"
 last_activity: 2026-09-11
-last_activity_desc: v1.5 roadmap created (Phases 20-23)
-state_head: 1331fff8a6eb1bb9d81c3460202dce98672d1358
+last_activity_desc: Phase 20 execution started
+state_head: 97335b0ea9616e20f6b4a761dc6a3a470821d4c7
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-11)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** v1.5 Digest Notifications — roadmap created (Phases 20-23), Phase 20 next
+**Current focus:** Phase 20 — Digest Settings & Operator Control
 
 ## Current Position
 
-Phase: 20 (digest-settings-operator-control) — READY TO EXECUTE
-Plan: —
-Status: Roadmap created — 16/16 v1.5 requirements mapped across Phases 20-23
-Last activity: 2026-09-11 — v1.5 roadmap created (Phases 20-23)
+Phase: 20 (Digest Settings & Operator Control) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-09-11 — Phase 20 execution started
 
 ## Performance Metrics
 
@@ -128,6 +128,7 @@ Last activity: 2026-09-11 — v1.5 roadmap created (Phases 20-23)
 | Phase 19 P03 | 15min | 3 tasks | 4 files |
 | Phase 19 P04 | 20min | 3 tasks | 6 files |
 | Phase 19 P05 | 45min | 3 tasks | 5 files |
+| Phase 20 P01 | 45min | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -300,6 +301,7 @@ Recent decisions affecting current work:
   (d) **Phase 21 and Phase 22 ship in the same release** — Phase 21 (real-time stand-down) is not merged to `main`/auto-deployed until Phase 22 (the digest sender) is also ready, closing a window where an operator could enable digest mode with a gate live but no scheduler yet built to drain the queue — real notifications going dark with no ETA.
   (e) **Phase 20's singleton-enforcement mechanism ratified** (moved out of Claude's Discretion into `20-CONTEXT.md` D-05): `CHECK (id = 1)` + migration-time seed `INSERT`, not upsert-on-read — research's own schema sketch, no re-litigation needed.
   Two further findings were surfaced but deliberately left as noted risks, not new decisions: no `go test -race` on this project (WINDOWS.md) for Phase 21's concurrency proof (existing invariant-test substitute stands); and the actual v1.5 watchlist scale that would make Phase 23's >10-embed chunking a routine vs. theoretical case (RESEARCH gap #3, unchanged — capture real metrics at launch).
+- [Phase 20]: [Phase 20-01]: digest_last_sent_at maps through sqlc as pgtype.Timestamptz (not *time.Time); settings.Service converts it to *time.Time by hand, matching events.Service's NotifiedAt precedent -- emit_pointers_for_null_types only applies to types with no native pgtype null representation.
 
 ### Pending Todos
 
@@ -378,9 +380,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T21:23:10.102Z
-Stopped at: Phase 20 UI-SPEC approved
-Resume file: C:/CodeProjects/drop-tracker/.planning/phases/20-digest-settings-operator-control/20-UI-SPEC.md
+Last session: 2026-09-11T23:07:55.367Z
+Stopped at: Completed 20-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
