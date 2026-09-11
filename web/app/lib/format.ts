@@ -14,9 +14,9 @@
 //   - formatClock         -> the page-chrome "as of HH:MM:SS" freshness
 //     stamp (D-13), taken from the client clock at fetch resolution
 //   - formatDuration      -> per-source panel + history table Duration
-//     column (SYS-01) -- added by Task 2
+//     column (SYS-01)
 //   - formatPollInterval  -> About block "Every {…}" row + first-run copy
-//     (SYS-02, D-06) -- added by Task 2
+//     (SYS-02, D-06)
 
 const EM_DASH = "—"
 
@@ -126,4 +126,40 @@ export function formatIsoTitle(iso: string): string {
 // a payload field.
 export function formatClock(d: Date): string {
   return clockFormatter.format(d)
+}
+
+// formatDuration renders duration_ms (SYS-01). null -> em dash. Three
+// buckets: sub-second as whole milliseconds, sub-minute to one decimal
+// second, and a minute or more as minutes + zero-padded seconds -- a cycle
+// behind a rate-limited external API genuinely runs for minutes, and a bare
+// seconds figure at that scale is unreadable.
+export function formatDuration(ms: number | null): string {
+  if (ms === null) return EM_DASH
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+
+  const totalSeconds = Math.floor(ms / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`
+}
+
+// formatPollInterval turns poll_interval_seconds (SYS-02, D-06) into human
+// text for the About block's "Every {…}" row and the first-run copy. Returns
+// a bare phrase with no leading preposition -- both call sites supply their
+// own surrounding words, so a baked-in prefix would read wrong in one of
+// them.
+export function formatPollInterval(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? "" : "s"}`
+  }
+  if (seconds % 3600 === 0) {
+    const hours = seconds / 3600
+    return `${hours} hour${hours === 1 ? "" : "s"}`
+  }
+  if (seconds % 60 === 0) {
+    const minutes = seconds / 60
+    return `${minutes} minute${minutes === 1 ? "" : "s"}`
+  }
+  return `${seconds} seconds`
 }
