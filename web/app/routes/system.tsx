@@ -4,19 +4,33 @@ import { Link } from "react-router"
 
 import { EmptyState } from "~/components/common/EmptyState"
 import { AboutInstance } from "~/components/system/AboutInstance"
+import { SourcePanel } from "~/components/system/SourcePanel"
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert"
 import { Button } from "~/components/ui/button"
 import { Skeleton } from "~/components/ui/skeleton"
 import { ApiError, getStatus, type StatusResponse } from "~/lib/api"
+import { SOURCE_ORDER } from "~/lib/sources"
 
 // System is the SYS-01/02/03 operator status view. Plan 19-01's tracer
 // proved the full route/nav/fetch/render stack end to end with one real
 // payload field; this plan replaces that bare Version row with the real
-// About block (D-01/D-02/D-03) and the empty-watchlist callout (D-05).
-// Per-source panels (Task 3) and the first-run/loaded shape derivation
-// (plan 19-05) build on the same render-precedence chain established here.
-// Fetch happens on mount and on a Retry bump only (D-10): no background
-// refresh mechanism exists anywhere in this file, by design.
+// About block (D-01/D-02/D-03), the empty-watchlist callout (D-05), and one
+// panel per source in the fixed SOURCE_ORDER. The first-run/loaded shape
+// derivation (plan 19-05) builds on the same render-precedence chain
+// established here. Fetch happens on mount and on a Retry bump only (D-10):
+// no background refresh mechanism exists anywhere in this file, by design.
+
+// orderedSourceKeys puts SOURCE_ORDER's known keys first (MusicBrainz, then
+// Deezer) regardless of the payload's own map key order, then appends any
+// key the payload carries that SOURCE_ORDER doesn't know about -- dropping
+// an unrecognised source silently is worse than an unordered extra panel.
+function orderedSourceKeys(sources: StatusResponse["sources"]): string[] {
+  const known = SOURCE_ORDER.filter((key) => key in sources)
+  const rest = Object.keys(sources).filter(
+    (key) => !(SOURCE_ORDER as readonly string[]).includes(key)
+  )
+  return [...known, ...rest]
+}
 export default function System() {
   const [data, setData] = useState<StatusResponse | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
@@ -104,6 +118,10 @@ export default function System() {
               </AlertDescription>
             </Alert>
           )}
+
+          {orderedSourceKeys(data.sources).map((key) => (
+            <SourcePanel key={key} sourceKey={key} source={data.sources[key]} />
+          ))}
         </>
       )}
     </div>

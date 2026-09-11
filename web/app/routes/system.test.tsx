@@ -1,7 +1,12 @@
 import { screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
-import { ApiError, getStatus, type StatusResponse } from "~/lib/api"
+import {
+  ApiError,
+  getStatus,
+  type StatusResponse,
+  type StatusRun,
+} from "~/lib/api"
 import { renderRoute } from "~/lib/test/routeStub"
 
 import System from "./system"
@@ -39,6 +44,22 @@ function makeStatus(overrides: Partial<StatusResponse> = {}): StatusResponse {
         consecutive_skips: 0,
       },
     },
+    ...overrides,
+  }
+}
+
+function makeRun(overrides: Partial<StatusRun> = {}): StatusRun {
+  return {
+    cycle_id: "musicbrainz-1",
+    started_at: "2026-01-01T00:00:00Z",
+    finished_at: "2026-01-01T00:05:00Z",
+    duration_ms: 5000,
+    artists_checked: 10,
+    artists_skipped: 0,
+    artists_errored: 0,
+    events_recorded: 2,
+    outcome: "ok",
+    summary: "ok — 10 checked, 0 errored, 2 events",
     ...overrides,
   }
 }
@@ -157,5 +178,226 @@ describe("System route", () => {
     await screen.findByText("a1b2c3d4e5f6")
 
     expect(screen.queryByText("Nothing to poll")).not.toBeInTheDocument()
+  })
+
+  it("renders the last-run badge, verbatim summary, duration, and the clean-run line for a healthy run", async () => {
+    const healthyRun = makeRun()
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: healthyRun,
+            history: [healthyRun],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText("Success")
+    expect(screen.getByText("5.0s")).toBeInTheDocument()
+    expect(
+      screen.getByText("ok — 10 checked, 0 errored, 2 events")
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Last clean run/)).toBeInTheDocument()
+  })
+
+  it("renders 'No clean run in recent history' when every ok run in history errored some artists", async () => {
+    const erroredOkRun = makeRun({ outcome: "ok", artists_errored: 2 })
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: erroredOkRun,
+            history: [erroredOkRun],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText("No clean run in recent history")
+  })
+
+  it("renders both the runless line and the skip line for a runless-but-skipping source", async () => {
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: null,
+            history: [],
+            last_skipped_at: "2026-01-01T00:10:00Z",
+            consecutive_skips: 3,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText("No poll cycles recorded for MusicBrainz yet.")
+    expect(screen.getByText(/Skipped 3 consecutive cycles/)).toBeInTheDocument()
+  })
+
+  it("renders the Interrupted badge and the escalation line when the latest run is cancelled", async () => {
+    const cancelledRun = makeRun({ outcome: "cancelled" })
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: cancelledRun,
+            history: [cancelledRun],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText("Interrupted")
+    expect(
+      screen.getByText(
+        "Recent cycles are being interrupted — check for a restart or crash loop."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("does not render the escalation line when the latest run is ok", async () => {
+    const okRun = makeRun({ outcome: "ok" })
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: okRun,
+            history: [okRun],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText("Success")
+    expect(
+      screen.queryByText(
+        "Recent cycles are being interrupted — check for a restart or crash loop."
+      )
+    ).not.toBeInTheDocument()
+  })
+
+  it("renders the MusicBrainz panel before the Deezer panel even when the fixture lists them in reverse", async () => {
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          musicbrainz: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    const musicbrainzHeading = await screen.findByRole("heading", {
+      name: "MusicBrainz",
+    })
+    const deezerHeading = await screen.findByRole("heading", {
+      name: "Deezer",
+    })
+
+    expect(
+      musicbrainzHeading.compareDocumentPosition(deezerHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it("still renders a source key absent from SOURCE_ORDER, appended after the known panels", async () => {
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          spotify: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    const deezerHeading = await screen.findByRole("heading", {
+      name: "Deezer",
+    })
+    const spotifyHeading = await screen.findByRole("heading", {
+      name: "spotify",
+    })
+
+    expect(
+      deezerHeading.compareDocumentPosition(spotifyHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 })
