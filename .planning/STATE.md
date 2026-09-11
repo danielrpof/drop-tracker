@@ -1,10 +1,14 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.5
-milestone_name: Digest Notifications
+milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
+current_phase: 20
 status: in-progress
-last_updated: "2026-09-11T18:05:00.000Z"
+stopped_at: Phase 20 context gathered
+last_updated: "2026-09-11T17:43:44.071Z"
 last_activity: 2026-09-11
+last_activity_desc: v1.5 roadmap created (Phases 20-23)
+state_head: 91d7cbdcc37855d77e9d0c7b510a4fd541d8af34
 progress:
   total_phases: 4
   completed_phases: 0
@@ -367,9 +371,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T06:28:15.758Z
-Stopped at: v1.5 roadmap created (Phases 20-23, 16/16 requirements mapped) — no phase discussed or planned yet
-Resume file: None
+Last session: 2026-09-11T17:43:44.034Z
+Stopped at: Phase 20 context gathered
+Resume file: .planning/phases/20-digest-settings-operator-control/20-CONTEXT.md
 
 ## Operator Next Steps
 
