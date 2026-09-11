@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import {
@@ -203,8 +203,12 @@ describe("System route", () => {
 
     renderRoute(System, "/system")
 
-    await screen.findByText("Success")
-    expect(screen.getByText("5.0s")).toBeInTheDocument()
+    // "Success" appears twice once the history table lands (19-05): the
+    // panel's last-run badge and this same run's table row.
+    await waitFor(() => expect(screen.getAllByText("Success")).toHaveLength(2))
+    // "5.0s" also appears twice: the panel's duration span and the table's
+    // Duration column for this same run.
+    expect(screen.getAllByText("5.0s")).toHaveLength(2)
     expect(
       screen.getByText("ok — 10 checked, 0 errored, 2 events")
     ).toBeInTheDocument()
@@ -286,7 +290,11 @@ describe("System route", () => {
 
     renderRoute(System, "/system")
 
-    await screen.findByText("Interrupted")
+    // "Interrupted" appears twice once the history table lands (19-05): the
+    // panel's last-run badge and this same run's table row.
+    await waitFor(() =>
+      expect(screen.getAllByText("Interrupted")).toHaveLength(2)
+    )
     expect(
       screen.getByText(
         "Recent cycles are being interrupted — check for a restart or crash loop."
@@ -317,7 +325,9 @@ describe("System route", () => {
 
     renderRoute(System, "/system")
 
-    await screen.findByText("Success")
+    // "Success" appears twice once the history table lands (19-05): the
+    // panel's last-run badge and this same run's table row.
+    await waitFor(() => expect(screen.getAllByText("Success")).toHaveLength(2))
     expect(
       screen.queryByText(
         "Recent cycles are being interrupted — check for a restart or crash loop."
@@ -399,5 +409,89 @@ describe("System route", () => {
       deezerHeading.compareDocumentPosition(spotifyHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+
+  it("renders the cap caption when a source's history has fifty entries", async () => {
+    const history = Array.from({ length: 50 }, (_, i) =>
+      makeRun({ cycle_id: `musicbrainz-${i}` })
+    )
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: history[0],
+            history,
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText(
+      "Showing the 50 most recent cycles for this source. Older history isn't retained — it lives only in the logs."
+    )
+  })
+
+  it("renders the singular count caption for a single-entry history", async () => {
+    const run = makeRun()
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: run,
+            history: [run],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText(
+      "1 cycle recorded for this source since the last restart."
+    )
+  })
+
+  it("renders no table element when a source has zero history entries", async () => {
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: null,
+            history: [],
+            last_skipped_at: "2026-01-01T00:10:00Z",
+            consecutive_skips: 3,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByText("No poll cycles recorded for MusicBrainz yet.")
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
   })
 })

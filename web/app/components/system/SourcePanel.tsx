@@ -1,6 +1,7 @@
 import { TriangleAlert } from "lucide-react"
 
 import { OutcomeBadge } from "~/components/system/OutcomeBadge"
+import { SourceHistoryTable } from "~/components/system/SourceHistoryTable"
 import { Card, CardContent, CardHeader } from "~/components/ui/card"
 import { Separator } from "~/components/ui/separator"
 import {
@@ -27,9 +28,9 @@ function findCleanRun(history: StatusRun[]): StatusRun | undefined {
 }
 
 // SourcePanel renders one source's SYS-01 panel: last-run summary, the D-08
-// clean-run line, and the conditional skip/escalation lines. The history
-// table plan 19-05 adds sits below the trailing Separator this panel ends
-// with.
+// clean-run line, and the conditional skip/escalation lines, followed by
+// its own SYS-02 recent-runs table below a Separator -- summary first, then
+// table, per source.
 export function SourcePanel({ sourceKey, source }: SourcePanelProps) {
   const name = sourceDisplayName(sourceKey)
   const { last_run, history, last_skipped_at, consecutive_skips } = source
@@ -114,6 +115,10 @@ export function SourcePanel({ sourceKey, source }: SourcePanelProps) {
       </CardContent>
 
       <Separator />
+
+      <CardContent className="pt-0">
+        <SourceHistoryTable history={history} />
+      </CardContent>
     </Card>
   )
 }
