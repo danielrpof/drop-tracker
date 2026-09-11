@@ -31,6 +31,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/notifier"
 	"github.com/danielrpof/drop-tracker/internal/poller"
 	"github.com/danielrpof/drop-tracker/internal/pollruns"
+	"github.com/danielrpof/drop-tracker/internal/settings"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
@@ -247,6 +248,12 @@ func run(ctx context.Context) error {
 	// Phase 18.1; the store is wired but inert this phase.
 	runs := pollruns.NewStore()
 
+	// settingsStore backs GET/PUT /settings/notifications (DGST-01, DGST-03)
+	// -- its own sqlc.New(pool) instance, matching this file's existing
+	// idiom of one stateless sqlc.Queries wrapper per consumer (store,
+	// detector, eventsStore above).
+	settingsStore := settings.NewService(sqlc.New(pool))
+
 	// WithAuthGate engages the instance passphrase gate (GATE-01..06) when
 	// INSTANCE_PASSPHRASE is set; with it empty the option is inert and every
 	// route behaves exactly as v1.2 (GATE-07). Without this argument the gate
@@ -276,6 +283,7 @@ func run(ctx context.Context) error {
 			AppVersion:   buildinfo.Short(),
 			PollInterval: cfg.PollInterval,
 		}),
+		httpserver.WithSettings(settingsStore),
 	)
 	// Close stops the gate's per-IP limiter-map sweeper goroutine (plan 14-02);
 	// a no-op when the gate is disabled. Deferred here so it runs on every

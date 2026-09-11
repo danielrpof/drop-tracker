@@ -50,6 +50,7 @@ type Querier interface {
 	// row-level lock on this single statement is what makes the split
 	// deterministic under concurrency (T-02-15).
 	DeleteWatchlistEntry(ctx context.Context, id int64) (int64, error)
+	GetNotificationSettings(ctx context.Context) (NotificationSetting, error)
 	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
 	// existing event rows for this artist+source means seed mode.
 	HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool, error)
@@ -185,6 +186,10 @@ type Querier interface {
 	// fields to write), but the attempt itself still needs to be recorded so
 	// the read query's cooldown predicate above has something to check.
 	RecordArtMatchAttempt(ctx context.Context, mbid string) error
+	// A plain positional UPDATE, not watchlist's CASE-based merge: the route is
+	// a full-object PUT (no partial-update ambiguity to resolve), and the fixed
+	// id = 1 predicate is what makes replaying the same body a no-op.
+	UpdateNotificationSettings(ctx context.Context, arg UpdateNotificationSettingsParams) (NotificationSetting, error)
 	// The partial-update merge happens inside this statement, not in Go: each
 	// axis is resolved by a CASE whose ELSE names the column itself, so the
 	// value carried forward for an untouched axis is read from the row version

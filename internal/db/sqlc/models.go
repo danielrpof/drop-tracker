@@ -39,6 +39,14 @@ type Event struct {
 	WatchedArtistName  *string            `json:"watched_artist_name"`
 }
 
+type NotificationSetting struct {
+	ID               int32              `json:"id"`
+	DigestEnabled    bool               `json:"digest_enabled"`
+	DigestCadence    string             `json:"digest_cadence"`
+	DigestLastSentAt pgtype.Timestamptz `json:"digest_last_sent_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Watchlist struct {
 	ID              int64              `json:"id"`
 	ArtistID        int64              `json:"artist_id"`
