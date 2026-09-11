@@ -1,4 +1,5 @@
 import { screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import {
@@ -345,11 +346,13 @@ describe("System route", () => {
             last_skipped_at: null,
             consecutive_skips: 0,
           },
+          // A non-zero skip count keeps this fixture out of the first-run
+          // shape (D-04) so the panels this test asserts on actually render.
           musicbrainz: {
             last_run: null,
             history: [],
-            last_skipped_at: null,
-            consecutive_skips: 0,
+            last_skipped_at: "2026-01-01T00:10:00Z",
+            consecutive_skips: 1,
           },
         },
       })
@@ -374,11 +377,13 @@ describe("System route", () => {
     mockGetStatus.mockResolvedValueOnce(
       makeStatus({
         sources: {
+          // A non-zero skip count keeps this fixture out of the first-run
+          // shape (D-04) so the panels this test asserts on actually render.
           musicbrainz: {
             last_run: null,
             history: [],
-            last_skipped_at: null,
-            consecutive_skips: 0,
+            last_skipped_at: "2026-01-01T00:10:00Z",
+            consecutive_skips: 1,
           },
           deezer: {
             last_run: null,
@@ -493,5 +498,169 @@ describe("System route", () => {
 
     await screen.findByText("No poll cycles recorded for MusicBrainz yet.")
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
+  })
+
+  it("renders the first-run state naming the humanized poll interval when no source has ever run", async () => {
+    mockGetStatus.mockResolvedValueOnce(makeStatus())
+
+    renderRoute(System, "/system")
+
+    await screen.findByRole("heading", { name: "No poll cycles yet" })
+    expect(
+      screen.getByText(/The scheduler runs every 15 minutes/)
+    ).toBeInTheDocument()
+  })
+
+  it("moves from loaded to first-run when a Refresh returns an all-runless payload", async () => {
+    const healthyRun = makeRun()
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: healthyRun,
+            history: [healthyRun],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByRole("heading", { name: "MusicBrainz" })
+
+    mockGetStatus.mockResolvedValueOnce(makeStatus())
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }))
+
+    await screen.findByRole("heading", { name: "No poll cycles yet" })
+    expect(
+      screen.queryByRole("heading", { name: "MusicBrainz" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("hides the Refresh control in the error state", async () => {
+    mockGetStatus.mockRejectedValueOnce(new Error("network down"))
+
+    renderRoute(System, "/system")
+
+    await screen.findByRole("heading", {
+      name: "Couldn't load system status.",
+    })
+    expect(
+      screen.queryByRole("button", { name: "Refresh" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("issues exactly two total fetch calls across mount plus a double-clicked Refresh", async () => {
+    mockGetStatus.mockResolvedValueOnce(makeStatus())
+
+    renderRoute(System, "/system")
+
+    await screen.findByRole("button", { name: "Refresh" })
+    expect(mockGetStatus).toHaveBeenCalledTimes(1)
+
+    // The refresh call is held open (never resolved) so the second half of
+    // the double-click genuinely lands while the first is still in flight --
+    // a mock that resolves instantly would let the first click's request
+    // complete before the second click fires, testing nothing about
+    // re-entrancy.
+    mockGetStatus.mockImplementation(() => new Promise(() => {}))
+
+    await userEvent.dblClick(screen.getByRole("button", { name: "Refresh" }))
+
+    expect(mockGetStatus).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps previously rendered values on screen and shows the failed-refresh line when a Refresh fails", async () => {
+    const healthyRun = makeRun()
+    mockGetStatus.mockResolvedValueOnce(
+      makeStatus({
+        sources: {
+          musicbrainz: {
+            last_run: healthyRun,
+            history: [healthyRun],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+          deezer: {
+            last_run: null,
+            history: [],
+            last_skipped_at: null,
+            consecutive_skips: 0,
+          },
+        },
+      })
+    )
+
+    renderRoute(System, "/system")
+
+    await screen.findByRole("heading", { name: "MusicBrainz" })
+
+    mockGetStatus.mockRejectedValueOnce(new Error("network down"))
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }))
+
+    await screen.findByText(/Couldn't refresh — still showing data as of/)
+    expect(
+      screen.getByRole("heading", { name: "MusicBrainz" })
+    ).toBeInTheDocument()
+    expect(screen.getAllByText("Success").length).toBeGreaterThan(0)
+  })
+
+  it("renders neither the error state nor the inline failure line when a Refresh rejects with a session expiry", async () => {
+    mockGetStatus.mockResolvedValueOnce(makeStatus())
+
+    renderRoute(System, "/system")
+
+    await screen.findByRole("heading", { name: "No poll cycles yet" })
+
+    mockGetStatus.mockRejectedValueOnce(new ApiError(401, "unauthenticated"))
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }))
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(
+      screen.queryByRole("heading", { name: "Couldn't load system status." })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/Couldn't refresh/)).not.toBeInTheDocument()
+  })
+
+  it("sets no state and emits no unmounted-component warning when a Refresh resolves after unmount", async () => {
+    mockGetStatus.mockResolvedValueOnce(makeStatus())
+
+    const { unmount } = renderRoute(System, "/system")
+
+    await screen.findByRole("button", { name: "Refresh" })
+
+    let resolveRefresh: (value: StatusResponse) => void = () => {}
+    mockGetStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve
+        })
+    )
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    unmount()
+    resolveRefresh(makeStatus())
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const unmountedWarning = consoleError.mock.calls.some(
+      ([msg]) => typeof msg === "string" && msg.includes("unmounted component")
+    )
+    expect(unmountedWarning).toBe(false)
+
+    consoleError.mockRestore()
   })
 })
