@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest"
 import {
   formatAbsoluteTime,
   formatClock,
+  formatDuration,
   formatIsoTitle,
+  formatPollInterval,
   formatRelativeTime,
 } from "~/lib/format"
 
@@ -81,5 +83,36 @@ describe("formatIsoTitle", () => {
 describe("formatClock", () => {
   it("renders 24-hour HH:MM:SS for an injected Date", () => {
     expect(formatClock(new Date("2026-01-15T23:05:09Z"))).toBe("23:05:09")
+  })
+})
+
+describe("formatDuration", () => {
+  it("returns the em dash for null", () => {
+    expect(formatDuration(null)).toBe(EM_DASH)
+  })
+
+  it.each([
+    [840, "840ms"], // well under the 1000ms bucket edge
+    [999, "999ms"], // just under the 1000ms bucket edge
+    [1000, "1.0s"], // at the 1000ms bucket edge -- seconds bucket begins
+    [3120, "3.1s"], // mid seconds bucket
+    [59999, "60.0s"], // just under the 60000ms bucket edge -- still seconds
+    [60000, "1m 00s"], // at the 60000ms bucket edge -- minutes bucket begins
+    [63000, "1m 03s"], // mid minutes bucket, zero-padded seconds
+  ])("renders %ims as %s", (ms, expected) => {
+    expect(formatDuration(ms)).toBe(expected)
+  })
+})
+
+describe("formatPollInterval", () => {
+  it.each([
+    [900, "15 minutes"], // the fresh-instance default
+    [90, "90 seconds"], // not a whole minute multiple
+    [1, "1 second"], // singular
+    [60, "1 minute"], // singular minute
+    [3600, "1 hour"], // whole-hour collapse, singular
+    [7200, "2 hours"], // whole-hour collapse, plural
+  ])("renders %i seconds as %s", (seconds, expected) => {
+    expect(formatPollInterval(seconds)).toBe(expected)
   })
 })
