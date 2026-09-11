@@ -128,6 +128,48 @@
 
 ---
 
+## Milestone: v1.4 — Operator Observability
+
+**Shipped:** 2026-09-11
+**Phases:** 3 (18, 18.1, 19) | **Plans:** 12
+
+### What Was Built
+
+`GET /ready` distinct from `/health` liveness; an in-process, mutex-guarded poll-run ring buffer (`internal/pollruns.Store`, ADR-0001) replacing a speculative `poll_runs` table; `runCycle` instrumentation wiring the ring buffer live via a channel-fold aggregation; a gated `GET /status` JSON contract plus SHA-based app version; and a "System" tab in the SPA rendering it all as a five-state render machine with a keep-stale manual Refresh.
+
+### What Worked
+
+- **A design grilling before planning caught three concurrency hazards in the originally-proposed `poll_runs` table** — a prune-on-insert race, a cross-source deadlock, and a skip-row-eviction hazard — and replaced it with an in-process ring buffer (ADR-0001) before any code existed, eliminating a migration and a local-only `sqlc-check` drift gate along with the hazards.
+- **Splitting Phase 18 into 18 (additive) and 18.1 (the `runCycle` edit)** isolated the milestone's single riskiest change — counter aggregation across worker goroutines — into its own phase, reviewable independently of the low-risk endpoint/store work.
+- **Contract-freeze discipline held across the phase split**: Phase 18 froze `/status`'s JSON shape in `docs/api/status-contract.md` before Phase 19 started, so the frontend typed against a real response body rather than a guess.
+- **Channel-fold aggregation plus a 1000-iteration exact-equality invariant test stood in for `go test -race`** (still unusable on this dev box, still absent from CI) — correctness by construction, verified at scale, not by detector.
+- **Phase 19 extended the shipped `history.tsx` conventions** (fetch-on-mount, three-way empty/error/first-run copy, Retry) rather than inventing a new pattern for the System view.
+
+### What Was Inefficient
+
+- **Phase 18.1 was fully executed but never formally transitioned to complete in STATE.md** — caught and retroactively corrected at this same milestone's close (2026-09-11), one level down from v1.3's "file debug sessions as resolved when they close" lesson: this time it was a phase-completion flag, not a debug session.
+- **No milestone audit (`/gsd-audit-milestone`) existed for v1.4** — only v1.0 has one on file. The close proceeded on ROADMAP.md/REQUIREMENTS.md self-report (100% phases, 12/12 requirements) rather than a structured cross-phase audit; accepted as sufficient given full requirement coverage, but the audit habit established at v1.0 didn't carry forward.
+
+### Patterns Established
+
+- **An ADR for a storage-shape decision that rejects a database table in favor of an in-process structure** (`docs/adr/0001`) — first ADR in the repo; the pattern is to write one whenever a design grilling overturns a REQUIREMENTS-level storage assumption.
+- **Splitting a phase into a low-risk/high-risk pair after a design grilling**, so the riskiest concurrency or correctness change in a milestone gets its own single-purpose phase rather than riding along with additive work.
+- **Channel-fold counter aggregation** (buffered-to-dispatched-count channel, one send per worker including the panic-recovery path, single-threaded fold after `wg.Wait()`) as the house pattern for concurrent counter correctness when `-race` is unavailable, backed by a high-iteration invariant test.
+
+### Key Lessons
+
+1. When `go test -race` is unavailable (dev box or CI), design concurrent aggregation so correctness is structural (channel fold, no shared mutable state) and prove it with a high-iteration exact-equality invariant test — don't substitute more code review for the missing detector.
+2. Run a design grilling before planning a phase whose design rests on a speculative schema change — it can eliminate a migration, a class of races, and a drift gate before a line of code is written (mirrors v1.3's "verify research assumptions against the pinned dependency" lesson, one step earlier in the process).
+3. Mark a phase's completion transition the moment execution finishes, not at the next convenient checkpoint — an executed-but-untransitioned phase becomes cleanup work at milestone close, the same failure shape as v1.3's orphaned debug sessions.
+
+### Cost Observations
+
+- Model mix: not tracked this milestone
+- Sessions: not tracked
+- Notable: no cost/efficiency telemetry captured for v1.4, consistent with v1.0–v1.3
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -138,6 +180,7 @@
 | v1.1 | not tracked | 5 (08-11.1) | First milestone closed via the full `/gsd-complete-milestone` workflow; added a dedicated tech-debt-closure phase pattern |
 | v1.2 | not tracked | 2 (12-13) | Ad-hoc post-v1.1 cleanup phases (no REQUIREMENTS.md, version assigned only at close) closed via `/gsd-complete-milestone`; required manual archive/MILESTONES.md correction since the phases weren't pre-grouped under a milestone heading |
 | v1.3 | not tracked | 4 planned (14-17), 3 shipped | First **partial** milestone close — Phase 17 deferred for lack of a VPS; debug-session and todo backlog acknowledged and carried forward at close |
+| v1.4 | not tracked | 3 (18, 18.1, 19) | First milestone with a design-grilling checkpoint before planning, splitting a phase into low-risk/high-risk halves and writing the repo's first ADR; full requirement coverage (12/12) but closed without a `/gsd-audit-milestone` run |
 
 ### Cumulative Quality
 
@@ -147,6 +190,7 @@
 | v1.1 | backend 83.5%+, frontend 70%+ (both CI-enforced) | 80% backend / 70% frontend gate | buffered-channel semaphore (no worker-pool lib), hand-rolled accessible combobox (no UI lib) |
 | v1.2 | backend/frontend suites extended, gates held at 80%/70% throughout | 80% backend / 70% frontend gate (unchanged) | `internal/artistart` fail-closed matcher + `ActivityGate` primitive (stdlib-only, no new deps) |
 | v1.3 | suites extended for authgate + the two CI tools; gates held at 80%/70% (backend cutover margin measured 10pp above floor) | 80% backend / 70% frontend gate (unchanged) | `internal/authgate` signed-cookie gate, `cmd/coverage-report`, `cmd/migration-check`, `internal/sqlscan` — all stdlib-only, no new deps |
+| v1.4 | suites extended for `/ready`, `/status`, `pollruns`, and the System view; gates held at 80%/70%; a 1000-iteration invariant test substitutes for `-race` on `runCycle` | 80% backend / 70% frontend gate (unchanged) | `internal/pollruns` ring buffer + `internal/buildinfo` — stdlib-only, no new deps; repo's first ADR (`docs/adr/0001`) |
 
 ### Top Lessons (Verified Across Milestones)
 
@@ -155,3 +199,4 @@
 3. Fixing code-review/UAT-surfaced warnings inline, in the same phase they're found, beats deferring them — held true across v1.1, v1.2, and v1.3.
 4. Don't roadmap a phase gated on infrastructure you don't control — it holds the whole milestone hostage. Make it its own milestone gated on the prerequisite existing (v1.3 / Phase 17).
 5. File debug sessions as resolved when the fix ships in a plan, not only when a debug cycle closes them, or they resurface as milestone-close noise (v1.3).
+6. A phase-completion transition needs the same discipline as a debug-session resolution — flip it the moment execution finishes, or it becomes retroactive cleanup at the next milestone close (v1.4, same failure shape as lesson 5 one level up).
