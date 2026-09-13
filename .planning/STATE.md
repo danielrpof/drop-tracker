@@ -5,16 +5,16 @@ milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 20
 current_phase_name: Digest Settings & Operator Control
 status: executing
-stopped_at: Completed 20-02-PLAN.md
-last_updated: "2026-09-13T21:36:32.930Z"
+stopped_at: Completed 20-03-PLAN.md
+last_updated: "2026-09-13T22:17:08.525Z"
 last_activity: 2026-09-11
 last_activity_desc: Phase 20 execution started
-state_head: 42001e6d4e65b3943ddf7102cd78973e12951af7
+state_head: 9e88a6d91816f81bb4dc5ae4acf6ef8c6a4f4d5e
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 20 (Digest Settings & Operator Control) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-09-11 — Phase 20 execution started
 
@@ -130,6 +130,7 @@ Last activity: 2026-09-11 — Phase 20 execution started
 | Phase 19 P05 | 45min | 3 tasks | 5 files |
 | Phase 20 P01 | 45min | 2 tasks | 14 files |
 | Phase 20 P02 | 40min | 2 tasks | 1 files |
+| Phase 20 P03 | 40min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -304,6 +305,8 @@ Recent decisions affecting current work:
   Two further findings were surfaced but deliberately left as noted risks, not new decisions: no `go test -race` on this project (WINDOWS.md) for Phase 21's concurrency proof (existing invariant-test substitute stands); and the actual v1.5 watchlist scale that would make Phase 23's >10-embed chunking a routine vs. theoretical case (RESEARCH gap #3, unchanged — capture real metrics at launch).
 - [Phase 20]: [Phase 20-01]: digest_last_sent_at maps through sqlc as pgtype.Timestamptz (not *time.Time); settings.Service converts it to *time.Time by hand, matching events.Service's NotifiedAt precedent -- emit_pointers_for_null_types only applies to types with no native pgtype null representation.
 - [Phase 20]: [Phase 20-02]: No production code changed -- all 13 new rejection/gate/CSRF/503/no-leak test cases passed against plan 20-01's unmodified handler on first run, confirming both high-severity threats (T-20-07 spoofing, T-20-08 CSRF) as live behavioral tests rather than structural claims
+- [Phase 20]: [Phase 20]: [20-03] The base-ui Switch renders aria-disabled (not native disabled) on its role=switch element; tests assert getAttribute("aria-disabled") directly since jest-dom's toBeDisabled() doesn't recognize it
+- [Phase 20]: [Phase 20]: [20-03] DigestSettings save-success unit test uses a ControlledDigestSettings wrapper feeding onSaved's payload back as the next settings prop, mirroring system.tsx's setDigest, since the component never reads back its own write
 
 ### Pending Todos
 
@@ -382,8 +385,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-13T21:36:32.849Z
-Stopped at: Completed 20-02-PLAN.md
+Last session: 2026-09-13T22:17:08.425Z
+Stopped at: Completed 20-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

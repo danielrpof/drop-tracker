@@ -36,7 +36,7 @@ Requirements for the "Digest Notifications" milestone. Each maps to roadmap phas
 
 ### Operator Visibility
 
-- [ ] **DGST-16**: The existing SPA "System" view (or the new digest settings panel) shows the last digest send time and current digest mode/cadence
+- [x] **DGST-16**: The existing SPA "System" view (or the new digest settings panel) shows the last digest send time and current digest mode/cadence
 
 ## Out of Scope
 
@@ -72,7 +72,7 @@ Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4
 | DGST-13 | Phase 21 | Pending |
 | DGST-14 | Phase 21 | Pending |
 | DGST-15 | Phase 22 | Pending |
-| DGST-16 | Phase 20 | Pending |
+| DGST-16 | Phase 20 | Complete |
 
 **Per-phase coverage:**
 
