@@ -98,7 +98,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The digest settings routes sit behind the existing instance gate: without a session they answer `401` like every other data route, and a `PUT` carrying an unrecognised cadence or malformed body is rejected with a 4xx instead of persisting a value the scheduler would later have to interpret.
   5. There is exactly one settings row and no code path can create a second one — a read on a brand-new database returns defaults rather than "not found", and concurrent writes cannot fork the instance's configuration.
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -112,7 +112,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 20-04-PLAN.md — Cadence control, last-sent row, vendored `select`, embedded SPA bundle rebuild
+- [x] 20-04-PLAN.md — Cadence control, last-sent row, vendored `select`, embedded SPA bundle rebuild
 
 **UI hint**: yes
 
@@ -204,7 +204,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 20. Digest Settings & Operator Control | 3/4 | In Progress|  |
+| 20. Digest Settings & Operator Control | 4/4 | In Progress|  |
 | 21. Real-Time ↔ Digest Mutual Exclusion | 0/? | Not started | - |
 | 22. Scheduled Digest Send | 0/? | Not started | - |
 | 23. Digest Readability & Discord Limits | 0/? | Not started | - |

@@ -4,17 +4,17 @@ milestone: v1.5
 milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 20
 current_phase_name: Digest Settings & Operator Control
-status: executing
-stopped_at: Completed 20-03-PLAN.md
-last_updated: "2026-09-13T22:17:08.525Z"
+status: verifying
+stopped_at: Completed 20-04-PLAN.md
+last_updated: "2026-09-13T22:35:04.158Z"
 last_activity: 2026-09-11
 last_activity_desc: Phase 20 execution started
-state_head: 9e88a6d91816f81bb4dc5ae4acf6ef8c6a4f4d5e
+state_head: 0beceb6a5266095b971df98dcb362437ead2d40b
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 Phase: 20 (Digest Settings & Operator Control) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-11 — Phase 20 execution started
 
 ## Performance Metrics
@@ -131,6 +131,7 @@ Last activity: 2026-09-11 — Phase 20 execution started
 | Phase 20 P01 | 45min | 2 tasks | 14 files |
 | Phase 20 P02 | 40min | 2 tasks | 1 files |
 | Phase 20 P03 | 40min | 2 tasks | 6 files |
+| Phase 20 P04 | 35min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -307,6 +308,9 @@ Recent decisions affecting current work:
 - [Phase 20]: [Phase 20-02]: No production code changed -- all 13 new rejection/gate/CSRF/503/no-leak test cases passed against plan 20-01's unmodified handler on first run, confirming both high-severity threats (T-20-07 spoofing, T-20-08 CSRF) as live behavioral tests rather than structural claims
 - [Phase 20]: [Phase 20]: [20-03] The base-ui Switch renders aria-disabled (not native disabled) on its role=switch element; tests assert getAttribute("aria-disabled") directly since jest-dom's toBeDisabled() doesn't recognize it
 - [Phase 20]: [Phase 20]: [20-03] DigestSettings save-success unit test uses a ControlledDigestSettings wrapper feeding onSaved's payload back as the next settings prop, mirroring system.tsx's setDigest, since the component never reads back its own write
+- [Phase 20]: [Phase 20-04] shadcn add select mis-resolved cn as a package again (19-03 precedent) -- reverted package.json/pnpm-lock.yaml and hand-fixed the one import instead of discarding the CLI's otherwise-correct output
+- [Phase 20]: [Phase 20-04] Generalized the digest-mode save handler into a shared save({digestEnabled, digestCadence}) helper both the switch and the new cadence Select call, so the full-object PUT always carries both fields (T-20-19)
+- [Phase 20]: [Phase 20-04] go test -race still unusable on this Windows dev box (cgo/ThreadSanitizer, same limitation as Phase 11.1/15) -- substituted plain go test for make test's verification; coverage-gate confirmed 90.72%
 
 ### Pending Todos
 
@@ -385,8 +389,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-13T22:17:08.425Z
-Stopped at: Completed 20-03-PLAN.md
+Last session: 2026-09-13T22:35:04.103Z
+Stopped at: Completed 20-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
