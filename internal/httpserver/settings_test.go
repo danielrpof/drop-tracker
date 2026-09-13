@@ -9,10 +9,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
@@ -306,4 +308,290 @@ func TestSettings_PutRejectsOversizeBody(t *testing.T) {
 	}
 
 	assertSettingsDefaults(t, ts)
+}
+
+// --- Task 2: pin the gate, the CSRF requirement, the unconfigured 503, and the no-leak guarantee ---
+
+// settingsTestPassphrase is the same literal server_test.go's newGatedServer
+// and status_test.go's TestStatus_Gated401 already use for a gated server.
+const settingsTestPassphrase = "a-real-passphrase"
+
+// fakeSettingsStore is a file-local double for httpserver.SettingsStore,
+// mirroring fakeStatusStore/fakeWatchlistCounter's func-field shape. calls,
+// when non-nil, counts Update invocations so the "store never called" /
+// "store called exactly once" assertions are direct observations rather than
+// inferences.
+type fakeSettingsStore struct {
+	getFunc    func(context.Context) (settings.Settings, error)
+	updateFunc func(context.Context, settings.UpdateParams) (settings.Settings, error)
+	calls      *int32
+}
+
+func (f fakeSettingsStore) Get(ctx context.Context) (settings.Settings, error) {
+	if f.getFunc != nil {
+		return f.getFunc(ctx)
+	}
+	return settings.Settings{DigestCadence: settings.CadenceDaily}, nil
+}
+
+func (f fakeSettingsStore) Update(ctx context.Context, p settings.UpdateParams) (settings.Settings, error) {
+	if f.calls != nil {
+		atomic.AddInt32(f.calls, 1)
+	}
+	if f.updateFunc != nil {
+		return f.updateFunc(ctx, p)
+	}
+	return settings.Settings{DigestEnabled: p.DigestEnabled, DigestCadence: p.DigestCadence}, nil
+}
+
+var _ httpserver.SettingsStore = fakeSettingsStore{}
+
+// settingsServerOpts assembles the handler-/router-level server variants
+// this task needs: gated or inert, a supplied fake store, or WithSettings
+// omitted entirely -- mirroring statusOpts's shape in status_test.go.
+type settingsServerOpts struct {
+	passphrase   string
+	store        httpserver.SettingsStore
+	omitSettings bool
+}
+
+func newSettingsServer(t *testing.T, o settingsServerOpts) *httptest.Server {
+	t.Helper()
+	opts := []httpserver.Option{}
+	if o.passphrase != "" {
+		opts = append(opts, httpserver.WithAuthGate(o.passphrase, false, nil))
+	}
+	if !o.omitSettings {
+		store := o.store
+		if store == nil {
+			store = fakeSettingsStore{}
+		}
+		opts = append(opts, httpserver.WithSettings(store))
+	}
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger(), opts...)
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Router())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// loginForSettings mints a real session the way a browser does -- POST
+// /session with the SPA's X-Requested-With header and the passphrase in the
+// JSON body -- then lifts the dt_session cookie off the response, mirroring
+// internal/authgate/gate_test.go's sessionCookie/login helpers. No cookie is
+// hand-forged or signed here.
+func loginForSettings(t *testing.T, ts *httptest.Server) *http.Cookie {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"passphrase": settingsTestPassphrase})
+	if err != nil {
+		t.Fatalf("marshal login body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/session", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("build POST /session: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Requested-With", "drop-tracker")
+	// http.DefaultClient carries a nil Jar, so no case here can accidentally
+	// inherit a session it did not explicitly attach via req.AddCookie.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /session: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("POST /session status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	for _, c := range resp.Cookies() {
+		if c.Name == "dt_session" {
+			return c
+		}
+	}
+	t.Fatalf("no dt_session cookie in login response: %v", resp.Header.Values("Set-Cookie"))
+	return nil
+}
+
+func TestSettings_GetGated401NoCookie(t *testing.T) {
+	ts := newSettingsServer(t, settingsServerOpts{passphrase: settingsTestPassphrase})
+
+	resp, err := http.Get(ts.URL + "/settings/notifications")
+	if err != nil {
+		t.Fatalf("GET /settings/notifications: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (body %s)", resp.StatusCode, raw)
+	}
+	for _, leak := range []string{"digest_enabled", "digest_cadence", "digest_last_sent_at"} {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("401 body leaked %q: %s", leak, raw)
+		}
+	}
+}
+
+// TestSettings_PutGated401NoCookie proves the write verb also answers 401,
+// not 403, without a session -- gate.Authenticate runs before
+// gate.RequireCSRFHeader (server.go's gated-group construction).
+func TestSettings_PutGated401NoCookie(t *testing.T) {
+	ts := newSettingsServer(t, settingsServerOpts{passphrase: settingsTestPassphrase})
+
+	code, raw := putSettingsRaw(t, ts, `{"digest_enabled":true,"digest_cadence":"weekly"}`)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, not 403 -- Authenticate must run before RequireCSRFHeader (body %s)", code, raw)
+	}
+}
+
+func TestSettings_PutGatedForbiddenWithoutCSRFHeader(t *testing.T) {
+	var calls int32
+	ts := newSettingsServer(t, settingsServerOpts{passphrase: settingsTestPassphrase, store: fakeSettingsStore{calls: &calls}})
+	cookie := loginForSettings(t, ts)
+
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/settings/notifications", strings.NewReader(`{"digest_enabled":true,"digest_cadence":"weekly"}`))
+	if err != nil {
+		t.Fatalf("build PUT request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	// Deliberately no X-Requested-With header.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /settings/notifications: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("store.Update called %d times, want 0", got)
+	}
+}
+
+func TestSettings_PutGatedSucceedsWithCookieAndHeader(t *testing.T) {
+	var calls int32
+	ts := newSettingsServer(t, settingsServerOpts{passphrase: settingsTestPassphrase, store: fakeSettingsStore{calls: &calls}})
+	cookie := loginForSettings(t, ts)
+
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/settings/notifications", strings.NewReader(`{"digest_enabled":true,"digest_cadence":"weekly"}`))
+	if err != nil {
+		t.Fatalf("build PUT request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Requested-With", "drop-tracker")
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /settings/notifications: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("store.Update called %d times, want 1", got)
+	}
+}
+
+// TestSettings_UngatedNeverAnswers401 preserves the v1.2 posture for an
+// unconfigured (no passphrase) instance: neither verb is ever 401.
+func TestSettings_UngatedNeverAnswers401(t *testing.T) {
+	ts := newSettingsServer(t, settingsServerOpts{})
+
+	getResp, err := http.Get(ts.URL + "/settings/notifications")
+	if err != nil {
+		t.Fatalf("GET /settings/notifications: %v", err)
+	}
+	_ = getResp.Body.Close()
+	if getResp.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("GET status = 401 on an inert (ungated) server, want non-401")
+	}
+
+	putCode, putRaw := putSettingsRaw(t, ts, `{"digest_enabled":true,"digest_cadence":"weekly"}`)
+	if putCode == http.StatusUnauthorized {
+		t.Fatalf("PUT status = 401 on an inert (ungated) server, want non-401 (body %s)", putRaw)
+	}
+}
+
+// TestSettings_NotConfiguredAnswers503 mirrors TestStatus_NotConfigured: a
+// server built with no WithSettings option answers 503 with the shared fixed
+// body on both verbs, so the route table is identical with and without it.
+func TestSettings_NotConfiguredAnswers503(t *testing.T) {
+	ts := newSettingsServer(t, settingsServerOpts{omitSettings: true})
+
+	getCode, getRaw := getSettingsRaw(t, ts)
+	if getCode != http.StatusServiceUnavailable {
+		t.Fatalf("GET status = %d, want 503 (body %s)", getCode, getRaw)
+	}
+	var getErr errorBody
+	if err := json.Unmarshal([]byte(getRaw), &getErr); err != nil {
+		t.Fatalf("decode GET error body %q: %v", getRaw, err)
+	}
+	if getErr.Error != "settings not available" {
+		t.Fatalf("GET error = %q, want %q", getErr.Error, "settings not available")
+	}
+
+	putCode, putRaw := putSettingsRaw(t, ts, `{"digest_enabled":true,"digest_cadence":"weekly"}`)
+	if putCode != http.StatusServiceUnavailable {
+		t.Fatalf("PUT status = %d, want 503 (body %s)", putCode, putRaw)
+	}
+	var putErr errorBody
+	if err := json.Unmarshal([]byte(putRaw), &putErr); err != nil {
+		t.Fatalf("decode PUT error body %q: %v", putRaw, err)
+	}
+	if putErr.Error != "settings not available" {
+		t.Fatalf("PUT error = %q, want %q", putErr.Error, "settings not available")
+	}
+}
+
+// TestSettings_NoLeak mirrors TestStatus_NoLeak: a store error whose text
+// embeds a DSN password and a Discord webhook token must never reach the
+// raw response body on either verb, even though the decoded error field is
+// the fixed "internal error" string.
+func TestSettings_NoLeak(t *testing.T) {
+	const dsn = "postgres://tracker:Sup3rSecret@db.internal:5432/drop_tracker?sslmode=disable"
+	const webhook = "https://discord.com/api/webhooks/123456789/abcdefSECRETtoken"
+	getErr := fmt.Errorf("get notification settings against %s (webhook %s)", dsn, webhook)
+	updateErr := fmt.Errorf("update notification settings against %s (webhook %s)", dsn, webhook)
+
+	cases := []struct {
+		name string
+		ts   *httptest.Server
+		put  bool
+	}{
+		{"get-error", newSettingsServer(t, settingsServerOpts{store: fakeSettingsStore{
+			getFunc: func(context.Context) (settings.Settings, error) { return settings.Settings{}, getErr },
+		}}), false},
+		{"update-error", newSettingsServer(t, settingsServerOpts{store: fakeSettingsStore{
+			updateFunc: func(context.Context, settings.UpdateParams) (settings.Settings, error) { return settings.Settings{}, updateErr },
+		}}), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var code int
+			var raw string
+			if tc.put {
+				code, raw = putSettingsRaw(t, tc.ts, `{"digest_enabled":true,"digest_cadence":"weekly"}`)
+			} else {
+				code, raw = getSettingsRaw(t, tc.ts)
+			}
+			if code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500 (body %s)", code, raw)
+			}
+			var eb errorBody
+			if err := json.Unmarshal([]byte(raw), &eb); err != nil {
+				t.Fatalf("decode error body %q: %v", raw, err)
+			}
+			if eb.Error != "internal error" {
+				t.Fatalf("error = %q, want %q", eb.Error, "internal error")
+			}
+			for _, leak := range []string{dsn, webhook, "Sup3rSecret", "SECRETtoken", "://", "password", getErr.Error(), updateErr.Error()} {
+				if strings.Contains(raw, leak) {
+					t.Fatalf("response body leaked %q: %s", leak, raw)
+				}
+			}
+		})
+	}
 }
