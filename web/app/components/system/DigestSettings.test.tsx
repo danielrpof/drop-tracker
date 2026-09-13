@@ -9,6 +9,7 @@ import {
   updateDigestSettings,
   type NotificationSettings,
 } from "~/lib/api"
+import { formatAbsoluteTime, formatIsoTitle } from "~/lib/format"
 
 import { DigestSettings } from "./DigestSettings"
 
@@ -202,5 +203,127 @@ describe("DigestSettings", () => {
     expect(
       screen.queryByText("Couldn't save — reverted to the previous value.")
     ).not.toBeInTheDocument()
+  })
+
+  it("renders the Cadence row and saves both fields when a new cadence is chosen", async () => {
+    const onSaved = vi.fn()
+    mockUpdateDigestSettings.mockResolvedValueOnce(
+      makeSettings({ digest_enabled: true, digest_cadence: "weekly" })
+    )
+
+    render(
+      <ControlledDigestSettings
+        initial={makeSettings({
+          digest_enabled: true,
+          digest_cadence: "daily",
+        })}
+        onSaved={onSaved}
+      />
+    )
+
+    expect(screen.getByText("Cadence")).toBeInTheDocument()
+    const trigger = screen.getByRole("combobox", { name: "Cadence" })
+    expect(trigger).toHaveTextContent("Daily")
+
+    await userEvent.click(trigger)
+    await userEvent.click(await screen.findByRole("option", { name: "Weekly" }))
+
+    expect(mockUpdateDigestSettings).toHaveBeenCalledTimes(1)
+    expect(mockUpdateDigestSettings).toHaveBeenCalledWith({
+      digestEnabled: true,
+      digestCadence: "weekly",
+    })
+    await waitFor(() => expect(trigger).toHaveTextContent("Weekly"))
+    expect(onSaved).toHaveBeenCalledWith(
+      makeSettings({ digest_enabled: true, digest_cadence: "weekly" })
+    )
+  })
+
+  it("keeps the cadence control visible, disabled, and populated with the stored value when digest mode is off", () => {
+    render(
+      <DigestSettings
+        settings={makeSettings({
+          digest_enabled: false,
+          digest_cadence: "weekly",
+        })}
+        onSaved={vi.fn()}
+      />
+    )
+
+    const trigger = screen.getByRole("combobox", { name: "Cadence" })
+    expect(trigger).toBeInTheDocument()
+    expect(trigger).toBeDisabled()
+    expect(trigger).toHaveTextContent("Weekly")
+  })
+
+  it("does not change the displayed cadence when digest mode is flipped on", async () => {
+    mockUpdateDigestSettings.mockResolvedValueOnce(
+      makeSettings({ digest_enabled: true, digest_cadence: "daily" })
+    )
+
+    render(
+      <ControlledDigestSettings
+        initial={makeSettings({
+          digest_enabled: false,
+          digest_cadence: "daily",
+        })}
+      />
+    )
+
+    await userEvent.click(screen.getByRole("switch", { name: "Digest mode" }))
+
+    await screen.findByText("On")
+    expect(screen.getByRole("combobox", { name: "Cadence" })).toHaveTextContent(
+      "Daily"
+    )
+  })
+
+  it("keeps the previous cadence on screen and shows the shared failure copy when a cadence save rejects", async () => {
+    mockUpdateDigestSettings.mockRejectedValueOnce(new Error("boom"))
+
+    render(
+      <DigestSettings
+        settings={makeSettings({
+          digest_enabled: true,
+          digest_cadence: "daily",
+        })}
+        onSaved={vi.fn()}
+      />
+    )
+
+    const trigger = screen.getByRole("combobox", { name: "Cadence" })
+    await userEvent.click(trigger)
+    await userEvent.click(await screen.findByRole("option", { name: "Weekly" }))
+
+    await screen.findByText("Couldn't save — reverted to the previous value.")
+    expect(trigger).toHaveTextContent("Daily")
+  })
+
+  it("renders the literal 'Never sent yet' text and no <time> element for a null watermark", () => {
+    render(
+      <DigestSettings
+        settings={makeSettings({ digest_last_sent_at: null })}
+        onSaved={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Never sent yet")).toBeInTheDocument()
+    expect(document.querySelector("time")).not.toBeInTheDocument()
+  })
+
+  it("renders a <time> element carrying the ISO instant and the shared absolute-time text for a populated watermark", () => {
+    const iso = "2026-02-01T03:04:05Z"
+    render(
+      <DigestSettings
+        settings={makeSettings({ digest_last_sent_at: iso })}
+        onSaved={vi.fn()}
+      />
+    )
+
+    const timeEl = document.querySelector("time")
+    expect(timeEl).not.toBeNull()
+    expect(timeEl).toHaveAttribute("dateTime", iso)
+    expect(timeEl).toHaveAttribute("title", formatIsoTitle(iso))
+    expect(timeEl).toHaveTextContent(formatAbsoluteTime(iso))
   })
 })
