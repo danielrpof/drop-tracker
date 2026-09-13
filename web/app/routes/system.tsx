@@ -4,13 +4,20 @@ import { Link } from "react-router"
 
 import { EmptyState } from "~/components/common/EmptyState"
 import { AboutInstance } from "~/components/system/AboutInstance"
+import { DigestSettings } from "~/components/system/DigestSettings"
 import { SourcePanel } from "~/components/system/SourcePanel"
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert"
 import { Button } from "~/components/ui/button"
 import { Card, CardContent, CardHeader } from "~/components/ui/card"
 import { Separator } from "~/components/ui/separator"
 import { Skeleton } from "~/components/ui/skeleton"
-import { ApiError, getStatus, type StatusResponse } from "~/lib/api"
+import {
+  ApiError,
+  getDigestSettings,
+  getStatus,
+  type NotificationSettings,
+  type StatusResponse,
+} from "~/lib/api"
 import { formatClock, formatIsoTitle, formatPollInterval } from "~/lib/format"
 import { SOURCE_ORDER } from "~/lib/sources"
 
@@ -70,6 +77,17 @@ function SystemSkeleton() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-40" />
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-4 w-1/2" />
+        </CardContent>
+      </Card>
+
       {Array.from({ length: 2 }).map((_, i) => (
         <Card key={i}>
           <CardHeader>
@@ -92,6 +110,7 @@ function SystemSkeleton() {
 
 export default function System() {
   const [data, setData] = useState<StatusResponse | null>(null)
+  const [digest, setDigest] = useState<NotificationSettings | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -116,10 +135,14 @@ export default function System() {
     setLoadError(false)
     setRefreshError(false)
 
-    getStatus()
-      .then((body) => {
+    // Digest settings ride this same mount fetch (D-10): one combined fetch,
+    // one loadError surface covers both -- no separate digest-only fetch or
+    // error path exists anywhere in this file.
+    Promise.all([getStatus(), getDigestSettings()])
+      .then(([statusBody, digestBody]) => {
         if (cancelled) return
-        setData(body)
+        setData(statusBody)
+        setDigest(digestBody)
         setAsOf(new Date())
       })
       .catch((err) => {
@@ -158,9 +181,13 @@ export default function System() {
     setRefreshError(false)
 
     try {
-      const next = await getStatus()
+      const [next, nextDigest] = await Promise.all([
+        getStatus(),
+        getDigestSettings(),
+      ])
       if (!mountedRef.current) return
       setData(next)
+      setDigest(nextDigest)
       setAsOf(new Date())
     } catch (err) {
       if (!mountedRef.current) return
@@ -244,6 +271,8 @@ export default function System() {
             watchlistSize={data.watchlist_size}
             pollIntervalSeconds={data.poll_interval_seconds}
           />
+
+          {digest && <DigestSettings settings={digest} onSaved={setDigest} />}
 
           {data.watchlist_size === 0 && (
             <Alert>
