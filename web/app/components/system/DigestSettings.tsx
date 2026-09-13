@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from "react"
 
 import { Card, CardContent, CardHeader } from "~/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select"
 import { Switch } from "~/components/ui/switch"
+import { formatAbsoluteTime, formatIsoTitle } from "~/lib/format"
 import { cn } from "~/lib/utils"
 import {
   ApiError,
@@ -15,14 +23,21 @@ export interface DigestSettingsProps {
 }
 
 type SaveStatus = "idle" | "saved" | "failed"
+type Cadence = NotificationSettings["digest_cadence"]
 
-// DigestSettings renders the DGST-01 digest-mode row as an instant-apply
-// control (D-02): no Save button, every change persists immediately. The
-// rendered value is `pending` (the optimistic overlay) when present and the
-// `settings` prop otherwise -- clearing the overlay on either success or
-// failure is what gives the keep-stale-on-failure posture for free, with no
-// separate rollback bookkeeping. Task 1 renders only the Digest mode row;
-// the cadence and last-sent rows are plan 20-04's addition.
+// Title-case display labels for the lowercase wire values -- the operator
+// never sees "daily"/"weekly" (D-04, UI-SPEC Copywriting Contract).
+const CADENCE_LABELS: Record<Cadence, string> = {
+  daily: "Daily",
+  weekly: "Weekly",
+}
+
+// DigestSettings renders the DGST-01/DGST-02/DGST-16 digest settings rows
+// as instant-apply controls (D-02): no Save button, every change persists
+// immediately. The rendered value is `pending` (the optimistic overlay)
+// when present and the `settings` prop otherwise -- clearing the overlay on
+// either success or failure is what gives the keep-stale-on-failure posture
+// for free, with no separate rollback bookkeeping.
 export function DigestSettings({ settings, onSaved }: DigestSettingsProps) {
   const [pending, setPending] = useState<NotificationSettings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -45,7 +60,13 @@ export function DigestSettings({ settings, onSaved }: DigestSettingsProps) {
 
   const displayed = pending ?? settings
 
-  async function handleDigestModeChange(next: boolean) {
+  // save is the one instant-apply path both controls route through -- the
+  // route is full-object PUT semantics, so every call sends both fields
+  // regardless of which one actually changed (T-20-19).
+  async function save(next: {
+    digestEnabled: boolean
+    digestCadence: Cadence
+  }) {
     if (savingRef.current) return
     savingRef.current = true
     setSaving(true)
@@ -55,13 +76,14 @@ export function DigestSettings({ settings, onSaved }: DigestSettingsProps) {
       clearTimerRef.current = null
     }
 
-    setPending({ ...displayed, digest_enabled: next })
+    setPending({
+      ...displayed,
+      digest_enabled: next.digestEnabled,
+      digest_cadence: next.digestCadence,
+    })
 
     try {
-      const saved = await updateDigestSettings({
-        digestEnabled: next,
-        digestCadence: displayed.digest_cadence,
-      })
+      const saved = await updateDigestSettings(next)
       if (!mountedRef.current) return
       onSaved(saved)
       setPending(null)
@@ -80,6 +102,18 @@ export function DigestSettings({ settings, onSaved }: DigestSettingsProps) {
       savingRef.current = false
       if (mountedRef.current) setSaving(false)
     }
+  }
+
+  function handleDigestModeChange(next: boolean) {
+    void save({ digestEnabled: next, digestCadence: displayed.digest_cadence })
+  }
+
+  function handleCadenceChange(next: Cadence | null) {
+    // The two SelectItems below are the only selectable values, and this
+    // Select is neither clearable nor multiple -- null is unreachable in
+    // practice, but the primitive's type still carries it.
+    if (next === null) return
+    void save({ digestEnabled: displayed.digest_enabled, digestCadence: next })
   }
 
   return (
@@ -107,6 +141,52 @@ export function DigestSettings({ settings, onSaved }: DigestSettingsProps) {
             <span className="text-body text-foreground">
               {displayed.digest_enabled ? "On" : "Off"}
             </span>
+          </dd>
+
+          <dt
+            id="digest-cadence-label"
+            className="text-label text-muted-foreground"
+          >
+            Cadence
+          </dt>
+          <dd>
+            {/* Stays visible and populated when digest mode is off --
+                disabled only, never unmounted or reset to a placeholder
+                (D-04). */}
+            <Select
+              value={displayed.digest_cadence}
+              onValueChange={handleCadenceChange}
+              disabled={saving || !displayed.digest_enabled}
+            >
+              <SelectTrigger aria-labelledby="digest-cadence-label">
+                <SelectValue>
+                  {(value: Cadence) => CADENCE_LABELS[value]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="daily">Daily</SelectItem>
+                <SelectItem value="weekly">Weekly</SelectItem>
+              </SelectContent>
+            </Select>
+          </dd>
+
+          <dt className="text-label text-muted-foreground">Last digest sent</dt>
+          <dd>
+            {displayed.digest_last_sent_at === null ? (
+              // format.ts degrades a null instant to an em dash by design;
+              // this row deliberately overrides that for an honest
+              // never-sent state (DGST-16) -- the null branch is taken
+              // before either formatter is ever called.
+              <span className="text-body text-foreground">Never sent yet</span>
+            ) : (
+              <time
+                dateTime={displayed.digest_last_sent_at}
+                title={formatIsoTitle(displayed.digest_last_sent_at)}
+                className="text-body text-foreground"
+              >
+                {formatAbsoluteTime(displayed.digest_last_sent_at)}
+              </time>
+            )}
           </dd>
         </dl>
 
