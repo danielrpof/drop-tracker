@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
-current_phase: 20
-current_phase_name: Digest Settings & Operator Control
-status: verifying
-stopped_at: Completed 20-04-PLAN.md
-last_updated: "2026-09-13T22:35:04.158Z"
-last_activity: 2026-09-11
-last_activity_desc: Phase 20 execution started
-state_head: 0beceb6a5266095b971df98dcb362437ead2d40b
+current_phase: 21
+current_phase_name: Real-Time ↔ Digest Mutual Exclusion
+status: planning
+stopped_at: Phase 20 complete, ready to plan Phase 21
+last_updated: "2026-09-13T22:51:59.631Z"
+last_activity: 2026-09-13
+last_activity_desc: Phase 20 complete, transitioned to Phase 21
+state_head: 96a85a42ab903ef5e55adcd5372330bf2c63e967
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
   completed_plans: 4
-  percent: 0
+  percent: 25
 ---
 
 # Project State
@@ -29,16 +29,16 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 ## Current Position
 
-Phase: 20 (Digest Settings & Operator Control) — EXECUTING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
-Last activity: 2026-09-11 — Phase 20 execution started
+Phase: 21 — Real-Time ↔ Digest Mutual Exclusion
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-13 — Phase 20 complete, transitioned to Phase 21
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 84
+- Total plans completed: 88
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -65,6 +65,7 @@ Last activity: 2026-09-11 — Phase 20 execution started
 | 18 | 4 | - | - |
 | 19 | 5 | - | - |
 | 18.1 | 3 | - | - |
+| 20 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -390,7 +391,7 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-13T22:35:04.103Z
-Stopped at: Completed 20-04-PLAN.md
+Stopped at: Phase 20 complete, ready to plan Phase 21
 Resume file: None
 
 ## Operator Next Steps

@@ -74,7 +74,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 
 ### 🔄 v1.5 Digest Notifications (Phases 20-23) — IN PROGRESS
 
-- [ ] **Phase 20: Digest Settings & Operator Control** - Postgres-backed instance setting (on/off + daily/weekly), gated `GET`/`PUT` routes, and the SPA panel that drives it — notification behavior itself unchanged
+- [x] **Phase 20: Digest Settings & Operator Control** - Postgres-backed instance setting (on/off + daily/weekly), gated `GET`/`PUT` routes, and the SPA panel that drives it — notification behavior itself unchanged (completed 2026-09-13)
 - [ ] **Phase 21: Real-Time ↔ Digest Mutual Exclusion** - digest mode makes the real-time notify pass stand down; events queue instead of firing, and toggling back off flushes them
 - [ ] **Phase 22: Scheduled Digest Send** - the digest scheduler and batched, grouped send: cadence fire times, missed-tick catch-up, DST/tzdata correctness, the last-sent watermark, and the event-grouping hierarchy (by type and/or artist)
 - [ ] **Phase 23: Digest Readability & Discord Limits** - the "since <timestamp>" window header and multi-message chunking that never truncates, preserving Phase 22's grouping across the split
@@ -204,7 +204,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 20. Digest Settings & Operator Control | 4/4 | In Progress|  |
+| 20. Digest Settings & Operator Control | 4/4 | Complete    | 2026-09-13 |
 | 21. Real-Time ↔ Digest Mutual Exclusion | 0/? | Not started | - |
 | 22. Scheduled Digest Send | 0/? | Not started | - |
 | 23. Digest Readability & Discord Limits | 0/? | Not started | - |
