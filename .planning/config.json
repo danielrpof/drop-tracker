@@ -1,5 +1,5 @@
 {
-  "model_profile": "adaptive",
+  "model_profile": "balanced",
   "commit_docs": true,
   "parallelization": true,
   "search_gitignored": false,
@@ -11,7 +11,7 @@
   "perplexity": false,
   "jina": false,
   "git": {
-    "branching_strategy": "none",
+    "branching_strategy": "phase",
     "create_tag": true,
     "phase_branch_template": "gsd/phase-{phase}-{slug}",
     "milestone_branch_template": "gsd/{milestone}-{slug}",
@@ -92,5 +92,11 @@
   "granularity": "standard",
   "graphify": {
     "enabled": true
+  },
+  "model_overrides": {
+    "gsd-ui-researcher": "opus"
+  },
+  "models": {
+    "discuss": "opus"
   }
 }

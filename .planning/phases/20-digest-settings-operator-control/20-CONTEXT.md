@@ -41,9 +41,12 @@ Requirements: DGST-01, DGST-02, DGST-03, DGST-04, DGST-16 (`.planning/REQUIREMEN
 
 - **D-04: Cadence dropdown stays visible and editable when digest mode is off, just disabled.** An operator can see and pre-set a cadence before turning digest on; greying it out (not hiding it) keeps the on/off ↔ cadence relationship visible rather than having the UI jump/reflow when the toggle flips.
 
+### Schema
+
+- **D-05: Singleton enforcement is a `CHECK (id = 1)` constraint plus a migration-time seed `INSERT`, not upsert-on-read.** Ratified during a post-roadmap grilling session (2026-09-11) that stress-tested the v1.5 plan, over research's own schema sketch in `.planning/research/ARCHITECTURE.md`. This needs no app-level "ensure a row exists" race handling — `GetNotificationSettings`/`UpdateNotificationSettings` are both trivial single-row PK lookups — and matches the project's existing inline-CHECK convention (`events_source_valid`, `events_event_type_valid`). No longer open for the planner to re-decide.
+
 ### Claude's Discretion
 
-- **Singleton enforcement mechanism** — a `CHECK (id = 1)` constraint vs. seed-in-migration vs. upsert-on-read; ROADMAP.md 20's notes leave this to the planner. Pick one, make it non-bypassable, document the choice inline.
 - **Exact migration column types/constraints beyond what's named** (e.g. whether `digest_cadence` is a Postgres `TEXT CHECK` or an `ENUM` type) — follows the project's existing inline-CHECK convention per `CONVENTIONS.md` / ROADMAP notes, not re-litigated here.
 - **Component decomposition** within the `/system` view (a new sub-component vs. inline JSX in `system.tsx`) — planner's call, following the existing per-source-panel/About-block component split.
 - **Exact inline confirmation/error copy strings** — small, not worth locking in discussion; planner writes them consistent with the System view's existing tone (e.g. "Couldn't refresh — showing data as of <time>").
@@ -134,3 +137,4 @@ Requirements: DGST-01, DGST-02, DGST-03, DGST-04, DGST-16 (`.planning/REQUIREMEN
 
 *Phase: 20-digest-settings-operator-control*
 *Context gathered: 2026-09-11*
+*Amended: 2026-09-11 — D-05 (singleton enforcement) added and moved out of Claude's Discretion following a post-roadmap grilling session; see `20-DISCUSSION-LOG.md` for the audit trail.*
