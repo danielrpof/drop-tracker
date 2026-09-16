@@ -45,6 +45,7 @@ type NotificationSetting struct {
 	DigestCadence    string             `json:"digest_cadence"`
 	DigestLastSentAt pgtype.Timestamptz `json:"digest_last_sent_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DigestLastSlotAt pgtype.Timestamptz `json:"digest_last_slot_at"`
 }
 
 type Watchlist struct {

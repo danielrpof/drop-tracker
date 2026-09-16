@@ -9,6 +9,21 @@ import (
 )
 
 type Querier interface {
+	// Phase 22 (D-16): the digest send's single-statement batch ack. Acks every
+	// sent/suppressed event id (idempotent via the same AND notified_at IS NULL
+	// predicate MarkNotified uses) and advances the singleton row's slot record
+	// (always) and last-sent watermark (only when something was actually sent --
+	// sent_at is nil on an empty/suppressed-only skip, so COALESCE leaves the
+	// watermark untouched) in one atomic statement. No updated_at bump here on
+	// purpose: updated_at tracks operator writes through PUT
+	// /settings/notifications, and a scheduler-driven ack is not one. The
+	// `acked` CTE is deliberately unreferenced by the outer UPDATE: Postgres
+	// executes every data-modifying CTE in a statement exactly once regardless
+	// of whether it is read from, so this still acks the events and updates the
+	// settings row as one atomic statement with no Go transaction --
+	// sqlc.Querier (internal/db/sqlc/db.go) exposes WithTx only on the concrete
+	// *Queries, never on the interface every production caller is typed against.
+	AckDigestBatch(ctx context.Context, arg AckDigestBatchParams) error
 	// Atomic replacement (PERF-04, 11-RESEARCH.md Pattern 2) for the former
 	// two-statement GroupTrackCountBaseline SELECT + SetGroupTrackCountBaseline
 	// UPDATE -- those two round trips left a check-then-act window where two
@@ -186,9 +201,15 @@ type Querier interface {
 	// fields to write), but the attempt itself still needs to be recorded so
 	// the read query's cooldown predicate above has something to check.
 	RecordArtMatchAttempt(ctx context.Context, mbid string) error
-	// A plain positional UPDATE, not watchlist's CASE-based merge: the route is
-	// a full-object PUT (no partial-update ambiguity to resolve), and the fixed
-	// id = 1 predicate is what makes replaying the same body a no-op.
+	// Full-object PUT semantics (no partial-update ambiguity to resolve), and the
+	// fixed id = 1 predicate is what makes replaying the same body a no-op.
+	// Phase 22 (D-14): digest_last_slot_at re-anchors to the caller-computed slot
+	// only when digest mode is being turned on, or the cadence is changing while
+	// it is already on -- never on a plain no-op replay and never on turning
+	// digest mode off. The unqualified digest_enabled/digest_cadence on the
+	// right of the WHEN condition are Postgres's pre-UPDATE row values (a SET
+	// list's right-hand side evaluates against the row as it was before this
+	// statement), which is exactly what the re-anchor decision needs.
 	UpdateNotificationSettings(ctx context.Context, arg UpdateNotificationSettingsParams) (NotificationSetting, error)
 	// The partial-update merge happens inside this statement, not in Go: each
 	// axis is resolved by a CASE whose ELSE names the column itself, so the
