@@ -83,6 +83,15 @@ type Notifier struct {
 	spacing        time.Duration
 	maxAgeDays     int
 	notifying      atomic.Bool
+
+	// lastDigestMode/lastDigestModeSet are D-01's mode-transition logging
+	// state, read and written only by the goroutine currently holding the
+	// notifying CAS lock -- plain fields, not atomics, are race-free here
+	// because notifying.Store(false) at the end of one pass happens-before
+	// the next successful CompareAndSwap (sync/atomic is sequentially
+	// consistent).
+	lastDigestMode    bool
+	lastDigestModeSet bool
 }
 
 // Option customises a Notifier at construction, mirroring detection.Option so
@@ -183,6 +192,26 @@ func logSettingsReadFailure(ctx context.Context, logger *slog.Logger, err error)
 	)
 }
 
+// observeDigestMode is the single place D-01's transition line is emitted:
+// it logs one Info record only when the observed mode differs from the last
+// one recorded (or none has been recorded yet, so a restart always shows the
+// operative mode), then updates the last-observed mode. pendingCount is
+// included only when havePendingCount is true, so the on-to-off line can
+// carry the count about to be flushed with no COUNT query. This is a
+// logging-only record: nothing in the send/ack decision may read it.
+func (n *Notifier) observeDigestMode(logger *slog.Logger, enabled bool, pendingCount int, havePendingCount bool) {
+	if n.lastDigestModeSet && n.lastDigestMode == enabled {
+		return
+	}
+	fields := []any{slog.Bool("digest_enabled", enabled)}
+	if havePendingCount {
+		fields = append(fields, slog.Int("pending_count", pendingCount))
+	}
+	logger.Info("digest mode changed", fields...)
+	n.lastDigestMode = enabled
+	n.lastDigestModeSet = true
+}
+
 // NotifyPending drains every currently-pending events row in ListUnnotified's
 // order, sending each as one Discord message and marking it notified on success.
 // The notifying CAS guard mirrors poller's mbRunning/dzRunning (CAS-skip, not a
@@ -206,6 +235,8 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 		return nil
 	}
 	if cfg.DigestEnabled {
+		// No count: the pass never listed, so nothing is being flushed.
+		n.observeDigestMode(logger, true, 0, false)
 		return nil
 	}
 
@@ -213,6 +244,11 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 	if err != nil {
 		return fmt.Errorf("notifier: list unnotified: %w", err)
 	}
+	// The on-to-off transition line's pending count is len(events) here --
+	// no COUNT query, no sqlc change (D-01). This ordering is load-bearing:
+	// it is what lets the line carry the count with what the pass already
+	// fetched.
+	n.observeDigestMode(logger, false, len(events), true)
 
 	suppressed := 0
 	for i, ev := range events {
@@ -237,6 +273,8 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 			return nil
 		}
 		if cfg.DigestEnabled {
+			// The count left pending is everything from this row onward.
+			n.observeDigestMode(logger, true, len(events)-i, true)
 			return nil
 		}
 

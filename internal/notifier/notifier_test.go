@@ -1393,3 +1393,205 @@ func TestNotifyPending_MidPass_ReadErrorStopsPassIdenticallyToTopOfPass(t *testi
 		t.Fatalf("WARN msg = %q, want the exact literal %q", warns[0].Msg, "skipping notify pass: digest settings read failed")
 	}
 }
+
+// modeTransitionRecord decodes the subset of a D-01 "digest mode changed"
+// log line this file asserts on.
+type modeTransitionRecord struct {
+	Level         string `json:"level"`
+	Msg           string `json:"msg"`
+	DigestEnabled bool   `json:"digest_enabled"`
+	PendingCount  *int   `json:"pending_count"`
+}
+
+// decodeModeTransitionRecords decodes every newline-delimited JSON log line
+// in buf and returns only the records whose msg is "digest mode changed".
+func decodeModeTransitionRecords(t *testing.T, buf *bytes.Buffer) []modeTransitionRecord {
+	t.Helper()
+	var records []modeTransitionRecord
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	for {
+		var r modeTransitionRecord
+		if err := dec.Decode(&r); err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatalf("decode log record: %v", err)
+		}
+		if r.Msg == "digest mode changed" {
+			records = append(records, r)
+		}
+	}
+	return records
+}
+
+// TestNotifyPending_ModeTransitionLog_BootAlwaysLogsOperativeMode is D-01's
+// restart guarantee: the first successful read after construction logs
+// exactly one transition record, whatever the mode is.
+func TestNotifyPending_ModeTransitionLog_BootAlwaysLogsOperativeMode(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+
+	records := decodeModeTransitionRecords(t, buf)
+	if len(records) != 1 {
+		t.Fatalf("digest mode changed record count = %d, want exactly 1 (the first successful read after boot)", len(records))
+	}
+}
+
+// TestNotifyPending_ModeTransitionLog_SteadyStateLogsOnce is D-01's whole
+// point: digest mode staying unchanged across many passes must not repeat a
+// standdown line every poll cycle.
+func TestNotifyPending_ModeTransitionLog_SteadyStateLogsOnce(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+
+	for i := 0; i < 3; i++ {
+		if err := n.NotifyPending(context.Background(), logger); err != nil {
+			t.Fatalf("NotifyPending pass %d: %v, want nil", i+1, err)
+		}
+	}
+
+	records := decodeModeTransitionRecords(t, buf)
+	if len(records) != 1 {
+		t.Fatalf("digest mode changed record count across 3 unchanged passes = %d, want exactly 1", len(records))
+	}
+}
+
+// TestNotifyPending_ModeTransitionLog_OnToOffCarriesFlushCount proves the
+// on-to-off transition line names the count about to be flushed, taken from
+// the list the pass already fetched (no COUNT query).
+func TestNotifyPending_ModeTransitionLog_OnToOffCarriesFlushCount(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "modelogontooff")
+
+	sender := &fakeSender{}
+	reader, setEnabled := toggleableSettings(true)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("first NotifyPending (digest on): %v, want nil", err)
+	}
+
+	insertPendingEventTitled(t, pool, artistID, "modelogontooff-ext-1", "Row One")
+	insertPendingEventTitled(t, pool, artistID, "modelogontooff-ext-2", "Row Two")
+	insertPendingEventTitled(t, pool, artistID, "modelogontooff-ext-3", "Row Three")
+	insertPendingEventTitled(t, pool, artistID, "modelogontooff-ext-4", "Row Four")
+
+	setEnabled(false)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("second NotifyPending (digest off): %v, want nil", err)
+	}
+
+	records := decodeModeTransitionRecords(t, buf)
+	if len(records) != 2 {
+		t.Fatalf("digest mode changed record count = %d, want exactly 2 (on at pass 1, off at pass 2): %+v", len(records), records)
+	}
+	last := records[len(records)-1]
+	if last.DigestEnabled {
+		t.Fatal("second record digest_enabled = true, want false")
+	}
+	if last.PendingCount == nil || *last.PendingCount != 4 {
+		t.Fatalf("second record pending_count = %v, want 4", last.PendingCount)
+	}
+}
+
+// TestNotifyPending_ModeTransitionLog_MidLoopFlipLogsPendingCount proves a
+// mid-loop stop (the re-read reporting on) logs the count it left pending.
+func TestNotifyPending_ModeTransitionLog_MidLoopFlipLogsPendingCount(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "modelogmidloop")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-1", "Row One")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-2", "Row Two")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-3", "Row Three")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-4", "Row Four")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-5", "Row Five")
+
+	sender := &fakeSender{}
+	reader := flippingSettings(4, false, true)
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+
+	var onRecord *modeTransitionRecord
+	for _, r := range decodeModeTransitionRecords(t, buf) {
+		r := r
+		if r.DigestEnabled {
+			onRecord = &r
+		}
+	}
+	if onRecord == nil {
+		t.Fatalf("no digest mode changed record with digest_enabled=true was logged")
+	}
+	if onRecord.PendingCount == nil || *onRecord.PendingCount != 3 {
+		t.Fatalf("mid-loop transition pending_count = %v, want 3", onRecord.PendingCount)
+	}
+}
+
+// TestNotifyPending_ModeTransitionLog_FailedReadDoesNotUpdateLastObserved is
+// D-01's last guarantee: a failed read neither fabricates a transition nor
+// swallows the next real one.
+func TestNotifyPending_ModeTransitionLog_FailedReadDoesNotUpdateLastObserved(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	sender := &fakeSender{}
+	var stage int32 // 0=off, 1=error, 2=on
+	reader := &fakeSettingsReader{fn: func(ctx context.Context) (settings.Settings, error) {
+		switch atomic.LoadInt32(&stage) {
+		case 1:
+			return settings.Settings{}, errors.New("boom")
+		case 2:
+			return settings.Settings{DigestEnabled: true}, nil
+		default:
+			return settings.Settings{DigestEnabled: false}, nil
+		}
+	}}
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	atomic.StoreInt32(&stage, 0)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("pass 1 (digest off): %v, want nil", err)
+	}
+
+	atomic.StoreInt32(&stage, 1)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("pass 2 (settings read error): %v, want nil", err)
+	}
+
+	atomic.StoreInt32(&stage, 2)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("pass 3 (digest on): %v, want nil", err)
+	}
+
+	records := decodeModeTransitionRecords(t, buf)
+	if len(records) != 2 {
+		t.Fatalf("digest mode changed record count = %d, want exactly 2 (off at pass 1, on at pass 3): %+v", len(records), records)
+	}
+	if records[0].DigestEnabled {
+		t.Fatal("first record digest_enabled = true, want false (pass 1)")
+	}
+	if !records[1].DigestEnabled {
+		t.Fatal("second record digest_enabled = false, want true (pass 3)")
+	}
+}
