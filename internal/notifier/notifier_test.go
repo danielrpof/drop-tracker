@@ -102,6 +102,19 @@ func stubSettings(enabled bool) *fakeSettingsReader {
 	}}
 }
 
+// toggleableSettings returns a SettingsReader whose reported mode starts at
+// initial and can be flipped between NotifyPending calls via the returned
+// setter -- so a test can drive two passes on the SAME Notifier instance and
+// prove no per-pass caching hides a stale mode read (DGST-14).
+func toggleableSettings(initial bool) (*fakeSettingsReader, func(bool)) {
+	var enabled atomic.Bool
+	enabled.Store(initial)
+	r := &fakeSettingsReader{fn: func(ctx context.Context) (settings.Settings, error) {
+		return settings.Settings{DigestEnabled: enabled.Load()}, nil
+	}}
+	return r, func(v bool) { enabled.Store(v) }
+}
+
 // spacingRecorder installs a recording spacingWait seam for the duration of
 // t (via notifier.SetSpacingWaitForTest) and returns a func reporting the
 // durations NotifyPending's send loop requested. Each request is answered
@@ -924,5 +937,177 @@ func TestNotifyPending_DigestModeOn_SendsNothingAndLeavesRowsPending(t *testing.
 		if isNotified(t, pool, tc.id) {
 			t.Errorf("%s row was marked notified, want it left pending while digest mode is on", tc.name)
 		}
+	}
+}
+
+// TestNotifyPending_DigestToggleRoundTrip_QueuedEventsFlushExactlyOnce is
+// DGST-14's toggle round-trip: three rows queue while digest mode is on, then
+// the SAME Notifier instance -- no fresh construction -- flushes them all
+// exactly once once the mode reads off. Asserted on one instance so a cached
+// mode read would surface as a failure rather than being hidden by a fresh
+// object (D-07).
+func TestNotifyPending_DigestToggleRoundTrip_QueuedEventsFlushExactlyOnce(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "toggleroundtrip")
+	id1 := insertPendingEventTitled(t, pool, artistID, "toggle-ext-1", "Toggle Row One")
+	id2 := insertPendingEventTitled(t, pool, artistID, "toggle-ext-2", "Toggle Row Two")
+	id3 := insertPendingEventTitled(t, pool, artistID, "toggle-ext-3", "Toggle Row Three")
+
+	sender := &fakeSender{}
+	reader, setEnabled := toggleableSettings(true)
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("first NotifyPending (digest on): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls after digest-on pass = %d, want exactly 0", got)
+	}
+	for _, id := range []int64{id1, id2, id3} {
+		if isNotified(t, pool, id) {
+			t.Fatal("a row was acked while digest mode was on")
+		}
+	}
+
+	setEnabled(false)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("second NotifyPending (digest off, same instance): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 3 {
+		t.Fatalf("sender.calls after digest-off pass = %d, want exactly 3", got)
+	}
+	for _, id := range []int64{id1, id2, id3} {
+		if !isNotified(t, pool, id) {
+			t.Fatal("a row is still pending after the digest-off flush")
+		}
+	}
+}
+
+// TestNotifyPending_DigestOffFlush_OrderNoDuplication proves the off-flush
+// delivers every queued row exactly once, in ListUnnotified's order -- not
+// merely that a send count matches.
+func TestNotifyPending_DigestOffFlush_OrderNoDuplication(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "digestorder")
+	insertPendingEventTitled(t, pool, artistID, "digestorder-ext-1", "Order Row One")
+	insertPendingEventTitled(t, pool, artistID, "digestorder-ext-2", "Order Row Two")
+	insertPendingEventTitled(t, pool, artistID, "digestorder-ext-3", "Order Row Three")
+
+	var mu sync.Mutex
+	var titles []string
+	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		mu.Lock()
+		titles = append(titles, embed.Title)
+		mu.Unlock()
+		return nil
+	}}
+
+	spacingRecorder(t)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v", err)
+	}
+
+	mu.Lock()
+	got := append([]string(nil), titles...)
+	mu.Unlock()
+
+	want := []string{"Order Row One", "Order Row Two", "Order Row Three"}
+	if len(got) != len(want) {
+		t.Fatalf("recorded %d embed titles, want exactly %d: %v", len(got), len(want), got)
+	}
+	// formatEmbed prefixes an emoji, so match by containment rather than
+	// exact equality -- still element-by-element, in order.
+	for i, w := range want {
+		if !strings.Contains(got[i], w) {
+			t.Fatalf("embed title %d = %q, want it to contain %q at that exact position", i, got[i], w)
+		}
+	}
+}
+
+// TestNotifyPending_DigestOffFlush_IdempotentSecondPass proves the flush does
+// not re-send: a third pass, with the same digest-off reader, over an
+// already-acked outbox sends zero more messages.
+func TestNotifyPending_DigestOffFlush_IdempotentSecondPass(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "digestidempotent")
+	id1 := insertPendingEvent(t, pool, artistID, "digestidempotent-ext-1")
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("first NotifyPending: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls after the first pass = %d, want exactly 1", got)
+	}
+	if !isNotified(t, pool, id1) {
+		t.Fatal("row should be acked after the first pass")
+	}
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("second NotifyPending: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls after the second pass = %d, want still exactly 1 (the outbox is empty; nothing to re-send)", got)
+	}
+}
+
+// TestNotifyPending_DigestRealSettingsStore_TogglesWithoutRestart proves the
+// seam is satisfied by the production settings.Service (DGST-13, SC#3), and
+// that flipping the singleton row via a real Update call changes behavior on
+// the next pass with no restart. Built over testutil.NewIsolatedTestPool,
+// never the shared pool: internal/httpserver/settings_test.go flips the same
+// singleton notification_settings row and packages run in parallel, so a
+// shared-schema pool would let that package's writes decide this test's
+// outcome.
+func TestNotifyPending_DigestRealSettingsStore_TogglesWithoutRestart(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	settingsStore := settings.NewService(sqlc.New(pool))
+
+	artistID := insertTestArtist(t, pool, "digestrealstore")
+	id1 := insertPendingEvent(t, pool, artistID, "digestrealstore-ext-1")
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, settingsStore, time.Millisecond)
+
+	if _, err := settingsStore.Update(context.Background(), settings.UpdateParams{DigestEnabled: true, DigestCadence: settings.CadenceDaily}); err != nil {
+		t.Fatalf("Update(digest_enabled=true): %v", err)
+	}
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending (digest on): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls with the real store reporting digest on = %d, want exactly 0", got)
+	}
+	if isNotified(t, pool, id1) {
+		t.Fatal("row was acked while the real settings store reported digest mode on")
+	}
+
+	if _, err := settingsStore.Update(context.Background(), settings.UpdateParams{DigestEnabled: false, DigestCadence: settings.CadenceDaily}); err != nil {
+		t.Fatalf("Update(digest_enabled=false): %v", err)
+	}
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending (digest off): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls after the real store flips to digest off = %d, want exactly 1", got)
+	}
+	if !isNotified(t, pool, id1) {
+		t.Fatal("row should be acked once the real settings store reports digest mode off")
 	}
 }
