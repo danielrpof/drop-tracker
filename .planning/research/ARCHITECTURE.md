@@ -1,622 +1,306 @@
-# Architecture Research
+# Architecture Research — Digest/Batch Notification Mode (v1.5)
 
-**Domain:** Operator observability endpoints + persistence seam on an existing Go single-binary service (drop-tracker v1.4)
-**Researched:** 2026-09-09
-**Confidence:** HIGH (all integration points read directly from source at cited lines; no external-doc guessing)
+**Domain:** Instance-wide notification delivery-mode toggle inside an existing single-binary Go service (poller + notifier + API, no microservices)
+**Researched:** 2026-09-11
+**Confidence:** HIGH (derived directly from the existing codebase — `internal/poller`, `internal/notifier`, `internal/discord`, `internal/pollruns`, `internal/authgate`, `queries/events.sql` — not from external ecosystem sources; this is an in-repo architecture-fit question, not a "what does the ecosystem look like" question)
 
-This document answers "how do the four v1.4 features attach to the existing architecture?" It is written for the roadmapper (Phase 18/19 split) and the phase planners (concrete file/function/line integration points, the exact `RunRecorder` interface, a `poll_runs` DDL, and a build order).
+This research answers the milestone's central integration question by extending four patterns the codebase already uses successfully, rather than introducing new mechanisms:
 
-The four features:
-
-1. `GET /ready` — readiness probe that also checks migration-version drift.
-2. `poll_runs` table + `RunRecorder` seam — persist one summary row per poll cycle without giving the poller a DB connection.
-3. gated `GET /status` JSON endpoint — expose recent poll-run history.
-4. React "System" view — surface `/status` in the SPA behind the existing auth flow.
-
----
+1. The **events table as outbox** (`notified_at IS NULL` = pending) — already the queue; digest mode reuses it unchanged, per the milestone's own "no new polling" constraint.
+2. The **CAS overlap-guard + narrow consumer-declared seam** idiom from `poller.Poller` (D-08, D-11) — reused for the new digest scheduler.
+3. The **ticker-driven background goroutine** idiom from `authgate.Manager.sweepLoop` — reused instead of a third `robfig/cron` entry, and instead of a fixed `"0 9 * * *"` cron spec.
+4. The **inert-no-op-default option** idiom (`notifier.NoOp`, `poller.noopRunRecorder`) — reused so digest mode ships additive and off-by-default, matching D-10 and the milestone's "default stays real-time/off" requirement.
 
 ## Standard Architecture
 
-### System Overview (existing, with v1.4 additions marked ★)
+### System Overview
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  cmd/server/main.go — composition root (boot order fixed)             │
-│  config → logging → weak-pass WARN → gate-status log                  │
-│    → db.RunMigrations → db.NewPool → clients/limiters                 │
-│    → detection.New → artistart → watchlist.NewService → eventsStore   │
-│    → notifier.Select → poller.New → httpserver.New                    │
-│  ★ + db.ExpectedSchemaVersion (once, pre-listener)                    │
-│  ★ + pollruns.NewRecorder(pool) wired via poller.WithRunRecorder      │
-│  ★ + pollruns.NewStore(pool) wired into httpserver.New                │
-└───────────────┬──────────────────────────────────┬───────────────────┘
-                │                                  │
-   ┌────────────▼─────────────┐        ┌───────────▼────────────────────┐
-   │ internal/poller          │        │ internal/httpserver (chi)      │
-   │  Poller — NO DB conn      │        │  Server{db,watchlist,events,   │
-   │  runCycle(...) engine     │        │         sources,gate ★+status  │
-   │   ├ ReleaseGroupSource    │        │         ★+ready ★+expectedVer} │
-   │   ├ AlbumSource           │        │  /health  (ungated)            │
-   │   ├ EventRecorder         │        │  ★ /ready (ungated)            │
-   │   ├ Notifier              │        │  gated Group:                  │
-   │   ★ + RunRecorder seam    │        │   /search /watchlist /events   │
-   │      RecordRun(ctx,Result)│───────▶│   ★ /status                    │
-   └────────────┬─────────────┘        │  NotFound → embedded SPA        │
-                │                       └───────────┬────────────────────┘
-   ┌────────────▼─────────────┐        ┌────────────▼───────────────────┐
-   │ ★ internal/pollruns      │        │ web/app (React Router SPA)     │
-   │  Recorder  (sqlc + pool) │        │  ★ routes.ts + /system route   │
-   │  Store     (sqlc + pool) │        │  ★ root.tsx nav tab            │
-   └────────────┬─────────────┘        │  ★ lib/api.ts getStatus()      │
-                │                       │  ★ routes/system.tsx          │
-   ┌────────────▼─────────────────────────────────────────────────────┐
-   │ Postgres — sqlc queries (queries/*.sql), migrations              │
-   │  internal/db/migrations/*.up.sql (iofs-embedded)                 │
-   │  ★ 000008_poll_runs.up.sql  +  queries/pollruns.sql             │
-   │  schema_migrations (golang-migrate-owned, read by /ready)        │
-   └─────────────────────────────────────────────────────────────────┘
+│                         cmd/server/main.go                            │
+│  (composition root — constructs every seam below, then Start()s both  │
+│   schedulers)                                                         │
+├──────────────────────────┬─────────────────────────┬──────────────────┤
+│      internal/poller      │    internal/digest (NEW) │  internal/httpserver│
+│  ┌──────────────────┐    │  ┌────────────────────┐  │  ┌─────────────┐ │
+│  │ cron: MB cycle    │    │  │ time.Ticker loop   │  │  │ GET/PUT     │ │
+│  │ cron: Deezer cycle│    │  │ (mirrors authgate's│  │  │ /settings/  │ │
+│  │ (unchanged)       │    │  │  sweepLoop, NOT a   │  │  │ digest      │ │
+│  │ end-of-cycle:      │    │  │  3rd cron entry)    │  │  │ (NEW)       │ │
+│  │  notifier.NotifyPending│  │  each tick: read    │  │  └──────┬──────┘ │
+│  └─────────┬──────────┘    │  settings fresh,      │  │         │        │
+│            │                │  CAS-guard, if due:   │  │         │        │
+│            │                │  Notifier.SendDigest  │  │         │        │
+│            │                └──────────┬────────────┘  │         │        │
+├────────────┴───────────────────────────┼────────────────┴─────────┼───────┤
+│                     internal/notifier (extended)                          │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │ NotifyPending(ctx,logger)  — checks SettingsReader first; if      │   │
+│  │   digest ON, returns nil (rows stay pending) — else unchanged     │   │
+│  │   real-time drain+send+mark loop (today's behavior)               │   │
+│  │ SendDigest(ctx,logger)     — NEW: drains pending, reuses the SAME │   │
+│  │   formatEmbed/suppresses/listUnnotified/markNotified helpers,     │   │
+│  │   batches into <=10-embed Discord messages, sends via SendBatch   │   │
+│  └───────────────────────────────────────────┬─────────────────────┘  │
+├──────────────────────────────────────────────┼────────────────────────┤
+│              internal/discord (extended: +SendBatch)   internal/settings │
+│  ┌────────────────────────────┐              │        (NEW, thin)      │
+│  │ sendAttempt(ctx, []Embed)   │◄─────────────┘        ┌──────────────┐│
+│  │  Send()      = 1-embed call │                       │ Store.Get    ││
+│  │  SendBatch() = N-embed call │                       │ Store.Update ││
+│  └──────────────┬──────────────┘                       └──────┬───────┘│
+├─────────────────┴──────────────────────────────────────────────┴───────┤
+│                              Postgres (pgx/v5, sqlc)                    │
+│  ┌──────────────┐          ┌─────────────────────────────┐             │
+│  │ events table  │          │ notification_settings (NEW,  │             │
+│  │ (unchanged —  │          │  singleton row: enabled,     │             │
+│  │  the outbox)  │          │  cadence, last_sent_at)      │             │
+│  └──────────────┘          └─────────────────────────────┘             │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Component Responsibilities
 
-| Component | Responsibility | Implementation for v1.4 |
-|-----------|----------------|-------------------------|
-| `internal/db.ExpectedSchemaVersion()` ★ | Report the max migration version embedded in this binary | New exported func in `internal/db/migrate.go`, reuses `migrationsFS` + `maxSourceVersion` |
-| `httpserver` `ReadinessChecker` seam ★ | Read `schema_migrations` (version, dirty) via the live pool | New consumer-declared interface in `httpserver`, thin `*pgxpool.Pool` wrapper |
-| `httpserver.handleReady` ★ | Compose ping + schema check into a `/ready` JSON response | New handler file `internal/httpserver/ready.go`, registered next to `/health` |
-| `poller.RunRecorder` seam ★ | Accept one `RunResult` at cycle end; poller stays DB-free | New consumer-declared interface in `internal/poller/poller.go` |
-| `internal/pollruns.Recorder` ★ | Persist a `poll_runs` row + prune to newest N (sqlc + pool) | New package mirroring `internal/events` shape |
-| `internal/pollruns.Store` ★ | Read "latest N per source" for `/status` | Same package, second narrow type |
-| `httpserver.handleStatus` ★ | Serve gated `GET /status` from `pollruns.Store` | New handler file `internal/httpserver/status.go`, added to `registerDataRoutes` |
-| `web/app/routes/system.tsx` ★ | Render `/status` payload; mirrors `history.tsx` fetch/loading/error shape | New route + `components/system/*` |
+| Component | Responsibility | New or Modified |
+|-----------|----------------|------------------|
+| `notification_settings` table | Single-row instance config: digest on/off, cadence, last-sent bookkeeping | **New** — one additive migration |
+| `internal/settings` | Thin sqlc-backed store: `Get(ctx)`/`Update(ctx, ...)`, typed `Settings` struct | **New** — small package, mirrors `internal/pollruns`'s "wrap sqlc, expose a narrow struct" shape |
+| `internal/digest` | Ticker-driven scheduler: reads settings fresh every tick, decides "is a digest due," CAS-guards against overlap, calls `Notifier.SendDigest` when due | **New** — mirrors `authgate.Manager.sweepLoop`, not a third `robfig/cron` entry |
+| `internal/notifier.Notifier` | Gains a `SettingsReader` seam + mode check at the top of `NotifyPending`; gains a `SendDigest` method reusing existing private helpers | **Modified** — additive, no signature break on `poller.Notifier`/`Sink` |
+| `internal/discord.Client` | Gains `SendBatch(ctx, []Embed) error`; `Send` becomes a 1-embed wrapper over the same internal path | **Modified** — additive |
+| `internal/httpserver` | Gains `GET/PUT /settings/digest` inside the existing protected route group | **New routes**, existing group |
+| `internal/poller` | **Unchanged.** Still calls `notifier.NotifyPending` at end-of-cycle; digest mode's behavior change lives entirely inside `NotifyPending`, invisible to `poller` | **Unchanged** |
+| `web/app` SPA | New settings control (toggle + cadence select), likely a new panel alongside the existing System view | **New** UI, existing page-shell patterns |
 
----
+## Answering the Three Integration Questions Directly
 
-## Feature-by-Feature Integration
+### 1. New `robfig/cron` entry, or a different scheduling approach?
 
-### (a) `GET /ready` and the migration-version check
+**Recommendation: a plain `time.Ticker`-driven goroutine (mirroring `authgate.Manager.sweepLoop`), not a third `robfig/cron` entry.**
 
-**Where the "expected" version comes from — without duplicating `migrate.go`'s source wiring.**
+Reasoning, grounded in what's already in the codebase:
 
-`internal/db/migrate.go` already owns everything needed:
+- `poller.Poller` registers its two cron entries with a **fixed spec computed once at construction** (`spec := fmt.Sprintf("@every %s", interval.String())`, passed to `p.cron.AddFunc` inside `New`). robfig/cron has no supported way to change an already-registered entry's spec at runtime — the only path is `cron.Remove(id)` + a fresh `AddFunc` with a new spec, which is exactly the kind of runtime cron-internals reprogramming the milestone is trying to avoid needing every time an operator flips daily↔weekly in the SPA.
+- A **literal wall-clock cron spec** (e.g. `"0 9 * * *"`) is fragile against exactly the failure mode a single-instance self-hosted tool is most likely to hit: the process being down, mid-restart, or mid-deploy at 09:00. robfig/cron does not replay a missed tick — if the process wasn't running at 09:00:00, that day's digest silently never fires.
+- The project already has a proven, tested, in-repo precedent for "periodic background check against mutable state, stoppable via `Close()`": `authgate.Manager.sweepLoop`, a `time.NewTicker`-driven goroutine with a `sweepDone` channel and a `sync.Once`-guarded `Close`. The digest scheduler is structurally the same shape — periodic check, no cron-expression complexity needed — so reusing that idiom is lower-risk than introducing robfig/cron's expression parser for a feature that only ever uses `@every N`, which a raw ticker already does with less machinery.
+- Design: register one goroutine that ticks at a short, fixed, **compile-time interval** (a new `DIGEST_CHECK_INTERVAL` env var, default e.g. `5m`, following the exact `env:"..." envDefault:"..."` pattern already used for `POLL_INTERVAL`/`EVENT_RETENTION_DAYS` in `internal/config/config.go`). On every tick: read `notification_settings` fresh (see Q2), and if `digest_enabled` is true and `now` has crossed the next due boundary for `digest_cadence` since `digest_last_sent_at`, call `Notifier.SendDigest`. A tick that fires late (process was down at the boundary) still fires — "due since X" is a durable, persisted fact (`digest_last_sent_at` in Postgres), not a missed cron tick — which is what makes this approach resilient to restarts/deploys in a way a fixed cron spec is not.
+- Overlap guard: mirror `poller`'s CAS idiom exactly — a dedicated `atomic.Bool` (not shared with `notifier.Notifier.notifying`, matching D-08's "separate guards per independent concern" precedent from `mbRunning`/`dzRunning`) so a slow digest send can never collide with a concurrently-arriving tick.
+- Fixed target hour: the milestone's locked scope is on/off + daily/weekly cadence only — no specific "9am" requirement is in `PROJECT.md`. Recommend a single compile-time target hour (UTC) for v1.5, exactly the same posture the project already took with `pollruns.N` ("a compile-time constant, deliberately not an environment variable" — ADR-0001 precedent for keeping something a constant until there's a real reason to expose it). If a later milestone wants an operator-configurable hour, it is an additive column on the same settings table — no architecture change.
 
-- `migrationsFS` embed (`migrate.go:22-23`)
-- `iofs.New(migrationsFS, "migrations")` (`migrate.go:209`, inside `RunMigrations`)
-- `maxSourceVersion(src source.Driver) (uint, bool)` (`migrate.go:326-341`) — already walks a source to its highest version using the documented `os.ErrNotExist` end signal, already used by the ahead-of-source no-op guard at `migrate.go:298-302`.
+### 2. Where does the digest setting live, and how is it read?
 
-**Recommendation:** add one exported function to `internal/db/migrate.go` — no new file, no new source wiring:
+**Recommendation: a new dedicated singleton table (`notification_settings`), read fresh from Postgres on every check (no boot-time load, no in-process cache).**
 
-```go
-// ExpectedSchemaVersion returns the highest migration version embedded in
-// this binary. It reuses RunMigrations' own iofs source, so the number can
-// never drift from what RunMigrations would apply.
-func ExpectedSchemaVersion() (uint, error) {
-    src, err := iofs.New(migrationsFS, "migrations")
-    if err != nil {
-        return 0, fmt.Errorf("load embedded migrations: %w", err)
-    }
-    defer func() { _ = src.Close() }()
-    v, ok := maxSourceVersion(src)
-    if !ok {
-        return 0, errors.New("db: embedded migration source is empty")
-    }
-    return v, nil
-}
-```
+Why a new table, not a column on an existing one:
+- `events` is per-event-row data (the outbox), not instance config — bolting instance-wide settings onto it would mean every row redundantly carries (or a sentinel row fakes) config state; wrong shape.
+- `watchlist`/`artists` are per-artist scope; digest settings are instance-wide, orthogonal to any single artist.
+- There is no existing "one row per instance" table (unlike `authgate`, which is env-var-only and therefore has no DB row at all) — this milestone is explicitly the first instance-wide setting that needs to be **SPA-configurable without a redeploy**, which env vars structurally cannot satisfy. A new table is the correct, minimal-surface primitive.
+- Precedent for the shape: `pollruns` deliberately rejected a new Postgres table for run-history because that data resets-on-restart by design and the table version carried real concurrency hazards (ADR-0001). Digest settings are the opposite case — they must **survive restart** (an operator's toggle should stick) and involve no concurrency hazard (one low-frequency, single-row read-modify-write from one admin action, not a hot per-artist path) — so a table is the right call here specifically, even though `pollruns` correctly avoided one for its own use case.
 
-Call it **once** in `cmd/server/main.go`, in the boot sequence right after `db.RunMigrations` succeeds (`main.go:137-139`) and before `httpserver.New` (`main.go:235`). Pass the resulting `uint` into `httpserver.New`. Do **not** walk the source per request.
-
-**Where the "applied" version comes from.** `schema_migrations` is a golang-migrate-owned single-row table (`version bigint, dirty boolean`). It is not in `internal/db/migrations/`, so **sqlc does not know it** — a sqlc query is not an option without polluting the schema dir. Two clean choices:
-
-- **Recommended:** a hand-rolled pgx query on the existing pool. This mirrors how golang-migrate itself reads the table and keeps the check on the already-open connection (no fresh `sql.Open` per probe, unlike `runMigrationsOnce` at `migrate.go:272-277`):
-  ```go
-  // internal/httpserver/ready.go
-  type ReadinessChecker interface {
-      SchemaVersion(ctx context.Context) (version uint, dirty bool, err error)
-  }
-  ```
-  Implemented by a tiny wrapper in `main.go` (or a 15-line `internal/db` helper `SchemaVersion(ctx, pool)`) running:
-  `SELECT version, dirty FROM schema_migrations`.
-- Rejected: reuse `runMigrationsWithSource`-style wiring to build a `migrate.Instance` and call `m.Version()` — opens a second `database/sql` handle on every hit, slow, and duplicates the driver setup.
-
-This is the **same consumer-declared-seam pattern** as `httpserver.Pinger` (`server.go:20-27`) — a test substitutes a fake with no real DB.
-
-**`/ready` handler** (`internal/httpserver/ready.go`, new file; mirror `health.go` exactly):
-
-- Route registration: `r.Get("/ready", s.handleReady)` immediately after `r.Get("/health", s.handleHealth)` at `server.go:164` — **outside** the gate in both branches (ops/orchestrator probe, must be unauthenticated, same rationale as `/health` D-03).
-- Logic, bounded by a `context.WithTimeout` like `healthPingTimeout` (`health.go:17,29`):
-  1. `s.db.Ping(ctx)` fails → `503`, `{"status":"not_ready","db":"down"}`.
-  2. `s.ready.SchemaVersion(ctx)` errors → `503`, `{"status":"not_ready","schema":"unknown"}`.
-  3. `dirty == true` → `503`, `{"status":"not_ready","schema":"dirty"}`.
-  4. `applied < expected` → `503`, `{"status":"not_ready","schema":"behind","schema_version":<applied>,"expected_version":<expected>}` (migrations not fully applied, or a newer binary against an un-migrated DB).
-  5. `applied >= expected` && not dirty && db up → `200`, `{"status":"ready","db":"up","schema":"ok","schema_version":<applied>}`.
-- **Decision flag for the planner:** step 5 treats `applied > expected` (the N-1 rollback / ahead-of-source case that `migrate.go:298-302` deliberately tolerates) as **ready**. The stricter alternative (`applied == expected` only) would report a cleanly rolled-back binary as not-ready. Recommend `>=`; the planner should confirm against the deferred Phase 17 deploy model.
-- Error text (the raw schema/ping error) goes to `httplog.SetAttrs` only, never the body — same rule as `health.go:38`.
-
-**New vs modified:**
-
-| File | Change |
-|------|--------|
-| `internal/db/migrate.go` | MODIFIED — add `ExpectedSchemaVersion()` (+ optionally `SchemaVersion(ctx, pool)`) |
-| `internal/httpserver/ready.go` | NEW — `ReadinessChecker` seam + `handleReady` |
-| `internal/httpserver/server.go` | MODIFIED — register `/ready`; accept checker + expected version (see (c) for how) |
-| `cmd/server/main.go` | MODIFIED — call `ExpectedSchemaVersion()`, build checker, pass both to `New` |
-| `internal/httpserver/ready_test.go` | NEW |
-
----
-
-### (b) `RunRecorder` seam — keeping the poller DB-free
-
-**This is the riskiest edit. `runCycle` (`poller.go:270-399`) is shared by `RunMusicBrainzCycle` and `RunDeezerCycle` and has careful ctx-cancellation + per-worker panic isolation that must not regress.**
-
-#### Seam shape: one `RecordRun` call at cycle end (not start/finish)
-
-A single terminal call is strongly preferred:
-
-- It keeps the poller's "no DB connection" principle intact — `runCycle` calls a narrow interface exactly as it already calls `EventRecorder` and `Notifier` (`poller.go:80-101`).
-- A start/finish pair would need an in-progress row, an UPDATE path, and crash-recovery semantics (orphaned "running" rows) — disproportionate for a portfolio observability feature. `/status` showing terminal rows for the last N cycles is sufficient.
-- Trade-off accepted: a hard process crash mid-cycle leaves no row for that cycle. Per-artist panics are already recovered inside the worker (`poller.go:337-345`), so a single bad artist never costs the row.
-
-**Consumer-declared interface, added to `internal/poller/poller.go` next to `Notifier` (`poller.go:91-101`):**
-
-```go
-// RunRecorder is the narrow seam runCycle uses to persist one poll-cycle
-// summary row at the end of every cycle. Declared here, in the consumer,
-// exactly as EventRecorder and Notifier are, so the Poller still holds no
-// database connection itself (see the package comment) and a test can
-// substitute a fake. cmd/server/main.go wires the sqlc-backed
-// internal/pollruns.Recorder.
-type RunRecorder interface {
-    RecordRun(ctx context.Context, result RunResult) error
-}
-
-// RunResult is the immutable summary of one completed poll cycle.
-type RunResult struct {
-    Source         string    // "musicbrainz" | "deezer" (the existing source const)
-    CycleID        string    // the existing "<source>-<n>" correlation id
-    StartedAt      time.Time // cycleStart (poller.go:286)
-    FinishedAt     time.Time
-    DurationMS     int64     // already computed at poller.go:381
-    ArtistsPolled  int       // entries for which fetchAndRecord was invoked
-    ArtistsErrored int       // fetchAndRecord returned non-nil, or the worker panicked
-    Outcome        string    // "success" | "error" | "cancelled"
-}
-```
-
-**`EventsRecorded` is deliberately NOT on `RunResult`.** Today the `EventRecorder` methods return only `error` (`detection/musicbrainz.go:46`, `detection/deezer.go:33`); the per-cycle `inserted` count exists only as a local for logging (`musicbrainz.go:70,104`; `deezer.go:58,99`). Two ways to get `events_recorded` into the row:
-
-- **Recommended (minimal runCycle risk): compute it downstream in `pollruns.Recorder`.** `RecordRun` runs `SELECT count(*) FROM events WHERE source = $1 AND created_at >= $2` using `StartedAt`. Safe because the per-source overlap guard (`poller.go:278-281`) guarantees no other cycle of the same source ran in that window, and `events.created_at` defaults to `now()` (`000003_events.up.sql:40`) which is always `>= StartedAt` (captured in Go before `store.List`). Guest-feature / deluxe rows also carry `source='musicbrainz'` (`000003_events.up.sql:9-11`) so they count toward MB runs — desirable. Zero poller/detection changes for the count.
-- Alternative (more precise, more invasive): widen `EventRecorder.DetectMusicBrainz` / `DetectDeezer` to `(int, error)`, thread the count through the `fetchAndRecord` closures, sum with an `atomic.Int64` in `runCycle`. Touches the detection package signatures + ~6 test call sites + both closures. Only choose this if the planner wants exact attribution independent of wall-clock.
-
-#### Wiring `RunRecorder` into the `Poller` — functional option, not a constructor param
-
-Add via `poller.WithRunRecorder(r RunRecorder) Option`, mirroring `WithMusicBrainzWorkers` (`poller.go:110-123`). The `p.runs` field defaults to a private `noopRunRecorder{}` so `runCycle` never nil-checks it (same discipline as the always-non-nil `Notifier`, `poller.go:96-98`). This keeps `poller.New`'s signature stable — `main.go:258` stays a pure additive `poller.WithRunRecorder(pollruns.NewRecorder(pool))` argument.
-
-#### The exact `runCycle` change (minimal, spelled out)
-
-Signature — one change: `fetchAndRecord` gains an `error` return.
-
-```
-BEFORE (poller.go:270):
-  fetchAndRecord func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry)
-AFTER:
-  fetchAndRecord func(ctx context.Context, logger *slog.Logger, entry watchlist.Entry) error
-```
-
-Body — five localized edits, none touching the CAS guard, the semaphore/`select`-on-`ctx.Done()` dispatch, or `wg.Wait()`:
-
-1. **After `cycleStart` (`poller.go:286`), before the dispatch loop:** declare counters.
-   ```go
-   var artistsPolled, artistsErrored atomic.Int64
-   ```
-
-2. **Inside the worker goroutine, in the panic-recovery block (`poller.go:337-345`):** add `artistsErrored.Add(1)` alongside the existing `logger.Error("poll worker panicked", ...)`. A panicked artist is an errored artist.
-
-3. **Inside the worker goroutine, replacing the bare `fetchAndRecord(ctx, logger, entry)` call (`poller.go:360`):**
-   ```go
-   artistsPolled.Add(1)
-   if err := fetchAndRecord(ctx, logger, entry); err != nil {
-       artistsErrored.Add(1)
-   }
-   ```
-   This sits *after* the existing in-flight `if err := ctx.Err(); err != nil { return }` check (`poller.go:356-358`), so a worker that never runs its fetch is not counted as polled — correct.
-
-4. **The two closures in `RunMusicBrainzCycle` / `RunDeezerCycle` (`poller.go:417-442`, `476-501`)** change from bare `return` after a logged error to `return err` (fetch error at `:419-425` / `:478-484`; detection error at `:434-441` / `:493-500`) and `return nil` at the end. `shouldDispatch` is unchanged — a skipped nil-`DeezerID` entry (`poller.go:465-474`) is never counted in `artistsPolled`, which is correct (it was not polled).
-
-5. **After the post-join `ctx.Err()` re-check (`poller.go:375-377`) and the existing `"poll cycle complete"` log (`poller.go:379-382`), before the `if cycleErr != nil { return cycleErr }` return (`poller.go:384-386`):**
-   ```go
-   outcome := "success"
-   switch {
-   case errors.Is(cycleErr, context.Canceled), errors.Is(cycleErr, context.DeadlineExceeded):
-       outcome = "cancelled"
-   case cycleErr != nil:
-       outcome = "error"
-   }
-   recCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordRunTimeout)
-   if err := p.runs.RecordRun(recCtx, RunResult{
-       Source: source, CycleID: cycleID, StartedAt: cycleStart, FinishedAt: time.Now(),
-       DurationMS: time.Since(cycleStart).Milliseconds(),
-       ArtistsPolled: int(artistsPolled.Load()), ArtistsErrored: int(artistsErrored.Load()),
-       Outcome: outcome,
-   }); err != nil {
-       logger.Error("record poll run failed", slog.String("run_recorder_error", err.Error()))
-   }
-   cancel()
-   ```
-   - `context.WithoutCancel` (Go 1.21+; the module is `go 1.26`) is load-bearing: a shutdown-cancelled cycle must still write its row. This is the *only* place `runCycle` needs a detached context; `recordRunTimeout` is a new package const (~5s), mirroring `healthPingTimeout`.
-   - It is placed **before** the `cycleErr != nil` early return so error/cancelled cycles are still recorded — that is the whole point of the feature.
-   - A `RecordRun` failure is **logged, not returned** — identical treatment to `NotifyPending` (`poller.go:394-396`): an observability write must never turn a successful detection cycle into a failed one.
-
-**The CAS overlap-skip path (`poller.go:278-281`) is deliberately left untouched** — no `poll_runs` row for a skipped tick. It returns `ErrCycleInProgress` before `cycleID`/`cycleStart` even exist, the existing `Warn` log already covers it, and writing DB rows on that hot guard adds risk for no value. Note this exclusion for the planner (an `outcome='skipped'` row was considered and rejected).
-
-**New vs modified for (b):**
-
-| File | Change |
-|------|--------|
-| `internal/poller/poller.go` | MODIFIED — `RunRecorder`/`RunResult` types, `p.runs` field + `WithRunRecorder` option + noop default, `recordRunTimeout` const, the 5 `runCycle` edits, `fetchAndRecord` return in both closures |
-| `internal/poller/poller_test.go` (+ fakes) | MODIFIED — fake `RunRecorder`, closure signatures |
-| `internal/pollruns/recorder.go` | NEW — sqlc-backed `Recorder` (INSERT + prune, + optional `events` count subquery) |
-| `internal/pollruns/pollruns_test.go` | NEW — integration test (`make db-up`) |
-| `queries/pollruns.sql` | NEW — see (d) |
-| `internal/db/migrations/000008_poll_runs.up.sql` / `.down.sql` | NEW — see (d) |
-| `internal/db/sqlc/*` | REGENERATED — `make sqlc-check` gate |
-| `cmd/server/main.go` | MODIFIED — `pollruns.NewRecorder(pool)` via `poller.WithRunRecorder` |
-
----
-
-### (c) `GET /status` — on the existing `Server`, inside the gated Group
-
-Yes. `/status` exposes operational data (poll timings, watchlist-derived counts, error counts) — it belongs behind the same gate as `/events` and `/watchlist`. It is a `GET`, so it is CSRF-exempt automatically.
-
-- **New seam:** `httpserver` declares its own narrow interface (same pattern as `events.Store` at `events/service.go:82-84`, referenced from `server.go:106`):
-  ```go
-  // internal/httpserver/status.go
-  type StatusStore interface {
-      RecentPollRuns(ctx context.Context, limit int32) ([]pollruns.Run, error)
-  }
-  ```
-  Implemented by `internal/pollruns.Store` (sqlc + pool), constructed in `main.go` and passed to `httpserver.New`.
-- **Route registration:** add `r.Get("/status", s.handleStatus)` to `registerDataRoutes` (`server.go:197-204`). Because that function is called on the gated sub-router when a passphrase is set and on the root router otherwise (`server.go:166-182`), `/status` inherits `gate.Authenticate` + `gate.RequireCSRFHeader` with zero extra wiring, and `X-Instance-Gated` is set on its responses for free.
-- **Handler** (`internal/httpserver/status.go`, new file): fetch newest N per source (two `RecentPollRuns` calls, or one query — see (d)), assemble the envelope, encode. Mirror `handleListEvents` error handling exactly (`events.go:124-128`): raw store error → `httplog.SetAttrs` + fixed `"internal error"` 500, never raw DB text.
-- **Response envelope** (keep scoped; the planner can extend):
-  ```json
-  {
-    "poll_interval_seconds": 3600,
-    "poll_runs": {
-      "musicbrainz": [ { "cycle_id": "musicbrainz-42", "started_at": "...", "finished_at": "...",
-                         "duration_ms": 1234, "artists_polled": 12, "artists_errored": 0,
-                         "events_recorded": 3, "outcome": "success", "error": null }, ... ],
-      "deezer": [ ... ]
-    }
-  }
-  ```
-  `poll_interval_seconds` is available from `cfg.PollInterval` at `main.go` construction; pass it into `New`. Optional additions the planner may want: `watchlist_count` (needs a new `CountWatchlist` sqlc query — `queries/watchlist.sql` currently has no count), `ready` block (fold in the (a) schema check).
-
-**How `New`'s signature grows (applies to both (a) and (c)).** `server.go:48-51` and `:106` establish the rule: every existing 5-arg `New` call stays a pure additive change. Two viable approaches — planner picks:
-
-- **Functional options** `WithReadiness(checker, expectedVersion)` and `WithStatus(store, pollInterval)`: zero churn on the ~15 existing `New` call sites in tests; handlers return `503 "not configured"` when the option is absent. Best for `/ready` (degrades gracefully, ops-only).
-- **Positional params**: honest (main.go always wires them), matches how `eventsStore` was added as the 3rd param, but touches every `New(...)` test call. Acceptable for `statusStore` since `/status` is always registered.
-  Recommendation: `WithReadiness(...)` option for (a); `WithStatus(...)` option for (c), with `/status` returning 503 when unconfigured so the route table stays identical.
-
-**New vs modified for (c):**
-
-| File | Change |
-|------|--------|
-| `internal/httpserver/status.go` | NEW — `StatusStore` seam + `handleStatus` + wire types |
-| `internal/httpserver/server.go` | MODIFIED — `registerDataRoutes` gains `/status`; `New` gains option(s) |
-| `internal/httpserver/status_test.go` | NEW — gated + inert cases (mirror `events_test.go`) |
-| `internal/pollruns/store.go` | NEW — sqlc-backed `Store.RecentPollRuns` |
-| `cmd/server/main.go` | MODIFIED — build `pollruns.NewStore(pool)`, pass via option |
-
----
-
-### (d) `poll_runs` schema, indexes, and prune-on-insert
-
-**Migration `internal/db/migrations/000008_poll_runs.up.sql` (purely additive — new table, no expand/contract concern, N-1-safe because the previous release never queries it):**
+Schema sketch (new additive migration, following the existing migrations' comment-heavy style and the N-1 expand/contract rule in `internal/db/migrations/README.md`):
 
 ```sql
--- v1.4 OPS: one summary row per completed poll cycle (RunRecorder seam).
--- Brand-new table: additive-only, no old binary references it, so the
--- README's expand/contract rule imposes nothing here. Every NOT NULL is on
--- a fresh table (never an ALTER ADD COLUMN NOT NULL), so cmd/migration-check
--- has nothing to flag. Plain CREATE INDEX (not CONCURRENTLY) is fine inside
--- golang-migrate's per-file transaction on an empty table.
-CREATE TABLE poll_runs (
-    id               BIGSERIAL PRIMARY KEY,
-    source           TEXT        NOT NULL,
-    cycle_id         TEXT        NOT NULL,
-    started_at       TIMESTAMPTZ NOT NULL,
-    finished_at      TIMESTAMPTZ NOT NULL,
-    duration_ms      BIGINT      NOT NULL,
-    artists_polled   INTEGER     NOT NULL,
-    artists_errored  INTEGER     NOT NULL,
-    events_recorded  INTEGER     NOT NULL,
-    outcome          TEXT        NOT NULL,
-    error            TEXT,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT poll_runs_source_valid  CHECK (source  IN ('musicbrainz', 'deezer')),
-    CONSTRAINT poll_runs_outcome_valid CHECK (outcome IN ('success', 'error', 'cancelled'))
+CREATE TABLE notification_settings (
+    id                  INT PRIMARY KEY DEFAULT 1,
+    digest_enabled      BOOLEAN NOT NULL DEFAULT false,
+    digest_cadence      TEXT NOT NULL DEFAULT 'daily'
+                          CHECK (digest_cadence IN ('daily', 'weekly')),
+    digest_last_sent_at TIMESTAMPTZ,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT notification_settings_singleton CHECK (id = 1)
 );
 
--- Query pattern is exclusively "latest N for one source" — this index makes
--- it an index-only backwards scan with no sort node.
-CREATE INDEX poll_runs_source_started_idx ON poll_runs (source, started_at DESC);
+INSERT INTO notification_settings (id) VALUES (1);
 ```
 
-`.down.sql`: `DROP TABLE IF EXISTS poll_runs;` (exists for the pair; the app never runs it — README rule).
+The `CHECK (id = 1)` + a migration-time seed `INSERT` gives an always-exactly-one-row table with no application-level "ensure a row exists" logic and no upsert-race handling — `GetNotificationSettings` (`SELECT * ... WHERE id = 1`) and `UpdateNotificationSettings` (`UPDATE ... WHERE id = 1 RETURNING *`) are both trivial, single-row, index-backed (PK) lookups. This is the same "make invalid states unrepresentable via a CHECK constraint" instinct the project already applies elsewhere (`events_source_valid`, `events_event_type_valid`).
 
-Column notes: `error` is the only nullable column (`NULL` on success; redacted text on failure — reuse `internal/db`'s redaction discipline if the error can carry a DSN, though poller errors here are watchlist/upstream errors, not DSN-bearing). `events_recorded` is `NOT NULL` — the `Recorder` always computes it (0 if the subquery approach finds nothing).
+**Read timing — the load-bearing decision for "takes effect without a restart":**
 
-**Read query — one statement covers "latest N per source" for both sources** using a lateral join, so `handleStatus` makes a single round trip:
+Do **not** load settings once at boot into a struct field. Read fresh via a cheap single-row `SELECT` at two call sites:
+1. Every digest-ticker tick (every `DIGEST_CHECK_INTERVAL`, e.g. 5 min) — decides whether a digest is due.
+2. Every `Notifier.NotifyPending` invocation (i.e. at the end of every poll cycle, both MusicBrainz and Deezer) — decides whether to send real-time or leave rows pending for the digest job.
 
-```sql
--- name: RecentPollRunsBySource :many
--- One row block per source, newest-first, capped at $1 per source.
-SELECT r.id, r.source, r.cycle_id, r.started_at, r.finished_at, r.duration_ms,
-       r.artists_polled, r.artists_errored, r.events_recorded, r.outcome, r.error, r.created_at
-FROM (VALUES ('musicbrainz'), ('deezer')) AS s(source)
-CROSS JOIN LATERAL (
-    SELECT * FROM poll_runs p
-    WHERE p.source = s.source
-    ORDER BY p.started_at DESC, p.id DESC
-    LIMIT sqlc.arg('per_source')::int
-) r
-ORDER BY r.source, r.started_at DESC, r.id DESC;
-```
+Both call sites already run at low, bounded frequency (poll cycles are ~15 min apart per source by default; the digest ticker is proposed at 5 min) — the query cost is the same class as `store.List()` already paid once per poll cycle. No cache/invalidation layer is needed: a PK-indexed single-row read is cheap enough that re-querying Postgres each time is simpler and strictly more correct than an in-process cache that would need an explicit invalidation hook wired to the new `PUT /settings/digest` handler. This mirrors the project's own stated bias against premature complexity (ADR-0001's rejection of a `poll_runs` table cited exactly this kind of unnecessary-machinery risk).
 
-(If the planner prefers dead-simple: two `ListRecentPollRuns($source, $limit)` calls. Either is fine; the lateral version is one round trip.)
+### 3. How does `internal/notifier` support both delivery modes without duplicating embed-building?
 
-**Prune-on-insert — two explicit statements in a transaction, no trigger, no self-referential CTE.**
+**Recommendation: keep `formatEmbed` (and its private helpers `appendField`, `truncateRunes`, `tracksFieldValue`, the URL builders) exactly as they are today — pure, unexported, package-private — and add the digest path as a second method on the same `Notifier` type, in the same package, so it can call those unexported functions directly with zero duplication.**
 
-A single-statement CTE that both `INSERT`s and prunes is **incorrect** here: data-modifying CTEs all see the pre-statement snapshot, so the prune's `SELECT ... LIMIT N` subquery cannot see the row just inserted (off-by-one, wrong set pruned). Do not use that shape.
+Concretely:
 
-Instead, `pollruns.Recorder.RecordRun` opens a pgx transaction (`pool.Begin`), builds `q := sqlc.New(tx)`, and runs two queries in sequence:
+1. **`discord.Client` gains `SendBatch`, generalizing the existing single-request path.** `sendAttempt` already builds a `webhookPayload{Embeds: []Embed{embed}, ...}` from a single embed; widen its parameter to `embeds []Embed` and add a chunking caller:
+   ```go
+   func (c *Client) Send(ctx context.Context, embed Embed) error {
+       return c.sendAttempt(ctx, []Embed{embed}, true)
+   }
+   func (c *Client) SendBatch(ctx context.Context, embeds []Embed) error {
+       return c.sendAttempt(ctx, embeds, true) // caller chunks to Discord's 10-embed/message cap
+   }
+   ```
+   This is a signature widening on an already-private helper, not new marshal/retry/429 logic — `sendAttempt`'s existing 429-retry-once and no-body-echo behavior (D-08, T-03-01) is inherited by both callers for free.
 
-```sql
--- name: InsertPollRun :exec
-INSERT INTO poll_runs (
-    source, cycle_id, started_at, finished_at, duration_ms,
-    artists_polled, artists_errored, events_recorded, outcome, error
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+2. **`Notifier` gains a narrow, consumer-declared `SettingsReader` seam**, matching the project's established D-11 convention (seams declared where they're consumed, e.g. `poller.ReleaseGroupSource`, `poller.EventRecorder`):
+   ```go
+   type SettingsReader interface {
+       DigestEnabled(ctx context.Context) (bool, error)
+   }
+   ```
+   injected via a `WithSettingsReader` functional option, defaulting to an always-disabled no-op (mirroring `notifier.NoOp` and `poller.noopRunRecorder`) — so every existing call site and every existing test is unaffected until main.go opts in.
 
--- name: PrunePollRuns :exec
--- Keep only the newest $2 rows for $1. Runs as its own statement AFTER
--- InsertPollRun in the same tx, so the just-inserted row is visible and
--- counts toward the retained set. Explicit SQL, no trigger (project rule).
-DELETE FROM poll_runs
-WHERE source = $1
-  AND id NOT IN (
-      SELECT id FROM poll_runs
-      WHERE source = $1
-      ORDER BY started_at DESC, id DESC
-      LIMIT $2
-  );
-```
+3. **`NotifyPending` gets one new guard at the top**, everything else unchanged:
+   ```go
+   if enabled, err := n.settings.DigestEnabled(ctx); err != nil {
+       logger.Warn("digest settings read failed: falling back to real-time delivery", ...)
+       // fall through — fail OPEN to real-time, not fail-closed-to-silence
+   } else if enabled {
+       return nil // rows stay pending; the digest scheduler owns delivery
+   }
+   ```
+   Failing open (real-time) on a settings-read error is the deliberate choice: a transient DB hiccup should never silently suppress all notifications — real-time was already the safe, validated default (D-10), so an error path should degrade *toward* it, not away from it.
 
-The retention count `N` is a constant in `internal/pollruns` (suggest 50 per source — plenty for a "recent runs" view, bounded table growth). The transaction is nice-to-have, not load-bearing: if `PrunePollRuns` fails after `InsertPollRun` commits, the table briefly holds `>N` rows and the next run prunes them. If the `events_recorded` subquery approach from (b) is used, it runs as a third read (`CountEventsSince`) before the INSERT, inside the same tx.
+4. **A new `SendDigest(ctx, logger) error` method on `*Notifier`** reuses the existing private plumbing verbatim:
+   - `listUnnotified(ctx, n.q)` — same query, same function, unchanged.
+   - `n.suppresses(ev)` / `staleReleaseDate` — same staleness gate applied per-event before batching, so a digest can't resurrect a stale backlog any more than real-time can.
+   - `formatEmbed(ev)` — the exact same pure transform real-time uses; **this is the whole point of co-locating `SendDigest` in the `notifier` package** rather than a separate top-level package — `formatEmbed` and its helpers are intentionally unexported (per format.go's own comment: kept private "to avoid a compile-time dep on internal/detection"), so any digest logic living outside this package would be forced to either duplicate the formatting logic or force those helpers to become exported API surface they were deliberately kept out of.
+   - New: chunk the formatted `[]discord.Embed` into groups of ≤10 (Discord's per-message embed cap) and call `sender.SendBatch(ctx, chunk)` per chunk (mirroring the existing `defaultSpacing` inter-send pacing between chunks, reusing `spacingWait`/`dbOpTimeout` exactly as `NotifyPending` does).
+   - On each chunk's successful send, `markNotified` every event in that chunk (same function, same per-row idempotent `WHERE ... AND notified_at IS NULL` semantics as today). A failed chunk is logged and left pending — mirroring `NotifyPending`'s existing per-event Send-error handling (D-09: a later pass, here the next digest tick or a mode switch back to real-time, retries it) — rather than treating one bad chunk as a hard failure of the whole run.
+   - After a fully successful (or partially successful — "at least one chunk sent") run, update `digest_last_sent_at` via the settings store, so the ticker's due-check advances even under partial delivery.
 
-**sqlc mechanics:** `queries/pollruns.sql` is picked up by `sqlc.yaml` (`queries: "queries"`, `schema: "internal/db/migrations"`) — the `000008` migration must exist before `sqlc generate`. `make sqlc-check` is a local-only gate (no CI counterpart per CLAUDE.md) — the planner must run it.
+5. **`poller` package needs zero changes.** It still depends only on the existing `Notifier` interface (`NotifyPending(ctx, logger) error`) — the mode switch is entirely internal to `notifier.Notifier`, invisible to `poller.runCycle`. This preserves `poller.go`'s own documented boundary ("this package still performs no diffing... it only calls the seam") and avoids widening `poller`'s dependency surface for a concern (delivery mode) it has no reason to know about.
 
----
-
-### (e) React "System" view
-
-Mirrors the existing two-tab structure precisely.
-
-- **`web/app/routes.ts`** (MODIFIED — currently `routes.ts:8-11`, two entries): add
-  ```ts
-  route("system", "routes/system.tsx", { id: "system-path" }),
-  ```
-- **`web/app/root.tsx`** (MODIFIED): add a third `<NavLink to="/system" className={tabLinkClassName}>System</NavLink>` in the `<nav>` (`root.tsx:111-119`), after the History link. **No extra gating needed** — `App` already returns `<PassphraseScreen />` before any nav markup when `!authed` (`root.tsx:105-107`), and every route renders under that guard. The System tab is a normal view; it shows always (unlike `LogoutButton`, which is `gateActive`-conditional at `root.tsx:118`).
-- **`web/app/lib/api.ts`** (MODIFIED): add wire types + one wrapper, typed against the Go `statusResponse` struct exactly (the file's stated discipline — `api.ts:1-7`):
-  ```ts
-  export interface PollRun {
-    cycle_id: string
-    started_at: string
-    finished_at: string
-    duration_ms: number
-    artists_polled: number
-    artists_errored: number
-    events_recorded: number
-    outcome: "success" | "error" | "cancelled"
-    error: string | null
-  }
-  export interface SystemStatus {
-    poll_interval_seconds: number
-    poll_runs: { musicbrainz: PollRun[]; deezer: PollRun[] }
-  }
-  export async function getStatus(): Promise<SystemStatus> {
-    return apiFetch<SystemStatus>("/status")
-  }
-  ```
-  Routing through `apiFetch` (`api.ts:123`) gives the System view the D-16 global-401 interceptor (`api.ts:155-158`) and the `X-Instance-Gated` latch (`api.ts:146-148`) for free — same as every other endpoint. `/ready` is **not** wrapped (no auth, ops-only) unless the planner wants a readiness badge in the System view, in which case add `getReady()` calling a bare `fetch("/ready")` (it must tolerate a 503 body).
-- **`web/app/routes/system.tsx`** (NEW): structurally a copy of `history.tsx` (`routes/history.tsx`) — `useEffect` fetch on mount, `initialLoading` skeleton, `error` + `EmptyState` + Retry button (`history.tsx:74-125,165-175`). Render each source's runs as a small table or card list. New presentational components under `web/app/components/system/` (mirror `components/history/`).
-- **`web/app/routes/system.test.tsx`** (NEW) — mirror `history.test.tsx`.
-- **Definition of Done:** `corepack pnpm --dir web exec prettier --write "**/*.{ts,tsx}"` before staging (CLAUDE.md), plus `pnpm test`.
-
-**New vs modified for (e):**
-
-| File | Change |
-|------|--------|
-| `web/app/routes.ts` | MODIFIED — third route |
-| `web/app/root.tsx` | MODIFIED — third nav tab |
-| `web/app/lib/api.ts` | MODIFIED — `PollRun`/`SystemStatus` types + `getStatus()` |
-| `web/app/routes/system.tsx` | NEW |
-| `web/app/routes/system.test.tsx` | NEW |
-| `web/app/components/system/*` | NEW |
-
----
+This gives exactly one embed-building code path (`formatEmbed`, unchanged), exactly one Discord-payload-construction code path (`sendAttempt`, widened not duplicated), and exactly one outbox-draining query pair (`listUnnotified`/`markNotified`, reused verbatim) — real-time and digest differ only in *how many embeds go in one Discord request* and *whether the caller is the poll cycle or the digest ticker*.
 
 ## Data Flow
 
-### `/ready` request flow
+### Real-time mode (today, and the default under v1.5)
 
 ```
-orchestrator GET /ready
-  → chi root router (ungated, before gate Group)
-  → handleReady: ctx = WithTimeout(r.Context(), readyTimeout)
-      → s.db.Ping(ctx)                    ── down → 503
-      → s.ready.SchemaVersion(ctx)        ── err  → 503 ;  dirty → 503
-      → compare applied vs s.expectedSchemaVersion (set once at boot)
-  → 200 {"status":"ready","schema_version":N}  |  503 {...reason}
+poll cycle (MB or Deezer) completes
+    ↓
+runCycle → p.notifier.NotifyPending(ctx, logger)
+    ↓
+NotifyPending: SettingsReader.DigestEnabled → false
+    ↓
+listUnnotified → for each event: suppresses? → formatEmbed → sender.Send (1 embed/request)
+    ↓
+markNotified (per event, spaced defaultSpacing apart)
 ```
 
-### Poll cycle → `poll_runs` → `/status` → System view
+### Digest mode (new, opt-in)
 
 ```
-cron tick → RunMusicBrainzCycle → runCycle(ctx, &mbRunning, "musicbrainz", ...)
-  CAS guard ─ skip → Warn + ErrCycleInProgress (NO row, unchanged)
-  store.List → dispatch workers (bounded, ctx-aware) → fetchAndRecord per artist
-      worker: artistsPolled++ ; err → artistsErrored++ ; panic → recover + artistsErrored++
-  wg.Wait → ctx.Err() re-check → "poll cycle complete" log
-  ★ p.runs.RecordRun(WithoutCancel(ctx)+timeout, RunResult{counts, outcome})
-        → pollruns.Recorder: BEGIN
-            (opt) SELECT count(*) FROM events WHERE source=$1 AND created_at>=started_at
-            INSERT INTO poll_runs (...)
-            DELETE FROM poll_runs WHERE source=$1 AND id NOT IN (newest N)
-          COMMIT
-  ★ NotifyPending (unchanged) ; return cycleErr
-
-browser → /system mount → getStatus() → GET /status (gated Group)
-  → handleStatus → pollruns.Store.RecentPollRuns(N)
-      → RecentPollRunsBySource (one round trip, lateral join)
-  → JSON envelope → system.tsx renders per-source run tables
+poll cycle (MB or Deezer) completes
+    ↓
+runCycle → p.notifier.NotifyPending(ctx, logger)
+    ↓
+NotifyPending: SettingsReader.DigestEnabled → true → return nil (no dequeue, no send)
+    ↓                                                        (events accumulate,
+    ↓                                                         notified_at stays NULL)
+digest ticker (independent goroutine, every DIGEST_CHECK_INTERVAL)
+    ↓
+read notification_settings fresh → enabled? cadence? due since last_sent_at?
+    ↓ (due)
+CAS guard → Notifier.SendDigest(ctx, logger)
+    ↓
+listUnnotified → suppresses? filter → formatEmbed (same fn as real-time) per event
+    ↓
+chunk into ≤10-embed groups → sender.SendBatch per chunk (spaced)
+    ↓
+markNotified per successfully-sent event → settings.Store.Update(digest_last_sent_at = now)
 ```
 
----
+### SPA settings change (no restart required)
 
-## Architectural Patterns (already established in this repo — reuse, don't invent)
-
-### Pattern 1: Consumer-declared narrow seam
-
-**What:** the consuming package declares the minimal interface it needs; the concrete type is injected at the composition root. `httpserver.Pinger` (`server.go:20-27`), `poller.ReleaseGroupSource`/`EventRecorder`/`Notifier` (`poller.go:61-101`), `events.Store` (`events/service.go:82-84`).
-**Apply to v1.4:** `httpserver.ReadinessChecker`, `httpserver.StatusStore`, `poller.RunRecorder` — all declared in the consumer, all fakeable with no DB.
-**Trade-off:** one more interface per boundary; pays for itself the first time a test needs to run without Postgres.
-
-### Pattern 2: Functional options keep `New` signatures additive
-
-**What:** `poller.Option` (`poller.go:103-123`), `httpserver.Option` (`server.go:48-72`), `db.RetryOption` (`migrate.go:42-64`). `New` builds from defaults, applies each option.
-**Apply to v1.4:** `poller.WithRunRecorder`, `httpserver.WithReadiness`, `httpserver.WithStatus`. Every existing `New(...)` call site is untouched.
-
-### Pattern 3: One stateless `sqlc.New(pool)` wrapper per consumer
-
-**What:** `main.go` deliberately creates 5+ `sqlc.New(pool)` instances (`main.go:176,215,223,250,294`) — `sqlc.Queries` is a stateless wrapper over the shared pool; do not consolidate.
-**Apply to v1.4:** `pollruns.NewRecorder(pool)` and `pollruns.NewStore(pool)` each get their own `sqlc.New(pool)` (or share the pool and call `sqlc.New(tx)` for the transactional prune).
-
-### Pattern 4: Structured-log-and-continue for non-critical writes
-
-**What:** a notifier delivery failure is logged, never returned, so it can't fail a good detection cycle (`poller.go:388-396`). Per-artist errors logged inside the worker, never propagated (`poller.go:420-425`).
-**Apply to v1.4:** a `RecordRun` failure is logged (`"record poll run failed"`) and swallowed — observability must never break polling.
-
-### Pattern 5: Detached context for shutdown-surviving work
-
-**What:** `main.go` uses fresh `context.Background()` + timeout for drain paths (`main.go:271,307,338`) so a SIGTERM-cancelled `ctx` doesn't abort cleanup.
-**Apply to v1.4:** `runCycle`'s `RecordRun` call wraps `context.WithoutCancel(ctx)` + a short timeout, so a cycle cancelled by shutdown still persists its (likely `outcome:"cancelled"`) row.
-
----
-
-## Anti-Patterns to Avoid
-
-### Anti-Pattern 1: Giving the `Poller` a DB handle for `poll_runs`
-
-**What people do:** pass `*pgxpool.Pool` or `sqlc.Querier` into `poller.New` to write the run row directly.
-**Why it's wrong:** the package comment (`poller.go:1-15`) and the `Poller` struct's deliberate absence of a DB field are a load-bearing design decision — the poller is unit-tested with fakes and no Postgres. A DB handle here also re-opens the question of pool sizing (`main.go:141-146` sizes `MaxConns` against poll-worker count precisely).
-**Do this instead:** the `RunRecorder` seam. The DB lives in `internal/pollruns`, wired at the composition root.
-
-### Anti-Pattern 2: Self-referential prune CTE in the INSERT statement
-
-**What people do:** `WITH ins AS (INSERT ... RETURNING), del AS (DELETE ... WHERE id NOT IN (SELECT ... LIMIT N)) SELECT`.
-**Why it's wrong:** all data-modifying sub-statements see the snapshot from the start of the statement — the `DELETE`'s `SELECT` cannot see the just-`INSERT`ed row, so it retains `N` *old* rows and the new one becomes `N+1`, then the next run deletes the wrong one. Also less readable than two statements.
-**Do this instead:** `InsertPollRun` then `PrunePollRuns` as two `:exec` queries in one pgx transaction — matches "explicit SQL in queries/*.sql, no triggers."
-
-### Anti-Pattern 3: A Postgres trigger for pruning
-
-**What people do:** `CREATE TRIGGER ... AFTER INSERT ON poll_runs`.
-**Why it's wrong:** the project explicitly prefers explicit SQL in `queries/*.sql`; triggers hide behaviour from the sqlc-visible surface and from `cmd/migration-check`'s reasoning.
-**Do this instead:** the explicit `PrunePollRuns` query.
-
-### Anti-Pattern 4: Re-walking the embedded migration source per `/ready` hit
-
-**What people do:** call `iofs.New` + `maxSourceVersion` inside `handleReady`.
-**Why it's wrong:** allocates and walks the embed FS on every probe (orchestrators hit `/ready` every few seconds).
-**Do this instead:** `db.ExpectedSchemaVersion()` once at boot in `main.go`, pass the `uint` into `httpserver.New`.
-
-### Anti-Pattern 5: A stricter-than-necessary `runCycle` change
-
-**What people do:** restructure the worker goroutine, add a results channel, collect per-artist outcomes into a slice.
-**Why it's wrong:** `runCycle`'s ctx-cancellation races and panic isolation (`poller.go:293-377`) are carefully reasoned in comments; a restructure risks regressing `wg.Wait()` reachability or the double `ctx.Err()` check.
-**Do this instead:** two `atomic.Int64` counters + one `error` return on `fetchAndRecord`. Nothing else moves.
-
----
-
-## Integration Points
-
-### Internal boundaries
-
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| `poller` ↔ `pollruns.Recorder` | `RunRecorder.RecordRun(ctx, RunResult)` — one call at cycle end | Detached ctx; errors logged not returned |
-| `httpserver` ↔ `pollruns.Store` | `StatusStore.RecentPollRuns(ctx, N)` | Gated route; error → fixed 500 text |
-| `httpserver` ↔ `db` (readiness) | `ReadinessChecker.SchemaVersion(ctx)` + boot-time `ExpectedSchemaVersion()` | Ungated route; hand-rolled pgx read of `schema_migrations` |
-| `main.go` ↔ all new pieces | explicit constructor wiring in the fixed boot order | `ExpectedSchemaVersion` after `RunMigrations`, before `NewPool`; recorder/store after `NewPool` |
-| `web/app` ↔ `/status` | `getStatus()` through `apiFetch` | Inherits 401 interceptor + gate latch |
-
-### External services
-
-No new external services. `/ready` and `/status` are inbound-only. The `poll_runs` write adds one short transaction per poll cycle (≤ 2× `PollInterval` frequency, default hourly) — negligible pool pressure.
-
----
+```
+Operator toggles digest ON / picks "weekly" in SPA
+    ↓
+PUT /settings/digest {enabled, cadence}  (protected route, behind authgate when active)
+    ↓
+httpserver handler → settings.Store.Update → notification_settings row updated
+    ↓
+Next poll-cycle-end NotifyPending call reads the new value (within ≤ one poll interval)
+Next digest-ticker tick reads the new value (within ≤ DIGEST_CHECK_INTERVAL)
+    ↓
+No process restart, no cron re-registration, no cache to invalidate
+```
 
 ## Scaling Considerations
 
-| Scale | Adjustment |
-|-------|------------|
-| Single instance (current + planned) | No change. `poll_runs` grows by ≤ 2 rows/interval, pruned to `2 × N` (~100) total. `/status` is a bounded index scan. |
-| Multiple instances (not planned; `robfig/cron` has no leader election per STACK.md) | `poll_runs` would interleave rows from concurrent pollers; the per-source overlap guard is per-process, so the `events` count subquery for `events_recorded` could over-count. Would need a Postgres advisory lock around the cycle (already flagged in STACK.md as the prerequisite for multi-instance). |
-| `/ready` under aggressive probing | Already bounded by a `WithTimeout`; the `schema_migrations` read is a single-row primary-key-less scan of a 1-row table — trivial. |
+This is a single-operator, single-instance self-hosted tool (explicitly out of scope: multi-user, horizontal scale) — scaling considerations here are about **data volume within one instance**, not concurrent users.
 
----
+| Scale | Approach |
+|-------|----------|
+| Small watchlist, low event volume (the actual target use case) | As designed above: single-row settings read per tick, single Discord message per digest run (events fit in ≤10 embeds) |
+| A digest accumulates more than 10 events between sends (e.g. a long outage, or weekly cadence over an active watchlist) | Already handled by the chunking design — multiple Discord messages, spaced, in one `SendDigest` run; no redesign needed |
+| Digest check interval tension | A shorter `DIGEST_CHECK_INTERVAL` gives tighter "UI change takes effect" latency and tighter wall-clock-hour accuracy, at the cost of more low-cost PK-indexed reads; 5 min is a reasonable default matching the existing `authgate` sweep-interval order of magnitude |
 
-## Suggested Build Order (Phase 18/19 split)
+No path here requires a second Postgres connection pool, a message queue, or a distributed lock — `robfig/cron`'s own documented limitation (no leader election, relevant only if the project ever runs multiple instances of one poller) is explicitly listed as an existing, already-accepted constraint in STACK.md and is unchanged by this milestone, since the digest scheduler is exactly as single-instance-only as the existing poll cycles.
 
-**Dependency chain:** `000008` migration → sqlc regen → `pollruns.Recorder` → `poller.RunRecorder` edits → `pollruns.Store` → `/status` handler → `getStatus()` → System view. `/ready` is independent of all of it.
+## Anti-Patterns to Avoid
 
-### Phase 18 — Backend: readiness + poll-run persistence + `/status`
+### Anti-Pattern 1: A second, independent "digest queue" table
 
-| # | Step | Depends on | Files |
-|---|------|-----------|-------|
-| 18.1 | `GET /ready` | nothing | `db.ExpectedSchemaVersion` + `SchemaVersion`; `httpserver/ready.go` + `WithReadiness` option; `main.go` wiring; `ready_test.go` |
-| 18.2 | `poll_runs` migration + sqlc queries | nothing (but do after 18.1 to avoid two concurrent edits to `internal/db`) | `000008_poll_runs.{up,down}.sql`; `queries/pollruns.sql`; `make sqlc-check` |
-| 18.3 | `pollruns.Recorder` + `poller.RunRecorder` seam + `runCycle` edits | 18.2 | `internal/pollruns/recorder.go`; `poller.go` (5 edits + types + option); `main.go` (`WithRunRecorder`); poller + pollruns tests |
-| 18.4 | `pollruns.Store` + gated `GET /status` | 18.2, 18.3 | `internal/pollruns/store.go`; `httpserver/status.go` + `WithStatus`; `registerDataRoutes` +1 line; `status_test.go`; `main.go` wiring |
+**What people do:** Introduce a `digest_queue` table that mirrors/duplicates rows out of `events` for batching purposes.
+**Why it's wrong:** The milestone's own constraint is "uses only the existing `events` table as its data source." `notified_at IS NULL` already *is* a queue — duplicating it invites the exact dedup/consistency bugs the existing outbox design (D-06, D-09, D-20) was built to avoid, and doubles the surface `internal/db/migrations/README.md`'s N-1 safety rule has to reason about.
+**Do this instead:** Reuse `ListUnnotified`/`MarkNotified` unchanged; digest mode is purely "who drains the outbox and how many embeds per request," not a different queue.
 
-Rationale for ordering: 18.1 ships standalone operator value immediately and is the lowest-risk change. 18.2 is a pure schema/codegen step that unblocks everything downstream. 18.3 is the **single riskiest step** (the `runCycle` edit) and gets its own slice with focused review. 18.4 is thin once 18.3 exists.
+### Anti-Pattern 2: A fixed cron spec (`"0 9 * * *"`) per cadence, swapped via `cron.Remove`+`cron.AddFunc` on every settings change
 
-### Phase 19 — Frontend: System view
+**What people do:** Try to keep the "real" schedule inside `robfig/cron` and reprogram it live when the operator changes cadence in the SPA.
+**Why it's wrong:** Couples the HTTP settings-update handler to cron-internals mutation (must find the right `cron.EntryID`, remove it, re-add it, handle the case where a tick was mid-flight during the swap), and still doesn't solve the "process was down at 09:00" resilience gap — a missed tick with `robfig/cron` is just gone.
+**Do this instead:** A ticker that checks a persisted `digest_last_sent_at` against `now` every few minutes — the "schedule" lives in the database, not in cron's in-memory entry table, so an HTTP update is just an ordinary row update with no coupling to the scheduler's internals at all.
 
-| # | Step | Depends on | Files |
-|---|------|-----------|-------|
-| 19.1 | `api.ts` wire types + `getStatus()` | 18.4 (contract must be final) | `web/app/lib/api.ts` |
-| 19.2 | Route + nav tab | 19.1 | `web/app/routes.ts`; `web/app/root.tsx` |
-| 19.3 | `system.tsx` + components + tests | 19.1, 19.2 | `web/app/routes/system.tsx`; `components/system/*`; `system.test.tsx`; prettier + `pnpm test` |
+### Anti-Pattern 3: Caching settings in-process at boot or on first read
 
-**Why split 18/19 at the API boundary:** the SPA is `go:embed`-ed into the binary (no separate deploy), and `api.ts`'s explicit discipline is to type against the *real* Go response body. Freezing the `/status` JSON shape in 18.4 before starting 19.1 means the frontend never re-guesses the contract. If the roadmapper prefers a single phase, 18.4 + 19.x can merge, but keep 18.3 (the `runCycle` edit) as its own reviewable unit regardless.
+**What people do:** Load `notification_settings` once into a `Config`-shaped struct at startup (matching the existing env-var `config.Config` pattern) for performance.
+**Why it's wrong:** Directly defeats the milestone's explicit requirement ("changeable without a redeploy") — env-var config is deliberately boot-time-only in this codebase (that's the whole reason the milestone calls out digest as different from `authgate`'s env-var gate), and a cache reintroduces the exact "SPA change didn't take effect" bug class the milestone exists to avoid.
+**Do this instead:** Read-through on every check, as above — the query is cheap and infrequent enough that a cache buys nothing but risk.
 
----
+## Integration Points
+
+### External Services
+
+| Service | Integration Pattern | Notes |
+|---------|---------------------|-------|
+| Discord webhook | Existing `discord.Client`, extended with `SendBatch` | Discord's execute-webhook route accepts up to 10 embeds per request and a ~6000-character total-embed-content budget per message — `SendDigest`'s chunking must respect the 10-embed cap; the existing per-field `fieldValueLimit`/`titleLimit` truncation already bounds individual embed size, so the main new constraint is chunk *count*, not per-embed size |
+
+### Internal Boundaries
+
+| Boundary | Communication | Notes |
+|----------|---------------|-------|
+| `poller` ↔ `notifier` | Existing `Notifier` interface (`NotifyPending`), unchanged signature | Digest mode is invisible to `poller`; only `notifier`'s internals branch on mode |
+| `internal/digest` ↔ `notifier` | New: calls `Notifier.SendDigest(ctx, logger)` directly (not through the `poller.Notifier`/`Sink` interface, since the digest scheduler is a different caller with a different trigger) | Mirrors how `httpserver.handleStatus` calls `pollruns.Store` directly rather than through `poller`'s own seam — a second, independent consumer of the same underlying type is already an established pattern in this codebase |
+| `internal/digest` ↔ `internal/settings` | New: reads `Settings` every tick | Narrow interface, consumer-declared, matching D-11 |
+| `notifier` ↔ `internal/settings` | New: `SettingsReader` seam, consumer-declared | Same D-11 convention |
+| `internal/httpserver` ↔ `internal/settings` | New: `GET/PUT /settings/digest` handlers call `settings.Store` directly | Registered inside the existing protected route group (same group as `/watchlist`, `/events`) so it is gated by `authgate` exactly like every other mutating endpoint when the passphrase gate is active, and ungated identically when it's not (GATE-07's inert-path guarantee extends automatically — no new gate logic needed) |
+| `internal/discord` ↔ `notifier` | Widened `Sender`-shaped interface (`Send` + `SendBatch`) | `*discord.Client` already implements both once `SendBatch` is added; no second client type needed |
+
+## Suggested Build Order
+
+Matches the project's own established sequencing convention (additive migration → Go seams bottom-up → HTTP surface → SPA → composition-root wiring last), and mirrors how Phase 18/18.1/19 sequenced `pollruns` (land the seam inert, then wire it, then give it a UI):
+
+1. **Migration**: `notification_settings` table (additive, singleton-row, `CHECK (id = 1)`) + sqlc queries (`GetNotificationSettings`, `UpdateNotificationSettings`). No dependents yet blocked; can be reviewed in isolation against the N-1 expand/contract rule.
+2. **`internal/settings` package**: typed `Settings` struct + `Store.Get`/`Store.Update` wrapping the sqlc queries from step 1. Small, mirrors `internal/pollruns`'s "wrap sqlc, expose a narrow struct" shape.
+3. **`discord.Client.SendBatch`**: generalize `sendAttempt`'s signature, add the public method. Independent of steps 1–2; can build in parallel.
+4. **`internal/notifier` changes**: `SettingsReader` seam + `WithSettingsReader` option + the mode-check guard in `NotifyPending` + the new `SendDigest` method. Depends on step 2 (interface shape) and step 3 (`BatchSender`/`SendBatch`).
+5. **`internal/digest` package**: ticker scheduler (mirroring `authgate.sweepLoop`) wrapping `Notifier.SendDigest`, reading `settings.Store` each tick for the due-check. Depends on steps 2 and 4. Land it wired but perhaps gated similarly to how `pollruns`' seam landed inert first, if the team wants to split "scheduler exists" from "scheduler is live" into separate reviewable changes.
+6. **`internal/httpserver` routes**: `GET/PUT /settings/digest` inside the existing protected group. Depends on step 2 only — can be built in parallel with steps 3–5.
+7. **SPA settings UI**: toggle + cadence control calling the new endpoints. Depends on step 6.
+8. **`cmd/server/main.go` composition-root wiring**: construct `settings.Store`, pass it into `notifier.Select`/`New` via the new option, construct and `Start()` the `internal/digest` scheduler alongside the existing `poller.Start()`/`Stop()` lifecycle (same `signal.NotifyContext`-bounded shutdown pattern already used for the poller). Final integration step — depends on everything above.
 
 ## Sources
 
-- `cmd/server/main.go` (boot order, DI wiring, detached-context drain pattern) — read directly, HIGH
-- `internal/poller/poller.go` (runCycle mechanics, consumer seams, atomic guards, overlap CAS) — read directly, HIGH
-- `internal/httpserver/server.go`, `health.go`, `events.go` (route registration, gate Group, Pinger/Store seam pattern, error handling) — read directly, HIGH
-- `internal/db/migrate.go` (`migrationsFS`, `maxSourceVersion`, `RunMigrations`, ahead-of-source guard) — read directly, HIGH
-- `internal/db/migrations/README.md` (expand/contract, N-1 invariant, `cmd/migration-check` scope) — read directly, HIGH
-- `internal/db/migrations/000003_events.up.sql`, `queries/events.sql` (table + CTE + index conventions, `source` semantics, `created_at DEFAULT now()`) — read directly, HIGH
-- `internal/events/service.go`, `internal/detection/detector.go` + `musicbrainz.go`/`deezer.go` (Store/Service shape, `EventRecorder` returns only `error`, `inserted` is log-only) — read directly, HIGH
-- `web/app/lib/api.ts`, `authStore.ts`, `root.tsx`, `routes.ts`, `routes/history.tsx` (SPA route + nav + fetch-wrapper + auth-latch patterns) — read directly, HIGH
-- `sqlc.yaml`, `go.mod` (`queries/` + `schema:` dirs, `go 1.26` → `context.WithoutCancel` available) — read directly, HIGH
-- STACK.md (robfig/cron has no leader election; advisory-lock prerequisite for multi-instance) — repo doc, MEDIUM
+- `C:/CodeProjects/drop-tracker/.planning/PROJECT.md` — milestone scope, locked architecture constraints, ADR-0001 precedent, N-1 migration rule — confidence HIGH (project's own source of truth)
+- `internal/notifier/notifier.go`, `internal/notifier/format.go` — existing real-time delivery loop, outbox drain, embed-building — confidence HIGH (read directly)
+- `internal/discord/client.go` — existing webhook client, single-embed send path, 429 handling — confidence HIGH (read directly)
+- `internal/poller/poller.go` — existing `robfig/cron` registration pattern, CAS overlap guard (D-08, D-09), consumer-declared seam convention (D-11), `RunRecorder` no-op-default idiom — confidence HIGH (read directly)
+- `internal/pollruns/pollruns.go` — precedent for a small typed store wrapping mutable instance state, and ADR-0001's table-vs-in-process reasoning — confidence HIGH (read directly)
+- `internal/authgate/gate.go` — `time.Ticker`-driven background-goroutine precedent (`sweepLoop`/`Close`), instance-wide-toggle precedent (env-var-only, contrasted against this milestone's DB-configurable requirement) — confidence HIGH (read directly)
+- `queries/events.sql`, `internal/db/migrations/000003_events.up.sql`, `000004_events_display_fields.up.sql` — outbox schema, `ListUnnotified`/`MarkNotified` query shape, dedup/idempotency constraints (D-20) — confidence HIGH (read directly)
+- `internal/config/config.go` — env-var naming/default convention (`env:"..." envDefault:"..."`) referenced for the proposed `DIGEST_CHECK_INTERVAL` — confidence HIGH (read directly)
+- Discord webhook embed limits (10 embeds/message, ~6000-char total budget) — confidence MEDIUM (general Discord API documentation knowledge, not re-verified live against Discord's docs in this research pass — worth a quick confirmation during phase planning/discuss, same caveat the project's own `05-RESEARCH.md` already flagged for embed limits)
 
 ---
-*Architecture research for: operator observability on an existing Go single-binary service*
-*Researched: 2026-09-09*
+*Architecture research for: drop-tracker v1.5 Digest Notifications*
+*Researched: 2026-09-11*

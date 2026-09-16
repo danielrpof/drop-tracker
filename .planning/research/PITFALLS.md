@@ -1,387 +1,233 @@
 # Pitfalls Research
 
-**Domain:** Operator observability (readiness probe + poll-cycle run records + status API + status UI) bolted onto a shipped Go single-binary poller
-**Researched:** 2026-09-09
-**Confidence:** HIGH for the codebase-specific mechanics (read directly from `internal/poller/poller.go`, `internal/db/migrate.go`, `internal/httpserver/server.go`, `cmd/migration-check/main.go`, `cmd/server/main.go`); MEDIUM for the golang-migrate `schema_migrations` semantics and Postgres prune concurrency (corroborated against upstream docs + pgsql-general threads).
+**Domain:** Scheduled digest/batch notifications, added onto an existing real-time per-event Discord notification pipeline (drop-tracker v1.5)
+**Researched:** 2026-09-11
+**Confidence:** MEDIUM (general digest/cron/Discord findings cross-checked across multiple sources; drop-tracker-specific findings are HIGH — verified directly against this repo's schema and code)
 
-Cost ranking of the critical pitfalls (highest first): **#1 `runCycle` counter aggregation**, **#2 prune-on-insert concurrency**, then #3–#4 (RunRecorder call-site/failure semantics), then #5–#7 (`/ready` correctness, `/status` leakage), then #8 (`events_recorded` seam), then the Phase 19 UI items #9–#11.
+## Codebase Grounding (read this before the pitfalls below)
+
+The existing real-time notifier is **already an outbox/queue pattern**, not a fire-on-insert push:
+
+- `events.notified_at TIMESTAMPTZ` (nullable) is the queue marker. `ListUnnotified` (`queries/events.sql`) is `SELECT * FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC`.
+- `MarkNotified` is `UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL` — a per-row atomic claim, called only after a confirmed Discord send (`internal/notifier/notifier.go`, D-06/D-07/D-10).
+- `Notifier.NotifyPending` is invoked once at the end of **every** poll cycle (`internal/poller/poller.go:514`), for both the MusicBrainz and Deezer cycles independently, guarded by a single shared `notifying atomic.Bool` CAS flag so overlapping cycles never double-drain.
+- `events_unnotified_idx` is a partial index on `notified_at IS NULL`, sized for "usually near-empty."
+
+This matters enormously for digest design: **the queue already exists.** Digest mode is not "build a new buffer," it's "change who drains `notified_at IS NULL` rows, how often, and how many messages the drain produces." Most of the pitfalls below follow directly from that reframing — the dangerous move is building a *second*, parallel queueing mechanism (an in-memory buffer, a new table, a second timestamp column) instead of extending the one that's already race-tested and restart-safe.
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Data race aggregating `artists_errored` / `artists_checked` / `events_recorded` across the worker goroutines — and `-race` can't catch it here
+### Pitfall 1: Real-time drain stays wired in, digest mode just adds a second consumer on top
 
 **What goes wrong:**
-`runCycle` (poller.go:270) fans every watchlist entry out across `go func(entry)` closures. Today those closures share only `sem` (channel) and `wg` (WaitGroup) — both already concurrency-safe — plus a `recover()` per worker. To record a per-cycle row you must count how many artists were checked, how many errored, and how many events were recorded, and those counts are produced *inside* `fetchAndRecord`, which runs on N worker goroutines at once (`p.mbWorkers` default 3, `p.dzWorkers` default 5). A plain `errored++` or a shared `[]string` append inside `fetchAndRecord` is an unsynchronized read-modify-write from multiple goroutines: a textbook data race that corrupts the count and is undefined behaviour.
+`poller.go` calls `p.notifier.NotifyPending(...)` unconditionally at the end of every poll cycle today. If digest mode is implemented as a new, separate scheduled job that also drains `notified_at IS NULL` rows, but the existing per-poll-cycle call to `NotifyPending` is left untouched, every event gets posted twice: once immediately (real-time path, still wired) and once again in the next digest batch — except `MarkNotified`'s `AND notified_at IS NULL` guard means the real-time path wins the race almost every time, so digest mode silently does nothing while looking "toggled on." Either failure mode (double-post, or digest mode that's a no-op) is easy to ship because both code paths compile and pass tests that only exercise one mode at a time.
 
 **Why it happens:**
-The obvious implementation — close over an `int` in `runCycle` and bump it in the `fetchAndRecord` closure — compiles, passes every existing test, and passes a new non-race test because the race window is tiny and the counts are usually right. The project's safety net for exactly this (`go test -race`) is **unavailable**: ThreadSanitizer fails to allocate under WSL2 on the dev machine (PROJECT.md Context, `.planning/WINDOWS.md`). CI does not run `-race` either. So the normal "the race detector will catch it" backstop is gone.
+The toggle is a config value, not a structural change to the call graph. It's tempting to gate the *content* of what a drain sends (batch vs. individual) while forgetting to gate *whether the per-poll-cycle drain runs at all*.
 
 **How to avoid:**
-- Aggregate with `sync/atomic` (the package is *already imported* in poller.go for `nextCycleID` and the `atomic.Bool` guards). Use `atomic.Int64` for `checked`, `errored`, `recorded`; increment inside the worker; read once after `wg.Wait()`.
-- Or (cleaner, no shared mutable state) have each worker send a small result value on a buffered channel sized to `len(entries)`, close it after `wg.Wait()`, and fold the totals single-threaded in `runCycle`. This mirrors the "workers return, parent aggregates" shape and is trivially correct without `-race`.
-- The panic path must also count: the worker `recover()` block (poller.go:337) must increment `errored` (a panicked artist is a failed artist), otherwise `checked` and `errored+ok` disagree whenever a worker panics.
-- Add a non-race invariant test: run a cycle with a fake source where K of M artists error and P panic, assert `errored == K+P` and `checked == M` exactly, repeated ~1000× in a loop to shake out ordering bugs the race detector would otherwise have found.
-- Reason about it explicitly in the plan's "concurrency correctness" note (the project's stated substitute for `-race`).
+Make the digest toggle a single decision point that both `poller.go`'s per-cycle call site and the new scheduled digest job read from the same source: when digest mode is on, `NotifyPending`'s per-cycle invocation becomes a no-op (or is skipped entirely) and only the digest cron job drains `notified_at IS NULL`; when digest mode is off, the digest cron job's own tick is a no-op and the existing per-cycle drain resumes. One `Sink`-shaped seam deciding "who currently owns draining the outbox" is safer than two independent boolean checks that can drift out of sync.
 
-**Warning signs:**
-Counts that don't reconcile (`checked != errored + succeeded`); test assertions on counts that are `>=`/`<=` instead of `==`; flaky count values between test runs; a `[]string` or `map` being appended to inside `fetchAndRecord`.
+**Warning signs:** A test that toggles digest mode on, inserts an event, runs both the poll cycle and the digest tick, and asserts Discord received exactly one message — if that test doesn't exist, this bug is very likely live.
 
-**Phase to address:** Phase 18 (backend).
+**Phase to address:** The phase that wires the digest scheduler into the existing poll-cycle/notifier seam (not the phase that only builds the DB-persisted toggle and SPA control).
 
 ---
 
-### Pitfall 2: Prune-on-insert races between the two sources — wrong scoping deletes the other source's history, or the two DELETEs deadlock
+### Pitfall 2: Operator's "9am" isn't the container's "9am" — timezone and Alpine tzdata
 
 **What goes wrong:**
-`poller.New` registers **two** cron entries on the *same* `@every <interval>` spec (poller.go:209–223), so the MusicBrainz and Deezer cycles start — and finish — at essentially the same instant every tick. Each cycle then does `INSERT INTO poll_runs ...` followed by "prune to last N rows per source." Failure modes:
-- **Missing `source` scope:** `DELETE FROM poll_runs WHERE id NOT IN (SELECT id FROM poll_runs ORDER BY started_at DESC LIMIT N)` keeps N rows *total*, so whichever source prunes second deletes the other source's rows down to nothing. The prune predicate must be `WHERE source = $1 AND ...`.
-- **`NOT IN (SELECT ...)` + NULL:** if any selected `id` is NULL the whole `NOT IN` goes false and the prune deletes nothing (silent unbounded growth) or everything, depending on shape. Use `NOT EXISTS` or a keyset cutoff, not `NOT IN`.
-- **Cross-source deadlock:** two concurrent `DELETE`s on `poll_runs` from the two cycles take row/page locks; if they touch overlapping rows in different orders Postgres kills one with `deadlock detected`. Since the write is best-effort (see Pitfall 3) you'd lose that row silently.
-- **Prune bug deletes too much:** `OFFSET N` vs `LIMIT N`, `ASC` vs `DESC`, or an off-by-one keeps N-1 or 0 rows. On a table that only ever holds ~50–100 rows per source this is easy to get subtly wrong and invisible until someone opens the System view and sees two entries.
+The Docker image is a multi-stage build on `alpine` (per this project's Dockerfile/stack decisions). Alpine's minimal base does **not** ship the IANA timezone database — Go's `time.LoadLocation("America/New_York")` (or whatever zone the operator picks in the SPA) will fail at runtime with `unknown time zone` unless `tzdata` is installed in the final stage, *or* Go's embeddable `time/tzdata` package is blank-imported so the zoneinfo is baked into the binary itself. Separately, `robfig/cron` defaults to the **host's local timezone** unless `cron.WithLocation(...)` is passed explicitly — in a container that's almost always UTC, not the operator's timezone, so a schedule entered as "fire at 9am" silently fires at 9am UTC instead.
 
 **Why it happens:**
-"Retention by pruning to last N rows per source on insert (no new env var)" (PROJECT.md) reads as one line of SQL. The two-independent-cron-entries design (D-08) means the author testing one cycle in isolation never sees the concurrent-prune interaction.
+This class of bug is invisible in local dev (a developer's own machine has full tzdata and a "real" local timezone that happens to match their expectations) and only surfaces in the actual deployed container, which is a different environment than where it was written and tested.
 
 **How to avoid:**
-- Do the insert and the prune as **one atomic statement** via a CTE: `WITH ins AS (INSERT INTO poll_runs (...) VALUES (...) RETURNING id) DELETE FROM poll_runs WHERE source = $1 AND started_at < (SELECT started_at FROM poll_runs WHERE source = $1 ORDER BY started_at DESC, id DESC OFFSET $N_minus_1 LIMIT 1)`. One statement = one implicit transaction, prune failure fails the insert (which is logged), no separate round-trip.
-- **Every** prune predicate scoped by `source`. Add a test that inserts M rows for `musicbrainz` and M for `deezer`, prunes each, and asserts both sources retain exactly N — the cross-source-deletion bug fails this immediately.
-- Prefer a keyset cutoff (`started_at < <Nth newest>`) over `id NOT IN (SELECT ... LIMIT N)`; it locks fewer rows and sidesteps the NULL trap.
-- Keep it in a sqlc query (`queries/pollruns.sql`), not a Postgres trigger / plpgsql function — a trigger drags `CREATE FUNCTION ... $$ ... $$` into a boot migration (dollar-quoting the stdlib `cmd/migration-check` tokenizer has to handle) and moves prune logic somewhere no Go test covers.
-- **Prune-on-insert is the right call here, not a periodic sweep.** Volume is ~2 inserts per `POLL_INTERVAL` (default 15m) ≈ 192 rows/day total, table capped at N per source. A periodic sweep would need its own scheduler entry and a DB touch-point, and the poller is deliberately DB-connection-free (poller.go package doc, D-05) — a sweep reintroduces exactly what the `RunRecorder` seam exists to avoid.
+1. Store the operator's chosen IANA zone name (e.g. `"America/Chicago"`) in Postgres alongside the digest config, not a UTC offset — offsets don't carry DST information.
+2. Blank-import `time/tzdata` in `main.go` (`_ "time/tzdata"`) so the zoneinfo database is compiled into the binary and independent of the base image — cheaper and more reliable than relying on an Alpine package staying installed across image rebuilds.
+3. Pass `cron.WithLocation(loc)` explicitly when constructing the digest cron entry, using the operator's stored zone, not the process default.
+4. Never store or compute the digest fire time in UTC and then "convert for display only" — compute the next fire time using `time.Date(..., loc)` in the operator's zone so DST arithmetic is correct by construction.
 
-**Warning signs:**
-`deadlock detected` in logs around cycle-completion timestamps; System view history shorter than N right after both cycles run; `SELECT count(*) FROM poll_runs` climbing past `2*N`; a prune query with no `source =` in its `WHERE`.
+**Warning signs:** Any code path that treats the digest time as a bare `HH:MM` string without an accompanying zone; any `time.Now()` call in the digest scheduler with no explicit `.In(loc)`.
 
-**Phase to address:** Phase 18 (backend).
+**Phase to address:** The phase that builds the digest scheduler itself — this must be settled before any cron-registration code is written, and needs a Dockerfile check (or CI smoke test) that the built image can actually `time.LoadLocation` a real zone name.
 
 ---
 
-### Pitfall 3: A `RunRecorder` write that fails or hangs turns a green poll cycle red — or delays it — or is skipped at shutdown
+### Pitfall 3: DST transitions skip or double-fire the digest
 
 **What goes wrong:**
-The recorder is called at the end of `runCycle`. Three ways to get it wrong:
-- **Propagating the error:** returning the recorder's error from `runCycle` makes a successful poll cycle (artists checked, events detected, notifications sent) report as *failed* just because the observability row didn't persist. The cron closure would then log `"musicbrainz poll cycle failed"` (poller.go:211) for a cycle that did its job.
-- **Blocking the overlap guard:** `runCycle`'s `defer running.Store(false)` (poller.go:282) releases the per-source guard. If the recorder call sits before that runs and blocks on a hung DB (a TCP-ESTABLISHED-but-unanswering Postgres — the exact failure `internal/db/pool.go` documents), the `running` flag stays `true`, every subsequent tick for that source logs `"skipping poll cycle: previous cycle still in progress"` and the source silently stops polling for the life of the process.
-- **Skipped at shutdown:** if the recorder call uses the cycle's `ctx`, and shutdown cancelled it (`pollr.Stop` → `runCancel()` in main.go), the write is skipped and the final cycle before shutdown leaves no trace — or worse, blocks `Stop`'s bounded drain (`pollDrainTimeout` 10s) and makes the container slow to die.
+`robfig/cron` (confirmed on the maintained v3 line, which this project already depends on) has documented, still-open gaps around spring-forward and fall-back: a job scheduled inside the skipped "spring forward" hour (e.g. 2:30am when clocks jump from 2:00 to 3:00) fires immediately when the clock jumps rather than being silently lost, but the fall-back case — where the local hour repeats — has ambiguous, under-documented behavior on whether the job fires once or twice. A digest scheduled for a fixed local wall-clock time (e.g. "9:00am daily") will hit this twice a year in any timezone that observes DST.
 
 **Why it happens:**
-The existing seams give mixed signals: `EventRecorder` errors *are* logged-not-returned (poller.go:434), `notifier.NotifyPending` errors *are* logged-not-returned (poller.go:394) — but both are called with the cycle `ctx`. Copying that pattern verbatim inherits the shutdown-skip problem.
+Cron libraries reason in wall-clock time; DST transitions are precisely the two days a year wall-clock time is not a monotonic, one-to-one mapping onto real time. This is a known, structural limitation of wall-clock cron scheduling, not a bug specific to this project.
 
 **How to avoid:**
-- Model `RunRecorder` on the `Notifier` seam: a narrow consumer-declared interface in `internal/poller`, one method, returns `error`, and `runCycle` **logs and swallows** that error exactly like `NotifyPending` (`logger.Error("record poll run failed", ...)`), never returns it.
-- Give the recorder call its **own bounded context**, derived so shutdown cancellation doesn't nuke it but a hang still can't wedge anything: `recCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)`. This records the last cycle even during graceful shutdown, and caps the delay to the overlap guard / drain at 5s.
-- Put the recorder call *before* `defer running.Store(false)` in source order (so it runs while still "in progress", which is fine) but ensure its bounded context guarantees it returns promptly.
-- Test: recorder returns an error → `runCycle` still returns `nil` and logs. Recorder blocks 30s → `runCycle` returns within ~5s.
+- Pick a fire time unlikely to fall in a transition window where possible (DST transitions in the US happen at 2am local, not 9am, so a mid-morning/evening digest time mostly sidesteps the ambiguous-hour case — but don't assume this holds for every timezone an operator might pick).
+- Make the digest job **idempotent on the send side**, not just the schedule side: the window-selection query (see Pitfall 4) should derive its event set from `notified_at IS NULL`, not from "did cron tick." A double-fire on a DST fall-back day then finds nothing new to send on the second tick (empty digest → suppressed, see Pitfall 7) rather than sending duplicate content.
+- Log every digest cron fire (scheduled time, actual fire time, event count) so a DST-week anomaly is visible in `/status` or logs rather than silently causing a missed or duplicate operator-facing message.
 
-**Warning signs:**
-Poll-cycle error rate rises after wiring the recorder; container shutdown latency regresses; a source stops emitting `"poll cycle complete"` lines after a DB blip; the recorder call passes `ctx` straight through.
+**Warning signs:** No log line distinguishing "cron ticked, N events found" from "cron ticked, 0 events found" — without that, a DST-week skip/double-fire looks identical to "just a quiet day" in the logs.
 
-**Phase to address:** Phase 18 (backend).
+**Phase to address:** Same phase as Pitfall 2 (scheduler construction) — add a test that advances a fake clock across both DST boundaries and asserts the digest fires exactly once per calendar day either side of the transition.
 
 ---
 
-### Pitfall 4: Recording a row for a cycle that the overlap guard skipped
+### Pitfall 4: Window-boundary events are neither lost nor double-sent, but land in a non-obvious cycle
 
 **What goes wrong:**
-`runCycle` returns `ErrCycleInProgress` at the CAS check (poller.go:278–281) — *before* `cycleStart` is set, before the watchlist is read, before any work. If the recorder is wired in the wrong place (a `defer` at the very top of `RunMusicBrainzCycle`, or in the cron closure that receives the error), every skipped tick writes a junk `poll_runs` row: zero duration, zero artists, an ambiguous outcome. During one slow 20-minute cycle you'd get a burst of bogus rows and the prune would evict the *real* history to make room for them.
+If the digest job selects events by a time-range query (`created_at BETWEEN window_start AND window_end`), an event whose `created_at` lands within milliseconds of the boundary can end up in either window depending on exact commit timing versus query-snapshot timing — not "double-sent" (Postgres snapshot isolation prevents that), but attributed to a different day's digest than an operator watching a clock would expect. Worse, if the window boundaries are computed independently each run (e.g. "now minus 24h") rather than anchored to the last successful send, a delayed or skipped cron tick (Pitfall 3, Pitfall 5) silently shifts or narrows the window, and events can fall into the **gap** between two windows and never get selected by either.
 
 **Why it happens:**
-`ErrCycleInProgress` is a normal, expected control-flow value (the cron closures explicitly `errors.Is(err, ErrCycleInProgress)` and stay quiet — poller.go:210). It's easy to forget it's also a path through whatever wraps the cycle.
+Time-range windowing assumes cron fires exactly on schedule every time. Combined with Pitfall 5 (restarts) and Pitfall 3 (DST), that assumption doesn't hold.
 
 **How to avoid:**
-- Instrument *inside* `runCycle`, after `running.CompareAndSwap` succeeds. Capture `startedAt` right after the CAS, and record in a `defer` that runs on every exit path from that point (normal, error, panic) — so a skipped cycle, which returns before the defer is registered, is never recorded.
-- The recorded `outcome` must distinguish: `ok` (completed, no artist errors), `partial` (completed, ≥1 artist errored), `cancelled` (`cycleErr != nil` from context cancellation — poller.go:375–377), `error` (watchlist `List` failed — poller.go:289). Never record `ErrCycleInProgress` as an outcome; it's the *absence* of a run.
+Don't window by time range at all — window by **outbox state**, matching the existing real-time pattern. The digest query should be `SELECT * FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC` (the exact `ListUnnotified` query that already exists), with no time-range predicate. "The digest window" becomes "everything that accumulated since the last successful digest send," which is self-correcting: a late, skipped, or double-fired cron tick changes *when* the digest goes out, never *whether* an event gets included exactly once. This also means an event detected in the last second before the digest job's query runs is safely included (it's just an unclaimed row), and an event detected one second after is safely deferred to the next cycle — no boundary ambiguity, no lost row.
 
-**Warning signs:**
-`poll_runs` row count grows faster than 2 per `POLL_INTERVAL`; rows where `started_at == finished_at` or `artists_checked = 0` on a non-empty watchlist; a "skipped" outcome value appearing in the table.
+**Warning signs:** Any digest query with a `created_at >= $1 AND created_at < $2` predicate instead of `notified_at IS NULL` — that's the tell that windowing is being done by wall-clock time instead of by outbox state.
 
-**Phase to address:** Phase 18 (backend).
+**Phase to address:** The phase that writes the digest event-selection query — should reuse/extend `ListUnnotified`, not introduce a parallel time-ranged query.
 
 ---
 
-### Pitfall 5: `/ready` requires the schema version to *equal* the binary's expected version — so an intentionally-rolled-back instance reports not-ready forever and a future deploy gate flap-loops
+### Pitfall 5: Process restart near the fire time silently skips that cycle (schedule, not data)
 
 **What goes wrong:**
-"Returns 200 only when the DB is reachable and the schema is at the expected migration version" (PROJECT.md) invites a strict equality check: `db.schema_migrations.version == <max embedded migration> AND NOT dirty`. That is wrong for the rollback scenario Phase 16 deliberately supports:
-- Deploy `v_new` → it applies migration 8. Roll back to `v_old` (embedded max = 7). Phase 16's ahead-of-source guard (migrate.go:298–302) lets `v_old` **boot cleanly** against schema version 8 — that's the whole N-1 guarantee, and the expand/contract rule (migrations README) means schema 8 is additive-only so `v_old` runs fine against it.
-- But a strict-equality `/ready` on `v_old` sees `db.version (8) > binary.expectedMax (7)` → **503 forever**. The instance is up, serving traffic correctly, `/health` green — and `/ready` says not-ready.
-- When Phase 17's health-gated auto-rollback is un-deferred, it polls `/ready` after a deploy. A rolled-back-and-healthy instance that reports 503 makes the gate conclude the rollback failed and… roll back again / never converge. The probe built to make deploys safe makes them loop.
+`robfig/cron`'s schedule lives entirely in process memory — it computes each entry's next fire time from `Now()` at `cron.Start()`, with no persisted "last fired at" or "missed run" catch-up. If the container restarts (a deploy — this app restarts on every merge-to-main release per its existing CI/CD pipeline) in the minute the digest was due to fire, that fire is simply gone: on restart, cron recomputes the *next* scheduled time from the new `Now()`, which for a daily digest is tomorrow, and for a weekly digest is up to six days later.
 
 **Why it happens:**
-"At the expected version" is naturally read as `==`. The interaction with Phase 16's intentional ahead-of-source tolerance is non-obvious and lives in a different subsystem.
+This is a direct consequence of using an in-process scheduler with no persistence — which is the correct, already-validated choice for this project's poll cycles (ADR-0001 made the same call for poll-run history: single-instance, restart-reset-by-design is acceptable there). But a digest's failure mode is more visible to the operator than a poll-run history entry: "I configured a weekly digest and didn't get one this week" is a much louder signal than "the ring buffer reset."
 
 **How to avoid:**
-- Ready condition: **`NOT dirty AND db.version >= binary.expectedMax`**. Equal-or-newer additive schema = ready (that is precisely the N-1 invariant the migrations README states). Only `db.version < expectedMax` (migrations genuinely not yet applied) or `dirty = true` is not-ready.
-- Get `expectedMax` from the embedded source, not a hand-typed constant that drifts: expose a `db.ExpectedSchemaVersion()` that reuses the existing `maxSourceVersion` walk (migrate.go:326) over `migrationsFS`.
-- Read `schema_migrations` via one sqlc query (`SELECT version, dirty FROM schema_migrations`) on the shared pool — it's a single-row table golang-migrate maintains (`version bigint`, `dirty boolean`).
-- Document the `>=` choice and its Phase-16 rationale in the handler comment, the way `health.go` documents its own contract.
+- This is *not* a data-loss risk, thanks to Pitfall 4's design: skipped events stay `notified_at IS NULL` and simply roll into the next successful cycle. Make sure this stays true — do not let any digest-adjacent code mark events notified before a confirmed Discord send.
+- Store `last_digest_sent_at` in Postgres (not memory) so that on boot, the scheduler can detect "the last successful send was more than one full cadence period ago" and log a visible warning (or optionally fire an immediate catch-up send) rather than silently waiting for the next natural cron tick.
+- Surface `last_digest_sent_at` in `/status` (this project already has a "System" observability surface from v1.4 — extending it, rather than inventing a new diagnostic path, is the lower-risk move) so a missed cycle is operator-visible instead of only discoverable by an empty Discord channel.
 
-**Warning signs:**
-`/ready` returns 503 on an instance whose `/health` is 200 and whose logs show `"ahead-of-source"` no-op at boot; an equality (`==`) comparison on the version; `expectedMax` written as a literal.
+**Warning signs:** No persisted "last sent" timestamp anywhere outside cron's in-memory state; a digest feature with no `/status`-visible field showing when it last actually ran.
 
-**Phase to address:** Phase 18 (backend). Flag for the (deferred) Phase 17: the deploy gate consumer must debounce — require consecutive successes and tolerate transient 503s, because a single DB blip through `/ready` should never trigger a production rollback.
+**Phase to address:** Scheduler-construction phase for the persisted cursor; the observability-surfacing part can ride along with whatever phase touches the SPA digest config screen, since that's already the natural place an operator checks "is this working."
 
 ---
 
-### Pitfall 6: `/ready` ends up auth-gated, CSRF-wrapped, expensive, or flapping
+### Pitfall 6: Toggling digest → real-time mid-window orphans the queued events
 
 **What goes wrong:**
-- **Gated:** if `/ready` is registered inside the `r.Group` that `gate.Authenticate` + `RequireCSRFHeader` protect (server.go:172–179), a gated production instance returns 401 to every uptime monitor and to Phase 17's deploy gate (neither sends a passphrase). `/health` is exempt because it's registered as an exact path on the root router *before* the group (server.go:164, D-03) — `/ready` must be registered the same way, in **both** the gated and inert branches.
-- **Too expensive:** implementing the schema check via `migrate.NewWithInstance(...).Version()` opens a *fresh* `database/sql` connection every hit (that's what `runMigrationsOnce` does — migrate.go:272). Under a monitor polling every few seconds plus a deploy gate, that's needless connection churn. Use the shared `pgxpool` via a plain sqlc query.
-- **Unbounded:** no timeout on the DB call means a hung network path hangs the probe and stacks goroutines — the exact reasoning behind `healthPingTimeout` (health.go:13). Bound `/ready`'s DB work with the same 3s.
-- **Flapping / over-sensitive:** adding ret/hysteresis logic *inside* `/ready` (e.g. "503 only after 3 consecutive bad checks") makes it lie about the current instant and hides real problems. Keep `/ready` a pure point-in-time check; debouncing belongs in the consumer (Phase 17).
-- **Deploy consequence of a wrong probe:** false-ready → Phase 17 shifts traffic to a broken release and never rolls back = outage. False-not-ready → deploy never completes / rollback loop.
+Say digest mode is on, three events have accumulated (`notified_at IS NULL`, waiting for Friday's digest), and the operator switches the toggle to real-time on Wednesday. If the per-poll-cycle `NotifyPending` call is simply re-enabled going forward, it will pick up those three already-queued events on the very next poll cycle and post them individually — which may be exactly right (nothing is lost, they just arrive as three separate real-time messages instead of one digest) or may be jarring if the operator's mental model was "those are gone, digest mode ate them." Conversely, if the implementation instead moves a "digest queue" into some other bucket when digest mode is on and doesn't reconcile it on toggle-off, those events never get sent at all — a genuine drop.
 
 **Why it happens:**
-The gate refactor (Phase 14) makes "which router does this route go on" a real decision with an inert branch and a gated branch; it's easy to add the route in one place. And `internal/db` already *has* a version-reading path (`m.Version()`), so reusing it looks DRY.
+This is the direct consequence of *not* following Pitfall 1's guidance (single shared outbox, single active consumer). If the digest feature is built with its own queue separate from `notified_at IS NULL`, toggling modes mid-window becomes a data-migration problem instead of a no-op.
 
 **How to avoid:**
-- Register `/ready` exactly like `/health`: `r.Get("/ready", s.handleReady)` on the root router, outside `if gate != nil`, so it's identical in both branches. Add a test asserting `/ready` returns non-401 on a gated server with no cookie.
-- New `Server` dependency for the schema query (a narrow `SchemaVersioner` interface mirroring `Pinger`), or widen the existing DB seam minimally — don't reach into `internal/db`'s migrate path.
-- `context.WithTimeout(r.Context(), 3*time.Second)` around the query; on error/timeout return 503 with a fixed body, log the raw error to `httplog.SetAttrs` (health.go:38 pattern).
-- Keep the handler branchless and stateless.
+Keep exactly one outbox (`notified_at IS NULL`) and exactly one active consumer determined by the current mode at drain time, decided fresh on every drain attempt (poll-cycle tick or digest cron tick) rather than cached at toggle time. With that design, toggling digest → real-time mid-window has an automatic, correct, and easily-explained behavior: whatever's still unclaimed gets swept up by the next real-time poll cycle and sent individually, with no special-case flush code needed. Document this behavior explicitly in the SPA copy near the toggle ("switching to real-time will immediately send any events that built up while digest mode was on") so it's a stated contract, not an accidental side effect an operator discovers by surprise.
 
-**Warning signs:**
-`/ready` in the `registerDataRoutes` set or inside the `r.Group`; a 401 from `/ready` in a gated-instance test; `sql.Open` / `migrate.New*` in the ready path; no `context.WithTimeout`.
+**Warning signs:** Any new column/table (`digest_queue`, `pending_digest_events`, a second `*_at` timestamp) introduced specifically for digest mode — that's a sign a second, parallel outbox is being built instead of reusing the one that exists.
 
-**Phase to address:** Phase 18 (backend).
+**Phase to address:** Same phase as Pitfall 1 — this is really one design decision (single outbox, mode-selected consumer) with two observable consequences.
 
 ---
 
-### Pitfall 7: `/status` leaks a DSN, the Discord webhook URL, or an internal path through an error string in the JSON
+### Pitfall 7: Discord embed/message limits silently truncate or drop events in a busy digest
 
 **What goes wrong:**
-`poll_runs` naturally grows a "what went wrong" field. If the cycle stores and `/status` returns a free-text error/detail string, it can carry:
-- a Postgres DSN **with password** — pgx / driver connection errors embed it verbatim (the entire reason `redactDSN`/`redactError` exist — migrate.go:114–194, `internal/db/pool.go` `redactedTarget`);
-- the `DISCORD_WEBHOOK_URL` (a secret) — notifier errors can include the request URL;
-- internal filesystem paths / stack fragments.
-`/status` is gated, but a gated instance with a weak passphrase (the D-11 WARN path — main.go:124) still must not hand out credentials, and "operator observability" is not a reason to relax the Phase 1 redaction decision.
+A Discord embed is capped at 25 fields, 6000 total characters across all embeds in one message, and a single message can carry at most 10 embeds; per-webhook send rate is roughly 5 requests per 2 seconds. A digest that naively tries to pack every event from a busy day/week into one embed's fields will either get rejected outright by Discord's API once a limit is crossed, or — worse, if the code truncates the field list to "the first 25" without any further handling — silently drops the rest with no operator-visible signal and no corresponding `MarkNotified` skipped, meaning those events are *not* marked notified and will confusingly reappear in the *next* digest (partially mitigating data loss, but producing a duplicate-looking entry days later).
 
 **Why it happens:**
-The existing redaction helpers (`redactDSN`, `redactError`) are **unexported** in `internal/db` — a new `internal/pollruns` or the `internal/httpserver` status handler cannot call them. The path of least resistance is to `err.Error()` into a string column and echo it.
+The existing real-time notifier only ever formats one event per embed, so there's no existing code path in this codebase that has ever had to chunk N events across multiple embeds/messages — this is genuinely new surface area, not an extension of a pattern that's already been battle-tested here.
 
 **How to avoid:**
-- **Preferred: store no free-text error at all.** `poll_runs` carries counts (`artists_checked`, `artists_errored`, `events_recorded`) and an `outcome` enum (`ok` / `partial` / `cancelled` / `error`). Per-artist error *detail* already goes to the structured log with the `cycle_id` correlation attribute (poller.go:285, 420) — that's where an operator debugging a specific failure looks. The System view shows counts + outcome + a "view logs" hint.
-- If a message is genuinely required: promote redaction to an exported shared package (`internal/redact` with `Error(err) string` / `DSN(string) string`), move `internal/db`'s two helpers behind it, run **every** string through it at the write boundary, and add a golden test in the spirit of `TestRunMigrations_NeverLogsDSN` (asserted at migrate.go / redact_test.go) that feeds a DSN-bearing and webhook-bearing error through the status path and asserts neither survives.
-- `/status`'s own DB-failure path mirrors every other handler: log raw error to `httplog.SetAttrs`, return the fixed `"internal error"` body (events.go:124–127), never raw driver text.
-- `poll interval` and `watchlist size` are non-sensitive — fine to return as-is.
+- Chunk events into multiple embeds (up to 25 fields each) and multiple messages (up to 10 embeds each) as needed, rather than assuming one message suffices.
+- Only call `MarkNotified` for events actually included in a message that received a confirmed 2xx from Discord — matching the existing real-time contract of "mark after confirmed send," applied per-chunk rather than per-event-in-a-loop.
+- Respect the existing 400ms inter-send spacing constant (`defaultSpacing` in `internal/notifier/notifier.go`, already tuned to Discord's 5-req/2s ceiling) between chunked digest messages, the same way the real-time path already does between individual sends — a digest firing 5 chunked messages back-to-back with no spacing can trip the same rate limit the real-time path was built to avoid.
+- For a single-operator, modest-watchlist project, this is a low-probability-but-not-impossible edge case (a very active week across many watched artists) — it doesn't need to be over-engineered, but it must degrade gracefully (multiple messages) rather than silently (dropped fields) when it does happen.
 
-**Warning signs:**
-Any `error`, `message`, `detail`, `last_error` string field in the `/status` response type; `err.Error()` written into a `poll_runs` column; no redaction test covering the status path; the string `://` or `password=` appearing in a `/status` fixture.
+**Warning signs:** A digest formatter that builds one `discord.Embed` and appends fields in an unbounded loop with no length/count check before sending.
 
-**Phase to address:** Phase 18 (backend).
-
----
-
-### Pitfall 8: `events_recorded` can't be counted without giving the poller a DB connection or widening the `EventRecorder` seam
-
-**What goes wrong:**
-The poller does no diffing and holds no DB connection *by design* (poller.go package doc, D-05). Detection happens behind `EventRecorder.DetectMusicBrainz` / `DetectDeezer`, which return **only `error`** (poller.go:86–89). So `runCycle` has no idea how many event rows a cycle produced. Getting `events_recorded` means either:
-- widening `EventRecorder` to return `(int, error)` — touches the interface, `internal/detection`'s implementation, and every test fake in `internal/poller` and `internal/httpserver`; or
-- having the `RunRecorder` count rows in the `events` table — which hands the poller (or its seam) a DB read it's architecturally not supposed to have; or
-- omitting / approximating `events_recorded`.
-
-**Why it happens:**
-"events recorded" is listed alongside "artists checked / errored" as if all three are equally available to the poller. Two of them are; this one isn't.
-
-**How to avoid:**
-- Decide explicitly at plan time. Cleanest that preserves the DB-free poller: widen the two `EventRecorder` methods to return `(int, error)` — the count flows back through the same seam the poller already depends on, no new DB access, and the aggregation is subject to Pitfall 1 (use atomics / channel fold).
-- If that ripple is judged too large for this milestone, record `events_recorded` as nullable and populate it later, or drop it from the row and surface "new events this cycle" in the UI from the existing `/events` feed instead. Do not give the poller a `sqlc.Queries`.
-
-**Warning signs:**
-`events_recorded` hard-coded to 0; a `sqlc.New(pool)` appearing in `poller.New`'s call site for the recorder; the `EventRecorder` fakes gaining a DB.
-
-**Phase to address:** Phase 18 (backend).
-
----
-
-### Pitfall 9: The System view polls `/status` far faster than the thing it's observing
-
-**What goes wrong:**
-A status panel invites `setInterval(fetchStatus, 5000)`. Each poll is a gated request that runs several DB queries (last run per source, run history, `SELECT count(*)` on the watchlist). The poll cycle it's reporting on runs every **15 minutes** by default. Polling every 5s is ~180× more backend/DB load than the subsystem under observation, and every open System tab adds a steady connection-pool draw (`MaxConns` is sized for poll workers + headroom — `internal/db/pool.go`, not for UI polling).
-
-**Why it happens:**
-"Live status panel" reads as "real-time." The rest of this SPA has **no polling anywhere** — `history.tsx` and `watchlist.tsx` fetch once on mount (history.tsx:98) — so there's no existing pattern to copy and the author invents one.
-
-**How to avoid:**
-- Fetch once on mount (the established pattern) + an explicit "Refresh" button.
-- If auto-refresh is wanted, no faster than 30–60s, and **pause when the tab is hidden** (`document.visibilityState` / `visibilitychange`), resuming (with an immediate fetch) on re-show.
-- Clear the interval in the `useEffect` cleanup (history.tsx's `cancelled` flag is the reference pattern).
-
-**Warning signs:**
-Network tab shows steady `/status` traffic with the System tab focused; pool acquisition waits climb when someone leaves the tab open; a sub-10s interval literal; no `visibilitychange` handling.
-
-**Phase to address:** Phase 19 (UI).
-
----
-
-### Pitfall 10: Empty state before the first poll cycle — the normal state for the first 15 minutes of every deploy — renders as "Loading…" forever or a broken date
-
-**What goes wrong:**
-A freshly deployed (or freshly migrated) instance has an empty `poll_runs` table. `/status` returns `last run per source = null`, empty history. A UI that assumes a run always exists renders a spinner that never resolves, the string "Invalid Date" from `new Date(null)`, or a blank card. This is not an edge case — it's every deploy's first ~`POLL_INTERVAL`, and every instance with an empty watchlist (poll cycles run but do nothing).
-
-**Why it happens:**
-Development always has poll history within minutes; the "never run yet" window is easy to never see locally.
-
-**How to avoid:**
-- Explicit first-run empty state, distinct from an error state and from a loaded-but-empty state — mirror `history.tsx`'s three-way `emptyStateCopy` (history.tsx:40) and the `EmptyState` component. Copy like: "No poll cycle has run yet — the first is scheduled within your poll interval."
-- Handle each source independently (one may have a run while the other doesn't — though both cron entries fire together, a source's first cycle can still be mid-flight).
-- Guard every timestamp render against `null`.
-- Handle watchlist size 0 explicitly ("Add an artist to start tracking").
-
-**Warning signs:**
-`new Date(status.lastRun)` with no null check; one loading boolean covering both "fetching" and "no data"; no dedicated first-run copy; QA only ever run against a populated dev DB.
-
-**Phase to address:** Phase 19 (UI).
-
----
-
-### Pitfall 11: Auth expiry while the System view is polling — stale interval keeps firing 401s after the passphrase screen mounts
-
-**What goes wrong:**
-`apiFetch`'s global 401 interceptor calls `authStore.markUnauthenticated()` (api.ts:155), which makes `<App>` early-return `<PassphraseScreen>` (root.tsx:105) and unmount the routed content. If the System route started a `setInterval` and doesn't clear it on unmount, the interval keeps firing `/status` fetches behind the login screen, each returning 401, each re-calling `markUnauthenticated` — harmless but noisy, and it holds a fetch in flight against a gated server on every tick.
-
-**Why it happens:**
-`setInterval` in a component without a matching `clearInterval` in the effect cleanup is one of the most common React mistakes, and this SPA has no prior polling code to have established the discipline.
-
-**How to avoid:**
-- `useEffect` that returns `() => clearInterval(id)`; never start a second interval without clearing the first (guard on filter/dependency changes).
-- Rely on the existing 401 → `PassphraseScreen` swap for re-auth; after login, `markAuthenticated` remounts `<Outlet/>` and the System route's mount effect re-fetches (root.tsx:97–100 documents this as the whole re-fetch mechanism). No retry queue needed.
-- A poll firing during the login race is fine — the 401 just re-asserts unauthenticated.
-
-**Warning signs:**
-Repeated 401s in the console after logout/expiry; `/status` requests continuing with the passphrase screen visible; a `setInterval` with no `clearInterval` in the same effect.
-
-**Phase to address:** Phase 19 (UI).
-
----
-
-## The `poll_runs` migration vs the CI guards (confirmed safe, with conditions)
-
-**`cmd/migration-check` — a pure `CREATE TABLE` passes.** `scanFile` (migration-check main.go:560) only switches on `sqlscan.DropTable` and `sqlscan.AlterTable`; a `CREATE TABLE` statement produces zero findings, and `CREATE INDEX` isn't matched either. The D-15 previous-release cross-reference only fires on `DROP`/`RENAME` of an object the N-1 release's `queries/*.sql` still touches — irrelevant for a brand-new table. Conditions to keep it clean:
-- Put any `CHECK` constraint (e.g. on the `outcome` enum) **inline in the `CREATE TABLE`**, not as a later `ALTER TABLE ... ADD CHECK` — `classifyAction` flags `AddCheck` as `backward-incompatible` (migration-check main.go:592), and there's no reason to split it since the table is new.
-- No `CREATE INDEX CONCURRENTLY` — golang-migrate wraps each file in a transaction and `CONCURRENTLY` can't run inside one (migrations README checklist). A brand-new empty table has no rows to lock, so a plain `CREATE INDEX` in the same file is fine.
-- No trigger / `CREATE FUNCTION ... $$ ... $$` for the prune (see Pitfall 2) — keep prune logic in a sqlc query.
-- Ship the `.down.sql` (`DROP TABLE poll_runs`) as the pair even though the app never runs `Down()`; `migration-check` skips `*.down.sql` files (main.go:57).
-- Number it `000008_poll_runs.up.sql`, strictly ascending; never renumber or edit a released migration (`runChangedFiles` hard-errors on a modified released migration — main.go:309).
-
-**N-1 boot is safe.** A bare additive `CREATE TABLE poll_runs` that the previous release's binary never references satisfies the N-1 invariant automatically — the old binary boots against the new schema, ignores the new table, reads/writes everything else unchanged. The `n1-boot` job exercises this. The guard-adoption skip-green window (migrations README) is orthogonal and self-clearing.
-
-**Not caught by CI — the local-only `sqlc` gate.** Adding `queries/pollruns.sql` requires `sqlc generate` + committing the generated code; `make sqlc-check` (CLAUDE.md Definition of Done, no CI counterpart) is the only thing that catches drift. Easy to forget because CI stays green.
-
-**Phase to address:** Phase 18 (backend).
+**Phase to address:** The phase that implements digest message formatting/sending — should extend `internal/discord`'s existing embed-building code and `internal/notifier`'s spacing constant rather than hand-rolling a new send path.
 
 ---
 
 ## Technical Debt Patterns
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Plain `int` counters in the worker closures, "we'll test it works" | One less concept than atomics | Data race with no `-race` safety net; corrupted counts that look plausible; the bug ships | **Never** — atomics are already imported; the cost is zero |
-| `err.Error()` into a `poll_runs.last_error` text column | Rich detail in the System view | DSN/webhook/path leakage through a gated-but-not-secret endpoint; needs the unexported redaction helpers promoted anyway | **Never** — use counts + `outcome` enum; detail lives in the correlated logs |
-| Prune with `id NOT IN (SELECT id ... LIMIT N)`, no `source` scope | Shortest SQL | Cross-source history deletion; NULL trap; extra locks feeding cross-source deadlock | **Never** — scope by source, use a keyset cutoff |
-| `/ready` = strict `version == expectedMax` | "Obviously correct" | Rolled-back (intentionally-behind) instance reports not-ready forever; Phase 17 flap-loop | **Never** — use `>=` and document the Phase 16 rationale |
-| `events_recorded` hard-coded to 0 for now | Avoids widening `EventRecorder` this milestone | A visible metric that's always wrong; erodes trust in the whole panel | Only if the field is omitted from the UI too, not shown as "0" |
-| `setInterval` polling `/status`, no visibility gating | "Live" panel with 3 lines of code | 180× load multiplier vs the observed subsystem; pool pressure per open tab; stale-interval 401 spam | MVP only if interval ≥ 60s and cleared on unmount; visibility gating is cheap, do it |
-| Reading `schema_migrations` by spinning up `migrate.NewWithInstance().Version()` | Reuses existing code | Fresh `database/sql` connection per `/ready` hit | **Never** — one sqlc query on the shared pool |
+|----------|-------------------|-----------------|-----------------|
+| Separate in-memory buffer for "events pending digest," built alongside the existing `notified_at`-based outbox | Feels like a clean, isolated feature module | Reintroduces the exact restart-data-loss risk the DB-backed outbox already solved; requires new reconciliation logic for mode toggles (Pitfall 6) | Never — reuse `notified_at IS NULL` |
+| Fixed UTC-offset digest time instead of an IANA zone name | Simpler config, no tzdata dependency | Breaks twice a year at DST transitions with no natural fix | Never, once an operator-facing "pick your local time" control exists |
+| Digest window computed as `now() - 24h` / `now() - 7d` instead of outbox-state-based | Simple, intuitive-sounding query | Boundary/gap bugs under any schedule drift (restart, DST, late cron tick) | Only acceptable for a throwaway prototype/demo, never for the shipped feature |
+| Single unbounded embed with all events appended as fields, no chunking | Fastest to implement, works fine at current watchlist scale | Silent drop or hard API rejection the first time a digest crosses 25 events | Acceptable temporarily behind an explicit `TODO` + a hard cap that logs a warning, not acceptable as the final shipped behavior |
+| Reading the digest on/off + cadence config once at process boot instead of per-tick | Simpler code, no need for a config-watch mechanism | Contradicts the milestone's explicit goal ("changeable without a redeploy") — a toggle flip in the SPA would silently do nothing until the next restart | Never, given the stated requirement |
 
 ## Integration Gotchas
 
 | Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| golang-migrate `schema_migrations` | Assuming multiple rows / a history; parsing `version` as a string | Single-row table: `version bigint`, `dirty boolean`. `SELECT version, dirty FROM schema_migrations`. `ErrNilVersion` equivalent = table empty / no row (fresh DB) → not ready |
-| Phase 16 ahead-of-source guard | `/ready` treating "DB newer than binary" as an error | It's the supported rollback state (migrate.go:298). `db.version >= expectedMax && !dirty` = ready |
-| chi gate routing (Phase 14) | Registering `/ready` once, inside or outside the gate group | Register on the root router in **both** branches, exact path, before `r.NotFound` — mirror `/health` (server.go:164) |
-| `EventRecorder` seam | Expecting it to report event counts | Returns `error` only; widen to `(int, error)` if `events_recorded` is required |
-| `notifier.NotifyPending` pattern | Copying "log, don't return" *including* passing the cycle `ctx` | Log-don't-return is right; the `ctx` is not — use `context.WithoutCancel` + timeout for the recorder write |
-| sqlc | Adding `queries/pollruns.sql` and relying on CI to catch drift | `make sqlc-check` is local-only; regenerate and commit before pushing |
+|--------------|------------------|--------------------|
+| Discord webhooks (digest message) | Packing unlimited events into one embed's fields | Chunk at 25 fields/embed, 10 embeds/message, 6000 total chars/message; send multiple messages if needed |
+| Discord webhooks (digest message) | Firing several chunked messages back-to-back with no spacing | Reuse the existing 400ms inter-send spacing (`defaultSpacing`) between chunks, same as real-time sends |
+| Discord webhooks (digest message) | Treating a 429 on a digest send the same as a single dropped event | A 429 mid-digest should retry the whole failed chunk (or back off and retry the batch), not silently mark some events notified and lose others — keep the per-chunk "mark only on confirmed send" discipline |
+| `robfig/cron` (already a project dependency) | Constructing the digest cron entry with the library's default (host-local) timezone | Pass `cron.WithLocation(operatorZone)` explicitly, sourced from the Postgres-persisted config, not process default |
+| `robfig/cron` (already a project dependency) | Registering the cron schedule once at boot and expecting a Postgres config change to take effect | Support re-registering the cron entry (remove + re-add, or use a dynamically-computed `Schedule`) when the operator changes cadence/time via the SPA, without requiring a restart |
+| Postgres-persisted config (new for this milestone — everything else in the app is env-var-only per CLAUDE.md) | Treating this like the rest of the app's env-var config (read once, cached forever) | This is intentionally a runtime-mutable exception to the "env vars only" convention — design the read path (cache invalidation or per-tick read) accordingly, and call this out explicitly since it's a deliberate deviation from an established project convention |
 
 ## Performance Traps
 
 | Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| `/status` polled every few seconds by the UI | Steady gated-request + DB traffic; pool acquisition waits | Fetch-on-mount + Refresh button; ≥60s interval; pause on hidden tab | Immediately with one open tab; worse per concurrent operator |
-| Two concurrent per-source `DELETE` prunes on `poll_runs` | `deadlock detected` in logs at cycle-completion times | Insert+prune as one CTE statement; keyset cutoff; source-scoped | Every tick once both sources have >N rows |
-| `/status` "run history" as a query per source in a loop | N queries where 1 would do | Single `LIMIT`-bounded query, clamp page size in the domain layer (events.go pattern) | Trivial now; still wrong shape |
-| `/ready` opening a fresh DB connection per hit | Connection churn under monitor + deploy-gate polling | sqlc query on the shared `pgxpool` | Under Phase 17's frequent polling |
-| `poll_runs` unbounded growth if a swallowed prune keeps failing | `count(*)` >> `2*N`; slow System view | Atomic insert+prune (prune failure fails the logged insert); sanity assertion in a test | Slowly — ~192 rows/day, tiny rows, but no monitoring |
-
-## Security Mistakes
-
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Free-text error string in `poll_runs` → `/status` JSON | DSN-with-password / Discord webhook URL / internal path exfiltrated through a gated-but-not-secret endpoint | Store counts + `outcome` enum only; detail to correlated logs; if a message is unavoidable, promote `redactDSN`/`redactError` to an exported `internal/redact` and golden-test the status path |
-| `/ready` or `/status` returning raw driver error text on DB failure | Same leakage class as above, via the error path | Log raw to `httplog.SetAttrs`, return fixed `"internal error"` / a bare 503 body (health.go / events.go pattern) |
-| `/ready` registered behind the gate | Not a leak, but breaks uptime monitoring and the future deploy gate — pushing operators toward disabling the gate | Root-router exact path, both branches |
-| Assuming "gated" means "safe to expose secrets to" | A weak passphrase (D-11 WARN path) still gets in | Redaction is unconditional, independent of the gate |
+|------|-----------|-------------|-----------------|
+| Unbounded digest event count read into memory in one query | Fine at current single-operator watchlist scale | `ListUnnotified` already has no `LIMIT`; acceptable given this project's scale, but worth a sanity cap (e.g. log a warning past a few hundred pending events) so a stuck/misconfigured digest doesn't silently build an unbounded backlog | Not a near-term concern for this project's single-operator, modest-watchlist scope — flag only, don't build infrastructure for it |
+| Digest formatter re-fetching artist/cover-art data per event synchronously before sending | Slow digest send on a busy day, blocking the cron goroutine | Reuse whatever display-field caching the existing per-event notifier already does; the events table already stores denormalized display fields (title, artist_name, cover_art_url) precisely so this isn't needed | Only relevant if a future digest redesign starts re-querying MusicBrainz/Deezer at send time, which nothing here requires |
 
 ## UX Pitfalls
 
 | Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| No first-run empty state | Operator sees a spinner or "Invalid Date" for 15 min after every deploy and thinks it's broken | Dedicated "no cycle has run yet" copy, distinct from error and from loaded-empty (history.tsx three-way pattern) |
-| `artists_checked` counting all watchlist entries for Deezer | Deezer always shows the same count as MusicBrainz even when most entries have no `deezer_id` (skipped pre-dispatch, poller.go:466) | Count dispatched artists (post-`shouldDispatch`); optionally a separate `artists_skipped` |
-| Showing `events_recorded: 0` when the number is actually unknown | Operator distrusts the panel | Omit the field until it's real, or wire the count through the seam |
-| Status panel that looks stale with no "as of" timestamp | Operator can't tell if the panel itself is live | Show "last refreshed" and the cycle `finished_at`, both explicitly |
-| Outcome shown as a raw enum (`partial`) | Ambiguous | Human phrasing: "Completed with 2 artist errors" |
+|---------|-------------|-------------------|
+| No indication of "last digest sent" anywhere in the SPA | Operator can't tell whether digest mode is actually working or silently stuck (Pitfall 5) | Surface `last_digest_sent_at` and next-scheduled-fire time in the System view alongside the digest toggle |
+| Empty digest sent when zero events accumulated | A blank/near-empty Discord message every day erodes trust in the feature and trains the operator to ignore it | Suppress the send entirely when the outbox is empty at fire time; log the no-op tick instead |
+| Toggling digest → real-time with no explanation of what happens to queued events | Operator surprised by a burst of "old" individual messages, or worse, silently loses them if Pitfall 6 wasn't handled correctly | State the flush behavior explicitly in the SPA UI copy near the toggle (see Pitfall 6) |
+| Digest time picker that accepts a bare `HH:MM` with no timezone selector | Operator has no way to correctly express intent; falls back to server default (likely UTC), producing the exact bug in Pitfall 2 | Timezone selector (or auto-detected browser timezone as the default, explicitly confirmed/overridable) alongside the time picker |
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **`/ready`:** often missing the `>=` (not `==`) version comparison — verify a binary with a *lower* embedded max than the DB still reports ready (simulate rollback)
-- [ ] **`/ready`:** often missing the gated-instance test — verify it returns non-401 with no session cookie on a server built with `WithAuthGate`
-- [ ] **`/ready`:** often missing a DB-call timeout — verify a blocked ping fails the probe within ~3s, doesn't hang
-- [ ] **`runCycle` counters:** often missing `==` (exact) assertions — verify `checked == errored + succeeded` under a fake with errors *and* panics, looped 1000×
-- [ ] **Worker panic:** often missing from the errored count — verify a panicking artist increments `artists_errored`
-- [ ] **RunRecorder:** often missing the "swallow the error" path — verify a recorder returning an error leaves `runCycle` returning `nil`
-- [ ] **RunRecorder:** often missing the shutdown case — verify the last cycle before `Stop()` still writes a row; verify a 30s-hanging recorder doesn't extend shutdown past ~5s
-- [ ] **Overlap-guard skip:** verify an `ErrCycleInProgress` tick writes **no** `poll_runs` row
-- [ ] **Prune:** often missing source scoping — verify inserting >N rows for each source and pruning leaves exactly N *per source*
-- [ ] **Prune:** verify insert+prune is atomic (one statement) so a prune failure surfaces
-- [ ] **`/status` redaction:** verify a DSN-bearing and webhook-bearing error fed through the status path appears nowhere in the response
-- [ ] **Migration:** `migration-check` green, `n1-boot` green, `make sqlc-check` green locally, `.down.sql` present, `CHECK` inline in `CREATE TABLE`
-- [ ] **System view:** verify the fetch interval (if any) is cleared on unmount and paused on `visibilitychange`
-- [ ] **System view:** verify null `last_run` timestamps render as first-run copy, not "Invalid Date"
+- [ ] **Digest toggle wired end-to-end:** Verify the *existing* per-poll-cycle `NotifyPending` call is actually gated off when digest mode is on — not just that a new digest job exists alongside it (Pitfall 1).
+- [ ] **Timezone correctness:** Verify the built container image (Alpine-based) can actually `time.LoadLocation` a real IANA zone name, not just that the code compiles locally where tzdata is already present (Pitfall 2).
+- [ ] **DST coverage:** Verify a test exists that advances a fake clock across both a spring-forward and a fall-back boundary and asserts exactly one digest fires per calendar day (Pitfall 3).
+- [ ] **Restart resilience:** Verify killing the process a few seconds before a scheduled digest fire, then restarting, still results in that day's events reaching Discord on the next tick — not silently lost (Pitfall 4, Pitfall 5).
+- [ ] **Toggle-mid-window behavior:** Verify switching digest → real-time with events already queued either flushes them via the next real-time poll cycle or explicitly documents/tests the chosen behavior — not left unspecified (Pitfall 6).
+- [ ] **Discord limit handling:** Verify a digest with more events than fit in one embed/message actually sends multiple chunked messages instead of erroring or truncating silently (Pitfall 7).
+- [ ] **Cadence change without redeploy:** Verify changing the digest time/cadence via the SPA takes effect on the *next* scheduled fire without a container restart — this is an explicit milestone goal, easy to accidentally regress to "read config at boot only."
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| Counter data race shipped | MEDIUM | Switch to `atomic.Int64` or channel-fold; add looped exact-assertion test; the historical rows are just slightly wrong, no data loss |
-| Prune deleted the other source's history | MEDIUM | History is gone (not recoverable), but fix is a one-line `WHERE source =` + test; re-accumulates within N cycles |
-| Cross-source prune deadlock | LOW | Collapse insert+prune into one CTE statement; deadlock disappears |
-| `/ready` strict-equality shipped, deploy gate loops | LOW (before Phase 17) / HIGH (after) | Change `==` to `>=`; before Phase 17 there's no consumer so it's harmless; after, a bad deploy could have flapped |
-| `/status` leaked a secret | HIGH | Rotate the exposed credential (DB password / Discord webhook), then remove the field + add the golden test |
-| RunRecorder wedged the overlap guard | MEDIUM | Bound the recorder context; until fixed, a restart clears the stuck `running` flag |
-| `poll_runs` grew unbounded | LOW | One-off `DELETE` down to N per source; fix the atomic prune |
+|---------|-----------------|-------------------|
+| Double-send from an un-gated real-time drain running alongside digest mode (Pitfall 1) | LOW | Since `MarkNotified` is idempotent per-row, no DB cleanup is needed; fix the gating logic and ship — no data corruption occurred, only duplicate Discord messages |
+| Wrong timezone causing digests to fire at an unexpected hour (Pitfall 2) | LOW | Backfill `time/tzdata` import / operator zone config, redeploy; no data lost since events remain queued via `notified_at IS NULL` regardless of when the digest fires |
+| A missed digest cycle from a restart or DST edge case (Pitfall 4, Pitfall 5) | LOW | No recovery action needed if outbox-state windowing (Pitfall 4) was followed — the missed cycle's events are still `notified_at IS NULL` and go out on the next successful tick automatically |
+| Orphaned queued events after a mode toggle, if a separate digest-only queue was built instead of reusing `notified_at` (Pitfall 6) | MEDIUM | Requires a one-off manual query/backfill to reconcile the separate queue's state back into `notified_at`, plus a follow-up fix to collapse to a single outbox going forward |
+| Silently dropped events from an un-chunked oversized digest embed (Pitfall 7) | MEDIUM | If `MarkNotified` was (incorrectly) called before confirming the send succeeded, affected events must be identified and manually reset (`notified_at = NULL`) to re-queue them; if the "mark only on confirmed send" discipline was followed correctly, no recovery is needed — they simply remain queued |
 
 ## Pitfall-to-Phase Mapping
 
 | Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| #1 Counter aggregation data race | Phase 18 | Looped exact-count test with errors + panics; atomics/channel fold in code review |
-| #2 Prune-on-insert concurrency | Phase 18 | Per-source retention test; single-statement CTE; no `deadlock detected` in a two-source stress test |
-| #3 RunRecorder failure/hang semantics | Phase 18 | Recorder-error → cycle nil; hanging-recorder → bounded; last-cycle-at-shutdown recorded |
-| #4 Recording an overlap-skipped cycle | Phase 18 | `ErrCycleInProgress` tick writes no row; row count == 2 per interval |
-| #5 `/ready` version `>=` not `==` | Phase 18 | Simulated-rollback binary reports ready; `ExpectedSchemaVersion` derived from embedded FS |
-| #6 `/ready` gating / cost / timeout | Phase 18 | Non-401 on gated server; shared-pool query; 3s timeout test |
-| #7 `/status` secret leakage | Phase 18 | Golden redaction test on the status path; no free-text error field |
-| #8 `events_recorded` seam | Phase 18 | Decision recorded; if kept, `EventRecorder` returns `(int, error)` and poller stays DB-free |
-| #9 Over-aggressive `/status` polling | Phase 19 | Interval ≥60s + `visibilitychange` pause, or fetch-on-mount + Refresh |
-| #10 First-run empty state | Phase 19 | Three-way empty/error/first-run copy; null-timestamp guards |
-| #11 Auth-expiry / stale interval | Phase 19 | `clearInterval` in effect cleanup; 401 → PassphraseScreen swap re-fetches on re-auth |
-| `poll_runs` migration vs CI guards | Phase 18 | `migration-check` + `n1-boot` + `make sqlc-check` all green; inline CHECK; `.down.sql` present |
-| `artists_checked` semantics (Deezer skip) | Phase 18 | Deezer count reflects dispatched artists, not `len(entries)` |
+|---------|--------------------|-----------------|
+| Un-gated real-time drain running alongside digest mode (1) | Scheduler/outbox-integration phase | Test: toggle digest on, insert event, run both a poll cycle and a digest tick, assert exactly one Discord send |
+| Timezone / Alpine tzdata (2) | Scheduler-construction phase | CI or image-smoke-test step that `time.LoadLocation`s a real zone inside the built container; `cron.WithLocation` unit test |
+| DST transitions (3) | Scheduler-construction phase | Fake-clock test crossing both DST boundaries, asserting exactly one fire per day |
+| Window-boundary ambiguity (4) | Event-selection query phase | Test asserting an event inserted mid-drain is included exactly once across two consecutive digest ticks, never zero or twice |
+| Restart near fire time (5) | Scheduler-construction phase + System-view extension | Kill/restart test around a scheduled fire time; `/status` shows `last_digest_sent_at` |
+| Toggle mid-window orphaning events (6) | Same phase as (1) | Test: queue events under digest mode, toggle to real-time, assert they're sent on the next poll cycle |
+| Discord embed/message limits (7) | Digest message-formatting phase | Test with an event count exceeding 25, asserting multiple embeds/messages sent and all events end up `notified_at IS NOT NULL` |
+| Cadence change requires restart (Technical Debt row) | Postgres-config-read phase | Test: change cadence via API/SPA path, assert next fire uses new cadence with no process restart |
 
 ## Sources
 
-- Codebase (authoritative for all mechanics): `internal/poller/poller.go`, `internal/db/migrate.go`, `internal/db/pool.go`, `internal/httpserver/server.go`, `internal/httpserver/health.go`, `internal/httpserver/events.go`, `cmd/server/main.go`, `cmd/migration-check/main.go`, `internal/config/config.go`, `internal/db/migrations/README.md`, `internal/watchlist/service.go`, `web/app/lib/api.ts`, `web/app/lib/authStore.ts`, `web/app/root.tsx`, `web/app/routes/history.tsx` — read 2026-09-09
-- `.planning/PROJECT.md` (v1.4 milestone scope, Phase 16 decisions D-16/D-17, `-race` unavailability), `.planning/WINDOWS.md` (Broken Windows Ledger — ThreadSanitizer waiver)
-- [golang-migrate/migrate pkg.go.dev](https://pkg.go.dev/github.com/golang-migrate/migrate/v4) and [Better Stack: Database migrations in Go with golang-migrate](https://betterstack.com/community/guides/scaling-go/golang-migrate/) — `schema_migrations` table shape (`version` bigint, `dirty` boolean), `Version()` semantics, `ErrNilVersion` — MEDIUM
-- [Checking migration status with golang-migrate — Jamie Tanna](https://www.jvt.me/posts/2023/06/19/golang-migrate-status/) — reading applied version — MEDIUM
-- [pgsql-general: "How to keep at-most N rows per group?"](https://www.postgresql.org/message-id/20080109182115.6E39C2E3239%40postgresql.org) and [Nicola Iarocci: Automatic deletion of older records in Postgres](https://nicolaiarocci.com/automatic-deletion-of-older-records-in-postgres/) — trigger vs periodic-sweep tradeoffs, prune-on-insert lock overhead — MEDIUM
+- `internal/db/migrations/000003_events.up.sql`, `queries/events.sql`, `internal/notifier/notifier.go`, `internal/poller/poller.go` (this repository) — existing outbox/queue design (`notified_at`, `ListUnnotified`, `MarkNotified`, per-poll-cycle `NotifyPending` call site, 400ms spacing constant) — confidence HIGH (primary source, read directly)
+- `.planning/PROJECT.md` (this repository) — milestone goal (Postgres-persisted, no-redeploy-required toggle), Alpine-based Dockerfile decision, single-instance/restart-on-deploy deployment model — confidence HIGH
+- [github.com/robfig/cron](https://github.com/robfig/cron), [Enhancement: UTC · Issue #180](https://github.com/robfig/cron/issues/180), [Set Timezone for Scheduler · Issue #132](https://github.com/robfig/cron/issues/132), [pkg.go.dev/github.com/robfig/cron/v3](https://pkg.go.dev/github.com/robfig/cron/v3) — DST spring-forward/fall-back behavior, default-to-host-timezone behavior, `cron.WithLocation` — confidence MEDIUM (project's own dependency's issue tracker, cross-checked across multiple pages)
+- [docs.discord.com/developers/topics/rate-limits](https://docs.discord.com/developers/topics/rate-limits), [Discord Embed Limits Cheat Sheet](https://discord-webhook.com/en/blog/discord-webhook-embed-limits/), [discord.com/safety/using-webhooks-and-embeds](https://discord.com/safety/using-webhooks-and-embeds) — 25 fields/embed, 6000 chars/message, 10 embeds/message, ~5 requests/2s per webhook, global 50 req/s — confidence MEDIUM (official Discord docs plus independent corroborating sources)
+- [Wawandco: Go's Locations & Alpine Docker image](https://wawand.co/blog/posts/go-time-default-locations/), [A story about Go, Docker and time zones](https://lalatron.hashnode.dev/a-story-about-go-docker-and-time-zones) — Alpine missing tzdata, `time.LoadLocation` failure mode, `time/tzdata` blank-import fix — confidence MEDIUM (independent, corroborating sources; well-known Go/Alpine interaction)
+- [Knock: Building a batched notification engine](https://knock.app/blog/building-a-batched-notification-engine), [SuprSend: How Notification Batching and Digests Actually Work](https://www.suprsend.com/post/notification-batching-and-digest), [techinterview.org: Digest Scheduler Low-Level Design](https://www.techinterview.org/post/3233470550/lld-digest-scheduler/) — outbox-state vs. time-range windowing, idempotency-key dedup pattern, empty-digest suppression — confidence MEDIUM (industry vendor engineering blogs, corroborating on the same core patterns)
+- Kubernetes CronJob `startingDeadlineSeconds` / missed-schedule documentation (general cron catch-up pattern references) — confidence MEDIUM, used only as a general illustration of the "missed schedule window" problem class, not as a direct implementation recommendation for this project (robfig/cron has no equivalent option; the outbox-state approach in Pitfall 4 is the recommended substitute)
 
 ---
-*Pitfalls research for: operator observability features on drop-tracker v1.4*
-*Researched: 2026-09-09*
+*Pitfalls research for: digest/batch notification mode, drop-tracker v1.5*
+*Researched: 2026-09-11*

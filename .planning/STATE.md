@@ -1,44 +1,43 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Operator Observability (Phases 18, 18.1, 19) — IN PROGRESS
-status: Awaiting next milestone
-stopped_at: All 3 phases (18, 18.1, 19) complete — ready to run /gsd-complete-milestone v1.4
-last_updated: "2026-09-11T06:41:39.771Z"
-last_activity: 2026-09-11
-last_activity_desc: Milestone v1.4 completed and archived
-state_head: e373288eac2265447fa2cb199fb3ebfb6a0293aa
+milestone: v1.5
+milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
+current_phase: 21
+current_phase_name: Real-Time ↔ Digest Mutual Exclusion
+status: "Phase 20 shipped — PR #5"
+stopped_at: Phase 20 complete, ready to plan Phase 21
+last_updated: "2026-09-16T12:37:07.165Z"
+last_activity: 2026-09-16
+state_head: 515094fc8452d2c4bd4a7b323eed1f19f47187fa
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 12
-  completed_plans: 12
-  percent: 100
-current_phase: null
-current_phase_name: null
+  total_phases: 4
+  completed_phases: 1
+  total_plans: 4
+  completed_plans: 4
+  percent: 25
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-11)
+See: .planning/PROJECT.md (updated 2026-09-13)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** v1.4 milestone complete — ready to close out
+**Current focus:** Phase 21 — Real-Time ↔ Digest Mutual Exclusion
 
 ## Current Position
 
-Phase: Milestone v1.4 complete
-Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-09-11 — Milestone v1.4 completed and archived
+Phase: 21 — Real-Time ↔ Digest Mutual Exclusion
+Plan: Not started
+Status: Phase 20 shipped — PR #5
+Last activity: 2026-09-16
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 84
+- Total plans completed: 88
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -65,6 +64,7 @@ Last activity: 2026-09-11 — Milestone v1.4 completed and archived
 | 18 | 4 | - | - |
 | 19 | 5 | - | - |
 | 18.1 | 3 | - | - |
+| 20 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -128,6 +128,10 @@ Last activity: 2026-09-11 — Milestone v1.4 completed and archived
 | Phase 19 P03 | 15min | 3 tasks | 4 files |
 | Phase 19 P04 | 20min | 3 tasks | 6 files |
 | Phase 19 P05 | 45min | 3 tasks | 5 files |
+| Phase 20 P01 | 45min | 2 tasks | 14 files |
+| Phase 20 P02 | 40min | 2 tasks | 1 files |
+| Phase 20 P03 | 40min | 2 tasks | 6 files |
+| Phase 20 P04 | 35min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -286,6 +290,28 @@ Recent decisions affecting current work:
 - [Phase 19]: [Phase 19][19-05] Refresh re-entrancy guard uses a useRef checked synchronously before the first await, not the refreshing state variable -- a real double-click test proved the state-only guard let two clicks in the same task both start a fetch
 - [Phase 19]: [Phase 19][19-05] deriveLoadedShape is computed during render from the freshest payload every fetch, never stored in state, so a Refresh returning an emptied ring buffer after a restart falls back to first-run automatically
 
+- [v1.5 Roadmap]: 4 phases derived from the 16 v1.5 requirements — Phase 20 (Digest Settings & Operator Control; DGST-01…04, DGST-16), Phase 21 (Real-Time ↔ Digest Mutual Exclusion; DGST-13/14), Phase 22 (Scheduled Digest Send; DGST-05…09, DGST-15), Phase 23 (Digest Readability & Discord Limits; DGST-10…12). Phase numbering continues from v1.4's Phase 19; Phase 17 stays deferred and archived.
+- [v1.5 Roadmap]: Gate before sender — Phase 21 (real-time stand-down) lands *before* Phase 22 (the digest send), inverting the research's ordering. With the real-time drain un-gated, every poll cycle empties the `notified_at IS NULL` outbox, so a digest would always find zero events and silently skip: the sender is not verifiable until the gate exists. The in-between state is safe by Phase 21's own success criteria (events queue, toggle-off flushes them) — same posture as v1.3's Phase 16, building the safety precondition before the thing it protects.
+- [v1.5 Roadmap]: The research's Phase 20 "Digest Foundation (inert)" was folded into the settings/UI phase rather than shipping as its own phase. A migration plus a store plus two inert seams has task-shaped success criteria, not observable ones, and the SPA panel needs all of it anyway. `digest_last_sent_at` still ships in that one migration even though nothing writes it until Phase 22 — the panel renders "never sent yet" from it, and one migration beats two.
+- [v1.5 Roadmap]: DGST-16 folded into Phase 20 instead of becoming a one-requirement visibility phase — the requirement explicitly allows the new digest panel as its home, and that panel is Phase 20's deliverable.
+- [v1.5 Roadmap]: One outbox, never two. `events.notified_at IS NULL` stays the single source of delivery truth — no `digest_pending` flag, no second queue table. DGST-14 (toggle-back flush) is then correct by construction, and the digest window is defined by outbox state rather than a `created_at BETWEEN` predicate (RESEARCH Pitfall 4). The watermark decides *whether a send is due* and labels the window; it never selects the event set.
+- [v1.5 Roadmap]: RESEARCH gap #1 closed as **no** — operator-configurable local fire time and an IANA zone picker are explicitly Out of Scope in REQUIREMENTS.md, so Phase 22 ships a fixed, documented fire time. What survives from that gap: the `time/tzdata` blank import for Alpine (DGST-07) and an explicit zone at every fire-time computation instead of container-local time.
+- [v1.5 Roadmap]: Phase 20 carries a UI hint — run `/gsd-ui-phase 20` before planning. Phases 21-23 are backend-only; Phase 23's operator-facing surface is the Discord message itself, not the SPA. Migration `000008` is the next free number — v1.4's sketched `poll_runs` table was rejected in favour of the in-process ring buffer (`docs/adr/0001`), so nothing occupies it. `make sqlc-check` has no CI counterpart, so Phase 20's codegen must be regenerated and committed locally.
+- [v1.5 Grilling]: A `/mattpocock-skills:grill-with-docs` session (2026-09-11) challenged the full v1.5 plan post-roadmap and resolved the three decisions the roadmap had deliberately left open, plus two further findings, direct-edited into ROADMAP.md/REQUIREMENTS.md/`20-CONTEXT.md` with explicit user sign-off to bypass `/gsd-discuss-phase`/`/gsd-phase` for this doc sync:
+  (a) **Settings-read failure posture (Phase 21) locked to fail-open real-time** — a `settings.Get` error behaves as "digest off," matching D-10's existing real-time-is-the-safe-default bias, never as a silent no-send.
+  (b) **Phase 22 restart catch-up locked to log-and-wait** — no immediate catch-up send on boot; an immediate send would arrive at an arbitrary restart time, undercutting DGST-11's "predictable window" framing more than the extra wait does. Closes RESEARCH gap #4.
+  (c) **DGST-10 (grouping hierarchy) moved from Phase 23 to Phase 22, pulled forward** — Phase 22 was going to reuse `formatEmbed` verbatim for a flat batch while Phase 23's own research lean (Description-line grouping over field-per-event embeds) would have replaced that same output; building the real grouped shape once in Phase 22 avoids the planned throwaway work. REQUIREMENTS.md traceability and both phases' success criteria/planner notes updated accordingly; Phase 23 is now window-header (DGST-11) + chunking (DGST-12) only, preserving Phase 22's grouping across a multi-message split.
+  (d) **Phase 21 and Phase 22 ship in the same release** — Phase 21 (real-time stand-down) is not merged to `main`/auto-deployed until Phase 22 (the digest sender) is also ready, closing a window where an operator could enable digest mode with a gate live but no scheduler yet built to drain the queue — real notifications going dark with no ETA.
+  (e) **Phase 20's singleton-enforcement mechanism ratified** (moved out of Claude's Discretion into `20-CONTEXT.md` D-05): `CHECK (id = 1)` + migration-time seed `INSERT`, not upsert-on-read — research's own schema sketch, no re-litigation needed.
+  Two further findings were surfaced but deliberately left as noted risks, not new decisions: no `go test -race` on this project (WINDOWS.md) for Phase 21's concurrency proof (existing invariant-test substitute stands); and the actual v1.5 watchlist scale that would make Phase 23's >10-embed chunking a routine vs. theoretical case (RESEARCH gap #3, unchanged — capture real metrics at launch).
+- [Phase 20]: [Phase 20-01]: digest_last_sent_at maps through sqlc as pgtype.Timestamptz (not *time.Time); settings.Service converts it to *time.Time by hand, matching events.Service's NotifiedAt precedent -- emit_pointers_for_null_types only applies to types with no native pgtype null representation.
+- [Phase 20]: [Phase 20-02]: No production code changed -- all 13 new rejection/gate/CSRF/503/no-leak test cases passed against plan 20-01's unmodified handler on first run, confirming both high-severity threats (T-20-07 spoofing, T-20-08 CSRF) as live behavioral tests rather than structural claims
+- [Phase 20]: [Phase 20]: [20-03] The base-ui Switch renders aria-disabled (not native disabled) on its role=switch element; tests assert getAttribute("aria-disabled") directly since jest-dom's toBeDisabled() doesn't recognize it
+- [Phase 20]: [Phase 20]: [20-03] DigestSettings save-success unit test uses a ControlledDigestSettings wrapper feeding onSaved's payload back as the next settings prop, mirroring system.tsx's setDigest, since the component never reads back its own write
+- [Phase 20]: [Phase 20-04] shadcn add select mis-resolved cn as a package again (19-03 precedent) -- reverted package.json/pnpm-lock.yaml and hand-fixed the one import instead of discarding the CLI's otherwise-correct output
+- [Phase 20]: [Phase 20-04] Generalized the digest-mode save handler into a shared save({digestEnabled, digestCadence}) helper both the switch and the new cadence Select call, so the full-object PUT always carries both fields (T-20-19)
+- [Phase 20]: [Phase 20-04] go test -race still unusable on this Windows dev box (cgo/ThreadSanitizer, same limitation as Phase 11.1/15) -- substituted plain go test for make test's verification; coverage-gate confirmed 90.72%
+
 ### Pending Todos
 
 - [minor] Delete the stale tracked `web/package-lock.json` — a drifting second lockfile Trivy also scans. `.planning/todos/pending/2026-09-05-delete-stale-web-package-lock-json.md`
@@ -341,6 +367,8 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 - Phase 16 context revised (2026-09-04) after a `/grill-with-docs` pass — 8 findings (S1-S8) resolved, new decisions D-15..D-19: (S1) static guard now cross-references the previous release's `queries/*.sql` + boot job adds a `POST /watchlist` write assertion — GET-only missed the poller's write paths; (S2) a `changes` prelude job computes the diff base per event (`github.event.before..github.sha` for push) — the old merge-base approach was a no-op on direct-to-main; (S3) unexported `runMigrationsWithSource` seam so the SC #4 test drives the real boot path; (S4) `ADD COLUMN NOT NULL` reclassified as unsafe-forward (deploy hazard), not an N-1 break — two-class guard messages; (S5) Phase 17 rollback constrained to strictly N-1 (D-17) + annotation tag validated; (S6) N-1 boot job path-filtered to migration PRs; (S7) both checks stay blocking, transient-ghcr risk accepted; (S8) `HTTP_PORT` not `PORT`, `fetch-depth: 0` + tags a hard req. See `16-CONTEXT.md` `<revisions>`.
 - v1.4 milestone opened (2026-09-09): Phases 18-19 added — Backend (Readiness, Poll-Run History & Status API) and Frontend (System View). Phase numbering continued from 17 (deferred, archived, still carried forward) rather than resetting. Deliberately a two-phase split: the research's 18.1-18.4 breakdown is plan-level wave structure inside Phase 18, not separate roadmap phases, and the 18/19 boundary is the frozen `/status` JSON contract.
 
+- v1.5 milestone opened (2026-09-11): Phases 20-23 added — Digest Settings & Operator Control, Real-Time ↔ Digest Mutual Exclusion, Scheduled Digest Send, Digest Readability & Discord Limits. Phase numbering continued from 19. Two deliberate deviations from the research's five-phase proposal: its inert "Digest Foundation" phase was folded into the settings/UI phase, and the mutual-exclusion gate was moved *ahead* of the digest sender (an un-gated real-time drain empties the outbox every poll cycle, which would make the sender unverifiable and the digest look broken rather than duplicated).
+
 ## Deferred Items
 
 Items acknowledged and carried forward from previous milestone close:
@@ -361,10 +389,11 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T06:28:15.758Z
-Stopped at: v1.4 milestone (Phases 18, 18.1, 19) all complete — ready for /gsd-complete-milestone v1.4
+Last session: 2026-09-13T22:35:04.103Z
+Stopped at: Phase 20 complete, ready to plan Phase 21
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Review `.planning/ROADMAP.md` (Phases 20-23) and confirm the phase split
+- Run `/gsd-ui-phase 20` (Phase 20 carries a UI hint), then `/gsd-plan-phase 20`

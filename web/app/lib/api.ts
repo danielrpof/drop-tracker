@@ -150,6 +150,16 @@ export interface StatusResponse {
   sources: Record<string, StatusSource>
 }
 
+// NotificationSettings mirrors internal/httpserver/settings.go's
+// settingsResponse exactly -- the GET/PUT /settings/notifications wire
+// contract (DGST-01, DGST-16).
+export interface NotificationSettings {
+  digest_enabled: boolean
+  digest_cadence: "daily" | "weekly"
+  digest_last_sent_at: string | null
+  updated_at: string
+}
+
 // ---- Error type ---------------------------------------------------------
 
 // ApiError carries the HTTP status and the server's fixed {"error": "..."}
@@ -346,4 +356,30 @@ export async function deleteSession(): Promise<void> {
 // code.
 export async function getStatus(): Promise<StatusResponse> {
   return apiFetch<StatusResponse>("/status")
+}
+
+// ---- Digest settings (operator control) -----------------------------------
+
+// getDigestSettings fetches the gated digest settings resource (DGST-01,
+// DGST-16). Routed through apiFetch like every other wrapper -- no
+// per-wrapper auth code needed.
+export async function getDigestSettings(): Promise<NotificationSettings> {
+  return apiFetch<NotificationSettings>("/settings/notifications")
+}
+
+// updateDigestSettings always sends both fields (D-02 instant-apply,
+// full-object semantics matching the Go DTO) -- there is no partial-update
+// variant of this endpoint, unlike updateWatchlistPreferences.
+export async function updateDigestSettings(params: {
+  digestEnabled: boolean
+  digestCadence: "daily" | "weekly"
+}): Promise<NotificationSettings> {
+  return apiFetch<NotificationSettings>("/settings/notifications", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      digest_enabled: params.digestEnabled,
+      digest_cadence: params.digestCadence,
+    }),
+  })
 }

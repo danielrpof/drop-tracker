@@ -1,10 +1,12 @@
 import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   ApiError,
+  getDigestSettings,
   getStatus,
+  type NotificationSettings,
   type StatusResponse,
   type StatusRun,
 } from "~/lib/api"
@@ -18,9 +20,23 @@ import System from "./system"
 vi.mock("~/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/api")>()),
   getStatus: vi.fn(),
+  getDigestSettings: vi.fn(),
 }))
 
 const mockGetStatus = vi.mocked(getStatus)
+const mockGetDigestSettings = vi.mocked(getDigestSettings)
+
+function makeSettings(
+  overrides: Partial<NotificationSettings> = {}
+): NotificationSettings {
+  return {
+    digest_enabled: false,
+    digest_cadence: "daily",
+    digest_last_sent_at: null,
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  }
+}
 
 function makeStatus(overrides: Partial<StatusResponse> = {}): StatusResponse {
   return {
@@ -66,6 +82,14 @@ function makeRun(overrides: Partial<StatusRun> = {}): StatusRun {
 }
 
 describe("System route", () => {
+  // Every case rides the same Promise.all([getStatus(), getDigestSettings()])
+  // mount fetch (D-10) -- a Promise.all member left unmocked rejects and
+  // turns every existing case red, so this default covers every case that
+  // doesn't override it below.
+  beforeEach(() => {
+    mockGetDigestSettings.mockResolvedValue(makeSettings())
+  })
+
   it("fetches once on mount and renders the heading and app_version", async () => {
     mockGetStatus.mockResolvedValueOnce(makeStatus())
 
@@ -662,5 +686,31 @@ describe("System route", () => {
     expect(unmountedWarning).toBe(false)
 
     consoleError.mockRestore()
+  })
+
+  it("renders the Digest notifications card alongside the About block on a successful mount", async () => {
+    mockGetStatus.mockResolvedValueOnce(makeStatus())
+
+    renderRoute(System, "/system")
+
+    await screen.findByRole("heading", { name: "System" })
+    expect(
+      screen.getByRole("heading", { name: "Digest notifications" })
+    ).toBeInTheDocument()
+  })
+
+  it("renders the existing page-level error state when the digest-settings fetch rejects with a non-401 error", async () => {
+    mockGetStatus.mockResolvedValueOnce(makeStatus())
+    mockGetDigestSettings.mockReset()
+    mockGetDigestSettings.mockRejectedValueOnce(new Error("network down"))
+
+    renderRoute(System, "/system")
+
+    await screen.findByRole("heading", {
+      name: "Couldn't load system status.",
+    })
+    expect(
+      screen.queryByRole("heading", { name: "Digest notifications" })
+    ).not.toBeInTheDocument()
   })
 })

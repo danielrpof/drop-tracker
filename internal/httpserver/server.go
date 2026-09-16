@@ -41,6 +41,7 @@ type Server struct {
 	watchlistCounter WatchlistCounter
 	appVersion       string
 	pollInterval     time.Duration
+	settingsStore    SettingsStore
 }
 
 // serverConfig collects the optional settings New applies before building
@@ -56,6 +57,7 @@ type serverConfig struct {
 	watchlistCounter  WatchlistCounter
 	appVersion        string
 	pollInterval      time.Duration
+	settingsStore     SettingsStore
 }
 
 // Option customises New, mirroring internal/poller's and internal/notifier's
@@ -112,6 +114,16 @@ func WithStatus(deps StatusDeps) Option {
 	}
 }
 
+// WithSettings supplies the digest notification settings store backing
+// GET/PUT /settings/notifications (DGST-01, DGST-03). Absent, both handlers
+// answer 503 with the shared fixed error body, mirroring WithStatus; a
+// cmd/server binary always wires it.
+func WithSettings(store SettingsStore) Option {
+	return func(c *serverConfig) {
+		c.settingsStore = store
+	}
+}
+
 // New builds a Server backed by db, store, eventsStore, sources and logging
 // through logger. The chi middleware stack runs in this order:
 // middleware.RequestID first so the correlation ID exists in context for
@@ -162,6 +174,7 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	s.watchlistCounter = cfg.watchlistCounter
 	s.appVersion = cfg.appVersion
 	s.pollInterval = cfg.pollInterval
+	s.settingsStore = cfg.settingsStore
 
 	r := chi.NewRouter()
 
@@ -256,6 +269,12 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	// X-Instance-Gated header on the gated path exactly as /events does; it is
 	// a read verb, so the CSRF-header requirement is a no-op for it.
 	r.Get("/status", s.handleStatus)
+	// The digest settings resource (DGST-01..04, T-20-01) is registered
+	// here, next to the other data routes, so both verbs inherit
+	// gate.Authenticate and gate.RequireCSRFHeader with no new middleware
+	// and no path allowlist -- structural gating, not a code-path decision.
+	r.Get("/settings/notifications", s.handleGetSettings)
+	r.Put("/settings/notifications", s.handleUpdateSettings)
 }
 
 // securityResponseHeaders sets response headers that apply to every route in

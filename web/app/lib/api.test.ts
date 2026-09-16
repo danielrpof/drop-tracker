@@ -413,4 +413,110 @@ describe("apiFetch auth behaviour (401 interceptor, CSRF header, session wrapper
     expect(err).toBeInstanceOf(api.ApiError)
     expect((err as InstanceType<typeof api.ApiError>).status).toBe(401)
   })
+
+  // --- plan 20-03 Task 2: getDigestSettings()/updateDigestSettings() (DGST-01, DGST-16) ---
+
+  const freshDigestSettingsBody = {
+    digest_enabled: false,
+    digest_cadence: "daily",
+    digest_last_sent_at: null,
+    updated_at: "2026-01-01T00:00:00Z",
+  }
+
+  it("getDigestSettings() issues its request to /settings/notifications and resolves all four fields intact", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(freshDigestSettingsBody))
+
+    const result = await api.getDigestSettings()
+
+    expect(fetchSpy.mock.calls[0][0]).toBe("/settings/notifications")
+    expect(result).toEqual(freshDigestSettingsBody)
+    expect(result.digest_last_sent_at).toBeNull()
+  })
+
+  it("updateDigestSettings() PUTs both snake_case keys to /settings/notifications carrying the centrally-injected CSRF header", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ ...freshDigestSettingsBody, digest_enabled: true })
+    )
+
+    await api.updateDigestSettings({
+      digestEnabled: true,
+      digestCadence: "weekly",
+    })
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/settings/notifications")
+    expect(init.method).toBe("PUT")
+    expect(JSON.parse(init.body as string)).toEqual({
+      digest_enabled: true,
+      digest_cadence: "weekly",
+    })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("getDigestSettings() rejects with a real ApiError carrying status 401 on a 401", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "unauthenticated" }), {
+        status: 401,
+      })
+    )
+
+    const err = await api.getDigestSettings().then(
+      () => {
+        throw new Error("expected getDigestSettings() to reject")
+      },
+      (e: unknown) => e
+    )
+
+    expect(err).toBeInstanceOf(api.ApiError)
+    expect((err as InstanceType<typeof api.ApiError>).status).toBe(401)
+  })
+
+  it("updateDigestSettings() rejects with a real ApiError carrying status 401 on a 401", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "unauthenticated" }), {
+        status: 401,
+      })
+    )
+
+    const err = await api
+      .updateDigestSettings({ digestEnabled: true, digestCadence: "daily" })
+      .then(
+        () => {
+          throw new Error("expected updateDigestSettings() to reject")
+        },
+        (e: unknown) => e
+      )
+
+    expect(err).toBeInstanceOf(api.ApiError)
+    expect((err as InstanceType<typeof api.ApiError>).status).toBe(401)
+  })
+
+  it("updateDigestSettings() rejects with an ApiError carrying the server's fixed error message on a 400", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "invalid digest cadence" }), {
+        status: 400,
+      })
+    )
+
+    const err = await api
+      .updateDigestSettings({
+        digestEnabled: true,
+        // @ts-expect-error -- exercising the server's own rejection path
+        digestCadence: "biweekly",
+      })
+      .then(
+        () => {
+          throw new Error("expected updateDigestSettings() to reject")
+        },
+        (e: unknown) => e
+      )
+
+    expect(err).toBeInstanceOf(api.ApiError)
+    expect((err as InstanceType<typeof api.ApiError>).status).toBe(400)
+    expect((err as InstanceType<typeof api.ApiError>).message).toBe(
+      "invalid digest cadence"
+    )
+  })
 })
