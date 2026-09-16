@@ -4,9 +4,21 @@ A release tracker for hip-hop, reggaeton, and R&B: it polls MusicBrainz and Deez
 
 ## Language
 
+**Outbox**:
+Every event that has been detected but not yet delivered or acknowledged — the single place both real-time delivery and digests draw from.
+_Avoid_: queue, digest queue
+
+**Pending event**:
+One event in the outbox.
+_Avoid_: queued event, held event, unnotified event
+
 **Digest mode**:
 The instance-wide, Postgres-persisted setting that switches notification delivery from real-time (one Discord message per event, as it's detected) to batched. Off by default.
 _Avoid_: batch mode, digest toggle
+
+**Flush**:
+The first real-time delivery pass after digest mode is turned off, delivering the events that accumulated while it was on, one message each.
+_Avoid_: drain, catch-up send
 
 **Digest**:
 One batched delivery produced while digest mode is on — the message(s) sent for a single cadence period, covering every event in that digest's window.
@@ -17,7 +29,7 @@ How often digest mode fires: daily or weekly. An instance-wide setting, not a sp
 _Avoid_: frequency, schedule, interval
 
 **Digest window**:
-The set of events one digest covers. Defined by outbox state (every event still unnotified since the last successful digest), never by a wall-clock time range — a late, skipped, or duplicated scheduler tick still converges on the correct set, because nothing is selected by *when* the tick fired.
+The set of events one digest covers. Defined by outbox state (every event still pending since the last successful digest), never by a wall-clock time range — a late, skipped, or duplicated scheduler tick still converges on the correct set, because nothing is selected by *when* the tick fired.
 _Avoid_: batch window, time window
 
 **Watermark**:
