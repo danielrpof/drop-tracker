@@ -16,7 +16,7 @@ Requirements for the "Digest Notifications" milestone. Each maps to roadmap phas
 
 ### Digest Scheduling
 
-- [ ] **DGST-05**: Digest job fires at a stable, predictable time per the chosen cadence, resilient to the process being down at the exact fire time (a missed tick is caught on the next check, not silently skipped)
+- [ ] **DGST-05**: Digest job fires at a stable, predictable time per the chosen cadence, resilient to the process being down at the exact fire time (a missed fire is caught on the next check while still within a bounded grace window after its scheduled time; past that window it is not sent late, and its pending events go out at the next scheduled fire — never silently dropped)
 - [ ] **DGST-06**: Digest scheduling handles daylight-saving-time transitions without skipping or double-firing a digest for the same period
 - [ ] **DGST-07**: Digest scheduling works correctly in the shipped container image (Alpine base) despite its minimal timezone database
 
@@ -32,7 +32,7 @@ Requirements for the "Digest Notifications" milestone. Each maps to roadmap phas
 
 - [x] **DGST-13**: When digest mode is on, real-time per-event Discord notifications stop firing for the same events (no duplicate delivery)
 - [x] **DGST-14**: Toggling from digest back to real-time flushes any events accumulated during the digest window through the normal real-time path, rather than losing or re-batching them
-- [ ] **DGST-15**: A watermark (last-successful-digest-send timestamp) determines what's "new since last digest," so a late, skipped, or duplicate scheduler tick self-corrects instead of dropping or re-sending events
+- [ ] **DGST-15**: A persisted record of the last handled scheduled fire (separate from the last-successful-digest-send timestamp shown to the operator) determines whether a digest is due, while outbox state determines which events it carries — so a late, skipped, or duplicate scheduler tick self-corrects instead of dropping or re-sending events
 
 ### Operator Visibility
 
@@ -94,3 +94,4 @@ Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4
 *Requirements defined: 2026-09-11*
 *Last updated: 2026-09-11 — traceability populated by roadmap (Phases 20-23)*
 *Re-mapped 2026-09-11 — DGST-10 (grouping) moved from Phase 23 to Phase 22 following a grilling-session challenge to the milestone plan: building a flat, ungrouped digest in Phase 22 only to replace it with the grouped format in Phase 23 was planned throwaway work. See ROADMAP.md Phase 22/23 notes.*
+*Reworded 2026-09-16 — DGST-05 (bounded grace-window catch-up) and DGST-15 (slot record decides "due", last-sent stays the displayed timestamp, outbox decides content) following a grilling-session challenge to the Phase 22 plan. See `.planning/phases/22-scheduled-digest-send/22-CONTEXT.md` D-11–D-13.*

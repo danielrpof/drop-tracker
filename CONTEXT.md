@@ -33,5 +33,21 @@ The set of events one digest covers. Defined by outbox state (every event still 
 _Avoid_: batch window, time window
 
 **Watermark**:
-The persisted timestamp of the last successful digest send (`digest_last_sent_at`). It decides whether a new digest is due and supplies the "since <watermark>" label shown on the digest — it never selects which events are included (that's the digest window's job, via outbox state).
+The persisted timestamp of the last successful digest send. It is what the operator sees as "last digest sent" and supplies the "since <watermark>" label shown on the digest. It does not decide whether a digest is due (that's the slot record) and never selects which events are included (that's the digest window).
 _Avoid_: cursor, last-sent timestamp, checkpoint
+
+**Digest slot**:
+A scheduled instant at which a digest is due: 00:05 America/New_York every day (daily cadence) or every Friday (weekly cadence). Slots are calendar times in that zone, not fixed intervals, so they stay put across daylight-saving changes.
+_Avoid_: tick (a tick is one due-check, not the slot it checks), run
+
+**Slot record**:
+The persisted most recent digest slot that has been handled — by sending a digest, or by finding nothing to send. A digest is due only when a newer slot has passed. Turning digest mode on or changing cadence moves it to the most recent slot, so neither triggers an immediate digest.
+_Avoid_: watermark, last run, checkpoint
+
+**Grace window**:
+How long after a digest slot a missed digest may still be sent late: 12 hours for daily cadence, 48 hours for weekly. Past it, the slot is abandoned and its pending events wait for the next slot.
+_Avoid_: catch-up window, retry window
+
+**Watched artist**:
+The watchlist artist an event was detected for. On a guest feature this differs from the **credited artist** (the release's primary artist, whose release the watched artist appears on).
+_Avoid_: featured artist (ambiguous — say watched or credited)
