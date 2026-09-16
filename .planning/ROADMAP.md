@@ -176,12 +176,12 @@ Plans:
   4. Across both a spring-forward and a fall-back transition, exactly one digest is sent per calendar day (daily) or per week (weekly) — no skip, no double-send — and the shipped Alpine image resolves the zone it schedules against rather than silently falling back to UTC.
   5. The slot record (last handled scheduled fire) decides whether a digest is due and outbox state decides what it carries: a late tick, a duplicated tick, a skipped tick, and a zero-event fire followed by newly detected events later that day all converge on one digest per scheduled fire, with none dropped and none sent twice. Turning digest mode on, or changing cadence, never triggers an immediate send.
 
-**Plans**: 4 plans
+**Plans**: 1/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 22-01-PLAN.md — Migration 000009's slot-record column, the D-14 re-anchor and D-16 ack queries, `internal/settings` slot math, and `cmd/server`'s fail-fast zone resolution
+- [x] 22-01-PLAN.md — Migration 000009's slot-record column, the D-14 re-anchor and D-16 ack queries, `internal/settings` slot math, and `cmd/server`'s fail-fast zone resolution
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -241,7 +241,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 20. Digest Settings & Operator Control | 4/4 | Complete    | 2026-09-13 |
 | 21. Real-Time ↔ Digest Mutual Exclusion | 3/3 | Complete    | 2026-09-16 |
-| 22. Scheduled Digest Send | 0/? | Not started | - |
+| 22. Scheduled Digest Send | 1/4 | In Progress|  |
 | 23. Digest Readability & Discord Limits | 0/? | Not started | - |
 
 ## Backlog
