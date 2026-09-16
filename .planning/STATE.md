@@ -5,16 +5,16 @@ milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 22
 current_phase_name: Scheduled Digest Send
 status: executing
-stopped_at: Completed 22-01-PLAN.md
-last_updated: "2026-09-16T22:17:23.469Z"
+stopped_at: Completed 22-02-PLAN.md
+last_updated: "2026-09-16T22:44:07.138Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 22 execution started
-state_head: 890a8c3519367367950f174a64b8eb571f09c893
+state_head: 82d053057dc11e3330ed32c4dee269419b456233
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 11
-  completed_plans: 8
+  completed_plans: 9
   percent: 50
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-16)
 ## Current Position
 
 Phase: 22 (Scheduled Digest Send) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 22 execution started
 
@@ -138,6 +138,7 @@ Last activity: 2026-09-16 — Phase 22 execution started
 | Phase 21 P03 | 10min | 2 tasks | 5 files |
 | Phase 21 P02 | 20min | 3 tasks | 3 files |
 | Phase 22 P01 | 25min | 3 tasks | 15 files |
+| Phase 22 P02 | 45min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -326,6 +327,8 @@ Recent decisions affecting current work:
 - [Phase 22 Grilling]: A `/mattpocock-skills:grill-with-docs` session (2026-09-16) challenged the Phase 22 plan and recorded D-11–D-26 in `22-CONTEXT.md`, synced into ROADMAP.md (Phase 22 criteria 3/5 and planner notes, Phase 23 notes, deploy sequencing) and REQUIREMENTS.md (DGST-05/15 reworded). Headline changes: **catch-up is a 12h/48h grace window**, superseding the 2026-09-11 log-and-wait lock (entry (b) above), which contradicted criterion 3 and D-10. **The due rule is slot-based calendar math** in America/New_York, not "watermark + cadence". **A new `digest_last_slot_at` column (migration 000009)** records the last handled slot separately from `digest_last_sent_at`, and is re-anchored when digest mode is enabled or the cadence changes, so empty fires and enabling never cause off-schedule sends. **The ack is one data-modifying CTE** through `sqlc.Querier`, with no Go transaction. **`Sink.SendDigestIfDue` + a `DigestScheduler`** is modeled on `Poller.Start`/`Stop`. **Phases 21, 22, and 23 ship in one release**, because an oversized single-embed digest would otherwise wedge. Guest-feature lines are keyed by watched artist and name the host. Markdown is escaped, sorting is collated, the zone check fails fast at startup, and a `build-scan` step boots the current image.
 - [Phase 22]: sqlc generates pgtype.Timestamptz (not *time.Time) for the new digest slot columns/params, matching existing codebase convention; recorded verbatim for plan 22-02
 - [Phase 22]: Task 3's tdd=true RED/GREEN commits were not split (6 interdependent files) -- delivered as one feat commit, documented as a process deviation in 22-01-SUMMARY.md
+- [Phase 22]: Renamed cmd/server/main.go's digestLoc to loc so notifier.WithLocation(loc)/DigestScheduler wiring is shared cleanly across settingsStore, notif, and digestSched. — 22-01-SUMMARY.md recorded the resolved zone var as digestLoc; this plan's Task 3 acceptance criteria and action text both name it loc -- renamed for literal compliance, no behavior change.
+- [Phase 22]: DigestScheduler.Stop uses a dedicated stopCh (closed via sync.Once) distinct from runCancel, so Stop can ask the loop to exit gracefully after its current check finishes without forcibly cancelling that check's own context. — The plan's literal Stop pseudocode could never return nil on its own -- only cancelling runCancel via a timed-out drain -- which contradicted the plan's own stated behavior (Stop returns nil once the in-flight check has finished). Caught in the RED-phase test run before GREEN.
 
 ### Pending Todos
 
@@ -407,8 +410,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-16T22:17:22.824Z
-Stopped at: Completed 22-01-PLAN.md
+Last session: 2026-09-16T22:44:06.325Z
+Stopped at: Completed 22-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
