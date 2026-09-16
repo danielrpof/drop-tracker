@@ -102,6 +102,13 @@ func stubSettings(enabled bool) *fakeSettingsReader {
 	}}
 }
 
+// erroringSettings returns a SettingsReader whose Get always fails with err.
+func erroringSettings(err error) *fakeSettingsReader {
+	return &fakeSettingsReader{fn: func(ctx context.Context) (settings.Settings, error) {
+		return settings.Settings{}, err
+	}}
+}
+
 // toggleableSettings returns a SettingsReader whose reported mode starts at
 // initial and can be flipped between NotifyPending calls via the returned
 // setter -- so a test can drive two passes on the SAME Notifier instance and
@@ -1109,5 +1116,112 @@ func TestNotifyPending_DigestRealSettingsStore_TogglesWithoutRestart(t *testing.
 	}
 	if !isNotified(t, pool, id1) {
 		t.Fatal("row should be acked once the real settings store reports digest mode off")
+	}
+}
+
+// logRecord is the subset of a slog JSON line this file decodes to assert on
+// log content, rather than substring-matching the raw buffer.
+type logRecord struct {
+	Level string `json:"level"`
+	Msg   string `json:"msg"`
+}
+
+// decodeLogRecords decodes every newline-delimited JSON log line in buf.
+func decodeLogRecords(t *testing.T, buf *bytes.Buffer) []logRecord {
+	t.Helper()
+	var records []logRecord
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	for {
+		var r logRecord
+		if err := dec.Decode(&r); err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatalf("decode log record: %v", err)
+		}
+		records = append(records, r)
+	}
+	return records
+}
+
+// TestNotifyPending_SettingsReadFails_FailsClosedWithOneWarnAndNoSends is
+// D-03's fail-closed regression guard: a settings-read error must stop the
+// pass before any row is listed, never turn into a hard error (poller.go's
+// call site logs a returned error as "notify pending failed", which would
+// misread a settings-read skip as a Discord delivery failure), and log
+// exactly one distinctly-worded Warn.
+func TestNotifyPending_SettingsReadFails_FailsClosedWithOneWarnAndNoSends(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "settingsreadfail")
+	id1 := insertPendingEvent(t, pool, artistID, "settingsreadfail-ext-1")
+	id2 := insertPendingEvent(t, pool, artistID, "settingsreadfail-ext-2")
+	id3 := insertPendingEvent(t, pool, artistID, "settingsreadfail-ext-3")
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, erroringSettings(errors.New("boom")), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil -- poller.go's log-and-continue call site logs a returned error as \"notify pending failed\", which would read like a Discord delivery failure rather than a settings-read skip", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls = %d, want exactly 0", got)
+	}
+	for _, id := range []int64{id1, id2, id3} {
+		if isNotified(t, pool, id) {
+			t.Fatal("a row was acked despite the settings read failing -- failing closed must not ack anything either")
+		}
+	}
+
+	var warns []logRecord
+	for _, r := range decodeLogRecords(t, buf) {
+		if r.Level == "WARN" {
+			warns = append(warns, r)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("WARN record count = %d, want exactly 1: %+v", len(warns), warns)
+	}
+	if warns[0].Msg != "skipping notify pass: digest settings read failed" {
+		t.Fatalf("WARN msg = %q, want the exact literal %q", warns[0].Msg, "skipping notify pass: digest settings read failed")
+	}
+}
+
+// TestNotifyPending_SettingsReadCtxCancelled_NoWarnLogged is D-03's shutdown
+// carve-out: a settings-read error caused by the caller's own context
+// cancellation is not a delivery incident and must log nothing.
+func TestNotifyPending_SettingsReadCtxCancelled_NoWarnLogged(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "settingsreadcancel")
+	id1 := insertPendingEvent(t, pool, artistID, "settingsreadcancel-ext-1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	sender := &fakeSender{}
+	reader := &fakeSettingsReader{fn: func(rctx context.Context) (settings.Settings, error) {
+		return settings.Settings{}, rctx.Err()
+	}}
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(ctx, logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil on a shutdown cancellation", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls = %d, want exactly 0", got)
+	}
+	if isNotified(t, pool, id1) {
+		t.Fatal("a row was acked despite the settings read failing")
+	}
+
+	for _, r := range decodeLogRecords(t, buf) {
+		if r.Level == "WARN" {
+			t.Fatalf("unexpected WARN record: %+v -- a shutdown cancellation is not a delivery incident", r)
+		}
 	}
 }
