@@ -170,6 +170,19 @@ func readSettings(ctx context.Context, r SettingsReader) (settings.Settings, err
 	return r.Get(opCtx)
 }
 
+// logSettingsReadFailure applies D-03's fail-closed posture identically
+// whether the read happened at the top of the pass or before an individual
+// send: silent on the caller's own context cancellation (not a delivery
+// incident), otherwise exactly one Warn with the shared literal.
+func logSettingsReadFailure(ctx context.Context, logger *slog.Logger, err error) {
+	if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return
+	}
+	logger.Warn("skipping notify pass: digest settings read failed",
+		slog.String("error", err.Error()),
+	)
+}
+
 // NotifyPending drains every currently-pending events row in ListUnnotified's
 // order, sending each as one Discord message and marking it notified on success.
 // The notifying CAS guard mirrors poller's mbRunning/dzRunning (CAS-skip, not a
@@ -189,12 +202,7 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 	// backlog as individual messages on one transient outage.
 	cfg, err := readSettings(ctx, n.settingsReader)
 	if err != nil {
-		if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
-			return nil
-		}
-		logger.Warn("skipping notify pass: digest settings read failed",
-			slog.String("error", err.Error()),
-		)
+		logSettingsReadFailure(ctx, logger, err)
 		return nil
 	}
 	if cfg.DigestEnabled {
@@ -217,6 +225,21 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 			suppressed++
 			continue
 		}
+
+		// D-04: re-read the mode before every send, not once per pass -- a
+		// toggle to digest mode landing mid-pass must stop the pass at the
+		// next send boundary, leaving the rest of the batch pending. The
+		// suppression ack above is exempt: it issues no Discord request, so
+		// it can neither duplicate a message nor violate the mode.
+		cfg, err := readSettings(ctx, n.settingsReader)
+		if err != nil {
+			logSettingsReadFailure(ctx, logger, err)
+			return nil
+		}
+		if cfg.DigestEnabled {
+			return nil
+		}
+
 		embed := formatEmbed(ev)
 		if err := n.sender.Send(ctx, embed); err != nil {
 			logger.Error("notify send failed",

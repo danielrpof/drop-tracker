@@ -109,6 +109,35 @@ func erroringSettings(err error) *fakeSettingsReader {
 	}}
 }
 
+// flippingSettings returns a SettingsReader whose Get reports before for
+// calls 1..k-1 and after from call k onward -- a deterministic k-th-call
+// mode flip for the mid-pass re-read tests (D-07: exact counts, not a
+// timing invariant), built on fakeSettingsReader's existing fn/calls shape.
+func flippingSettings(k int, before, after bool) *fakeSettingsReader {
+	r := &fakeSettingsReader{}
+	r.fn = func(ctx context.Context) (settings.Settings, error) {
+		if r.Calls() < int32(k) {
+			return settings.Settings{DigestEnabled: before}, nil
+		}
+		return settings.Settings{DigestEnabled: after}, nil
+	}
+	return r
+}
+
+// erroringFrom returns a SettingsReader whose Get succeeds (digest off) for
+// calls 1..k-1 and fails with err from call k onward -- the mid-pass
+// read-error counterpart to flippingSettings.
+func erroringFrom(k int, err error) *fakeSettingsReader {
+	r := &fakeSettingsReader{}
+	r.fn = func(ctx context.Context) (settings.Settings, error) {
+		if r.Calls() < int32(k) {
+			return settings.Settings{DigestEnabled: false}, nil
+		}
+		return settings.Settings{}, err
+	}
+	return r
+}
+
 // toggleableSettings returns a SettingsReader whose reported mode starts at
 // initial and can be flipped between NotifyPending calls via the returned
 // setter -- so a test can drive two passes on the SAME Notifier instance and
@@ -1223,5 +1252,144 @@ func TestNotifyPending_SettingsReadCtxCancelled_NoWarnLogged(t *testing.T) {
 		if r.Level == "WARN" {
 			t.Fatalf("unexpected WARN record: %+v -- a shutdown cancellation is not a delivery incident", r)
 		}
+	}
+}
+
+// TestNotifyPending_MidPass_StopsPassAtNextSendBoundary is D-04's per-send
+// re-read proof: a mode flip landing mid-pass stops delivery at the next
+// send boundary, leaving the rest of the batch pending. It also pins the
+// accepted residual (D-04, ADR 0002): the event whose send was already
+// issued when the flip is observed is acked, not clawed back.
+func TestNotifyPending_MidPass_StopsPassAtNextSendBoundary(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "midpassflip")
+	ids := []int64{
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-1", "Mid Pass Row One"),
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-2", "Mid Pass Row Two"),
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-3", "Mid Pass Row Three"),
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-4", "Mid Pass Row Four"),
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-5", "Mid Pass Row Five"),
+	}
+
+	sender := &fakeSender{}
+	// Call 1 is the top-of-pass gate (off); calls 2 and 3 are the per-send
+	// re-reads that let rows one and two through; call 4 stops the pass
+	// before row three's send.
+	reader := flippingSettings(4, false, true)
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 2 {
+		t.Fatalf("sender.calls = %d, want exactly 2", got)
+	}
+	for i, id := range ids {
+		want := i < 2
+		if got := isNotified(t, pool, id); got != want {
+			t.Fatalf("row %d notified = %v, want %v", i+1, got, want)
+		}
+	}
+}
+
+// TestNotifyPending_MidPass_SuppressionAcksDoNotReRead proves a stale-event
+// suppression ack costs no settings read (D-04): the reader's call count is
+// exactly 1 (top-of-pass) plus one per FRESH row -- a re-read added to the
+// suppression path would make this number too large and fail the assertion.
+func TestNotifyPending_MidPass_SuppressionAcksDoNotReRead(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "midpasssuppress")
+	staleIDs := []int64{
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-stale-1", "Stale One", "2015-01-01"),
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-stale-2", "Stale Two", "2015-01-02"),
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-stale-3", "Stale Three", "2015-01-03"),
+	}
+	freshIDs := []int64{
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-fresh-1", "Fresh One", todayDate),
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-fresh-2", "Fresh Two", todayDate),
+	}
+
+	sender := &fakeSender{}
+	reader := stubSettings(false)
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 2 {
+		t.Fatalf("sender.calls = %d, want exactly 2 (the two fresh rows)", got)
+	}
+	if got := reader.Calls(); got != 3 {
+		t.Fatalf("reader.Calls() = %d, want exactly 3 (1 top-of-pass + one per fresh row; stale rows must not trigger a re-read)", got)
+	}
+	for _, id := range staleIDs {
+		if !isNotified(t, pool, id) {
+			t.Fatal("a stale row was left pending, want acked")
+		}
+	}
+	for _, id := range freshIDs {
+		if !isNotified(t, pool, id) {
+			t.Fatal("a fresh row was left pending, want acked")
+		}
+	}
+}
+
+// TestNotifyPending_MidPass_ReadErrorStopsPassIdenticallyToTopOfPass proves a
+// mid-pass settings-read error is indistinguishable from a top-of-pass one:
+// nil return, exactly one distinctly-worded Warn, remaining rows left
+// pending.
+func TestNotifyPending_MidPass_ReadErrorStopsPassIdenticallyToTopOfPass(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "midpasserror")
+	ids := []int64{
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-1", "Mid Pass Err Row One"),
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-2", "Mid Pass Err Row Two"),
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-3", "Mid Pass Err Row Three"),
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-4", "Mid Pass Err Row Four"),
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-5", "Mid Pass Err Row Five"),
+	}
+
+	sender := &fakeSender{}
+	// Calls 1..3 succeed (digest off); call 4 errors, stopping the pass
+	// before row three's send.
+	reader := erroringFrom(4, errors.New("boom"))
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 2 {
+		t.Fatalf("sender.calls = %d, want exactly 2", got)
+	}
+	for i, id := range ids {
+		want := i < 2
+		if got := isNotified(t, pool, id); got != want {
+			t.Fatalf("row %d notified = %v, want %v", i+1, got, want)
+		}
+	}
+
+	var warns []logRecord
+	for _, r := range decodeLogRecords(t, buf) {
+		if r.Level == "WARN" {
+			warns = append(warns, r)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("WARN record count = %d, want exactly 1: %+v", len(warns), warns)
+	}
+	if warns[0].Msg != "skipping notify pass: digest settings read failed" {
+		t.Fatalf("WARN msg = %q, want the exact literal %q", warns[0].Msg, "skipping notify pass: digest settings read failed")
 	}
 }
