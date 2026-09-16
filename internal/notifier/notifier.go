@@ -135,8 +135,22 @@ func Select(webhookURL string, q sqlc.Querier, settingsReader SettingsReader, ht
 // An absent or partial date SUPPRESSES -- conservative by design, opposite the
 // usual "err toward an extra alert", because an undated row is absence of
 // evidence, not evidence of freshness.
+//
+// The cutoff is anchored to ev.CreatedAt, not time.Now() (D-02): time an
+// event spends pending -- a digest window, a long standdown, a weekly
+// cadence -- must not age it out of delivery. Pre-fix backlog rows still
+// suppress, because their release dates are old relative to their own
+// created_at, not merely relative to now. The extra day is D-02's slack:
+// created_at is the database's own now() at insert, a different clock and
+// strictly later than the now() detection captured, so without it a
+// release dated exactly on the cutoff day could clear detection and then
+// be suppressed at delivery.
 func (n *Notifier) suppresses(ev sqlc.Event) bool {
-	cutoff := time.Now().UTC().AddDate(0, 0, -n.maxAgeDays).Format(time.DateOnly)
+	anchor := time.Now()
+	if ev.CreatedAt.Valid {
+		anchor = ev.CreatedAt.Time
+	}
+	cutoff := anchor.UTC().AddDate(0, 0, -n.maxAgeDays-1).Format(time.DateOnly)
 	return staleReleaseDate(ev.ReleaseDate, cutoff)
 }
 

@@ -339,6 +339,19 @@ func insertPendingEventDated(t *testing.T, pool *pgxpool.Pool, artistID int64, e
 	return eventID
 }
 
+// insertPendingEventBackdated inserts a dated pending row via
+// insertPendingEventDated, then backdates created_at with a separate
+// UPDATE -- a separate statement because the INSERT's DEFAULT now() is what
+// every other helper in this file otherwise relies on (D-02).
+func insertPendingEventBackdated(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID, title, releaseDate string, createdAt time.Time) int64 {
+	t.Helper()
+	eventID := insertPendingEventDated(t, pool, artistID, externalID, title, releaseDate)
+	if _, err := pool.Exec(context.Background(), "UPDATE events SET created_at = $1 WHERE id = $2", createdAt, eventID); err != nil {
+		t.Fatalf("backdate created_at: %v", err)
+	}
+	return eventID
+}
+
 // TestNotifyPending_StaleRowsAckedWithoutSending is the delivery-side
 // regression test for
 // .planning/debug/resolved/backlog-songs-trigger-discord.md.
@@ -1593,5 +1606,34 @@ func TestNotifyPending_ModeTransitionLog_FailedReadDoesNotUpdateLastObserved(t *
 	}
 	if !records[1].DigestEnabled {
 		t.Fatal("second record digest_enabled = false, want true (pass 3)")
+	}
+}
+
+// TestNotifyPending_StaleAnchor_EventDetectedLongAgoStillDelivered is D-02's
+// end-to-end proof: an events row backdated 60 days, with a release_date 2
+// days before that created_at, is actually sent by a real NotifyPending pass
+// with digest mode off -- proving the created_at anchor reaches the real
+// drain path, not just the suppresses unit.
+func TestNotifyPending_StaleAnchor_EventDetectedLongAgoStillDelivered(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "staleanchor")
+	backdatedCreatedAt := time.Now().UTC().AddDate(0, 0, -60)
+	releaseDate := backdatedCreatedAt.AddDate(0, 0, -2).Format(time.DateOnly)
+	eventID := insertPendingEventBackdated(t, pool, artistID, "staleanchor-ext-1", "Old But Fresh Release", releaseDate, backdatedCreatedAt)
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls = %d, want exactly 1", got)
+	}
+	if !isNotified(t, pool, eventID) {
+		t.Fatal("notified_at is still NULL after the pass; the created_at-anchored freshness gate should have delivered this row")
 	}
 }
