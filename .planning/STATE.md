@@ -22,10 +22,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-13)
+See: .planning/PROJECT.md (updated 2026-09-16)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 21 — Real-Time ↔ Digest Mutual Exclusion
+**Current focus:** Phase 22 — Scheduled Digest Send
 
 ## Current Position
 
@@ -408,5 +408,6 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Review `.planning/ROADMAP.md` (Phases 20-23) and confirm the phase split
-- Run `/gsd-ui-phase 20` (Phase 20 carries a UI hint), then `/gsd-plan-phase 20`
+- Phase 21 verified complete (5/5 must-haves) — `21-VERIFICATION.md`
+- Run `/gsd-plan-phase 22` (Scheduled Digest Send — no UI hint, backend-only)
+- Reminder: Phase 21 stays unmerged from `main` until Phase 22 also ships (locked deploy-sequencing note, ROADMAP.md)
