@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-13)
 Phase: 21 — Real-Time ↔ Digest Mutual Exclusion
 Plan: Not started
 Status: Phase 20 shipped — PR #5
-Last activity: 2026-09-16
+Last activity: 2026-09-16 - Completed quick task 260916-dvy: Record post-grilling Phase 21 decisions in planning docs and ADR 0002
 
 ## Performance Metrics
 
@@ -356,6 +356,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 260905-et1 | n1-boot skip-greens when the previous release image predates the ahead-of-source migration guard (Phase 16 gap G-16-1). New gated `guardcheck` step in full-pipeline.yml + README/16-CONTEXT docs. Static fix only — G-16-1 stays open until a live migration push confirms green. | 2026-09-05 | 9876c4e | [260905-et1-n1-boot-skip-greens-when-the-previous-re](./quick/260905-et1-n1-boot-skip-greens-when-the-previous-re/) |
 | 260905-fa4 | Bump browserslist (→4.28.9) and fast-uri (→3.1.7) past 6 HIGH CVEs via caret `overrides:` in web/pnpm-workspace.yaml + lockfile regen (pnpm 11.8.0) + `make web`. Trivy 0.70.0 local scan: 6 HIGH → 0. Two follow-up todos filed. CI-green confirmation pending a scratch-branch push. | 2026-09-05 | efd9ea0 | [260905-fa4-bump-frontend-transitive-deps-to-clear-t](./quick/260905-fa4-bump-frontend-transitive-deps-to-clear-t/) |
 | 260905-kfv | Extract `internal/sqlscan` from `cmd/migration-check/main.go` (Phase 16 arch-review candidate 1): the SQL comment/quote lexer, a new typed `Parse` DDL model, and the D-15 query-reference extractor (`QueryColumnRefs`/`RefSet`) become one flat stdlib-only package; `main.go` 1469 → 753 lines, all policy/I/O kept. Behavior-preserving — `mixed_findings.golden.txt` byte-identical at every commit. Retires review findings CR-01 (schema-qualified D-15 bypass) and WR-01 (re-parsed display string) by design, not by patch. sqlscan per-package coverage 92.0%; `make coverage-gate` 90.39%. Two follow-up todos filed (unify the two quote scanners; resolve D-15 prev-release files from `--prev-tag`). Verified passed 8/8. On branch `quick/260905-kfv-sqlscan`, PR pending. | 2026-09-05 | 6ccd998 | [260905-kfv-extract-an-internal-sqlscan-module-out-o](./quick/260905-kfv-extract-an-internal-sqlscan-module-out-o/) |
+| 260916-dvy | Record post-grilling Phase 21 decisions: 21-CONTEXT D-01..D-07, discussion log, ROADMAP Phase 21/22 notes, ADR 0002 (one outbox, one sender lock), glossary terms Outbox/Pending event/Flush. Docs only. | 2026-09-16 | 478f5eb | [260916-dvy-record-post-grilling-phase-21-decisions-](./quick/260916-dvy-record-post-grilling-phase-21-decisions-/) |
 
 ### Roadmap Evolution
 
@@ -368,6 +369,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 - v1.4 milestone opened (2026-09-09): Phases 18-19 added — Backend (Readiness, Poll-Run History & Status API) and Frontend (System View). Phase numbering continued from 17 (deferred, archived, still carried forward) rather than resetting. Deliberately a two-phase split: the research's 18.1-18.4 breakdown is plan-level wave structure inside Phase 18, not separate roadmap phases, and the 18/19 boundary is the frozen `/status` JSON contract.
 
 - v1.5 milestone opened (2026-09-11): Phases 20-23 added — Digest Settings & Operator Control, Real-Time ↔ Digest Mutual Exclusion, Scheduled Digest Send, Digest Readability & Discord Limits. Phase numbering continued from 19. Two deliberate deviations from the research's five-phase proposal: its inert "Digest Foundation" phase was folded into the settings/UI phase, and the mutual-exclusion gate was moved *ahead* of the digest sender (an un-gated real-time drain empties the outbox every poll cycle, which would make the sender unverifiable and the digest look broken rather than duplicated).
+- Phase 21 context revised (2026-09-16) after a `/grill-with-docs` pass: the settings read now fails closed (reversing the 2026-09-11 fail-open lock), all outbox sends share the `notifying` lock (ADR 0002, which constrains Phase 22's digest send to a `Notifier` method), the mode is re-read before each send, staleness is anchored to `created_at`, logging happens only on mode changes, `SettingsReader` is a required argument, and SPA helper text is back in scope. See `21-CONTEXT.md` D-01..D-07.
 
 ## Deferred Items
 

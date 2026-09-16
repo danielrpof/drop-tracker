@@ -87,7 +87,7 @@ Requirements: DGST-13, DGST-14 (`.planning/REQUIREMENTS.md`).
 ### Established Patterns
 - `WithMaxReleaseAgeDays` stays a functional option, but `SettingsReader` is deliberately a required constructor argument, not an option (D-05).
 - `notifier.Select` in `cmd/server/main.go` (line 299) is the composition-root call site that will need the new dependency (`settingsStore` is already constructed at line 255 — it's just not yet passed into `notifier.Select`/`notifier.New`).
-- Structured `slog` logging style already established in `notifier.go`: `logger.Info(...)`/`logger.Warn(...)` with `slog.Int64`, `slog.String("error", ...)` fields, one line per pass (not per row) for summary-style events (mirrors the `suppressed` count line D-01 is modeled on).
+- Structured `slog` logging style already established in `notifier.go`: `logger.Info(...)`/`logger.Warn(...)` with `slog.Int64`, `slog.String("error", ...)` fields, summary lines rather than per-row lines. D-01's transition line follows that style but fires only on a mode change, not every pass.
 
 ### Integration Points
 - `internal/notifier/notifier.go` — `SettingsReader` interface; required arg on `New`/`Select`; last-observed-mode field; bounded mode read at the top plus a per-send re-read; the `suppresses` cutoff from `ev.CreatedAt`.
