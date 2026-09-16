@@ -57,9 +57,14 @@ var _ SettingsReader = (*settings.Service)(nil)
 
 // Sink is what poller.Notifier is declared against -- re-declared here as the
 // type both Notifier and NoOp implement, so notifier.Select's return type does
-// not force callers to import poller.Notifier.
+// not force callers to import poller.Notifier. SendDigestIfDue (D-18) is
+// declared here rather than behind a type assertion so NoOp's inert
+// implementation covers the digest path the same way it already covers
+// NotifyPending -- an unset DISCORD_WEBHOOK_URL leaves the digest scheduler
+// running and inert with no branch at any call site.
 type Sink interface {
 	NotifyPending(ctx context.Context, logger *slog.Logger) error
+	SendDigestIfDue(ctx context.Context, logger *slog.Logger, now time.Time) error
 }
 
 var _ Sink = (*Notifier)(nil)
@@ -72,6 +77,12 @@ type NoOp struct{}
 // NotifyPending on NoOp issues no request and touches no row.
 func (NoOp) NotifyPending(ctx context.Context, logger *slog.Logger) error { return nil }
 
+// SendDigestIfDue on NoOp issues no request and touches no row, mirroring
+// NotifyPending (D-18).
+func (NoOp) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now time.Time) error {
+	return nil
+}
+
 // Notifier drains the events outbox: fetch pending rows, format each to a
 // discord.Embed, send serially with spacing, mark notified on success. notifying
 // is D-06's shared CAS-skip guard -- one guard for both poll cycles, since
@@ -82,6 +93,7 @@ type Notifier struct {
 	settingsReader SettingsReader
 	spacing        time.Duration
 	maxAgeDays     int
+	loc            *time.Location
 	notifying      atomic.Bool
 
 	// lastDigestMode/lastDigestModeSet are D-01's mode-transition logging
@@ -102,6 +114,13 @@ type Option func(*Notifier)
 // ("only releases dated today"), not "unset"; negatives are rejected at config parse.
 func WithMaxReleaseAgeDays(days int) Option {
 	return func(n *Notifier) { n.maxAgeDays = days }
+}
+
+// WithLocation sets the zone SendDigestIfDue computes digest slots against
+// (D-18). Without it, loc stays nil and SendDigestIfDue refuses to send --
+// there is no substitute location on the send path (D-23).
+func WithLocation(loc *time.Location) Option {
+	return func(n *Notifier) { n.loc = loc }
 }
 
 // New builds a Notifier backed by q for the outbox, sender for delivery,
