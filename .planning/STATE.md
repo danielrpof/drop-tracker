@@ -4,17 +4,17 @@ milestone: v1.5
 milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 21
 current_phase_name: Real-Time ↔ Digest Mutual Exclusion
-status: "Phase 20 shipped — PR #5"
-stopped_at: Phase 21 context gathered
-last_updated: "2026-09-16T15:53:52.832Z"
+status: executing
+stopped_at: Completed 21-01-PLAN.md
+last_updated: "2026-09-16T16:46:59.485Z"
 last_activity: 2026-09-16
-last_activity_desc: "Completed quick task 260916-dvy: Record post-grilling Phase 21 decisions in planning docs and ADR 0002"
-state_head: 1e4cb1b63df381412393fdcccc1738bee82fbb7c
+last_activity_desc: Phase 21 execution started
+state_head: 553d6d4d85253df1748568b9389dc0c3b5b482ce
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
   percent: 25
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-13)
 
 ## Current Position
 
-Phase: 21 (Real-Time ↔ Digest Mutual Exclusion) — READY TO EXECUTE
-Plan: Not started
-Status: Phase 20 shipped — PR #5
-Last activity: 2026-09-16 - Completed quick task 260916-dvy: Record post-grilling Phase 21 decisions in planning docs and ADR 0002
+Phase: 21 (Real-Time ↔ Digest Mutual Exclusion) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-09-16 — Phase 21 execution started
 
 ## Performance Metrics
 
@@ -133,6 +133,7 @@ Last activity: 2026-09-16 - Completed quick task 260916-dvy: Record post-grillin
 | Phase 20 P02 | 40min | 2 tasks | 1 files |
 | Phase 20 P03 | 40min | 2 tasks | 6 files |
 | Phase 20 P04 | 35min | 3 tasks | 5 files |
+| Phase 21 P01 | 22min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -312,6 +313,8 @@ Recent decisions affecting current work:
 - [Phase 20]: [Phase 20-04] shadcn add select mis-resolved cn as a package again (19-03 precedent) -- reverted package.json/pnpm-lock.yaml and hand-fixed the one import instead of discarding the CLI's otherwise-correct output
 - [Phase 20]: [Phase 20-04] Generalized the digest-mode save handler into a shared save({digestEnabled, digestCadence}) helper both the switch and the new cadence Select call, so the full-object PUT always carries both fields (T-20-19)
 - [Phase 20]: [Phase 20-04] go test -race still unusable on this Windows dev box (cgo/ThreadSanitizer, same limitation as Phase 11.1/15) -- substituted plain go test for make test's verification; coverage-gate confirmed 90.72%
+- [Phase 21]: [Phase 21-01]: SettingsReader declared in internal/notifier, returns full settings.Settings (not a bool) so Phase 22 can reuse the same read for cadence/watermark; required constructor argument on New/Select, never a functional Option (D-05)
+- [Phase 21]: [Phase 21-01]: erroringSettings test double deferred from Task 1 to Task 3 (first-use point) to keep golangci-lint's unused-function check clean at every per-task commit, per CLAUDE.md's Definition of Done
 
 ### Pending Todos
 
@@ -392,9 +395,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-16T13:49:12.538Z
-Stopped at: Phase 21 context gathered
-Resume file: .planning/phases/21-real-time-digest-mutual-exclusion/21-CONTEXT.md
+Last session: 2026-09-16T16:46:59.292Z
+Stopped at: Completed 21-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

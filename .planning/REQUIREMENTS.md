@@ -30,8 +30,8 @@ Requirements for the "Digest Notifications" milestone. Each maps to roadmap phas
 
 ### Real-Time / Digest Interop
 
-- [ ] **DGST-13**: When digest mode is on, real-time per-event Discord notifications stop firing for the same events (no duplicate delivery)
-- [ ] **DGST-14**: Toggling from digest back to real-time flushes any events accumulated during the digest window through the normal real-time path, rather than losing or re-batching them
+- [x] **DGST-13**: When digest mode is on, real-time per-event Discord notifications stop firing for the same events (no duplicate delivery)
+- [x] **DGST-14**: Toggling from digest back to real-time flushes any events accumulated during the digest window through the normal real-time path, rather than losing or re-batching them
 - [ ] **DGST-15**: A watermark (last-successful-digest-send timestamp) determines what's "new since last digest," so a late, skipped, or duplicate scheduler tick self-corrects instead of dropping or re-sending events
 
 ### Operator Visibility
@@ -69,8 +69,8 @@ Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4
 | DGST-10 | Phase 22 | Pending |
 | DGST-11 | Phase 23 | Pending |
 | DGST-12 | Phase 23 | Pending |
-| DGST-13 | Phase 21 | Pending |
-| DGST-14 | Phase 21 | Pending |
+| DGST-13 | Phase 21 | Complete |
+| DGST-14 | Phase 21 | Complete |
 | DGST-15 | Phase 22 | Pending |
 | DGST-16 | Phase 20 | Complete |
 
