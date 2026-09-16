@@ -179,9 +179,20 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 22-01-PLAN.md — Migration 000009's slot-record column, the D-14 re-anchor and D-16 ack queries, `internal/settings` slot math, and `cmd/server`'s fail-fast zone resolution
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 22-02-PLAN.md — Tracer: a due slot turns the outbox into one Discord embed and one atomic ack, driven by a 5-minute `DigestScheduler` wired into the composition root
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 22-03-PLAN.md — Digest body: markdown escaping and rune cap, collated sort by watched artist, guest host credit, deluxe track-count suffix
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 22-04-PLAN.md — DST and grace-window behavioural matrix, plus a `build-scan` step booting the just-built image to prove it resolves `America/New_York`
 
 **Notes for the phase planner**
