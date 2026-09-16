@@ -176,7 +176,13 @@ Plans:
   4. Across both a spring-forward and a fall-back transition, exactly one digest is sent per calendar day (daily) or per week (weekly) — no skip, no double-send — and the shipped Alpine image resolves the zone it schedules against rather than silently falling back to UTC.
   5. The slot record (last handled scheduled fire) decides whether a digest is due and outbox state decides what it carries: a late tick, a duplicated tick, a skipped tick, and a zero-event fire followed by newly detected events later that day all converge on one digest per scheduled fire, with none dropped and none sent twice. Turning digest mode on, or changing cadence, never triggers an immediate send.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 22-01-PLAN.md — Migration 000009's slot-record column, the D-14 re-anchor and D-16 ack queries, `internal/settings` slot math, and `cmd/server`'s fail-fast zone resolution
+- [ ] 22-02-PLAN.md — Tracer: a due slot turns the outbox into one Discord embed and one atomic ack, driven by a 5-minute `DigestScheduler` wired into the composition root
+- [ ] 22-03-PLAN.md — Digest body: markdown escaping and rune cap, collated sort by watched artist, guest host credit, deluxe track-count suffix
+- [ ] 22-04-PLAN.md — DST and grace-window behavioural matrix, plus a `build-scan` step booting the just-built image to prove it resolves `America/New_York`
 
 **Notes for the phase planner**
 
