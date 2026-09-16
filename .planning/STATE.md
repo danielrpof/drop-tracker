@@ -5,11 +5,11 @@ milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 22
 current_phase_name: Scheduled Digest Send
 status: planning
-stopped_at: Phase 21 complete, ready to plan Phase 22
-last_updated: "2026-09-16T17:38:37.319Z"
+stopped_at: Phase 22 context gathered
+last_updated: "2026-09-16T20:00:40.056Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 21 complete, transitioned to Phase 22
-state_head: e514e0825bff1c8a449629b07828079a3a087928
+state_head: a6a3260f14ce502ef93907fc06f124c04c9a451b
 progress:
   total_phases: 4
   completed_phases: 2
@@ -402,9 +402,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-16T17:20:11.188Z
-Stopped at: Phase 21 complete, ready to plan Phase 22
-Resume file: None
+Last session: 2026-09-16T20:00:39.657Z
+Stopped at: Phase 22 context gathered
+Resume file: .planning/phases/22-scheduled-digest-send/22-CONTEXT.md
 
 ## Operator Next Steps
 
