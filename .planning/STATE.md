@@ -6,10 +6,10 @@ current_phase: 22
 current_phase_name: Scheduled Digest Send
 status: planning
 stopped_at: Phase 22 context gathered
-last_updated: "2026-09-16T20:00:40.056Z"
+last_updated: "2026-09-16T20:54:23.991Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 21 complete, transitioned to Phase 22
-state_head: a6a3260f14ce502ef93907fc06f124c04c9a451b
+state_head: 4e4e4340ca013010f17b2d0be4a83d709ea148c1
 progress:
   total_phases: 4
   completed_phases: 2
@@ -369,6 +369,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 260905-fa4 | Bump browserslist (→4.28.9) and fast-uri (→3.1.7) past 6 HIGH CVEs via caret `overrides:` in web/pnpm-workspace.yaml + lockfile regen (pnpm 11.8.0) + `make web`. Trivy 0.70.0 local scan: 6 HIGH → 0. Two follow-up todos filed. CI-green confirmation pending a scratch-branch push. | 2026-09-05 | efd9ea0 | [260905-fa4-bump-frontend-transitive-deps-to-clear-t](./quick/260905-fa4-bump-frontend-transitive-deps-to-clear-t/) |
 | 260905-kfv | Extract `internal/sqlscan` from `cmd/migration-check/main.go` (Phase 16 arch-review candidate 1): the SQL comment/quote lexer, a new typed `Parse` DDL model, and the D-15 query-reference extractor (`QueryColumnRefs`/`RefSet`) become one flat stdlib-only package; `main.go` 1469 → 753 lines, all policy/I/O kept. Behavior-preserving — `mixed_findings.golden.txt` byte-identical at every commit. Retires review findings CR-01 (schema-qualified D-15 bypass) and WR-01 (re-parsed display string) by design, not by patch. sqlscan per-package coverage 92.0%; `make coverage-gate` 90.39%. Two follow-up todos filed (unify the two quote scanners; resolve D-15 prev-release files from `--prev-tag`). Verified passed 8/8. On branch `quick/260905-kfv-sqlscan`, PR pending. | 2026-09-05 | 6ccd998 | [260905-kfv-extract-an-internal-sqlscan-module-out-o](./quick/260905-kfv-extract-an-internal-sqlscan-module-out-o/) |
 | 260916-dvy | Record post-grilling Phase 21 decisions: 21-CONTEXT D-01..D-07, discussion log, ROADMAP Phase 21/22 notes, ADR 0002 (one outbox, one sender lock), glossary terms Outbox/Pending event/Flush. Docs only. | 2026-09-16 | 478f5eb | [260916-dvy-record-post-grilling-phase-21-decisions-](./quick/260916-dvy-record-post-grilling-phase-21-decisions-/) |
+| 27 | Fold Phase 22 grilling-session decisions (D-11–D-26) into 22-CONTEXT, ROADMAP Phase 22/23 notes + deploy sequencing, REQUIREMENTS DGST-05/15, STATE, and CONTEXT.md glossary. Docs only. | 2026-09-16 | 4e4e434 | — |
 
 ### Roadmap Evolution
 
