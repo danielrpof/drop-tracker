@@ -6,11 +6,13 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
 
+	"github.com/danielrpof/drop-tracker/internal/authgate"
 	"github.com/danielrpof/drop-tracker/internal/events"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 	"github.com/danielrpof/drop-tracker/internal/webassets"
@@ -27,11 +29,99 @@ type Pinger interface {
 
 // Server holds the dependencies the router needs to answer requests.
 type Server struct {
-	db        Pinger
-	watchlist watchlist.Store
-	events    events.Store
-	sources   []SearchSource
-	router    http.Handler
+	db             Pinger
+	watchlist      watchlist.Store
+	events         events.Store
+	sources        []SearchSource
+	router         http.Handler
+	gate             *authgate.Manager
+	schema           SchemaVersioner
+	expectedSchema   uint
+	statusStore      StatusStore
+	watchlistCounter WatchlistCounter
+	appVersion       string
+	pollInterval     time.Duration
+	settingsStore    SettingsStore
+}
+
+// serverConfig collects the optional settings New applies before building
+// the router. It is populated by Option closures; a zero serverConfig is the
+// v1.2 shape -- no gate, no proxy trust.
+type serverConfig struct {
+	gatePassphrase    string
+	gateAlerter       authgate.Alerter
+	trustProxyHeaders bool
+	schema            SchemaVersioner
+	expectedSchema    uint
+	statusStore       StatusStore
+	watchlistCounter  WatchlistCounter
+	appVersion        string
+	pollInterval      time.Duration
+	settingsStore     SettingsStore
+}
+
+// Option customises New, mirroring internal/poller's and internal/notifier's
+// functional-option shape so every existing 5-argument New call site stays a
+// pure additive change (GATE-07 / success criterion 5).
+type Option func(*serverConfig)
+
+// WithAuthGate enables the instance passphrase gate (GATE-01..06). When
+// passphrase is empty the option is completely inert: New registers the
+// seven v1.2 routes flat with no gate middleware, no /session routes and no
+// middleware.RealIP, so an unconfigured instance behaves exactly as it did
+// before v1.3 (GATE-07).
+//
+// trustProxyHeaders gates middleware.RealIP per D-14: pass true ONLY when
+// the app is reachable exclusively through a reverse proxy that sets
+// X-Forwarded-For (the Phase 17 VPS topology, container port unpublished).
+// Pass false for local dev, docker-compose, CI and any pre-proxy deploy so a
+// spoofed X-Forwarded-For cannot bypass the login throttle or forge an audit
+// line. alerter is the brute-force alert seam (plan 14-02 supplies the
+// Discord-backed one; nil falls back to a no-op).
+func WithAuthGate(passphrase string, trustProxyHeaders bool, alerter authgate.Alerter) Option {
+	return func(c *serverConfig) {
+		c.gatePassphrase = passphrase
+		c.trustProxyHeaders = trustProxyHeaders
+		c.gateAlerter = alerter
+	}
+}
+
+// WithReadiness supplies the schema-version seam and the binary's expected
+// migration version that GET /ready compares applied-at-or-above-expected
+// against (RDY-01, D-01). It is the sole owner of the schema seam on Server;
+// plan 18-04's /status reads the same two fields for its instance block.
+// Absent, /ready answers 503 with no reason -- a cmd/server binary always
+// supplies it, so a configured instance never sees that path.
+func WithReadiness(schema SchemaVersioner, expectedSchema uint) Option {
+	return func(c *serverConfig) {
+		c.schema = schema
+		c.expectedSchema = expectedSchema
+	}
+}
+
+// WithStatus supplies the dependencies the gated GET /status surface needs
+// beyond the schema seam WithReadiness already owns: the shared poll-run
+// history store, the watchlist counter, the short build version string, and
+// the configured poll interval (STAT-01, RUN-04). Absent, /status answers
+// 503 with the shared fixed error body so the route table is identical with
+// and without the option; a cmd/server binary always wires it.
+func WithStatus(deps StatusDeps) Option {
+	return func(c *serverConfig) {
+		c.statusStore = deps.Store
+		c.watchlistCounter = deps.Counter
+		c.appVersion = deps.AppVersion
+		c.pollInterval = deps.PollInterval
+	}
+}
+
+// WithSettings supplies the digest notification settings store backing
+// GET/PUT /settings/notifications (DGST-01, DGST-03). Absent, both handlers
+// answer 503 with the shared fixed error body, mirroring WithStatus; a
+// cmd/server binary always wires it.
+func WithSettings(store SettingsStore) Option {
+	return func(c *serverConfig) {
+		c.settingsStore = store
+	}
 }
 
 // New builds a Server backed by db, store, eventsStore, sources and logging
@@ -59,10 +149,60 @@ type Server struct {
 // creates no ordering conflict with the API routes above it
 // (06-RESEARCH.md Pattern 3, T-06-05) -- /health, /search, /watchlist and
 // /events always reach their own handlers, never the SPA fallback.
-func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []SearchSource, logger *slog.Logger) *Server {
+//
+// opts is variadic so every pre-v1.3 5-argument call site is unchanged
+// (GATE-07). When WithAuthGate supplies a non-empty passphrase, the six data
+// routes move behind a protected chi Group whose middleware is
+// authgate.Manager.Authenticate; /health and the SPA fallback stay on the
+// root router in BOTH branches (D-03/D-04). When no passphrase is
+// configured the route table is byte-for-byte the v1.2 shape.
+func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []SearchSource, logger *slog.Logger, opts ...Option) *Server {
 	s := &Server{db: db, watchlist: store, events: eventsStore, sources: sources}
 
+	var cfg serverConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	var gate *authgate.Manager
+	if cfg.gatePassphrase != "" {
+		gate = authgate.NewManager(cfg.gatePassphrase, cfg.gateAlerter, logger)
+	}
+	s.gate = gate
+	s.schema = cfg.schema
+	s.expectedSchema = cfg.expectedSchema
+	s.statusStore = cfg.statusStore
+	s.watchlistCounter = cfg.watchlistCounter
+	s.appVersion = cfg.appVersion
+	s.pollInterval = cfg.pollInterval
+	s.settingsStore = cfg.settingsStore
+
 	r := chi.NewRouter()
+
+	// D-14: middleware.RealIP rewrites r.RemoteAddr from X-Forwarded-For /
+	// X-Real-IP UNCONDITIONALLY -- it trusts the header with no verification.
+	// It is wired ONLY when the gate is enabled AND the operator set
+	// TRUST_PROXY_HEADERS=true, which is sound only because the Phase 17 VPS
+	// topology never publishes the container port: the app is reachable
+	// exclusively through the reverse proxy, so the only party that can set
+	// X-Forwarded-For is that proxy. Phase 17's runbook enables this flag
+	// together with that topology. When trustProxyHeaders is false (local
+	// dev, docker-compose, CI, any pre-proxy deploy) RealIP stays off and the
+	// login throttle and audit log key on r.RemoteAddr -- the direct peer,
+	// which a client cannot spoof -- so a misconfigured deploy fails safe.
+	if gate != nil && cfg.trustProxyHeaders {
+		r.Use(middleware.RealIP) //nolint:staticcheck // SA1019: chi deprecated middleware.RealIP over header-spoofing advisories; the advisory's own stated mitigation is to trust X-Forwarded-For / X-Real-IP only behind a proxy that sets them, which is exactly what the D-14 comment block directly above governs -- registration is gated behind TRUST_PROXY_HEADERS (default false) and Phase 17 enables it only together with the topology where the container port is never published. Removing RealIP is not the fix here: it is a Phase 17 prerequisite, and dropping it would leave the login throttle and audit log keyed on a proxy's own address once that topology lands.
+	}
+
+	// Referrer-Policy: no-referrer on every response -- gated or inert
+	// (Pitfall 14 hardening). It stops any URL the app is reached at from
+	// leaking to a third-party origin through a Referer header; defence in
+	// depth, since the passphrase already never enters a URL (POST body only).
+	// Registered as its own middleware rather than folded into echoRequestID
+	// so the four existing r.Use lines below stay byte-for-byte unchanged
+	// (plan 14-04). Set before next so it is present even on a panic path,
+	// which middleware.Recoverer handles downstream.
+	r.Use(securityResponseHeaders)
+
 	r.Use(middleware.RequestID)
 	r.Use(echoRequestID)
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
@@ -78,17 +218,75 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	}))
 	r.Use(middleware.Recoverer)
 
+	// /health is exempt as an exact registered path (D-03): chi matches the
+	// literal "/health", never a prefix, so /healthz and /health/details fall
+	// through to the SPA fallback and never see the health payload.
 	r.Get("/health", s.handleHealth)
+	// /ready inherits /health's exact structural exemption (D-04): registered
+	// on the root router, outside the gate branch below, so one registration
+	// serves both the gated and inert configurations and it is never 401.
+	r.Get("/ready", s.handleReady)
+
+	if gate != nil {
+		// /session is exempt (registered outside the Group): the login form
+		// must be reachable without a session. Throttling + CSRF checks live
+		// inside the handlers (plan 14-02 / 14-04).
+		r.Post("/session", gate.HandleLogin)
+		r.Delete("/session", gate.HandleLogout)
+		r.Group(func(pr chi.Router) {
+			pr.Use(gate.Authenticate)
+			// Second middleware, AFTER Authenticate: an unauthenticated
+			// non-GET still gets 401, not 403. Both live inside this gated
+			// branch, so the inert path installs neither (GATE-07, D-15).
+			pr.Use(gate.RequireCSRFHeader)
+			registerDataRoutes(pr, s)
+		})
+	} else {
+		registerDataRoutes(r, s)
+	}
+
+	// D-04: the static SPA shell serves publicly in both branches -- an
+	// unauthenticated visitor must receive index.html and the hashed assets
+	// under /assets/ so the passphrase form can render at all (Pitfall 23).
+	r.NotFound(webassets.Handler().ServeHTTP)
+
+	s.router = r
+	return s
+}
+
+// registerDataRoutes registers the gated data routes on r. It is called
+// on the protected sub-router when the gate is enabled and directly on the
+// root router otherwise, so the route set is identical in both cases -- the
+// only difference is whether authgate.Manager.Authenticate runs first.
+func registerDataRoutes(r chi.Router, s *Server) {
 	r.Get("/search", s.handleSearch)
 	r.Post("/watchlist", s.handleAddWatchlist)
 	r.Get("/watchlist", s.handleListWatchlist)
 	r.Patch("/watchlist/{id}", s.handleUpdateWatchlist)
 	r.Delete("/watchlist/{id}", s.handleRemoveWatchlist)
 	r.Get("/events", s.handleListEvents)
-	r.NotFound(webassets.Handler().ServeHTTP)
+	// /status inherits gate.Authenticate + gate.RequireCSRFHeader + the
+	// X-Instance-Gated header on the gated path exactly as /events does; it is
+	// a read verb, so the CSRF-header requirement is a no-op for it.
+	r.Get("/status", s.handleStatus)
+	// The digest settings resource (DGST-01..04, T-20-01) is registered
+	// here, next to the other data routes, so both verbs inherit
+	// gate.Authenticate and gate.RequireCSRFHeader with no new middleware
+	// and no path allowlist -- structural gating, not a code-path decision.
+	r.Get("/settings/notifications", s.handleGetSettings)
+	r.Put("/settings/notifications", s.handleUpdateSettings)
+}
 
-	s.router = r
-	return s
+// securityResponseHeaders sets response headers that apply to every route in
+// both the gated and inert configurations. Currently just Referrer-Policy:
+// no-referrer (Pitfall 14 hardening). The header is set before next so it is
+// present on the response even when a downstream handler panics and
+// middleware.Recoverer writes the 500.
+func securityResponseHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // echoRequestID writes chi's per-request correlation ID (already stamped
@@ -107,4 +305,15 @@ func echoRequestID(next http.Handler) http.Handler {
 // Router returns the wired http.Handler.
 func (s *Server) Router() http.Handler {
 	return s.router
+}
+
+// Close releases resources held by optional subsystems -- currently only the
+// auth gate's per-IP limiter-map sweeper goroutine (plan 14-02). It is safe to
+// call on a server built without a gate (the 5-argument New path) and safe to
+// call more than once. cmd/server/main.go defers it; tests that build a gated
+// server wire it into t.Cleanup so no sweeper goroutine outlives its server.
+func (s *Server) Close() {
+	if s.gate != nil {
+		s.gate.Close()
+	}
 }

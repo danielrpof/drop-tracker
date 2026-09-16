@@ -55,6 +55,12 @@ SELECT u.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
 FROM updated u
 JOIN artists a ON a.id = u.artist_id;
 
+-- name: CountWatchlist :one
+-- Backs GET /status watchlist_size (STAT-01). A count(*), not len(ListWatchlist)
+-- in Go -- ListWatchlist JOINs artists and returns every row's full projection,
+-- so counting its result would pull every row just to discard it.
+SELECT count(*) FROM watchlist;
+
 -- name: DeleteWatchlistEntry :execrows
 -- :execrows returns the affected row count in one round trip, which is what
 -- lets the service distinguish "deleted" from "there was nothing to delete"

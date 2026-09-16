@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"time"
 
@@ -103,7 +104,7 @@ func backoffDelay(cfg retryConfig, attempt int) time.Duration {
 	if shift > maxBackoffShift {
 		shift = maxBackoffShift
 	}
-	delay := cfg.baseDelay * time.Duration(uint64(1)<<uint(shift))
+	delay := cfg.baseDelay * time.Duration(uint64(1)<<uint(shift)) //nolint:gosec // shift is capped at maxBackoffShift=32 above; 1<<32 fits well within int64's range
 	if delay <= 0 || delay > cfg.maxDelay {
 		delay = cfg.maxDelay
 	}
@@ -209,7 +210,15 @@ func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger, opts ..
 	if err != nil {
 		return fmt.Errorf("load embedded migrations: %w", err)
 	}
+	return runMigrationsWithSource(ctx, dsn, logger, src, opts...)
+}
 
+// runMigrationsWithSource holds RunMigrations' retry/backoff body against an
+// injected source.Driver (D-18) rather than the embedded migrationsFS, so a
+// test can drive the exact boot path with a synthetic source without
+// exporting migrationsFS. RunMigrations' own signature and behavior are
+// unchanged; this is a behavior-preserving split.
+func runMigrationsWithSource(ctx context.Context, dsn string, logger *slog.Logger, src source.Driver, opts ...RetryOption) error {
 	cfg := newRetryConfig(opts...)
 	target := redactDSN(dsn)
 
@@ -265,7 +274,7 @@ func runMigrationsOnce(ctx context.Context, dsn string, src source.Driver) error
 	if err != nil {
 		return fmt.Errorf("open database/sql handle: %w", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	if err := sqlDB.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping database: %w", err)
@@ -281,6 +290,17 @@ func runMigrationsOnce(ctx context.Context, dsn string, src source.Driver) error
 		return fmt.Errorf("create migrate instance: %w", err)
 	}
 
+	// Ahead-of-source no-op (D-17, RESEARCH.md Finding 1): golang-migrate's
+	// Up() errors rather than returning ErrNoChange when schema_migrations is
+	// ahead of this binary's embedded source -- the rollback scenario. A
+	// dirty state or a fresh DB (ErrNilVersion) both fall through to Up() as
+	// before.
+	if cur, dirty, verr := m.Version(); verr == nil && !dirty {
+		if smax, ok := maxSourceVersion(src); ok && cur > smax {
+			return nil
+		}
+	}
+
 	done := make(chan error, 1)
 	go func() {
 		done <- m.Up()
@@ -294,5 +314,47 @@ func runMigrationsOnce(ctx context.Context, dsn string, src source.Driver) error
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// ExpectedSchemaVersion returns the highest migration version in the embedded
+// source. It builds the same iofs source RunMigrations builds and reuses the
+// same maxSourceVersion walk the ahead-of-source guard uses, so the number
+// can never drift from what RunMigrations would apply. cmd/server calls this
+// once at boot and hands the value to httpserver.WithReadiness (D-01).
+func ExpectedSchemaVersion() (uint, error) {
+	src, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return 0, fmt.Errorf("load embedded migrations: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+
+	v, ok := maxSourceVersion(src)
+	if !ok {
+		return 0, errors.New("db: embedded migration source is empty")
+	}
+	return v, nil
+}
+
+// maxSourceVersion walks src to its highest migration version, returning
+// (0, false) if the source is empty or an unexpected error interrupts the
+// walk. It does not string-match golang-migrate's error text (RESEARCH.md
+// Anti-Patterns: that message is fmt.Errorf-wrapped, not a stable sentinel)
+// -- it relies only on the documented os.ErrNotExist end-of-source signal
+// from source.Driver.Next.
+func maxSourceVersion(src source.Driver) (uint, bool) {
+	v, err := src.First()
+	if err != nil {
+		return 0, false
+	}
+	for {
+		next, err := src.Next(v)
+		if errors.Is(err, os.ErrNotExist) {
+			return v, true
+		}
+		if err != nil {
+			return 0, false
+		}
+		v = next
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 )
 
@@ -36,6 +38,7 @@ type Event struct {
 	ReleaseGroupMBID   *string    `json:"release_group_mbid"`
 	Title              string     `json:"title"`
 	ArtistName         string     `json:"artist_name"`
+	WatchedArtistName  *string    `json:"watched_artist_name"`
 	ReleaseDate        *string    `json:"release_date"`
 	CoverArtURL        *string    `json:"cover_art_url"`
 	TrackCount         *int32     `json:"track_count"`
@@ -46,23 +49,30 @@ type Event struct {
 }
 
 // ListParams carries the optional filter/pagination axes for List. A nil
-// ArtistID/EventType/Cursor means "no filter on this axis" -- mirrors
-// watchlist.PreferencesParams's nil-means-untouched convention. A PageSize
-// of zero or less is clamped to DefaultPageSize by List.
+// ArtistID/EventType means "no filter on this axis" -- mirrors
+// watchlist.PreferencesParams's nil-means-untouched convention. Cursor nil
+// still means "first page" (quick task 260825-g6i's composite Cursor
+// replaces the old single-bigint one, but keeps the same nil convention). A
+// PageSize of zero or less is clamped to DefaultPageSize by List.
 type ListParams struct {
 	ArtistID  *int64
 	EventType *string
-	Cursor    *int64
+	Cursor    *Cursor
 	PageSize  int32
 }
 
 // Page is one page of the history feed: Events is always non-nil (D-05).
-// NextCursor is set to the last returned row's id only when the page came
-// back completely full -- the client's unambiguous "no more pages" signal
-// when it is nil.
+// NextCursor is set to the last returned row's (release_date, id) position
+// only when the page came back completely full -- the client's unambiguous
+// "no more pages" signal when it is nil. HasOlderEvents (DATA-02, D-06)
+// answers a question the page itself cannot: whether this request's
+// artist/event-type scope has any event older than the retention window,
+// so the frontend can distinguish "no events ever" from "events exist but
+// every one aged out" -- both cases look identical from Events alone.
 type Page struct {
-	Events     []Event
-	NextCursor *int64
+	Events         []Event
+	NextCursor     *Cursor
+	HasOlderEvents bool
 }
 
 // Store is the minimal surface internal/httpserver needs for the events
@@ -75,12 +85,18 @@ type Store interface {
 
 // Service is the sqlc-backed implementation of Store.
 type Service struct {
-	q sqlc.Querier
+	q             sqlc.Querier
+	retentionDays int
 }
 
-// NewService builds a Service backed by q.
-func NewService(q sqlc.Querier) *Service {
-	return &Service{q: q}
+// NewService builds a Service backed by q, applying a retention window of
+// retentionDays to every List call (DATA-02, D-01) -- the cutoff is computed
+// here, in this domain service, not at the HTTP boundary and not as a
+// SQL-side now() expression, matching this file's own "clamped here, not at
+// the HTTP boundary" convention already established by the PageSize clamp
+// below.
+func NewService(q sqlc.Querier, retentionDays int) *Service {
+	return &Service{q: q, retentionDays: retentionDays}
 }
 
 var _ Store = (*Service)(nil)
@@ -101,14 +117,53 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 		pageSize = MaxPageSize
 	}
 
+	// The retention cutoff (DATA-02, D-01/D-04): events created before this
+	// instant are hidden from the feed, but Valid is always explicitly true
+	// -- following notifyGate's precedent (internal/detection/detector.go)
+	// -- because a zero-value pgtype.Timestamptz marshals as SQL NULL, and
+	// "created_at >= NULL" is never true, which would silently return an
+	// empty feed for every request instead of erroring (T-10-02).
+	cutoff := time.Now().AddDate(0, 0, -s.retentionDays)
+
+	cutoffParam := pgtype.Timestamptz{Time: cutoff, Valid: true}
+
+	// cursorID/cursorReleaseDate are set or cleared together: cursorID nil
+	// is what switches the whole composite-keyset predicate off in
+	// queries/events.sql, so a nil p.Cursor must never leave cursorID set
+	// while cursorReleaseDate is nil (or vice versa) -- both come from the
+	// same p.Cursor read below.
+	var cursorID *int64
+	var cursorReleaseDate *string
+	if p.Cursor != nil {
+		id := p.Cursor.ID
+		cursorID = &id
+		cursorReleaseDate = p.Cursor.ReleaseDate
+	}
+
 	rows, err := s.q.ListEvents(ctx, sqlc.ListEventsParams{
-		ArtistID:  p.ArtistID,
-		EventType: p.EventType,
-		Cursor:    p.Cursor,
-		PageSize:  pageSize,
+		ArtistID:          p.ArtistID,
+		EventType:         p.EventType,
+		CursorID:          cursorID,
+		CursorReleaseDate: cursorReleaseDate,
+		Cutoff:            cutoffParam,
+		PageSize:          pageSize,
 	})
 	if err != nil {
 		return Page{}, fmt.Errorf("list events: %w", err)
+	}
+
+	// Computed unconditionally on every call, not only when the page is
+	// empty (D-06): one obvious code path beats a conditional optimization,
+	// and the underlying query is a short-circuiting EXISTS. Reuses the same
+	// cutoff variable as ListEvents above so both queries in one request
+	// describe the same instant.
+	hasOlderEvents, err := s.q.HasOlderEvents(ctx, sqlc.HasOlderEventsParams{
+		ArtistID:  p.ArtistID,
+		EventType: p.EventType,
+		Cutoff:    cutoffParam,
+	})
+	if err != nil {
+		return Page{}, fmt.Errorf("has older events: %w", err)
 	}
 
 	out := make([]Event, 0, len(rows))
@@ -116,13 +171,13 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 		out = append(out, toEvent(row))
 	}
 
-	var nextCursor *int64
+	var nextCursor *Cursor
 	if len(rows) == int(pageSize) {
-		last := out[len(out)-1].ID
-		nextCursor = &last
+		lastRow := out[len(out)-1]
+		nextCursor = &Cursor{ReleaseDate: lastRow.ReleaseDate, ID: lastRow.ID}
 	}
 
-	return Page{Events: out, NextCursor: nextCursor}, nil
+	return Page{Events: out, NextCursor: nextCursor, HasOlderEvents: hasOlderEvents}, nil
 }
 
 // toEvent converts one sqlc-generated ListEventsRow into the API-facing
@@ -139,6 +194,7 @@ func toEvent(row sqlc.ListEventsRow) Event {
 		ReleaseGroupMBID:   row.ReleaseGroupMbid,
 		Title:              row.Title,
 		ArtistName:         row.ArtistName,
+		WatchedArtistName:  row.WatchedArtistName,
 		ReleaseDate:        row.ReleaseDate,
 		CoverArtURL:        row.CoverArtUrl,
 		TrackCount:         row.TrackCount,

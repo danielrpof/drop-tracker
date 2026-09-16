@@ -1,0 +1,14 @@
+-- Reverse of 000007_backfill_events_watched_artist_name.up.sql.
+--
+-- Intentionally a no-op. The up migration is a data repair, not a schema
+-- change, and it is not reversible in a way that is safe or meaningful:
+-- after it runs, a populated watched_artist_name is indistinguishable from
+-- one the live insert path wrote itself, so any "undo" that NULLed rows back
+-- out would destroy real detection snapshots alongside the backfilled ones.
+--
+-- Nothing downstream needs the undo either: 000006's own down migration drops
+-- the watched_artist_name column outright, which discards these values as a
+-- side effect. Rolling back past 000006 therefore already removes everything
+-- this migration wrote, and rolling back only to 000006 correctly leaves the
+-- repaired data in place.
+SELECT 1;

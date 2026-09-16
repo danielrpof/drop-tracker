@@ -87,6 +87,9 @@ func TestSearchArtists_DecodesFixture(t *testing.T) {
 	if got.Disambiguation != "Canadian rapper" {
 		t.Errorf("Disambiguation = %q, want %q", got.Disambiguation, "Canadian rapper")
 	}
+	if got.Country != "CA" {
+		t.Errorf("Country = %q, want %q", got.Country, "CA")
+	}
 	if got.Type != "Person" {
 		t.Errorf("Type = %q, want %q", got.Type, "Person")
 	}

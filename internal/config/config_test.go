@@ -189,7 +189,7 @@ func envExampleKeys(t *testing.T) map[string]bool {
 	if err != nil {
 		t.Fatalf("open .env.example: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	keys := map[string]bool{}
 	scanner := bufio.NewScanner(f)
@@ -252,6 +252,140 @@ func TestLoad_TypeErrorNeverEchoesSecretFields(t *testing.T) {
 	}
 }
 
+// TestLoad_EventRetentionDaysDefaultsTo90 pins DATA-01's default: with
+// EVENT_RETENTION_DAYS unset, Load() must yield 90.
+func TestLoad_EventRetentionDaysDefaultsTo90(t *testing.T) {
+	setRequired(t)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.EventRetentionDays != 90 {
+		t.Errorf("EventRetentionDays = %d, want 90", cfg.EventRetentionDays)
+	}
+}
+
+// TestLoad_EventRetentionDaysOverride proves the default is not hardcoded
+// past the env read -- an explicit value must flow through.
+func TestLoad_EventRetentionDaysOverride(t *testing.T) {
+	setRequired(t)
+	t.Setenv("EVENT_RETENTION_DAYS", "30")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.EventRetentionDays != 30 {
+		t.Errorf("EventRetentionDays = %d, want 30", cfg.EventRetentionDays)
+	}
+}
+
+// TestLoad_EventRetentionDaysRejectsNonPositive pins D-03's fail-fast
+// posture: an invalid retention window must abort boot, never be silently
+// reinterpreted as "show everything" or "hide everything".
+func TestLoad_EventRetentionDaysRejectsNonPositive(t *testing.T) {
+	cases := []string{"0", "-1", "-90"}
+	for _, v := range cases {
+		t.Run(v, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("EVENT_RETENTION_DAYS", v)
+
+			_, err := config.Load()
+			if err == nil {
+				t.Fatalf("Load() with EVENT_RETENTION_DAYS=%s returned nil error, want an error naming EVENT_RETENTION_DAYS", v)
+			}
+			if !strings.Contains(err.Error(), "EVENT_RETENTION_DAYS") {
+				t.Errorf("error = %q, want it to mention EVENT_RETENTION_DAYS", err.Error())
+			}
+		})
+	}
+}
+
+// TestLoad_PollWorkerDefaults pins D-02's locked defaults: with neither
+// worker-count variable set, Load() must yield MusicBrainzPollWorkers=3 and
+// DeezerPollWorkers=5.
+func TestLoad_PollWorkerDefaults(t *testing.T) {
+	setRequired(t)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.MusicBrainzPollWorkers != 3 {
+		t.Errorf("MusicBrainzPollWorkers = %d, want 3", cfg.MusicBrainzPollWorkers)
+	}
+	if cfg.DeezerPollWorkers != 5 {
+		t.Errorf("DeezerPollWorkers = %d, want 5", cfg.DeezerPollWorkers)
+	}
+}
+
+// TestLoad_PollWorkerOverrides proves the defaults are not hardcoded past
+// the env read -- explicit values must flow through independently (D-01).
+func TestLoad_PollWorkerOverrides(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MUSICBRAINZ_POLL_WORKERS", "7")
+	t.Setenv("DEEZER_POLL_WORKERS", "2")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.MusicBrainzPollWorkers != 7 {
+		t.Errorf("MusicBrainzPollWorkers = %d, want 7", cfg.MusicBrainzPollWorkers)
+	}
+	if cfg.DeezerPollWorkers != 2 {
+		t.Errorf("DeezerPollWorkers = %d, want 2", cfg.DeezerPollWorkers)
+	}
+}
+
+// TestLoad_RejectsNonPositivePollWorkers pins the same fail-fast posture
+// TestLoad_EventRetentionDaysRejectsNonPositive pins for EVENT_RETENTION_DAYS:
+// an invalid pool size must abort boot, never be silently reinterpreted as
+// zero workers. MUSICBRAINZ_POLL_WORKERS=1 is exercised separately below as
+// the boundary value one step above the rejected range.
+func TestLoad_RejectsNonPositivePollWorkers(t *testing.T) {
+	cases := []struct {
+		envVar string
+		value  string
+	}{
+		{"MUSICBRAINZ_POLL_WORKERS", "0"},
+		{"MUSICBRAINZ_POLL_WORKERS", "-1"},
+		{"DEEZER_POLL_WORKERS", "0"},
+		{"DEEZER_POLL_WORKERS", "-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.envVar+"_"+tc.value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv(tc.envVar, tc.value)
+
+			_, err := config.Load()
+			if err == nil {
+				t.Fatalf("Load() with %s=%s returned nil error, want an error naming %s", tc.envVar, tc.value, tc.envVar)
+			}
+			if !strings.Contains(err.Error(), tc.envVar) {
+				t.Errorf("error = %q, want it to mention %s", err.Error(), tc.envVar)
+			}
+		})
+	}
+}
+
+// TestLoad_PollWorkersOneIsValid pins the boundary immediately above the
+// rejected range: 1 is a valid worker count (WorkerCountOneIsSequential
+// relies on this being accepted, not rejected).
+func TestLoad_PollWorkersOneIsValid(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MUSICBRAINZ_POLL_WORKERS", "1")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() with MUSICBRAINZ_POLL_WORKERS=1 returned unexpected error: %v", err)
+	}
+	if cfg.MusicBrainzPollWorkers != 1 {
+		t.Errorf("MusicBrainzPollWorkers = %d, want 1", cfg.MusicBrainzPollWorkers)
+	}
+}
+
 func TestEnvExampleCompleteness(t *testing.T) {
 	structKeys := configEnvKeys(t)
 	fileKeys := envExampleKeys(t)
@@ -267,6 +401,67 @@ func TestEnvExampleCompleteness(t *testing.T) {
 	}
 }
 
+// TestDockerComposeWiresGateEnvVars is the G-14-1 regression guard. The
+// instance passphrase gate silently did nothing through a whole Phase 14 UAT
+// round because the app container booted with an empty INSTANCE_PASSPHRASE
+// and nothing in docker-compose.yml forwarded a host-shell value or made the
+// gate<->config coupling visible in the file. This test fails, naming the
+// missing key, if either gate env entry is dropped from the app service's
+// environment mapping -- so the regression surfaces in CI instead of a UAT.
+//
+// It uses a bufio.Scanner line walk (the idiom envExampleKeys and
+// TestDotEnvIsNotTracked already use) rather than a YAML parser: this plan
+// ships zero new module dependencies.
+func TestDockerComposeWiresGateEnvVars(t *testing.T) {
+	path := filepath.Join(repoRoot(t), "docker-compose.yml")
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open docker-compose.yml: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	var passphraseLine, trustProxyLine string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "INSTANCE_PASSPHRASE:") {
+			passphraseLine = line
+		}
+		if strings.HasPrefix(line, "TRUST_PROXY_HEADERS:") {
+			trustProxyLine = line
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan docker-compose.yml: %v", err)
+	}
+
+	if passphraseLine == "" {
+		t.Errorf("docker-compose.yml has no non-comment `INSTANCE_PASSPHRASE:` entry in the app service " +
+			"environment mapping; a host-shell INSTANCE_PASSPHRASE will not reach the container (G-14-1 regression)")
+	} else if !strings.Contains(passphraseLine, "${INSTANCE_PASSPHRASE") {
+		t.Errorf("docker-compose.yml INSTANCE_PASSPHRASE entry %q does not reference the variable as a "+
+			"Compose interpolation (${INSTANCE_PASSPHRASE...})", passphraseLine)
+	}
+
+	if trustProxyLine == "" {
+		t.Errorf("docker-compose.yml has no non-comment `TRUST_PROXY_HEADERS:` entry in the app service " +
+			"environment mapping (G-14-1 regression)")
+	} else {
+		if !strings.Contains(trustProxyLine, "${TRUST_PROXY_HEADERS") {
+			t.Errorf("docker-compose.yml TRUST_PROXY_HEADERS entry %q does not reference the variable as a "+
+				"Compose interpolation (${TRUST_PROXY_HEADERS...})", trustProxyLine)
+		}
+		if !strings.Contains(trustProxyLine, ":-false}") {
+			t.Errorf("docker-compose.yml TRUST_PROXY_HEADERS entry %q does not carry a `false` default "+
+				"(:-false}); D-14's fail-safe direction must not be silently dropped", trustProxyLine)
+		}
+	}
+}
+
 func TestDotEnvIsNotTracked(t *testing.T) {
 	root := repoRoot(t)
 
@@ -274,7 +469,7 @@ func TestDotEnvIsNotTracked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open .gitignore: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	found := false
 	scanner := bufio.NewScanner(f)

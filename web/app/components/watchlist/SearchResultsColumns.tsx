@@ -3,7 +3,13 @@ import { useState } from "react"
 
 import { CoverArt } from "~/components/common/CoverArt"
 import { Button } from "~/components/ui/button"
-import type { SearchArtist, SearchResponse, SourceResult, WatchlistEntry } from "~/lib/api"
+import type {
+  SearchArtist,
+  SearchResponse,
+  SourceResult,
+  WatchlistEntry,
+} from "~/lib/api"
+import { identityField, isAddableSource } from "~/lib/sources"
 
 // SOURCE_LABELS maps a GET /search source key to its display name -- falls
 // back to the raw key for any source not yet known here, so a future
@@ -83,20 +89,20 @@ function SourceColumn({
         {sourceLabel(sourceName)}
       </h2>
 
-      {result.status === 'error' && (
+      {result.status === "error" && (
         <p className="text-label text-muted-foreground">
           {sourceLabel(sourceName)} is unavailable right now — showing{" "}
           {otherSourceNames.map(sourceLabel).join(", ")} results only.
         </p>
       )}
 
-      {result.status !== 'error' && result.artists.length === 0 && (
+      {result.status !== "error" && result.artists.length === 0 && (
         <p className="text-label text-muted-foreground">
           No matches for "{query}"
         </p>
       )}
 
-      {result.status !== 'error' && result.artists.length > 0 && (
+      {result.status !== "error" && result.artists.length > 0 && (
         <ul className="flex max-h-96 flex-col gap-3 overflow-y-auto">
           {result.artists.map((artist) => (
             <SearchResultRow
@@ -104,11 +110,10 @@ function SourceColumn({
               sourceName={sourceName}
               artist={artist}
               alreadyWatching={
-                watchlistEntries?.some((entry) =>
-                  sourceName === "deezer"
-                    ? entry.deezer_id === artist.id
-                    : entry.mbid === artist.id,
-                ) ?? false
+                watchlistEntries?.some((entry) => {
+                  const field = identityField(sourceName)
+                  return entry[field] === artist.id
+                }) ?? false
               }
               onAdd={onAdd}
             />
@@ -127,9 +132,11 @@ interface SearchResultRowProps {
 }
 
 // SearchResultRow renders one result: cover art, name, type, and a
-// one-line-truncated disambiguation when present, all as plain JSX text
-// nodes -- every one of these strings comes from a third-party catalogue,
-// so this tree never reaches for React's raw-HTML injection escape hatch.
+// one-line-truncated secondary label (disambiguation, falling back to
+// country when disambiguation is blank) when present, all as plain JSX
+// text nodes -- every one of these strings comes from a third-party
+// catalogue, so this tree never reaches for React's raw-HTML injection
+// escape hatch.
 // The trailing control is one of three states: the disabled "Already
 // watching" state (D-11, cross-referenced against the already-loaded
 // watchlist entries by source-appropriate id -- mbid for MusicBrainz,
@@ -149,7 +156,8 @@ function SearchResultRow({
   onAdd,
 }: SearchResultRowProps) {
   const [pending, setPending] = useState(false)
-  const canAdd = sourceName === "musicbrainz"
+  const canAdd = isAddableSource(sourceName)
+  const secondaryLabel = artist.disambiguation ?? artist.country
 
   async function handleClick() {
     setPending(true)
@@ -168,9 +176,9 @@ function SearchResultRow({
           {artist.name}
         </span>
         <span className="text-label text-muted-foreground">{artist.type}</span>
-        {artist.disambiguation !== null && (
+        {secondaryLabel !== null && (
           <span className="truncate text-label text-muted-foreground">
-            {artist.disambiguation}
+            {secondaryLabel}
           </span>
         )}
       </div>

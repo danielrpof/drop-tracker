@@ -12,16 +12,57 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
+	"log/slog"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/danielrpof/drop-tracker/internal/artistart"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// testLogger returns a *slog.Logger that discards everything, so Phase 13's
+// artist-art tests emit no output on failure paths they deliberately drive.
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// stubMatcher is a test double for watchlist.ArtistMatcher (D-06). Each call
+// to Match is recorded in calls, in order. If blockUntil is non-nil, Match
+// blocks until the channel is closed before returning result/err -- used to
+// observe an ActivityGate's Active() state while a match is in flight.
+type stubMatcher struct {
+	result artistart.Result
+	err    error
+
+	blockUntil chan struct{}
+
+	// panicWith, when non-nil, makes Match panic with this value instead of
+	// returning -- used to drive WR-03's ActivityGate-leak-on-panic
+	// regression test (13-REVIEW.md).
+	panicWith any
+
+	calls [][2]string // [mbid, name] per call, in order
+}
+
+func (m *stubMatcher) Match(_ context.Context, mbid, name string) (artistart.Result, error) {
+	m.calls = append(m.calls, [2]string{mbid, name})
+	if m.blockUntil != nil {
+		<-m.blockUntil
+	}
+	if m.panicWith != nil {
+		panic(m.panicWith)
+	}
+	return m.result, m.err
+}
 
 // testMBID derives a short, unique-per-test mbid from t.Name() so tests
 // sharing one database never collide, without hardcoding a literal.
@@ -1113,7 +1154,7 @@ func TestService_UpdatePreferences_ConcurrentAxisWriteIsNotLost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	if _, err := tx.Exec(ctx, "UPDATE watchlist SET muted_event_types = ARRAY['deluxe_change']::text[] WHERE id = $1", entry.ID); err != nil {
 		t.Fatalf("held-lock update: %v", err)
@@ -1187,7 +1228,7 @@ func TestService_UpdatePreferences_RowDeletedMidWriteReturnsErrNotFound(t *testi
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	if _, err := tx.Exec(ctx, "DELETE FROM watchlist WHERE id = $1", entry.ID); err != nil {
 		t.Fatalf("held-lock delete: %v", err)
@@ -1445,5 +1486,528 @@ func TestCheckConstraintRejectsUnknownValue(t *testing.T) {
 	_, err = pool.Exec(ctx, "UPDATE watchlist SET release_types = ARRAY['mixtape']::text[] WHERE id = $1", entry.ID)
 	if err == nil {
 		t.Fatal("raw UPDATE with an unknown release type succeeded, want a CHECK constraint violation")
+	}
+}
+
+// The two tests below cover Phase 13's ListArtistsMissingImage (D-06/D-07,
+// D-12 cooldown amended by grilling round Q4) and RecordArtMatchAttempt
+// (D-12), the sqlc queries the artist-art backfill sweep (sibling plan
+// 13-03) depends on. testutil.NewTestPool resets schema, not table
+// contents (TestService_List_EmptyReturnsNonNilSlice's own precedent), so
+// both tests scope every assertion to the ids they themselves seeded.
+
+// insertArtistForArtTest inserts a bare artists row with the given mbid,
+// image_url and art_match_attempted_at (attemptedAgo == 0 means NULL --
+// never attempted), returning its id.
+func insertArtistForArtTest(t *testing.T, pool *pgxpool.Pool, mbid string, imageURL *string, attemptedAgo time.Duration) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var artistID int64
+	if attemptedAgo == 0 {
+		if err := pool.QueryRow(ctx,
+			"INSERT INTO artists (mbid, name, image_url) VALUES ($1, $2, $3) RETURNING id",
+			mbid, "Art Test "+mbid, imageURL,
+		).Scan(&artistID); err != nil {
+			t.Fatalf("insert artist %s: %v", mbid, err)
+		}
+		return artistID
+	}
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO artists (mbid, name, image_url, art_match_attempted_at) VALUES ($1, $2, $3, now() - $4::interval) RETURNING id",
+		mbid, "Art Test "+mbid, imageURL, attemptedAgo.String(),
+	).Scan(&artistID); err != nil {
+		t.Fatalf("insert artist %s: %v", mbid, err)
+	}
+	return artistID
+}
+
+func TestListArtistsMissingImage_CooldownAndScope(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	base := testMBID(t)
+
+	mbidNeverAttempted1 := base + "-never-1"
+	mbidNeverAttempted2 := base + "-never-2"
+	mbidStaleAttempt := base + "-stale"
+	mbidWithinCooldown := base + "-cooldown"
+	mbidHasImage := base + "-has-image"
+	mbidNotWatchlisted := base + "-not-watchlisted"
+	allMBIDs := []string{mbidNeverAttempted1, mbidNeverAttempted2, mbidStaleAttempt, mbidWithinCooldown, mbidHasImage, mbidNotWatchlisted}
+	t.Cleanup(func() {
+		for _, m := range allMBIDs {
+			if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", m); err != nil {
+				t.Fatalf("cleanup: delete artists row %s: %v", m, err)
+			}
+		}
+	})
+
+	idNever1 := insertArtistForArtTest(t, pool, mbidNeverAttempted1, nil, 0)
+	idNever2 := insertArtistForArtTest(t, pool, mbidNeverAttempted2, nil, 0)
+	idStale := insertArtistForArtTest(t, pool, mbidStaleAttempt, nil, 25*time.Hour)
+	idCooldown := insertArtistForArtTest(t, pool, mbidWithinCooldown, nil, 1*time.Hour)
+	hasImage := "https://example.test/has-image.jpg"
+	idHasImage := insertArtistForArtTest(t, pool, mbidHasImage, &hasImage, 0)
+	idNotWatchlisted := insertArtistForArtTest(t, pool, mbidNotWatchlisted, nil, 0)
+
+	for _, id := range []int64{idNever1, idNever2, idStale, idCooldown, idHasImage} {
+		if _, err := pool.Exec(ctx, "INSERT INTO watchlist (artist_id) VALUES ($1)", id); err != nil {
+			t.Fatalf("insert watchlist row for artist %d: %v", id, err)
+		}
+	}
+	// idNotWatchlisted deliberately gets no watchlist row.
+
+	got, err := q.ListArtistsMissingImage(ctx)
+	if err != nil {
+		t.Fatalf("ListArtistsMissingImage: %v", err)
+	}
+
+	var gotIDs []int64
+	for _, a := range got {
+		switch a.ID {
+		case idNever1, idNever2, idStale, idCooldown, idHasImage, idNotWatchlisted:
+			gotIDs = append(gotIDs, a.ID)
+		}
+	}
+
+	wantIDs := []int64{idNever1, idNever2, idStale}
+	slices.Sort(wantIDs)
+	slices.Sort(gotIDs)
+	if !slices.Equal(gotIDs, wantIDs) {
+		t.Fatalf("scoped result ids = %v, want %v (never-attempted x2 plus the 25h-stale row, excluding within-cooldown/has-image/not-watchlisted)", gotIDs, wantIDs)
+	}
+
+	if !slices.IsSorted(artistIDs(got)) {
+		t.Fatalf("ListArtistsMissingImage result is not ascending by id")
+	}
+}
+
+// artistIDs extracts the id column from a []sqlc.Artist slice for an
+// ascending-order assertion.
+func artistIDs(artists []sqlc.Artist) []int64 {
+	ids := make([]int64, len(artists))
+	for i, a := range artists {
+		ids[i] = a.ID
+	}
+	return ids
+}
+
+func TestRecordArtMatchAttempt_SetsTimestampLeavesImageUntouched(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	mbid := testMBID(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	wantImage := "https://example.test/record-attempt.jpg"
+	insertArtistForArtTest(t, pool, mbid, &wantImage, 0)
+
+	if err := q.RecordArtMatchAttempt(ctx, mbid); err != nil {
+		t.Fatalf("RecordArtMatchAttempt: %v", err)
+	}
+
+	var attemptedAt pgtype.Timestamptz
+	var imageURL *string
+	row := pool.QueryRow(ctx, "SELECT art_match_attempted_at, image_url FROM artists WHERE mbid = $1", mbid)
+	if err := row.Scan(&attemptedAt, &imageURL); err != nil {
+		t.Fatalf("query stored artist: %v", err)
+	}
+	if !attemptedAt.Valid {
+		t.Fatalf("art_match_attempted_at = NULL, want non-NULL")
+	}
+	if time.Since(attemptedAt.Time) > time.Minute {
+		t.Fatalf("art_match_attempted_at = %v, want approximately now", attemptedAt.Time)
+	}
+	if imageURL == nil || *imageURL != wantImage {
+		t.Fatalf("image_url = %v, want unchanged %q", imageURL, wantImage)
+	}
+}
+
+// The tests below cover Phase 13 plan 03's D-06 add-time artist-art match,
+// wired into Service.Add behind the optional WithArtistArt dependency (D-10
+// for the ActivityGate coordination). Every test shares the file's own
+// real-Postgres harness and mbid-per-test-name convention above.
+
+func TestService_Add_ArtistArt_NoMatcherConfigured_NoMatchAttempt(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	// NewService(q) with no options -- today's behavior, unchanged.
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "No Matcher Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if entry.ImageURL != nil {
+		t.Fatalf("entry.ImageURL = %v, want nil (no matcher configured)", entry.ImageURL)
+	}
+}
+
+func TestService_Add_ArtistArt_SkipsMatchWhenImageURLProvided(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	stub := &stubMatcher{result: artistart.Result{Matched: true, DeezerID: strptr("999"), ImageURL: strptr("https://example.test/wrong.jpg")}}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, nil, testLogger()))
+
+	callerImage := "https://example.test/caller-supplied.jpg"
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Skip Match Test", ImageURL: &callerImage})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if len(stub.calls) != 0 {
+		t.Fatalf("stub.calls = %d, want 0 (caller supplied ImageURL, so no match attempt)", len(stub.calls))
+	}
+	if entry.ImageURL == nil || *entry.ImageURL != callerImage {
+		t.Fatalf("entry.ImageURL = %v, want %q (caller-supplied value must reach UpsertArtist untouched)", entry.ImageURL, callerImage)
+	}
+}
+
+func TestService_Add_ArtistArt_CallsMatchWhenImageURLNil(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	stub := &stubMatcher{result: artistart.Result{}}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, nil, testLogger()))
+
+	if _, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Calls Match Test"}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if len(stub.calls) != 1 {
+		t.Fatalf("stub.calls = %d, want 1 (nil ImageURL must trigger exactly one match attempt)", len(stub.calls))
+	}
+	if stub.calls[0][0] != mbid || stub.calls[0][1] != "Calls Match Test" {
+		t.Fatalf("stub.calls[0] = %v, want [%q %q]", stub.calls[0], mbid, "Calls Match Test")
+	}
+}
+
+func TestService_Add_ArtistArt_MatchedPersistsDeezerIDAndImageURL(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	wantDeezerID := "555444"
+	wantImageURL := "https://example.test/matched.jpg"
+	stub := &stubMatcher{result: artistart.Result{Matched: true, DeezerID: &wantDeezerID, ImageURL: &wantImageURL}}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, nil, testLogger()))
+
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Matched Persist Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if entry.DeezerID == nil || *entry.DeezerID != wantDeezerID {
+		t.Fatalf("entry.DeezerID = %v, want %q", entry.DeezerID, wantDeezerID)
+	}
+	if entry.ImageURL == nil || *entry.ImageURL != wantImageURL {
+		t.Fatalf("entry.ImageURL = %v, want %q", entry.ImageURL, wantImageURL)
+	}
+
+	var deezerID, imageURL *string
+	row := pool.QueryRow(ctx, "SELECT deezer_id, image_url FROM artists WHERE mbid = $1", mbid)
+	if err := row.Scan(&deezerID, &imageURL); err != nil {
+		t.Fatalf("query stored artist: %v", err)
+	}
+	if deezerID == nil || *deezerID != wantDeezerID {
+		t.Fatalf("stored deezer_id = %v, want %q", deezerID, wantDeezerID)
+	}
+	if imageURL == nil || *imageURL != wantImageURL {
+		t.Fatalf("stored image_url = %v, want %q", imageURL, wantImageURL)
+	}
+}
+
+func TestService_Add_ArtistArt_ProvidedDeezerIDNotOverwrittenByMatch(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	matchedDeezerID := "111222"
+	matchedImageURL := "https://example.test/matched-image.jpg"
+	stub := &stubMatcher{result: artistart.Result{Matched: true, DeezerID: &matchedDeezerID, ImageURL: &matchedImageURL}}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, nil, testLogger()))
+
+	callerDeezerID := "999888"
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "DeezerID Priority Test", DeezerID: &callerDeezerID})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if len(stub.calls) != 1 {
+		t.Fatalf("stub.calls = %d, want 1 (a non-nil DeezerID with nil ImageURL still attempts a match)", len(stub.calls))
+	}
+	if entry.DeezerID == nil || *entry.DeezerID != callerDeezerID {
+		t.Fatalf("entry.DeezerID = %v, want %q (caller-supplied Deezer id must never be overwritten by a matched one)", entry.DeezerID, callerDeezerID)
+	}
+	if entry.ImageURL == nil || *entry.ImageURL != matchedImageURL {
+		t.Fatalf("entry.ImageURL = %v, want %q", entry.ImageURL, matchedImageURL)
+	}
+}
+
+func TestService_Add_ArtistArt_UnmatchedLeavesPreviousImageUnchanged(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	svcNoMatcher := watchlist.NewService(sqlc.New(pool))
+	originalImage := "https://example.test/original.jpg"
+	if _, err := svcNoMatcher.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Fail Closed Test", ImageURL: &originalImage}); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, "DELETE FROM watchlist WHERE artist_id = (SELECT id FROM artists WHERE mbid = $1)", mbid); err != nil {
+		t.Fatalf("delete watchlist row: %v", err)
+	}
+
+	// A fail-closed re-add (D-09): Matched: false, both pointers nil.
+	stub := &stubMatcher{result: artistart.Result{}}
+	svcWithMatcher := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, nil, testLogger()))
+	entry, err := svcWithMatcher.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Fail Closed Test"})
+	if err != nil {
+		t.Fatalf("second Add (re-add after fail-closed match): %v", err)
+	}
+
+	if entry.ImageURL == nil || *entry.ImageURL != originalImage {
+		t.Fatalf("entry.ImageURL = %v, want unchanged %q (D-09 fail-closed must never blank a previously-stored image)", entry.ImageURL, originalImage)
+	}
+
+	var imageURL *string
+	row := pool.QueryRow(ctx, "SELECT image_url FROM artists WHERE mbid = $1", mbid)
+	if err := row.Scan(&imageURL); err != nil {
+		t.Fatalf("query stored artist: %v", err)
+	}
+	if imageURL == nil || *imageURL != originalImage {
+		t.Fatalf("stored image_url = %v, want unchanged %q", imageURL, originalImage)
+	}
+}
+
+func TestService_Add_ArtistArt_MatchErrorStillSucceeds(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	stub := &stubMatcher{err: errors.New("upstream unreachable")}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, nil, testLogger()))
+
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Match Error Test"})
+	if err != nil {
+		t.Fatalf("Add returned err = %v, want nil (a match error must never fail the add, D-06/D-09)", err)
+	}
+	if entry.MBID != mbid || entry.Name != "Match Error Test" {
+		t.Fatalf("entry = %+v, want a fully populated Entry despite the match error", entry)
+	}
+	if entry.ImageURL != nil {
+		t.Fatalf("entry.ImageURL = %v, want nil (the match errored, so no art)", entry.ImageURL)
+	}
+}
+
+func TestService_Add_ArtistArt_DuplicateAddStillReturnsErrDuplicate(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	stub := &stubMatcher{result: artistart.Result{}}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, nil, testLogger()))
+
+	if _, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "First Add"}); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+	callsAfterFirst := len(stub.calls)
+
+	_, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Second Add"})
+	if !errors.Is(err, watchlist.ErrDuplicate) {
+		t.Fatalf("second Add error = %v, want errors.Is(err, watchlist.ErrDuplicate)", err)
+	}
+
+	// The duplicate-detection failure happens after UpsertArtist's own
+	// refresh (D-03), which itself happens after the match attempt tied to
+	// this second Add -- so the call count legitimately advances by one for
+	// the second Add's own attempt, matching Match's placement ahead of
+	// UpsertArtist. What must NOT happen is a *third* attempt from any
+	// retry/error-handling path.
+	if len(stub.calls) != callsAfterFirst+1 {
+		t.Fatalf("stub.calls = %d, want %d (exactly one match attempt per Add call, including the duplicate)", len(stub.calls), callsAfterFirst+1)
+	}
+}
+
+func TestService_Add_ArtistArt_PreferenceValidationErrorSkipsMatch(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	stub := &stubMatcher{result: artistart.Result{}}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, nil, testLogger()))
+
+	_, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Invalid Preferences Test", ReleaseTypes: []string{"mixtape"}})
+	if !errors.Is(err, watchlist.ErrInvalidReleaseType) {
+		t.Fatalf("err = %v, want errors.Is(err, watchlist.ErrInvalidReleaseType)", err)
+	}
+	if len(stub.calls) != 0 {
+		t.Fatalf("stub.calls = %d, want 0 (preference validation must short-circuit before any match attempt)", len(stub.calls))
+	}
+}
+
+func TestService_Add_ArtistArt_NilGateDoesNotPanic(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	wantDeezerID := "42"
+	wantImageURL := "https://example.test/nil-gate.jpg"
+	stub := &stubMatcher{result: artistart.Result{Matched: true, DeezerID: &wantDeezerID, ImageURL: &wantImageURL}}
+	// WithArtistArt(m, nil, logger): a nil gate must behave exactly like a
+	// real gate that is simply never checked -- no panic, no nil dereference.
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, nil, testLogger()))
+
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Nil Gate Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if entry.ImageURL == nil || *entry.ImageURL != wantImageURL {
+		t.Fatalf("entry.ImageURL = %v, want %q", entry.ImageURL, wantImageURL)
+	}
+}
+
+// TestService_Add_ArtistArt_ActivityGateActiveDuringMatch is -race-clean and
+// proves D-10's coordination contract: a real *artistart.ActivityGate's
+// Active() reports true while a blocking stubMatcher.Match call is in
+// flight via Service.Add, and false immediately after Add returns.
+func TestService_Add_ArtistArt_ActivityGateActiveDuringMatch(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	gate := artistart.NewActivityGate()
+	block := make(chan struct{})
+	stub := &stubMatcher{blockUntil: block}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, gate, testLogger()))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Activity Gate Test"})
+		done <- err
+	}()
+
+	deadline := time.After(2 * time.Second)
+	activeObserved := false
+	for !activeObserved {
+		select {
+		case <-deadline:
+			close(block) // unblock the goroutine so it doesn't leak past this test
+			t.Fatal("gate never reported Active() == true while Match was blocked")
+		default:
+			if gate.Active() {
+				activeObserved = true
+			} else {
+				time.Sleep(2 * time.Millisecond)
+			}
+		}
+	}
+
+	close(block)
+
+	if err := <-done; err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if gate.Active() {
+		t.Fatal("gate.Active() == true after Add returned, want false")
+	}
+}
+
+// TestService_Add_ArtistArt_ActivityGateReleasedEvenIfMatchPanics is
+// -race-clean and proves WR-03's fix (13-REVIEW.md): a panic inside
+// Matcher.Match must not leak the ActivityGate registration permanently
+// active. Before the fix, cancel()/end() were plain (non-deferred)
+// statements after the Match call, so a panic skipped them entirely.
+func TestService_Add_ArtistArt_ActivityGateReleasedEvenIfMatchPanics(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	mbid := testMBID(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM artists WHERE mbid = $1", mbid); err != nil {
+			t.Fatalf("cleanup: delete artists row: %v", err)
+		}
+	})
+
+	gate := artistart.NewActivityGate()
+	stub := &stubMatcher{panicWith: "simulated Match panic"}
+	svc := watchlist.NewService(sqlc.New(pool), watchlist.WithArtistArt(stub, gate, testLogger()))
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("Add did not panic, want it to propagate the stubMatcher panic")
+			}
+		}()
+		_, _ = svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Activity Gate Panic Test"})
+	}()
+
+	if gate.Active() {
+		t.Fatal("gate.Active() == true after Match panicked, want false (ActivityGate registration must not leak)")
 	}
 }

@@ -138,7 +138,7 @@ func (c *Client) fetchArtistAlbumsPage(ctx context.Context, artistID string, lim
 	if err != nil {
 		return artistAlbumsResponse{}, fmt.Errorf("deezer: artist albums: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		// Never echo the response body -- only the status code (mirrors

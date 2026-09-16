@@ -1,10 +1,20 @@
 package notifier_test
 
 // This file follows internal/detection/detector_test.go's real-Postgres
-// integration style (testutil.NewTestPool applies the embedded migrations)
-// combined with internal/musicbrainz/search_test.go's httptest.Server style
-// for the end-to-end drain case -- the tracer's proof that a pending events
-// row travels poll cycle -> notifier -> Discord -> acked row.
+// integration style, combined with internal/musicbrainz/search_test.go's
+// httptest.Server style for the end-to-end drain case -- the tracer's proof
+// that a pending events row travels poll cycle -> notifier -> Discord ->
+// acked row.
+//
+// Every test here uses testutil.NewIsolatedTestPool (not NewTestPool):
+// NotifyPending's ListUnnotified is a deliberately global, unfiltered query
+// (D-06), so a pool scoped to the shared fixture's default schema would let
+// any other concurrently-running package's own pending events rows leak
+// into this package's exact-count assertions -- and a real NotifyPending
+// call here could even mark one of those foreign rows notified out from
+// under its own test. NewIsolatedTestPool gives this package's tests their
+// own dedicated schema, migrated independently, so counts here reflect only
+// what this package's own tests inserted.
 
 import (
 	"bytes"
@@ -13,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -58,6 +69,32 @@ func (f *fakeSender) Send(ctx context.Context, embed discord.Embed) error {
 
 var _ notifier.Sender = (*fakeSender)(nil)
 
+// spacingRecorder installs a recording spacingWait seam for the duration of
+// t (via notifier.SetSpacingWaitForTest) and returns a func reporting the
+// durations NotifyPending's send loop requested. Each request is answered
+// with an already-fired channel, so the select in the send loop never
+// actually waits -- what is recorded is what NotifyPending asked for, which
+// is deterministic, rather than how long a goroutine happened to sleep,
+// which is not under CPU or scheduler contention.
+func spacingRecorder(t *testing.T) func() []time.Duration {
+	t.Helper()
+	var mu sync.Mutex
+	var recorded []time.Duration
+	notifier.SetSpacingWaitForTest(t, func(d time.Duration) <-chan time.Time {
+		mu.Lock()
+		recorded = append(recorded, d)
+		mu.Unlock()
+		ch := make(chan time.Time, 1)
+		ch <- time.Now()
+		return ch
+	})
+	return func() []time.Duration {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]time.Duration(nil), recorded...)
+	}
+}
+
 // testArtistMBID derives a short, unique-per-test-and-suffix artist mbid,
 // matching internal/poller/poller_test.go's testArtistMBID convention.
 func testArtistMBID(t *testing.T, suffix string) string {
@@ -87,18 +124,34 @@ func insertTestArtist(t *testing.T, pool *pgxpool.Pool, suffix string) int64 {
 	return artistID
 }
 
+// todayDate is the release_date the pending-row fixtures below stamp.
+//
+// Every test in this file exercises DELIVERY mechanics -- spacing, retry,
+// the CAS guard, mark-notified failure handling -- and needs its rows to
+// actually reach the Sender. Since the freshness gate shipped
+// (.planning/debug/resolved/backlog-songs-trigger-discord.md), "notified_at
+// IS NULL" is no longer sufficient for that: notifier.suppresses acks and
+// skips any row whose release_date is undated, partial, or older than the
+// configured window. An undated fixture row (which is what these helpers
+// used to insert) is now silently suppressed, so every send assertion here
+// would fail against correct code. Suppression itself is covered by
+// suppress_test.go; these fixtures deliberately opt out of it.
+var todayDate = time.Now().UTC().Format(time.DateOnly)
+
 // insertPendingEvent inserts a new_release events row with notified_at NULL
-// -- exactly the outbox state NotifyPending is meant to drain.
+// and a release_date of today -- exactly the outbox state NotifyPending is
+// meant to drain and actually deliver. See todayDate for why the date
+// matters.
 func insertPendingEvent(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID string) int64 {
 	t.Helper()
 	ctx := context.Background()
 
 	var eventID int64
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name)
-		 VALUES ($1, 'musicbrainz', 'new_release', $2, 'Test Title', 'Test Artist')
+		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date)
+		 VALUES ($1, 'musicbrainz', 'new_release', $2, 'Test Title', 'Test Artist', $3)
 		 RETURNING id`,
-		artistID, externalID,
+		artistID, externalID, todayDate,
 	).Scan(&eventID); err != nil {
 		t.Fatalf("insert pending event: %v", err)
 	}
@@ -116,10 +169,10 @@ func insertPendingEventTitled(t *testing.T, pool *pgxpool.Pool, artistID int64, 
 
 	var eventID int64
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name)
-		 VALUES ($1, 'musicbrainz', 'new_release', $2, $3, 'Test Artist')
+		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date)
+		 VALUES ($1, 'musicbrainz', 'new_release', $2, $3, 'Test Artist', $4)
 		 RETURNING id`,
-		artistID, externalID, title,
+		artistID, externalID, title, todayDate,
 	).Scan(&eventID); err != nil {
 		t.Fatalf("insert pending event: %v", err)
 	}
@@ -137,7 +190,7 @@ func isNotified(t *testing.T, pool *pgxpool.Pool, eventID int64) bool {
 }
 
 func TestNotifyPending_ZeroPendingRows_NoRequestNoMarkNoError(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -159,8 +212,119 @@ func TestNotifyPending_ZeroPendingRows_NoRequestNoMarkNoError(t *testing.T) {
 	}
 }
 
+// insertPendingEventDated inserts a pending new_release row carrying an
+// explicit release_date, so a test can drive the freshness gate. releaseDate
+// == "" inserts SQL NULL (an undated row), which is what 64% of real
+// guest_feature rows look like.
+func insertPendingEventDated(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID, title, releaseDate string) int64 {
+	t.Helper()
+
+	var date *string
+	if releaseDate != "" {
+		date = &releaseDate
+	}
+
+	var eventID int64
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date)
+		 VALUES ($1, 'musicbrainz', 'new_release', $2, $3, 'Test Artist', $4)
+		 RETURNING id`,
+		artistID, externalID, title, date,
+	).Scan(&eventID); err != nil {
+		t.Fatalf("insert dated pending event: %v", err)
+	}
+	return eventID
+}
+
+// TestNotifyPending_StaleRowsAckedWithoutSending is the delivery-side
+// regression test for
+// .planning/debug/resolved/backlog-songs-trigger-discord.md.
+//
+// It models the exact production state at the moment the fix ships: an
+// outbox already full of back-catalogue rows inserted by the old,
+// ungated code. Those rows must be ACKED (so they never come back on a
+// later pass) but must NEVER produce a Discord request -- the flood being
+// fixed was 242 such rows in a single day, reaching back to 2015. The
+// genuinely-fresh row in the same batch must still be delivered, which is
+// what stops this from being satisfied by a gate that simply suppresses
+// everything.
+func TestNotifyPending_StaleRowsAckedWithoutSending(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, logBuf := newTestLogger()
+
+	// Drain anything already pending, so the counts below reflect only this
+	// test's own rows (ListUnnotified is global -- D-06).
+	if err := notifier.New(q, &fakeSender{}, time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("drain NotifyPending: %v", err)
+	}
+	logBuf.Reset()
+
+	artistID := insertTestArtist(t, pool, "stale")
+	backlogID := insertPendingEventDated(t, pool, artistID, "stale-old", "Ancient Album", "2015-05-21")
+	undatedID := insertPendingEventDated(t, pool, artistID, "stale-undated", "Undated Album", "")
+	partialID := insertPendingEventDated(t, pool, artistID, "stale-partial", "Year Only Album", "2015")
+	freshID := insertPendingEventDated(t, pool, artistID, "stale-fresh", "Todays Album", todayDate)
+
+	var mu sync.Mutex
+	var titles []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		titles = append(titles, string(body))
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	n := notifier.New(q, discord.NewClient(ts.URL, ts.Client()), time.Millisecond)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v", err)
+	}
+
+	mu.Lock()
+	gotBodies := append([]string(nil), titles...)
+	mu.Unlock()
+
+	if len(gotBodies) != 1 {
+		t.Fatalf("Discord received %d requests, want exactly 1 (only today's release); bodies: %v", len(gotBodies), gotBodies)
+	}
+	if !strings.Contains(gotBodies[0], "Todays Album") {
+		t.Fatalf("the single delivered request was not today's release: %s", gotBodies[0])
+	}
+	for _, stale := range []string{"Ancient Album", "Undated Album", "Year Only Album"} {
+		for _, b := range gotBodies {
+			if strings.Contains(b, stale) {
+				t.Errorf("a stale row (%q) was delivered to Discord: %s", stale, b)
+			}
+		}
+	}
+
+	// Every row must be acked, stale ones included -- an unacked stale row
+	// would be re-selected and re-suppressed on every future pass forever.
+	for _, tc := range []struct {
+		name string
+		id   int64
+	}{
+		{"2015 backlog", backlogID},
+		{"undated", undatedID},
+		{"year-only", partialID},
+		{"today's release", freshID},
+	} {
+		if !isNotified(t, pool, tc.id) {
+			t.Errorf("%s row was left pending, want acked", tc.name)
+		}
+	}
+
+	// The suppression must be observable in the logs: a silently-dropped row
+	// is otherwise indistinguishable from one that was never detected.
+	if logs := logBuf.String(); !strings.Contains(logs, "notify pass suppressed stale events") {
+		t.Errorf("no suppression summary line was logged; logs: %s", logs)
+	}
+}
+
 func TestNotifyPending_OnePendingRow_204MarksNotified(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -189,7 +353,7 @@ func TestNotifyPending_OnePendingRow_204MarksNotified(t *testing.T) {
 }
 
 func TestNotifyPending_SendFails_LeavesNotifiedAtNullAndRePicksUpNextPass(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, buf := newTestLogger()
 
@@ -226,7 +390,7 @@ func TestNotifyPending_SendFails_LeavesNotifiedAtNullAndRePicksUpNextPass(t *tes
 }
 
 func TestNotifyPending_ReentrantCallSkippedWhileInFlight(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -291,7 +455,7 @@ func TestSelect_EmptyWebhookURL_ReturnsNoOpAndLogsDisabledLine(t *testing.T) {
 // scheduler a chance to interleave the two calls would prove nothing about
 // the race this guard exists to survive.
 func TestNotifyPending_ConcurrentCallsNoDoublePost(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -341,10 +505,15 @@ func TestNotifyPending_ConcurrentCallsNoDoublePost(t *testing.T) {
 }
 
 // TestNotifyPending_BatchSpacingBetweenSends proves D-07's inter-send
-// spacing with measured elapsed time across a real multi-row batch, not by
-// inspecting the spacing constant.
+// spacing by asserting which spacing durations NotifyPending requested
+// through the spacingWait seam, not by measuring elapsed wall-clock time
+// across a real multi-row batch. An elapsed-time lower bound is also
+// satisfied by an unrelated slow machine (a false pass) and can be missed
+// under CPU or scheduler contention (a false failure); asserting the
+// requested duration directly is both a stronger and a deterministic form
+// of the same property.
 func TestNotifyPending_BatchSpacingBetweenSends(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -353,36 +522,27 @@ func TestNotifyPending_BatchSpacingBetweenSends(t *testing.T) {
 	insertPendingEvent(t, pool, artistID, "spacing-ext-2")
 	insertPendingEvent(t, pool, artistID, "spacing-ext-3")
 
-	var mu sync.Mutex
-	var timestamps []time.Time
-	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
-		mu.Lock()
-		timestamps = append(timestamps, time.Now())
-		mu.Unlock()
-		return nil
-	}}
+	sender := &fakeSender{}
 
 	const spacing = 50 * time.Millisecond
+	recorded := spacingRecorder(t)
 	n := notifier.New(q, sender, spacing)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
 	}
 
-	mu.Lock()
-	got := append([]time.Time(nil), timestamps...)
-	mu.Unlock()
-	if len(got) != 3 {
-		t.Fatalf("recorded %d sends, want 3", len(got))
+	if got := atomic.LoadInt32(&sender.calls); got != 3 {
+		t.Fatalf("sender.calls = %d, want 3", got)
 	}
 
-	gapsMet := 0
-	for i := 1; i < len(got); i++ {
-		if got[i].Sub(got[i-1]) >= spacing {
-			gapsMet++
-		}
+	got := recorded()
+	if len(got) != 2 {
+		t.Fatalf("recorded %d spacing requests, want exactly 2 (three rows, spacing skipped after the last): %v", len(got), got)
 	}
-	if gapsMet < 2 {
-		t.Fatalf("only %d of 2 required inter-send gaps were >= %v (measured elapsed time, not the spacing constant); timestamps: %v", gapsMet, spacing, got)
+	for i, d := range got {
+		if d != spacing {
+			t.Fatalf("spacing request %d = %v, want exactly %v", i, d, spacing)
+		}
 	}
 }
 
@@ -405,7 +565,7 @@ func (markNotifiedFailingQuerier) MarkNotified(ctx context.Context, id int64) (i
 // the next pass re-sends it) -- this must be logged at Warn, distinguishable
 // from a generic DB-outage error, and still returned as a hard failure.
 func TestNotifyPending_MarkNotifiedFails_LogsWarnAndReturnsError(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, buf := newTestLogger()
 
@@ -441,9 +601,12 @@ func TestNotifyPending_MarkNotifiedFails_LogsWarnAndReturnsError(t *testing.T) {
 // TestNotifyPending_SpacingAppliedEvenAfterFailedSend is the WR-01
 // regression guard: the inter-send spacing wait must not be skipped on a
 // failed Send, since a backlog of failing sends (e.g. during a Discord
-// outage) is exactly the scenario D-07's pacing exists to protect.
+// outage) is exactly the scenario D-07's pacing exists to protect. It
+// asserts the requested spacing duration through the spacingWait seam
+// rather than measuring elapsed wall-clock time -- deterministic under CPU
+// or scheduler contention, where an elapsed-time lower bound is not.
 func TestNotifyPending_SpacingAppliedEvenAfterFailedSend(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -452,36 +615,29 @@ func TestNotifyPending_SpacingAppliedEvenAfterFailedSend(t *testing.T) {
 	insertPendingEvent(t, pool, artistID, "failspacing-ext-2")
 	insertPendingEvent(t, pool, artistID, "failspacing-ext-3")
 
-	var mu sync.Mutex
-	var timestamps []time.Time
 	failing := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
-		mu.Lock()
-		timestamps = append(timestamps, time.Now())
-		mu.Unlock()
 		return errors.New("send exploded")
 	}}
 
 	const spacing = 50 * time.Millisecond
+	recorded := spacingRecorder(t)
 	n := notifier.New(q, failing, spacing)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil (a send failure must not abort the pass, D-09)", err)
 	}
 
-	mu.Lock()
-	got := append([]time.Time(nil), timestamps...)
-	mu.Unlock()
-	if len(got) != 3 {
-		t.Fatalf("recorded %d sends, want 3", len(got))
+	if got := atomic.LoadInt32(&failing.calls); got != 3 {
+		t.Fatalf("failing.calls = %d, want 3 (all three rows must still be attempted)", got)
 	}
 
-	gapsMet := 0
-	for i := 1; i < len(got); i++ {
-		if got[i].Sub(got[i-1]) >= spacing {
-			gapsMet++
-		}
+	got := recorded()
+	if len(got) != 2 {
+		t.Fatalf("recorded %d spacing requests, want exactly 2 on the all-failed path (spacing must not be skipped after a failed Send): %v", len(got), got)
 	}
-	if gapsMet < 2 {
-		t.Fatalf("only %d of 2 required inter-send gaps were >= %v on the all-failed path (spacing must not be skipped after a failed Send); timestamps: %v", gapsMet, spacing, got)
+	for i, d := range got {
+		if d != spacing {
+			t.Fatalf("spacing request %d = %v, want exactly %v", i, d, spacing)
+		}
 	}
 }
 
@@ -491,7 +647,7 @@ func TestNotifyPending_SpacingAppliedEvenAfterFailedSend(t *testing.T) {
 // also return nil) -- it positively confirms the row after the failed one
 // was both attempted and delivered.
 func TestNotifyPending_BatchMidFailureContinuesToLaterRows(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -535,7 +691,7 @@ func TestNotifyPending_BatchMidFailureContinuesToLaterRows(t *testing.T) {
 // request gets a 429 with a small retry_after; its retry and rows one/three
 // all get 204. Every row must still be delivered exactly once, in order.
 func TestNotifyPending_BatchHonorsRetryAfterWithoutDroppingOtherRows(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
@@ -628,7 +784,7 @@ func TestNotifyPending_BatchHonorsRetryAfterWithoutDroppingOtherRows(t *testing.
 // after the webhook recovers -- must find and deliver the same row. No
 // retry-count or give-up state may prevent this.
 func TestNotifyPending_CrossCycleRecoveryAfterOutage(t *testing.T) {
-	pool := testutil.NewTestPool(t)
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 

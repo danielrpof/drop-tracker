@@ -1,0 +1,40 @@
+# Line-ending policy for this repository.
+#
+# Three parties disagree about line endings unless this file settles it:
+#   - this machine's git has `core.autocrlf=true`, which checks LF blobs out as CRLF;
+#   - `web/.prettierrc` pins `endOfLine: "lf"`;
+#   - the `prettier-web` hook in `.pre-commit-config.yaml` runs `prettier --write` on
+#     every commit and rewrites any CRLF `web/**/*.{ts,tsx}` file back to LF.
+# The net effect without this file is a working tree that is perpetually stat-dirty
+# even though `git diff` stays clean. `.gitattributes` is the portable, per-repo fix:
+# it overrides `core.autocrlf` on every machine and every clone, so nobody has to
+# change a global git setting.
+
+# Baseline: normalize every git-detected text file to LF in the repository AND check
+# it out as LF in the working tree. This is the rule that overrides core.autocrlf.
+* text=auto eol=lf
+
+# LF-mandatory regardless of content detection. A carriage return on a shebang line
+# is a silent bad-interpreter failure, and Makefile recipes are POSIX.
+*.sh       text eol=lf
+Makefile   text eol=lf
+Dockerfile text eol=lf
+
+# Explicit source-language rules. Redundant with `text=auto`, but stated so the
+# guarantee never depends on content sniffing.
+*.go  text eol=lf
+*.ts  text eol=lf
+*.tsx text eol=lf
+
+# Binaries. `binary` is git's macro for `-text -diff`, which makes `text=auto`
+# structurally unable to misfire on them. Only .woff2 and .ico are tracked today
+# (under internal/webassets/build/client/ and web/public/); the rest are listed
+# defensively so a future asset lands correctly on its first commit.
+*.woff2 binary
+*.ico   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.pdf   binary

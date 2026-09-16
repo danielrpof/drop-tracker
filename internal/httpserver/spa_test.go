@@ -26,7 +26,7 @@ func TestSPA_RootPathReturns200WithHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -45,7 +45,7 @@ func TestSPA_UnregisteredPathFallsBackToIndexHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /history/whatever/not-a-real-file: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d (an unregistered client-side route must serve index.html, not 404)", resp.StatusCode, http.StatusOK)
@@ -72,7 +72,7 @@ func TestSPA_APIRoutesStillReachTheirOwnHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /health: %v", err)
 	}
-	defer healthResp.Body.Close()
+	defer func() { _ = healthResp.Body.Close() }()
 	if ct := healthResp.Header.Get("Content-Type"); ct != "application/json" {
 		t.Fatalf("/health Content-Type = %q, want application/json (must reach the health handler, not the SPA fallback)", ct)
 	}
@@ -81,7 +81,7 @@ func TestSPA_APIRoutesStillReachTheirOwnHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /events: %v", err)
 	}
-	defer eventsResp.Body.Close()
+	defer func() { _ = eventsResp.Body.Close() }()
 	if ct := eventsResp.Header.Get("Content-Type"); ct != "application/json" {
 		t.Fatalf("/events Content-Type = %q, want application/json (must reach handleListEvents, not the SPA fallback)", ct)
 	}

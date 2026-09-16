@@ -31,12 +31,16 @@ func TestDetectDeezer_NewRelease(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
+	gotCount, err := d.DetectDeezer(ctx, testLogger(), entry, albums)
+	if err != nil {
 		t.Fatalf("DetectDeezer: %v", err)
+	}
+	if gotCount != 2 {
+		t.Fatalf("DetectDeezer returned count = %d, want 2 (one per inserted new_release row)", gotCount)
 	}
 
 	rows, err := pool.Query(ctx, `SELECT external_id, release_group_mbid, title, artist_name,
-		release_date, cover_art_url, event_type, source, release_type
+		release_date, cover_art_url, event_type, source, release_type, watched_artist_name
 		FROM events WHERE artist_id = $1 ORDER BY external_id`, artistID)
 	if err != nil {
 		t.Fatalf("query events: %v", err)
@@ -48,12 +52,13 @@ func TestDetectDeezer_NewRelease(t *testing.T) {
 		releaseGroupMbid, releaseDate, coverArtURL *string
 		eventType, source                          string
 		releaseType                                *string
+		watchedArtistName                          *string
 	}
 	var got []row
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.externalID, &r.releaseGroupMbid, &r.title, &r.artistName,
-			&r.releaseDate, &r.coverArtURL, &r.eventType, &r.source, &r.releaseType); err != nil {
+			&r.releaseDate, &r.coverArtURL, &r.eventType, &r.source, &r.releaseType, &r.watchedArtistName); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
 		got = append(got, r)
@@ -99,6 +104,9 @@ func TestDetectDeezer_NewRelease(t *testing.T) {
 		if got[i].releaseType == nil || *got[i].releaseType != "album" {
 			t.Fatalf("row %d release_type = %v, want %q", i, got[i].releaseType, "album")
 		}
+		if got[i].watchedArtistName == nil || *got[i].watchedArtistName != "Deezer New Release Artist" {
+			t.Fatalf("row %d watched_artist_name = %v, want %q (equal to artist_name for new_release)", i, got[i].watchedArtistName, "Deezer New Release Artist")
+		}
 	}
 }
 
@@ -115,10 +123,10 @@ func TestDetectDeezer_ReDetectionInsertsNothing(t *testing.T) {
 	}
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
 
-	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
+	if _, err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("first DetectDeezer: %v", err)
 	}
-	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
+	if _, err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("second DetectDeezer: %v", err)
 	}
 
@@ -145,7 +153,7 @@ func TestDetectDeezer_FiltersByRecordType(t *testing.T) {
 	}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
+	if _, err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("DetectDeezer: %v", err)
 	}
 
@@ -176,12 +184,12 @@ func TestDetectDeezer_SeedsIndependentlyOfMusicBrainz(t *testing.T) {
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
 
 	mbGroups := []musicbrainz.ReleaseGroup{{MBID: mbid + "-rg1", Title: "MB Album", PrimaryType: "Album"}}
-	if err := d.DetectMusicBrainz(ctx, testLogger(), entry, mbGroups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, testLogger(), entry, mbGroups); err != nil {
 		t.Fatalf("seed DetectMusicBrainz: %v", err)
 	}
 
 	albums := []deezer.Album{{ID: 1, Title: "Deezer Album", RecordType: "album"}}
-	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
+	if _, err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("DetectDeezer: %v", err)
 	}
 
@@ -222,7 +230,7 @@ func TestDetectDeezer_SameIDDifferentSourceCoexist(t *testing.T) {
 
 	d := detection.New(q, fakeRecordingSource{}, &fakeReleaseDetailSource{})
 	albums := []deezer.Album{{ID: sharedExternalID, Title: "Deezer Album", RecordType: "album"}}
-	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
+	if _, err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("DetectDeezer: %v", err)
 	}
 
@@ -249,7 +257,7 @@ func TestDetectDeezer_NeverProducesDeluxeChange(t *testing.T) {
 	albums := []deezer.Album{{ID: 1, Title: "Album", RecordType: "album"}}
 
 	d := detection.New(sqlc.New(pool), fakeRecordingSource{}, &fakeReleaseDetailSource{})
-	if err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
+	if _, err := d.DetectDeezer(ctx, testLogger(), entry, albums); err != nil {
 		t.Fatalf("DetectDeezer: %v", err)
 	}
 

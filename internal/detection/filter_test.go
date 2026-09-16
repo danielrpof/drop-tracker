@@ -32,6 +32,10 @@ func (noRecordingSource) RecordingsByArtist(ctx context.Context, mbid string) ([
 	return nil, nil
 }
 
+func (noRecordingSource) ReleasesForRecording(ctx context.Context, mbid string) ([]musicbrainz.RecordingRelease, error) {
+	return nil, nil
+}
+
 // noReleaseDetailSource is a no-op detection.ReleaseDetailSource double,
 // mirroring noRecordingSource -- Phase 4 plan 04-04 widened New to require
 // a ReleaseDetailSource, and DetectMusicBrainz now always runs its
@@ -260,7 +264,7 @@ func TestDetectMusicBrainz_FiltersByReleaseType(t *testing.T) {
 	}
 
 	d := New(sqlc.New(pool), noRecordingSource{}, noReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 
@@ -294,7 +298,7 @@ func TestDetectMusicBrainz_SkipsMutedEventType(t *testing.T) {
 	}
 
 	d := New(sqlc.New(pool), noRecordingSource{}, noReleaseDetailSource{})
-	if err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
+	if _, err := d.DetectMusicBrainz(ctx, filterTestLogger(), entry, groups); err != nil {
 		t.Fatalf("DetectMusicBrainz: %v", err)
 	}
 

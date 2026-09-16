@@ -1,0 +1,37 @@
+# Keeps the graphify knowledge graph (graphify-out/) focused on current,
+# living project docs. Indexing completed or ephemeral planning artifacts
+# dilutes query results with historical churn rather than active signal.
+# These patterns apply even to git-tracked files -- graphify's detect.py
+# honors them for indexing purposes independent of git's own tracking state,
+# so nothing needs to be untracked from git for this file to take effect.
+
+# Closed milestone, superseded by v1.1
+.planning/milestones/v1.0-phases/
+# Closed milestones, superseded by v1.3 (current)
+.planning/milestones/v1.1-phases/
+.planning/milestones/v1.2-phases/
+# Generated knowledge-graph artifacts -- indexing these makes the graph describe itself
+.planning/graphs/
+# One-off quick-task dirs, accumulating indefinitely
+.planning/quick/
+# Resolved debug session dumps
+.planning/debug/
+# Ephemeral
+.planning/todos/
+# One-time research writeups whose conclusions already live in ROADMAP.md and PROJECT.md
+.planning/research/
+
+# Harness / tooling config -- settings files, not project code. graphify
+# extracts zero nodes from these and warns about them on every build (#1666).
+.claude/settings.json
+.claude/settings.local.json
+.planning/config.json
+
+# Test fixture inputs and golden outputs -- data files exercised by the
+# cmd/* Go tests, not architecture. The tools' own Go source stays indexed.
+cmd/coverage-report/testdata/
+cmd/migration-check/testdata/
+
+# Maintenance: when a milestone completes, add that milestone's phase
+# directory under .planning/milestones/ to this list before the next
+# `/graphify . --update` rebuild.

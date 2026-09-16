@@ -11,32 +11,70 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const groupTrackCountBaseline = `-- name: GroupTrackCountBaseline :one
-SELECT COALESCE(MAX(track_count), 0)::int AS baseline,
-       COUNT(track_count) > 0 AS has_baseline
-FROM events
-WHERE source = 'musicbrainz' AND release_group_mbid = $1
+const advanceGroupTrackCountBaseline = `-- name: AdvanceGroupTrackCountBaseline :many
+WITH existing AS (
+    SELECT track_count FROM events
+    WHERE event_type = 'new_release' AND source = 'musicbrainz' AND external_id = $1
+    FOR UPDATE
+)
+UPDATE events e
+SET track_count = $2
+FROM existing
+WHERE e.event_type = 'new_release' AND e.source = 'musicbrainz' AND e.external_id = $1
+  AND (existing.track_count IS NULL OR $2::int > existing.track_count)
+RETURNING existing.track_count AS previous_track_count
 `
 
-type GroupTrackCountBaselineRow struct {
-	Baseline    int32 `json:"baseline"`
-	HasBaseline bool  `json:"has_baseline"`
+type AdvanceGroupTrackCountBaselineParams struct {
+	ExternalID string `json:"external_id"`
+	TrackCount *int32 `json:"track_count"`
 }
 
-// Plan 04-04's baseline lookup for a release-group's deluxe-change
-// comparison (D-01/D-02), option-a resolution (04-01's Task 1 checkpoint):
-// track_count lives directly on the events row, not a second table.
-// has_baseline distinguishes "no baseline recorded yet" (COUNT is 0, this
-// group has never had track_count populated) from "baseline recorded as
-// zero" -- collapsing those two into one COALESCE(...,0) is exactly
-// 04-RESEARCH.md Pitfall #1's false-positive mechanism: the caller MUST
-// branch on has_baseline before comparing, never compare against baseline
-// alone.
-func (q *Queries) GroupTrackCountBaseline(ctx context.Context, releaseGroupMbid *string) (GroupTrackCountBaselineRow, error) {
-	row := q.db.QueryRow(ctx, groupTrackCountBaseline, releaseGroupMbid)
-	var i GroupTrackCountBaselineRow
-	err := row.Scan(&i.Baseline, &i.HasBaseline)
-	return i, err
+// Atomic replacement (PERF-04, 11-RESEARCH.md Pattern 2) for the former
+// two-statement GroupTrackCountBaseline SELECT + SetGroupTrackCountBaseline
+// UPDATE -- those two round trips left a check-then-act window where two
+// concurrent callers racing the same release group could both read the old
+// baseline before either wrote, letting the second writer silently clobber
+// the first writer's correct, higher value with its own stale one. This
+// statement closes that window entirely rather than narrowing it: the CTE's
+// FOR UPDATE takes a row lock on the group's own new_release row, so a
+// second concurrent caller racing the same external_id blocks on that lock
+// until the first transaction commits, then re-evaluates against the
+// just-committed value.
+//
+// Zero rows returned means no advance happened: the fresh count was not a
+// genuine increase over the already-committed baseline (D-02's "equal or
+// lower: no event" case, strictly greater-than, now enforced by Postgres
+// itself). One row returned means the write landed; previous_track_count
+// NULL vs non-NULL is the has_baseline distinction the removed
+// GroupTrackCountBaseline query used to report, letting the caller keep
+// branching on "silently established" vs "advanced, fire an event" from
+// this one call's result alone.
+//
+// Keyed on external_id (not release_group_mbid, which the removed read
+// query used) -- a deliberate narrowing: for a musicbrainz new_release row,
+// external_id and release_group_mbid hold the same release-group MBID (see
+// internal/detection/musicbrainz.go's new_release insert), and it is the
+// new_release row's own track_count that the removed write query mutated,
+// so this statement reads exactly the value the old pair wrote.
+func (q *Queries) AdvanceGroupTrackCountBaseline(ctx context.Context, arg AdvanceGroupTrackCountBaselineParams) ([]*int32, error) {
+	rows, err := q.db.Query(ctx, advanceGroupTrackCountBaseline, arg.ExternalID, arg.TrackCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*int32
+	for rows.Next() {
+		var previous_track_count *int32
+		if err := rows.Scan(&previous_track_count); err != nil {
+			return nil, err
+		}
+		items = append(items, previous_track_count)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const hasAnyEvent = `-- name: HasAnyEvent :one
@@ -59,13 +97,50 @@ func (q *Queries) HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool,
 	return has_any, err
 }
 
+const hasOlderEvents = `-- name: HasOlderEvents :one
+SELECT EXISTS(
+    SELECT 1 FROM events
+    WHERE ($1::bigint IS NULL OR artist_id = $1::bigint)
+      AND ($2::text IS NULL OR event_type = $2::text)
+      AND created_at < $3::timestamptz
+) AS has_older
+`
+
+type HasOlderEventsParams struct {
+	ArtistID  *int64             `json:"artist_id"`
+	EventType *string            `json:"event_type"`
+	Cutoff    pgtype.Timestamptz `json:"cutoff"`
+}
+
+// Phase 10 (DATA-02, D-06): answers a question ListEvents' own result page
+// cannot -- whether this request's artist_id/event_type scope has ANY event
+// older than the retention cutoff, so the frontend can distinguish "no
+// events ever" from "events exist but every one of them aged out" (the
+// History empty state cannot tell those apart from an empty page alone).
+// Mirrors ListEvents' two optional filters exactly (same sqlc.narg casts on
+// both sides), but deliberately omits ListEvents' pagination-position
+// parameter: this answers a property of the whole filtered scope, not of
+// the current page, so a "Load more" click must not change the answer.
+// Uses EXISTS with no LIMIT inside it, following HasAnyEvent's existing
+// idiom in this file --
+// EXISTS already short-circuits on the first matching row. created_at <
+// cutoff (strict less-than) is the exact complement of ListEvents' >=, so a
+// row exactly at the boundary is never double-counted as both visible and
+// older (D-04 stays consistent across both queries).
+func (q *Queries) HasOlderEvents(ctx context.Context, arg HasOlderEventsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOlderEvents, arg.ArtistID, arg.EventType, arg.Cutoff)
+	var has_older bool
+	err := row.Scan(&has_older)
+	return has_older, err
+}
+
 const insertEvent = `-- name: InsertEvent :execrows
 INSERT INTO events (
     artist_id, source, event_type, external_id, release_group_mbid,
     title, artist_name, release_date, cover_art_url, track_count, notified_at,
-    previous_track_count, release_type
+    previous_track_count, release_type, watched_artist_name
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 )
 ON CONFLICT (event_type, source, external_id) DO NOTHING
 `
@@ -84,6 +159,7 @@ type InsertEventParams struct {
 	NotifiedAt         pgtype.Timestamptz `json:"notified_at"`
 	PreviousTrackCount *int32             `json:"previous_track_count"`
 	ReleaseType        *string            `json:"release_type"`
+	WatchedArtistName  *string            `json:"watched_artist_name"`
 }
 
 // 0 rows affected means the dedup key (event_type, source, external_id)
@@ -96,6 +172,10 @@ type InsertEventParams struct {
 // existing eleven columns, as $12/$13, so every pre-existing positional
 // parameter keeps its number -- D-20's write-once guarantee applies to
 // these two snapshot columns exactly as it does to the original nine.
+// watched_artist_name (quick/260825-g6i) is appended as $14, after
+// release_type/$13, for the same reason: every pre-existing positional
+// parameter keeps its number, and D-20's write-once guarantee applies to
+// this column identically.
 func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertEvent,
 		arg.ArtistID,
@@ -111,6 +191,7 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64
 		arg.NotifiedAt,
 		arg.PreviousTrackCount,
 		arg.ReleaseType,
+		arg.WatchedArtistName,
 	)
 	if err != nil {
 		return 0, err
@@ -120,21 +201,35 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64
 
 const listEvents = `-- name: ListEvents :many
 SELECT id, artist_id, source, event_type, external_id, release_group_mbid,
-       title, artist_name, release_date, cover_art_url, track_count,
-       previous_track_count, release_type, notified_at, created_at
+       title, artist_name, watched_artist_name, release_date, cover_art_url,
+       track_count, previous_track_count, release_type, notified_at, created_at
 FROM events
 WHERE ($1::bigint IS NULL OR artist_id = $1::bigint)
   AND ($2::text IS NULL OR event_type = $2::text)
-  AND ($3::bigint IS NULL OR id < $3::bigint)
-ORDER BY id DESC
-LIMIT $4
+  AND (
+        $3::bigint IS NULL
+        OR CASE
+             WHEN $4::text IS NULL
+               THEN release_date IS NULL
+                    AND id < $3::bigint
+             ELSE release_date IS NULL
+                  OR release_date < $4::text
+                  OR (release_date = $4::text
+                      AND id < $3::bigint)
+           END
+      )
+  AND created_at >= $5::timestamptz
+ORDER BY release_date DESC NULLS LAST, id DESC
+LIMIT $6
 `
 
 type ListEventsParams struct {
-	ArtistID  *int64  `json:"artist_id"`
-	EventType *string `json:"event_type"`
-	Cursor    *int64  `json:"cursor"`
-	PageSize  int32   `json:"page_size"`
+	ArtistID          *int64             `json:"artist_id"`
+	EventType         *string            `json:"event_type"`
+	CursorID          *int64             `json:"cursor_id"`
+	CursorReleaseDate *string            `json:"cursor_release_date"`
+	Cutoff            pgtype.Timestamptz `json:"cutoff"`
+	PageSize          int32              `json:"page_size"`
 }
 
 type ListEventsRow struct {
@@ -146,6 +241,7 @@ type ListEventsRow struct {
 	ReleaseGroupMbid   *string            `json:"release_group_mbid"`
 	Title              string             `json:"title"`
 	ArtistName         string             `json:"artist_name"`
+	WatchedArtistName  *string            `json:"watched_artist_name"`
 	ReleaseDate        *string            `json:"release_date"`
 	CoverArtUrl        *string            `json:"cover_art_url"`
 	TrackCount         *int32             `json:"track_count"`
@@ -157,25 +253,60 @@ type ListEventsRow struct {
 
 // Phase 6's HIST-01 history feed backing query (D-05): one global
 // chronological read across all watched artists, newest first -- not a
-// per-artist drill-down. Ordered and keyset-paginated on id DESC, not
-// created_at: this file's own ListUnnotified comment already documents why
-// created_at alone is not a unique order -- a seed cycle inserts many rows
-// sharing one created_at timestamp, so ordering by it alone would make page
-// boundaries non-deterministic across a "load more" click (06-RESEARCH.md
-// Pattern 2, Pitfall 2). id (BIGSERIAL) is already unique and monotonic and
-// needs no secondary tiebreak column.
+// per-artist drill-down.
 //
-// artist_id, event_type and cursor are all optional sqlc.narg filters, each
-// cast on both sides of its "IS NULL OR" predicate so sqlc's type inference
-// has no ambiguity. "IS NULL OR" keeps one static SQL string sqlc can
-// type-check, instead of building WHERE clauses in Go (06-RESEARCH.md
-// Anti-Patterns). cursor is absent on the first page and set to the previous
-// page's last row's id on subsequent pages.
+// Ordering is release chronology (quick task 260825-g6i), not detection
+// order: a newly-watched artist's seed-mode backfill inserts a whole
+// back-catalogue in one cycle, giving old releases the freshest ids and
+// interleaving them with genuinely new drops if ordered by id alone.
+// release_date is TEXT holding MusicBrainz partial dates (YYYY, YYYY-MM,
+// YYYY-MM-DD), which are zero-padded and left-anchored, so lexicographic
+// ordering IS chronological ordering, and a year-only value sorts as the
+// start of that year. NULLS LAST is written explicitly and is load-bearing,
+// not decorative: Postgres defaults DESC to NULLS FIRST, so omitting it
+// would float every undated row to the top of "latest." id DESC survives as
+// the tiebreak because release_date is not unique (year-only precision
+// especially), and a non-unique primary sort key alone makes page
+// boundaries non-deterministic across a "load more" click -- the same
+// hazard this comment previously invoked against created_at alone
+// (06-RESEARCH.md Pattern 2, Pitfall 2).
+//
+// artist_id and event_type are optional sqlc.narg filters, each cast on
+// both sides of its "IS NULL OR" predicate so sqlc's type inference has no
+// ambiguity. "IS NULL OR" keeps one static SQL string sqlc can type-check,
+// instead of building WHERE clauses in Go (06-RESEARCH.md Anti-Patterns).
+//
+// cursor_id/cursor_release_date are the composite keyset position (quick
+// task 260825-g6i, replacing the single-bigint cursor): absent on the first
+// page, set to the previous page's last row's (release_date, id) on
+// subsequent pages. cursor_id IS NULL is what switches the whole predicate
+// off -- the two params are always set or cleared together by the caller.
+// The CASE exists because a NULLS-LAST tail needs a different "everything
+// after me" predicate than the dated head does: inside the tail, "after me"
+// means a strictly smaller id among other NULL rows; inside the dated head,
+// "after me" means an earlier release_date, or the same release_date with a
+// strictly smaller id, or (since the tail sorts after every dated row) any
+// NULL row at all.
+//
+// Phase 10 (DATA-02, D-01/D-04): this is the ONLY query in this file that
+// ever gets a retention cutoff. cutoff is sqlc.arg, not sqlc.narg -- it is
+// never caller-optional, so there is no code path where a caller passes a
+// null cutoff and gets back unfiltered, out-of-window rows (T-10-03). The
+// comparison is >=, not >: an event exactly at the boundary stays visible
+// (D-04). This is a read-side filter only, nothing is deleted -- an
+// aged-out row stays fully present and fully visible to every query below
+// that intentionally has no cutoff: ListExternalIDs (dedup keys),
+// HasAnyEvent (seed-mode), AdvanceGroupTrackCountBaseline (deluxe
+// baselines), and ListUnnotified (pending notifications). Adding this predicate to any of
+// those four is the exact regression Phase 10's success criteria 3-5 exist
+// to catch -- do not "fix" them to also filter by retention.
 func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListEventsRow, error) {
 	rows, err := q.db.Query(ctx, listEvents,
 		arg.ArtistID,
 		arg.EventType,
-		arg.Cursor,
+		arg.CursorID,
+		arg.CursorReleaseDate,
+		arg.Cutoff,
 		arg.PageSize,
 	)
 	if err != nil {
@@ -194,6 +325,7 @@ func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListE
 			&i.ReleaseGroupMbid,
 			&i.Title,
 			&i.ArtistName,
+			&i.WatchedArtistName,
 			&i.ReleaseDate,
 			&i.CoverArtUrl,
 			&i.TrackCount,
@@ -246,13 +378,13 @@ func (q *Queries) ListExternalIDs(ctx context.Context, arg ListExternalIDsParams
 }
 
 const listUnnotified = `-- name: ListUnnotified :many
-SELECT id, artist_id, source, event_type, external_id, release_group_mbid, title, artist_name, release_date, cover_art_url, track_count, notified_at, created_at, previous_track_count, release_type FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC
+SELECT id, artist_id, source, event_type, external_id, release_group_mbid, title, artist_name, release_date, cover_art_url, track_count, notified_at, created_at, previous_track_count, release_type, watched_artist_name FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC
 `
 
 // D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
 // created_at ASC, id ASC for a deterministic total order (a plain
 // created_at ordering alone is not unique -- a seed cycle's rows share one
-// timestamp, see seedNotifiedAt). This is also the instrument plan 04-02's
+// timestamp, see notifyGate). This is also the instrument plan 04-02's
 // own tests use to prove seeded rows are excluded (D-13).
 func (q *Queries) ListUnnotified(ctx context.Context) ([]Event, error) {
 	rows, err := q.db.Query(ctx, listUnnotified)
@@ -279,6 +411,7 @@ func (q *Queries) ListUnnotified(ctx context.Context) ([]Event, error) {
 			&i.CreatedAt,
 			&i.PreviousTrackCount,
 			&i.ReleaseType,
+			&i.WatchedArtistName,
 		); err != nil {
 			return nil, err
 		}
@@ -301,30 +434,6 @@ UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL
 // instead of overwriting the recorded delivery time.
 func (q *Queries) MarkNotified(ctx context.Context, id int64) (int64, error) {
 	result, err := q.db.Exec(ctx, markNotified, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const setGroupTrackCountBaseline = `-- name: SetGroupTrackCountBaseline :execrows
-UPDATE events
-SET track_count = $2
-WHERE event_type = 'new_release' AND source = 'musicbrainz' AND external_id = $1
-`
-
-type SetGroupTrackCountBaselineParams struct {
-	ExternalID string `json:"external_id"`
-	TrackCount *int32 `json:"track_count"`
-}
-
-// Mutates track_count on the group's own new_release row -- this is
-// operational baseline state, not the D-12 display snapshot (title/
-// artist_name/release_date/cover_art_url), which stays write-once via
-// InsertEvent's ON CONFLICT DO NOTHING per D-20. No snapshot column is
-// ever written twice by this statement.
-func (q *Queries) SetGroupTrackCountBaseline(ctx context.Context, arg SetGroupTrackCountBaselineParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setGroupTrackCountBaseline, arg.ExternalID, arg.TrackCount)
 	if err != nil {
 		return 0, err
 	}

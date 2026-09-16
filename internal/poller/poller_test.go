@@ -14,7 +14,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"math"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,11 +25,13 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"golang.org/x/time/rate"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/deezer"
 	"github.com/danielrpof/drop-tracker/internal/detection"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
+	"github.com/danielrpof/drop-tracker/internal/pollruns"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
@@ -36,6 +41,134 @@ import (
 // or production poller.go) so internal/poller itself stays free of a
 // detection import (04-01 acceptance criteria).
 var _ EventRecorder = (*detection.Detector)(nil)
+
+// var _ RunRecorder = (*pollruns.Store)(nil) asserts the real store satisfies
+// the seam poller.go declares, kept here so internal/poller itself stays free
+// of anything but the pollruns DTO import.
+var _ RunRecorder = (*pollruns.Store)(nil)
+
+// TestWithRunRecorder_WiresRealStore is the tracer's end-to-end proof: a
+// RunResult handed to a Poller's RunRecorder-typed field -- wired only through
+// the public WithRunRecorder option -- comes back out of the real store's
+// snapshot carrying the same CycleID and the summary the store composed.
+func TestWithRunRecorder_WiresRealStore(t *testing.T) {
+	store := pollruns.NewStore()
+	logger, _ := newTestLogger()
+
+	p, err := New(&stubStore{}, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(store))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	want := pollruns.RunResult{
+		Source:         pollruns.SourceMusicBrainz,
+		CycleID:        "musicbrainz-1",
+		ArtistsChecked: 12,
+		ArtistsErrored: 1,
+		EventsRecorded: 3,
+		Outcome:        pollruns.OutcomeOK,
+	}
+	if err := p.runs.RecordRun(context.Background(), want); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+
+	snap := store.Snapshot()[pollruns.SourceMusicBrainz]
+	if snap.LastRun == nil {
+		t.Fatal("LastRun is nil after a RecordRun through the seam")
+	}
+	if snap.LastRun.CycleID != want.CycleID {
+		t.Fatalf("CycleID = %q, want %q", snap.LastRun.CycleID, want.CycleID)
+	}
+	const wantSummary = "ok — 12 checked, 1 errored, 3 events"
+	if snap.LastRun.Summary != wantSummary {
+		t.Fatalf("Summary = %q, want %q", snap.LastRun.Summary, wantSummary)
+	}
+}
+
+// TestRunRecorder_RecordsOneRunPerCycle pins the Phase 18.1 wiring that
+// inverts Phase 18's inert-seam pin: runCycle now records exactly one run
+// entry per completed cycle through the RunRecorder seam -- one RecordRun
+// per RunMusicBrainzCycle, one per RunDeezerCycle, and zero RecordSkip when
+// no overlap occurs. The real-store leg proves the event count that came
+// out of the widened EventRecorder seam lands in a live pollruns.Store.
+func TestRunRecorder_RecordsOneRunPerCycle(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	rec := &fakeRunRecorder{}
+	logger, _ := newTestLogger()
+
+	p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(rec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+	if got := rec.runCalls.Load(); got != 1 {
+		t.Fatalf("RecordRun call count after RunMusicBrainzCycle = %d, want 1", got)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+	if got := rec.runCalls.Load(); got != 2 {
+		t.Fatalf("RecordRun call count after RunDeezerCycle = %d, want 2 (one per cycle)", got)
+	}
+	if got := rec.skipCalls.Load(); got != 0 {
+		t.Fatalf("RecordSkip call count = %d, want 0 (no overlap occurred)", got)
+	}
+
+	// Real-store leg: the count from the widened EventRecorder seam must
+	// reach a live pollruns.Store, folded across the worker fan-out.
+	realStore := pollruns.NewStore()
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
+		return 3, nil
+	}}
+	p2, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(realStore))
+	if err != nil {
+		t.Fatalf("New (real store): %v", err)
+	}
+	if err := p2.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle (real store): %v", err)
+	}
+
+	snap := realStore.Snapshot()[pollruns.SourceMusicBrainz]
+	if len(snap.History) != 1 {
+		t.Fatalf("MusicBrainz history length = %d, want exactly 1", len(snap.History))
+	}
+	lr := snap.LastRun
+	if lr == nil {
+		t.Fatal("LastRun is nil after a completed MusicBrainz cycle")
+	}
+	if lr.ArtistsChecked != 3 {
+		t.Fatalf("ArtistsChecked = %d, want 3", lr.ArtistsChecked)
+	}
+	if lr.ArtistsSkipped != 0 {
+		t.Fatalf("ArtistsSkipped = %d, want 0 (MusicBrainz dispatches every entry)", lr.ArtistsSkipped)
+	}
+	if lr.ArtistsErrored != 0 {
+		t.Fatalf("ArtistsErrored = %d, want 0", lr.ArtistsErrored)
+	}
+	if lr.EventsRecorded != 9 {
+		t.Fatalf("EventsRecorded = %d, want 9 (3 entries x 3 events each, folded)", lr.EventsRecorded)
+	}
+	if lr.Outcome != pollruns.OutcomeOK {
+		t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeOK)
+	}
+	if lr.CycleID == "" {
+		t.Fatal("CycleID is empty")
+	}
+	if lr.FinishedAt.Before(lr.StartedAt) {
+		t.Fatalf("FinishedAt %s is before StartedAt %s", lr.FinishedAt, lr.StartedAt)
+	}
+	if lr.DurationMS < 0 {
+		t.Fatalf("DurationMS = %d, want >= 0", lr.DurationMS)
+	}
+	const wantSummary = "ok — 3 checked, 0 errored, 9 events"
+	if lr.Summary != wantSummary {
+		t.Fatalf("Summary = %q, want %q", lr.Summary, wantSummary)
+	}
+}
 
 // newTestLogger builds a *slog.Logger writing newline-delimited JSON into
 // buf, so a test can decode each emitted record and assert on its
@@ -73,6 +206,10 @@ func deezerID(id string) *string { return &id }
 type fakeRecordingSource struct{}
 
 func (fakeRecordingSource) RecordingsByArtist(ctx context.Context, mbid string) ([]musicbrainz.Recording, error) {
+	return nil, nil
+}
+
+func (fakeRecordingSource) ReleasesForRecording(ctx context.Context, mbid string) ([]musicbrainz.RecordingRelease, error) {
 	return nil, nil
 }
 
@@ -129,7 +266,10 @@ var _ watchlist.Store = (*stubStore)(nil)
 // fakeReleaseGroupSource is a file-local double for ReleaseGroupSource. It
 // tracks call count, the MBIDs it was called with (in order), and the
 // maximum number of concurrently in-flight calls it ever observed -- the
-// real observation TestMusicBrainzCycle_Sequential asserts on.
+// real observation TestMusicBrainzCycle_ConcurrencyBoundedByWorkerCount,
+// TestMusicBrainzCycle_WorkerCountOneIsSequential,
+// TestMusicBrainzCycle_WorkerCountAboveEntryCountFansOutToEntryCount, and
+// TestMusicBrainzCycle_SingleEntryReachesOneInFlight assert on (PERF-01).
 type fakeReleaseGroupSource struct {
 	fn func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error)
 
@@ -170,8 +310,8 @@ func (f *fakeReleaseGroupSource) ReleaseGroupsByArtist(ctx context.Context, mbid
 // deezerFn are nil by default (a silent no-op success), matching what a real
 // Detector with nothing new to record would do.
 type fakeEventRecorder struct {
-	fn       func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error
-	deezerFn func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error
+	fn       func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error)
+	deezerFn func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error)
 
 	calls       int32
 	deezerCalls int32
@@ -181,7 +321,7 @@ type fakeEventRecorder struct {
 	deezerMBIDs []string
 }
 
-func (f *fakeEventRecorder) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+func (f *fakeEventRecorder) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 	atomic.AddInt32(&f.calls, 1)
 	f.mu.Lock()
 	f.mbids = append(f.mbids, entry.MBID)
@@ -190,10 +330,10 @@ func (f *fakeEventRecorder) DetectMusicBrainz(ctx context.Context, logger *slog.
 	if f.fn != nil {
 		return f.fn(ctx, entry, groups)
 	}
-	return nil
+	return 0, nil
 }
 
-func (f *fakeEventRecorder) DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) error {
+func (f *fakeEventRecorder) DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) (int, error) {
 	atomic.AddInt32(&f.deezerCalls, 1)
 	f.mu.Lock()
 	f.deezerMBIDs = append(f.deezerMBIDs, entry.MBID)
@@ -202,7 +342,7 @@ func (f *fakeEventRecorder) DetectDeezer(ctx context.Context, logger *slog.Logge
 	if f.deezerFn != nil {
 		return f.deezerFn(ctx, entry, albums)
 	}
-	return nil
+	return 0, nil
 }
 
 var _ EventRecorder = (*fakeEventRecorder)(nil)
@@ -228,6 +368,35 @@ func (f *fakeNotifier) NotifyPending(ctx context.Context, logger *slog.Logger) e
 }
 
 var _ Notifier = (*fakeNotifier)(nil)
+
+// fakeRunRecorder is a file-local double for poller.RunRecorder in
+// fakeNotifier's shape -- two call counters and optional func hooks. This
+// phase asserts both counters stay zero after a full cycle (the seam is
+// deliberately inert until Phase 18.1); 18.1 inverts that assertion.
+type fakeRunRecorder struct {
+	runFn  func(ctx context.Context, result pollruns.RunResult) error
+	skipFn func(source string)
+
+	runCalls  atomic.Int32
+	skipCalls atomic.Int32
+}
+
+func (f *fakeRunRecorder) RecordRun(ctx context.Context, result pollruns.RunResult) error {
+	f.runCalls.Add(1)
+	if f.runFn != nil {
+		return f.runFn(ctx, result)
+	}
+	return nil
+}
+
+func (f *fakeRunRecorder) RecordSkip(source string) {
+	f.skipCalls.Add(1)
+	if f.skipFn != nil {
+		f.skipFn(source)
+	}
+}
+
+var _ RunRecorder = (*fakeRunRecorder)(nil)
 
 // testArtistMBID derives a short, unique-per-test artist mbid from
 // t.Name(), matching internal/watchlist/service_test.go's testMBID
@@ -316,16 +485,20 @@ func TestMusicBrainzCycle_CallsSourceOncePerEntry(t *testing.T) {
 	if got := atomic.LoadInt32(&mb.calls); got != 3 {
 		t.Fatalf("calls = %d, want 3", got)
 	}
+	// Membership, not order: under concurrent fan-out the three workers can
+	// finish in any order, so the assertion is on the set of MBIDs called,
+	// not a fixed dispatch-order sequence.
 	want := []string{"mbid-1", "mbid-2", "mbid-3"}
 	mb.mu.Lock()
 	got := append([]string(nil), mb.mbids...)
 	mb.mu.Unlock()
+	sort.Strings(got)
 	if len(got) != len(want) {
-		t.Fatalf("mbids = %v, want %v", got, want)
+		t.Fatalf("mbids = %v, want %v in any order", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("mbids[%d] = %q, want %q", i, got[i], want[i])
+			t.Fatalf("mbids = %v, want %v in any order", got, want)
 		}
 	}
 
@@ -334,18 +507,196 @@ func TestMusicBrainzCycle_CallsSourceOncePerEntry(t *testing.T) {
 	}
 }
 
-func TestMusicBrainzCycle_Sequential(t *testing.T) {
-	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+// TestMusicBrainzCycle_ConcurrencyBoundedByWorkerCount is the tracer's
+// canonical proof for PERF-01: over 6 watchlist entries and a worker pool
+// bounded to 3 (WithMusicBrainzWorkers(3)), the fan-out must reach the
+// ceiling (proving it actually ran concurrently) and never exceed it
+// (proving the bound is enforced). fakeReleaseGroupSource's fetch sleeps
+// briefly so overlapping in-flight calls are actually observable -- without
+// a delay, a fast fake could complete each call before the next dispatches,
+// making maxInFlight read 1 even under a correct concurrent implementation.
+func TestMusicBrainzCycle_ConcurrencyBoundedByWorkerCount(t *testing.T) {
+	entries := []watchlist.Entry{
+		{MBID: "mbid-1", Name: "Artist One"},
+		{MBID: "mbid-2", Name: "Artist Two"},
+		{MBID: "mbid-3", Name: "Artist Three"},
+		{MBID: "mbid-4", Name: "Artist Four"},
+		{MBID: "mbid-5", Name: "Artist Five"},
+		{MBID: "mbid-6", Name: "Artist Six"},
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		time.Sleep(50 * time.Millisecond)
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 3 {
+		t.Fatalf("max in-flight = %d, want exactly 3", got)
+	}
+}
+
+// TestMusicBrainzCycle_WorkerCountOneIsSequential proves the old sequential
+// guarantee this phase's previous (now-removed) test used to hard-code as
+// the default is still reachable -- it is now a configuration
+// (WithMusicBrainzWorkers(1)), not a default. Deterministic with no
+// sleep/gating needed: with a pool size of
+// 1, the semaphore's single slot is only released after a worker's entire
+// body (including its fetch call) completes, so the dispatch loop cannot
+// even launch the next worker until the current one has fully finished --
+// maxInFlight can never exceed 1 regardless of how fast or slow the fake
+// runs.
+func TestMusicBrainzCycle_WorkerCountOneIsSequential(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
+		return []watchlist.Entry{
+			{MBID: "mbid-1", Name: "Artist One"},
+			{MBID: "mbid-2", Name: "Artist Two"},
+			{MBID: "mbid-3", Name: "Artist Three"},
+			{MBID: "mbid-4", Name: "Artist Four"},
+		}, nil
+	}}
 	mb := &fakeReleaseGroupSource{}
 	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(1))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 1 {
+		t.Fatalf("max in-flight = %d, want exactly 1 (WithMusicBrainzWorkers(1) must still be reachable)", got)
+	}
+	if got := atomic.LoadInt32(&mb.calls); got != 4 {
+		t.Fatalf("calls = %d, want 4 (every entry still polled, just individually rather than concurrently)", got)
+	}
+}
+
+// TestMusicBrainzCycle_WorkerCountAboveEntryCountFansOutToEntryCount proves
+// a worker count larger than the entry count fans out to at most the entry
+// count and the dispatch loop never blocks waiting for slots it will never
+// need. release gates every fetch call so the test can deterministically
+// observe all 3 entries in flight simultaneously (rather than trusting a
+// fixed sleep duration is "long enough" on a loaded machine) before letting
+// them complete.
+func TestMusicBrainzCycle_WorkerCountAboveEntryCountFansOutToEntryCount(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	release := make(chan struct{})
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		<-release
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(8))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&mb.inFlight) < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 3 in-flight calls, last observed %d", atomic.LoadInt32(&mb.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunMusicBrainzCycle: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunMusicBrainzCycle did not return promptly after release -- possible deadlock on an unused semaphore slot")
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 3 {
+		t.Fatalf("max in-flight = %d, want exactly 3 (the entry count, not the 8-worker pool ceiling)", got)
+	}
+}
+
+// TestMusicBrainzCycle_SingleEntryReachesOneInFlight is deterministic with
+// no gating needed: a single entry can never produce more than 1 in-flight
+// call regardless of pool size.
+func TestMusicBrainzCycle_SingleEntryReachesOneInFlight(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) {
+		return []watchlist.Entry{{MBID: "mbid-1", Name: "Artist One"}}, nil
+	}}
+	mb := &fakeReleaseGroupSource{}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 1 {
+		t.Fatalf("max in-flight = %d, want exactly 1", got)
+	}
+}
+
+// TestMusicBrainzCycle_LogsCycleDurationAndArtistCount pins D-04/D-05: every
+// completed cycle emits exactly one "poll cycle complete" line carrying
+// artist_count equal to the watchlist size and a non-negative integer
+// duration_ms (Milliseconds() truncates toward zero -- the contract is an
+// integer, never a fractional JSON number).
+func TestMusicBrainzCycle_LogsCycleDurationAndArtistCount(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	mb := &fakeReleaseGroupSource{}
+	logger, buf := newTestLogger()
 	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
 
 	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
 		t.Fatalf("RunMusicBrainzCycle: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&mb.maxInFlight); got > 1 {
-		t.Fatalf("max in-flight = %d, want <= 1 (artists must be polled one at a time, D-07)", got)
+	records := decodeLogRecords(t, buf)
+	var found map[string]any
+	count := 0
+	for _, rec := range records {
+		if rec["msg"] == "poll cycle complete" {
+			found = rec
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("found %d 'poll cycle complete' records, want exactly 1", count)
+	}
+
+	artistCount, ok := found["artist_count"].(float64)
+	if !ok {
+		t.Fatalf("artist_count = %v (%T), want a JSON number", found["artist_count"], found["artist_count"])
+	}
+	if int(artistCount) != 3 {
+		t.Fatalf("artist_count = %v, want 3", artistCount)
+	}
+
+	durationMS, ok := found["duration_ms"].(float64)
+	if !ok {
+		t.Fatalf("duration_ms = %v (%T), want a JSON number", found["duration_ms"], found["duration_ms"])
+	}
+	if durationMS < 0 {
+		t.Fatalf("duration_ms = %v, want >= 0", durationMS)
+	}
+	if durationMS != math.Trunc(durationMS) {
+		t.Fatalf("duration_ms = %v, want an integer (no fractional part)", durationMS)
 	}
 }
 
@@ -472,11 +823,21 @@ func TestMusicBrainzCycle_ListErrorReturnsZeroCallsNonNilError(t *testing.T) {
 	}
 }
 
+// TestMusicBrainzCycle_EmptyWatchlistNoCallsNilError also pins the empty
+// side of PERF-01's fan-out (zero goroutines, zero source calls), D-04/D-05
+// (the cycle-end log line still fires with artist_count 0), and D-05's
+// notifier contract (NotifyPending still runs exactly once even when there
+// is nothing to poll) -- constructed via New directly, not newTestPoller,
+// so the notifier fake is reachable for the assertion below.
 func TestMusicBrainzCycle_EmptyWatchlistNoCallsNilError(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
 	mb := &fakeReleaseGroupSource{}
-	logger, _ := newTestLogger()
-	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
+	notifier := &fakeNotifier{}
+	logger, buf := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, notifier, 15*time.Minute, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
 		t.Fatalf("RunMusicBrainzCycle: %v, want nil", err)
@@ -484,8 +845,41 @@ func TestMusicBrainzCycle_EmptyWatchlistNoCallsNilError(t *testing.T) {
 	if got := atomic.LoadInt32(&mb.calls); got != 0 {
 		t.Fatalf("calls = %d, want 0", got)
 	}
+	if got := atomic.LoadInt32(&notifier.calls); got != 1 {
+		t.Fatalf("notifier.calls = %d, want 1", got)
+	}
+
+	records := decodeLogRecords(t, buf)
+	var found map[string]any
+	for _, rec := range records {
+		if rec["msg"] == "poll cycle complete" {
+			found = rec
+		}
+	}
+	if found == nil {
+		t.Fatal("no 'poll cycle complete' log record found")
+	}
+	artistCount, ok := found["artist_count"].(float64)
+	if !ok || int(artistCount) != 0 {
+		t.Fatalf("artist_count = %v, want 0", found["artist_count"])
+	}
 }
 
+// TestMusicBrainzCycle_ContextCancelledStopsIteration pins the cancellation
+// contract: dispatching new workers stops once ctx is cancelled, and the
+// cycle returns the context error. This test explicitly bounds the pool to
+// 1 worker (WithMusicBrainzWorkers(1)), rather than relying on
+// newTestPoller's default of 3 over these same 3 entries -- with pool size
+// >= entry count the dispatch loop's semaphore send never actually blocks
+// (11-01-PLAN.md's own "never blocks" truth for that configuration), so
+// cancellation could only be observed by a goroutine-scheduling race, not a
+// deterministic happens-before edge. Forcing genuine semaphore contention
+// (1 worker, so dispatching mbid-2 must wait for mbid-1's worker to release
+// its slot) makes the ordering deterministic instead: mbid-1's fetch calls
+// cancel() and only *then* returns (releasing the semaphore via its
+// deferred `<-sem`), so ctx.Done() is guaranteed to close strictly before
+// that release -- the blocked dispatch-loop select always observes
+// cancellation, never the freed slot.
 func TestMusicBrainzCycle_ContextCancelledStopsIteration(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -496,11 +890,14 @@ func TestMusicBrainzCycle_ContextCancelledStopsIteration(t *testing.T) {
 		return []musicbrainz.ReleaseGroup{}, nil
 	}}
 	logger, _ := newTestLogger()
-	p := newTestPoller(t, store, mb, &fakeAlbumSource{}, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(1))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
-	err := p.RunMusicBrainzCycle(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("RunMusicBrainzCycle error = %v, want context.Canceled", err)
+	cycleErr := p.RunMusicBrainzCycle(ctx)
+	if !errors.Is(cycleErr, context.Canceled) {
+		t.Fatalf("RunMusicBrainzCycle error = %v, want context.Canceled", cycleErr)
 	}
 	if got := atomic.LoadInt32(&mb.calls); got >= 3 {
 		t.Fatalf("calls = %d, want < 3 (iteration must stop once ctx is cancelled)", got)
@@ -537,9 +934,10 @@ func TestPoller_RunMusicBrainzCycle_RecordsNewRelease(t *testing.T) {
 		}, nil
 	}}
 	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{}, fakeReleaseDetailSource{})
+	runs := pollruns.NewStore()
 	logger, _ := newTestLogger()
 
-	p, err := New(store, mb, &fakeAlbumSource{}, recorder, &fakeNotifier{}, 15*time.Minute, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, recorder, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -556,6 +954,21 @@ func TestPoller_RunMusicBrainzCycle_RecordsNewRelease(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("event row count = %d, want 2 (the seam must actually be wired into RunMusicBrainzCycle)", count)
+	}
+
+	// events_recorded must match the rows that actually landed, not a fake.
+	lr := runs.Snapshot()[pollruns.SourceMusicBrainz].LastRun
+	if lr == nil {
+		t.Fatal("LastRun is nil after a completed MusicBrainz cycle")
+	}
+	if lr.EventsRecorded != count {
+		t.Fatalf("RunResult.EventsRecorded = %d, want %d (the inserted row count)", lr.EventsRecorded, count)
+	}
+	if lr.ArtistsChecked != 1 {
+		t.Fatalf("RunResult.ArtistsChecked = %d, want 1 (one dispatched entry)", lr.ArtistsChecked)
+	}
+	if lr.Outcome != pollruns.OutcomeOK {
+		t.Fatalf("RunResult.Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeOK)
 	}
 }
 
@@ -590,9 +1003,10 @@ func TestPoller_RunDeezerCycle_RecordsNewRelease(t *testing.T) {
 		}, nil
 	}}
 	recorder := detection.New(sqlc.New(pool), fakeRecordingSource{}, fakeReleaseDetailSource{})
+	runs := pollruns.NewStore()
 	logger, _ := newTestLogger()
 
-	p, err := New(store, &fakeReleaseGroupSource{}, dz, recorder, &fakeNotifier{}, 15*time.Minute, logger)
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, recorder, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -610,6 +1024,21 @@ func TestPoller_RunDeezerCycle_RecordsNewRelease(t *testing.T) {
 	if count != 2 {
 		t.Fatalf("event row count = %d, want 2 (the seam must actually be wired into RunDeezerCycle)", count)
 	}
+
+	// events_recorded must match the rows that actually landed, not a fake.
+	lr := runs.Snapshot()[pollruns.SourceDeezer].LastRun
+	if lr == nil {
+		t.Fatal("LastRun is nil after a completed Deezer cycle")
+	}
+	if lr.EventsRecorded != count {
+		t.Fatalf("RunResult.EventsRecorded = %d, want %d (the inserted row count)", lr.EventsRecorded, count)
+	}
+	if lr.ArtistsChecked != 1 {
+		t.Fatalf("RunResult.ArtistsChecked = %d, want 1 (one dispatched entry)", lr.ArtistsChecked)
+	}
+	if lr.Outcome != pollruns.OutcomeOK {
+		t.Fatalf("RunResult.Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeOK)
+	}
 }
 
 // TestPoller_RunDeezerCycle_SkipsNilDeezerID proves the EventRecorder seam
@@ -621,8 +1050,12 @@ func TestPoller_RunDeezerCycle_SkipsNilDeezerID(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	dz := &fakeAlbumSource{}
 	events := &fakeEventRecorder{}
+	runs := pollruns.NewStore()
 	logger, _ := newTestLogger()
-	p := newTestPoller(t, store, &fakeReleaseGroupSource{}, dz, logger, events)
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	if err := p.RunDeezerCycle(context.Background()); err != nil {
 		t.Fatalf("RunDeezerCycle: %v", err)
@@ -642,6 +1075,19 @@ func TestPoller_RunDeezerCycle_SkipsNilDeezerID(t *testing.T) {
 			t.Fatalf("DetectDeezer called for mbid-2, which has a nil DeezerID and must be skipped entirely")
 		}
 	}
+
+	// artists_skipped counts exactly the shouldDispatch-rejected entries; the
+	// nil-DeezerID mbid-2 is rejected, the other two are dispatched (RUN-01).
+	lr := runs.Snapshot()[pollruns.SourceDeezer].LastRun
+	if lr == nil {
+		t.Fatal("LastRun is nil after a completed Deezer cycle")
+	}
+	if lr.ArtistsSkipped != 1 {
+		t.Fatalf("ArtistsSkipped = %d, want 1 (the nil-DeezerID entry)", lr.ArtistsSkipped)
+	}
+	if lr.ArtistsChecked != 2 {
+		t.Fatalf("ArtistsChecked = %d, want 2 (the two non-nil DeezerID entries)", lr.ArtistsChecked)
+	}
 }
 
 func TestDeezerCycle_SkipsNilDeezerID(t *testing.T) {
@@ -657,19 +1103,20 @@ func TestDeezerCycle_SkipsNilDeezerID(t *testing.T) {
 	if got := atomic.LoadInt32(&dz.calls); got != 2 {
 		t.Fatalf("calls = %d, want 2", got)
 	}
+	// Membership, not order: under concurrent fan-out the two workers can
+	// finish in either order, so the assertion is on the set of artist ids
+	// called, not a fixed dispatch-order sequence.
 	dz.mu.Lock()
 	ids := append([]string(nil), dz.artistIDs...)
 	dz.mu.Unlock()
+	sort.Strings(ids)
 	want := []string{"101", "103"}
 	if len(ids) != len(want) {
-		t.Fatalf("artistIDs = %v, want %v", ids, want)
+		t.Fatalf("artistIDs = %v, want %v in any order", ids, want)
 	}
 	for i := range want {
 		if ids[i] != want[i] {
-			t.Fatalf("artistIDs[%d] = %q, want %q", i, ids[i], want[i])
-		}
-		if ids[i] == "" {
-			t.Fatal("artist id must never be empty")
+			t.Fatalf("artistIDs = %v, want %v in any order", ids, want)
 		}
 	}
 
@@ -825,22 +1272,245 @@ func TestDeezerCycle_EmptyWatchlistNoCallsNilError(t *testing.T) {
 	}
 }
 
+// TestDeezerCycle_ContextCancelledStopsIteration pins the cancellation
+// contract, mirroring TestMusicBrainzCycle_ContextCancelledStopsIteration's
+// own comment: WithDeezerWorkers(1) is required, not the newTestPoller
+// default (5), because with pool size >= the 2 Deezer-capable entries in
+// threeEntries() the dispatch loop's semaphore send never blocks, making
+// cancellation observation a goroutine-scheduling race rather than a
+// deterministic happens-before edge -- confirmed empirically flaky (3/100
+// failures) before this fix. Forcing genuine semaphore contention (1
+// worker, so dispatching mbid-3 must wait for mbid-1's worker to release
+// its slot) makes mbid-1's cancel()-then-return strictly precede mbid-3's
+// dispatch.
 func TestDeezerCycle_ContextCancelledStopsIteration(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	ctx, cancel := context.WithCancel(context.Background())
 	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
-		cancel()
+		if artistID == "101" {
+			cancel()
+		}
 		return []deezer.Album{}, nil
 	}}
 	logger, _ := newTestLogger()
-	p := newTestPoller(t, store, &fakeReleaseGroupSource{}, dz, logger)
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(1))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
-	err := p.RunDeezerCycle(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("RunDeezerCycle error = %v, want context.Canceled", err)
+	cycleErr := p.RunDeezerCycle(ctx)
+	if !errors.Is(cycleErr, context.Canceled) {
+		t.Fatalf("RunDeezerCycle error = %v, want context.Canceled", cycleErr)
 	}
 	if got := atomic.LoadInt32(&dz.calls); got >= 2 {
 		t.Fatalf("calls = %d, want < 2 (iteration must stop once ctx is cancelled)", got)
+	}
+}
+
+// TestDeezerCycle_ConcurrencyBoundedByWorkerCount is RunDeezerCycle's own
+// canonical proof for PERF-01, mirroring
+// TestMusicBrainzCycle_ConcurrencyBoundedByWorkerCount: over 9
+// Deezer-capable entries and a worker pool bounded to 4
+// (WithDeezerWorkers(4)), the fan-out must reach the ceiling (proving it
+// actually ran concurrently) and never exceed it (proving the bound is
+// enforced). fakeAlbumSource's fetch sleeps briefly so overlapping
+// in-flight calls are actually observable.
+func TestDeezerCycle_ConcurrencyBoundedByWorkerCount(t *testing.T) {
+	var entries []watchlist.Entry
+	for i := 1; i <= 9; i++ {
+		id := fmt.Sprintf("%d0%d", i, i)
+		entries = append(entries, watchlist.Entry{MBID: fmt.Sprintf("mbid-%d", i), Name: fmt.Sprintf("Artist %d", i), DeezerID: deezerID(id)})
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+		time.Sleep(50 * time.Millisecond)
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(4))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&dz.maxInFlight); got != 4 {
+		t.Fatalf("max in-flight = %d, want exactly 4", got)
+	}
+}
+
+// TestDeezerCycle_WorkerCountEqualToEntryCountRunsAllConcurrently pins the
+// PERF-02 adjacency case: when the configured worker count exactly equals
+// the entry count, every entry runs concurrently -- maxInFlight equals the
+// entry count exactly, with no worker left queued.
+func TestDeezerCycle_WorkerCountEqualToEntryCountRunsAllConcurrently(t *testing.T) {
+	entries := []watchlist.Entry{
+		{MBID: "mbid-1", Name: "Artist One", DeezerID: deezerID("101")},
+		{MBID: "mbid-2", Name: "Artist Two", DeezerID: deezerID("102")},
+		{MBID: "mbid-3", Name: "Artist Three", DeezerID: deezerID("103")},
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	release := make(chan struct{})
+	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+		<-release
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunDeezerCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&dz.inFlight) < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 3 in-flight calls, last observed %d", atomic.LoadInt32(&dz.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunDeezerCycle: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunDeezerCycle did not return promptly after release -- possible deadlock on an unused semaphore slot")
+	}
+
+	if got := atomic.LoadInt32(&dz.maxInFlight); got != 3 {
+		t.Fatalf("max in-flight = %d, want exactly 3 (worker count == entry count)", got)
+	}
+}
+
+// TestDeezerCycle_NilDeezerIDConsumesNoWorkerSlot proves a nil-DeezerID
+// entry never occupies a worker slot or spawns a goroutine (D-06): a
+// watchlist where the number of nil-DeezerID entries exceeds the worker
+// count must still reach the non-nil entries' worker ceiling and call
+// ArtistAlbums exactly once per non-nil entry.
+func TestDeezerCycle_NilDeezerIDConsumesNoWorkerSlot(t *testing.T) {
+	entries := []watchlist.Entry{
+		{MBID: "mbid-1", Name: "Artist One", DeezerID: nil},
+		{MBID: "mbid-2", Name: "Artist Two", DeezerID: nil},
+		{MBID: "mbid-3", Name: "Artist Three", DeezerID: nil},
+		{MBID: "mbid-4", Name: "Artist Four", DeezerID: deezerID("104")},
+		{MBID: "mbid-5", Name: "Artist Five", DeezerID: deezerID("105")},
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	release := make(chan struct{})
+	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+		<-release
+		return nil, nil
+	}}
+	events := &fakeEventRecorder{}
+	logger, buf := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(2))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunDeezerCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&dz.inFlight) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 2 in-flight calls, last observed %d", atomic.LoadInt32(&dz.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunDeezerCycle: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunDeezerCycle did not return promptly after release")
+	}
+
+	if got := atomic.LoadInt32(&dz.calls); got != 2 {
+		t.Fatalf("dz.calls = %d, want 2 (only the non-nil DeezerID entries)", got)
+	}
+	dz.mu.Lock()
+	gotIDs := append([]string(nil), dz.artistIDs...)
+	dz.mu.Unlock()
+	sort.Strings(gotIDs)
+	wantIDs := []string{"104", "105"}
+	if len(gotIDs) != len(wantIDs) || gotIDs[0] != wantIDs[0] || gotIDs[1] != wantIDs[1] {
+		t.Fatalf("dz.artistIDs = %v, want %v in any order", gotIDs, wantIDs)
+	}
+	if got := atomic.LoadInt32(&events.deezerCalls); got != 2 {
+		t.Fatalf("events.deezerCalls = %d, want 2", got)
+	}
+
+	records := decodeLogRecords(t, buf)
+	skipCount := 0
+	for _, rec := range records {
+		if rec["artist_mbid"] == "mbid-1" || rec["artist_mbid"] == "mbid-2" || rec["artist_mbid"] == "mbid-3" {
+			msg, _ := rec["msg"].(string)
+			if strings.Contains(strings.ToLower(msg), "deezer_id") {
+				skipCount++
+			}
+		}
+	}
+	if skipCount != 3 {
+		t.Fatalf("found %d skip log records for nil-DeezerID entries, want 3", skipCount)
+	}
+}
+
+// TestDeezerCycle_LogsCycleDurationAndArtistCount is
+// TestMusicBrainzCycle_LogsCycleDurationAndArtistCount's Deezer twin,
+// pinning D-04/D-05 for RunDeezerCycle.
+func TestDeezerCycle_LogsCycleDurationAndArtistCount(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	dz := &fakeAlbumSource{}
+	logger, buf := newTestLogger()
+	p := newTestPoller(t, store, &fakeReleaseGroupSource{}, dz, logger)
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+
+	records := decodeLogRecords(t, buf)
+	var found map[string]any
+	count := 0
+	for _, rec := range records {
+		if rec["msg"] == "poll cycle complete" {
+			found = rec
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("found %d 'poll cycle complete' records, want exactly 1", count)
+	}
+
+	artistCount, ok := found["artist_count"].(float64)
+	if !ok {
+		t.Fatalf("artist_count = %v (%T), want a JSON number", found["artist_count"], found["artist_count"])
+	}
+	if int(artistCount) != 3 {
+		t.Fatalf("artist_count = %v, want 3", artistCount)
+	}
+
+	durationMS, ok := found["duration_ms"].(float64)
+	if !ok {
+		t.Fatalf("duration_ms = %v (%T), want a JSON number", found["duration_ms"], found["duration_ms"])
+	}
+	if durationMS < 0 {
+		t.Fatalf("duration_ms = %v, want >= 0", durationMS)
+	}
+	if durationMS != math.Trunc(durationMS) {
+		t.Fatalf("duration_ms = %v, want an integer (no fractional part)", durationMS)
 	}
 }
 
@@ -867,13 +1537,13 @@ func TestPoller_RunMusicBrainzCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 	mb := &fakeReleaseGroupSource{}
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
-	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 		select {
 		case started <- struct{}{}:
 		default:
 		}
 		<-release
-		return nil
+		return 0, nil
 	}}
 	logger, _ := newTestLogger()
 	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -894,8 +1564,19 @@ func TestPoller_RunMusicBrainzCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 	if !errors.Is(err, ErrCycleInProgress) {
 		t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
 	}
-	if got := atomic.LoadInt32(&events.calls); got != 1 {
-		t.Fatalf("events.calls = %d, want 1 (the skipped tick must perform zero detection calls)", got)
+	// store.listCalls, not events.calls: with the default worker pool, all
+	// 3 entries can be concurrently in flight and blocked inside events.fn
+	// by the time the "started" signal fires, and the still-running first
+	// cycle's own already-dispatched workers keep incrementing events.calls
+	// in the background regardless of what the second call does -- that
+	// makes any snapshot-based events.calls comparison inherently racy
+	// against the first cycle's own progress, not a measurement of the
+	// second call's behavior. store.List is the first thing the cycle body
+	// does after the CAS guard succeeds, so store.listCalls staying at 1
+	// is the deterministic proof the second, skipped call never performed
+	// any work at all -- not just zero detection calls.
+	if got := atomic.LoadInt32(&store.listCalls); got != 1 {
+		t.Fatalf("store.listCalls = %d, want 1 (the skipped tick must perform zero store reads)", got)
 	}
 
 	close(release)
@@ -907,8 +1588,8 @@ func TestPoller_RunMusicBrainzCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 func TestPoller_RunMusicBrainzCycle_GuardReleasedAfterDetectionError(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	mb := &fakeReleaseGroupSource{}
-	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
-		return errors.New("detection exploded")
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
+		return 0, errors.New("detection exploded")
 	}}
 	logger, _ := newTestLogger()
 	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -936,13 +1617,13 @@ func TestPoller_RunDeezerCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 	dz := &fakeAlbumSource{}
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
-	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error {
+	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error) {
 		select {
 		case started <- struct{}{}:
 		default:
 		}
 		<-release
-		return nil
+		return 0, nil
 	}}
 	logger, _ := newTestLogger()
 	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -963,8 +1644,20 @@ func TestPoller_RunDeezerCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 	if !errors.Is(err, ErrCycleInProgress) {
 		t.Fatalf("second RunDeezerCycle error = %v, want ErrCycleInProgress", err)
 	}
-	if got := atomic.LoadInt32(&events.deezerCalls); got != 1 {
-		t.Fatalf("events.deezerCalls = %d, want 1 (the skipped tick must perform zero detection calls)", got)
+	// store.listCalls, not events.deezerCalls: with the default worker pool,
+	// both Deezer-capable entries can be concurrently in flight and blocked
+	// inside events.deezerFn by the time the "started" signal fires, and the
+	// still-running first cycle's own already-dispatched workers keep
+	// incrementing events.deezerCalls in the background regardless of what
+	// the second call does -- that makes any snapshot-based
+	// events.deezerCalls comparison inherently racy against the first
+	// cycle's own progress, not a measurement of the second call's
+	// behavior. store.List is the first thing the cycle body does after the
+	// CAS guard succeeds, so store.listCalls staying at 1 is the
+	// deterministic proof the second, skipped call never performed any work
+	// at all -- not just zero detection calls.
+	if got := atomic.LoadInt32(&store.listCalls); got != 1 {
+		t.Fatalf("store.listCalls = %d, want 1 (the skipped tick must perform zero store reads)", got)
 	}
 
 	close(release)
@@ -976,8 +1669,8 @@ func TestPoller_RunDeezerCycle_SkipsWhenAlreadyRunning(t *testing.T) {
 func TestPoller_RunDeezerCycle_GuardReleasedAfterDetectionError(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
 	dz := &fakeAlbumSource{}
-	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) error {
-		return errors.New("detection exploded")
+	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error) {
+		return 0, errors.New("detection exploded")
 	}}
 	logger, _ := newTestLogger()
 	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -1009,11 +1702,11 @@ func TestPoller_RunMusicBrainzCycle_DetectionErrorIsolatedPerArtist(t *testing.T
 	}}
 	mb := &fakeReleaseGroupSource{}
 	failOn := "mbid-1"
-	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 		if entry.MBID == failOn {
-			return errors.New("detection exploded for this artist")
+			return 0, errors.New("detection exploded for this artist")
 		}
-		return nil
+		return 0, nil
 	}}
 	logger, buf := newTestLogger()
 	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
@@ -1028,11 +1721,17 @@ func TestPoller_RunMusicBrainzCycle_DetectionErrorIsolatedPerArtist(t *testing.T
 	if got := atomic.LoadInt32(&events.calls); got != 2 {
 		t.Fatalf("events.calls = %d, want 2 (both artists must still be attempted)", got)
 	}
+	// Membership, not order: under concurrent fan-out the two workers can
+	// finish in either order, so asserting the set {mbid-1, mbid-2} was
+	// attempted (PERF-03's actual guarantee) rather than a fixed
+	// [mbid-1, mbid-2] sequence is what the concurrent design can promise.
 	events.mu.Lock()
 	gotMBIDs := append([]string(nil), events.mbids...)
 	events.mu.Unlock()
-	if len(gotMBIDs) != 2 || gotMBIDs[0] != "mbid-1" || gotMBIDs[1] != "mbid-2" {
-		t.Fatalf("events.mbids = %v, want [mbid-1 mbid-2] (the second artist's detection must still run)", gotMBIDs)
+	sort.Strings(gotMBIDs)
+	wantMBIDs := []string{"mbid-1", "mbid-2"}
+	if len(gotMBIDs) != len(wantMBIDs) || gotMBIDs[0] != wantMBIDs[0] || gotMBIDs[1] != wantMBIDs[1] {
+		t.Fatalf("events.mbids = %v, want %v in any order (the second artist's detection must still run)", gotMBIDs, wantMBIDs)
 	}
 
 	records := decodeLogRecords(t, buf)
@@ -1047,12 +1746,313 @@ func TestPoller_RunMusicBrainzCycle_DetectionErrorIsolatedPerArtist(t *testing.T
 	}
 }
 
+// --- PERF-03: simultaneous per-artist error isolation under concurrency ---
+
+// recordMBID extracts a decoded log record's artist_mbid attribute as a
+// plain string, defaulting to "" if absent -- decodeLogRecords produces
+// map[string]any records, so every field access needs a type assertion.
+func recordMBID(rec map[string]any) string {
+	mbid, _ := rec["artist_mbid"].(string)
+	return mbid
+}
+
+// sixEntries returns 6 watchlist entries, every one carrying a non-nil
+// DeezerID -- used by the Simultaneous... tests below, which need a worker
+// count strictly less than the entry count and at least 3 failing entries
+// so at least two failures are guaranteed to be in flight simultaneously.
+func sixEntries() []watchlist.Entry {
+	var entries []watchlist.Entry
+	for i := 1; i <= 6; i++ {
+		id := fmt.Sprintf("%d0%d", i, i)
+		entries = append(entries, watchlist.Entry{MBID: fmt.Sprintf("mbid-%d", i), Name: fmt.Sprintf("Artist %d", i), DeezerID: deezerID(id)})
+	}
+	return entries
+}
+
+// failFirstThree returns a set of the first n of xs, for a fixed,
+// order-independent partition of a 6-entry watchlist into 3 failing / 3
+// succeeding entries.
+func failFirstThree(entries []watchlist.Entry) map[string]bool {
+	fail := map[string]bool{}
+	for i, e := range entries {
+		if i < 3 {
+			fail[e.MBID] = true
+		}
+	}
+	return fail
+}
+
+// TestMusicBrainzCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle proves
+// PERF-03 under genuine concurrent failure: with 6 entries and a pool of 3,
+// failing 3 of the 6 guarantees at least two failures are in flight at
+// once -- a single-failure test cannot distinguish isolated failure from
+// lucky ordering.
+func TestMusicBrainzCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle(t *testing.T) {
+	entries := sixEntries()
+	failSet := failFirstThree(entries)
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		if failSet[mbid] {
+			return nil, errors.New("upstream exploded")
+		}
+		return []musicbrainz.ReleaseGroup{}, nil
+	}}
+	events := &fakeEventRecorder{}
+	logger, buf := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle returned %v, want nil (simultaneous per-artist failures must not abort the cycle)", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.calls); got != 6 {
+		t.Fatalf("mb.calls = %d, want 6 (every entry must still be attempted)", got)
+	}
+	if got := atomic.LoadInt32(&events.calls); got != 3 {
+		t.Fatalf("events.calls = %d, want 3 (only the 3 succeeding fetches reach detection)", got)
+	}
+	events.mu.Lock()
+	gotDetected := append([]string(nil), events.mbids...)
+	events.mu.Unlock()
+	for _, mbid := range gotDetected {
+		if failSet[mbid] {
+			t.Fatalf("detection was called for %s, which was configured to fail its fetch", mbid)
+		}
+	}
+
+	errCount := 0
+	for _, rec := range decodeLogRecords(t, buf) {
+		if rec["msg"] == "poll artist failed" && failSet[recordMBID(rec)] {
+			errCount++
+		}
+	}
+	if errCount != 3 {
+		t.Fatalf("found %d 'poll artist failed' records for the failing set, want 3", errCount)
+	}
+}
+
+// TestMusicBrainzCycle_SimultaneousDetectionErrorsDoNotAbortCycle is
+// TestMusicBrainzCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle's
+// detection-side twin: all 6 fetches succeed, but 3 of the 6 detection
+// calls fail simultaneously.
+func TestMusicBrainzCycle_SimultaneousDetectionErrorsDoNotAbortCycle(t *testing.T) {
+	entries := sixEntries()
+	failSet := failFirstThree(entries)
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	mb := &fakeReleaseGroupSource{}
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
+		if failSet[entry.MBID] {
+			return 0, errors.New("detection exploded")
+		}
+		return 0, nil
+	}}
+	logger, buf := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle returned %v, want nil", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.calls); got != 6 {
+		t.Fatalf("mb.calls = %d, want 6", got)
+	}
+	if got := atomic.LoadInt32(&events.calls); got != 6 {
+		t.Fatalf("events.calls = %d, want 6 (every fetch succeeded, so every entry reaches detection)", got)
+	}
+
+	errCount := 0
+	for _, rec := range decodeLogRecords(t, buf) {
+		if rec["msg"] == "detection failed" && failSet[recordMBID(rec)] {
+			errCount++
+		}
+	}
+	if errCount != 3 {
+		t.Fatalf("found %d 'detection failed' records for the failing set, want 3", errCount)
+	}
+}
+
+// TestDeezerCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle is
+// TestMusicBrainzCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle's
+// Deezer twin.
+func TestDeezerCycle_SimultaneousArtistFetchErrorsDoNotAbortCycle(t *testing.T) {
+	entries := sixEntries()
+	failSet := failFirstThree(entries)
+	failIDs := map[string]bool{}
+	for _, e := range entries {
+		if failSet[e.MBID] {
+			failIDs[*e.DeezerID] = true
+		}
+	}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	dz := &fakeAlbumSource{fn: func(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+		if failIDs[artistID] {
+			return nil, errors.New("upstream exploded")
+		}
+		return []deezer.Album{}, nil
+	}}
+	events := &fakeEventRecorder{}
+	logger, buf := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle returned %v, want nil (simultaneous per-artist failures must not abort the cycle)", err)
+	}
+
+	if got := atomic.LoadInt32(&dz.calls); got != 6 {
+		t.Fatalf("dz.calls = %d, want 6 (every entry must still be attempted)", got)
+	}
+	if got := atomic.LoadInt32(&events.deezerCalls); got != 3 {
+		t.Fatalf("events.deezerCalls = %d, want 3 (only the 3 succeeding fetches reach detection)", got)
+	}
+
+	errCount := 0
+	for _, rec := range decodeLogRecords(t, buf) {
+		if rec["msg"] == "poll artist failed" && failSet[recordMBID(rec)] {
+			errCount++
+		}
+	}
+	if errCount != 3 {
+		t.Fatalf("found %d 'poll artist failed' records for the failing set, want 3", errCount)
+	}
+}
+
+// TestDeezerCycle_SimultaneousDetectionErrorsDoNotAbortCycle is
+// TestMusicBrainzCycle_SimultaneousDetectionErrorsDoNotAbortCycle's Deezer
+// twin.
+func TestDeezerCycle_SimultaneousDetectionErrorsDoNotAbortCycle(t *testing.T) {
+	entries := sixEntries()
+	failSet := failFirstThree(entries)
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	dz := &fakeAlbumSource{}
+	events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error) {
+		if failSet[entry.MBID] {
+			return 0, errors.New("detection exploded")
+		}
+		return 0, nil
+	}}
+	logger, buf := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, events, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle returned %v, want nil", err)
+	}
+
+	if got := atomic.LoadInt32(&dz.calls); got != 6 {
+		t.Fatalf("dz.calls = %d, want 6", got)
+	}
+	if got := atomic.LoadInt32(&events.deezerCalls); got != 6 {
+		t.Fatalf("events.deezerCalls = %d, want 6 (every fetch succeeded, so every entry reaches detection)", got)
+	}
+
+	errCount := 0
+	for _, rec := range decodeLogRecords(t, buf) {
+		if rec["msg"] == "detection failed" && failSet[recordMBID(rec)] {
+			errCount++
+		}
+	}
+	if errCount != 3 {
+		t.Fatalf("found %d 'detection failed' records for the failing set, want 3", errCount)
+	}
+}
+
+// TestMusicBrainzCycle_ConcurrentLogLinesAreFullyLabelled pins D-07's
+// interleaved-but-labelled contract: every poll result / poll artist
+// failed record carries cycle_id/source/artist_mbid/artist_name, all
+// records share one cycle_id, and the multiset of artist_mbid values
+// across those records equals the entry set exactly once each. Emission
+// order is deliberately not asserted anywhere in this test -- D-07
+// explicitly declines to specify it, and an order assertion here would be
+// a false guarantee that fails intermittently. A future contributor should
+// not "fix" this test by adding one.
+func TestMusicBrainzCycle_ConcurrentLogLinesAreFullyLabelled(t *testing.T) {
+	entries := sixEntries()
+	// A fixed, deterministic 2-of-6 failing set -- not derived from any
+	// runtime counter, which would itself be an unsynchronized read/write
+	// race across the concurrent worker goroutines calling this closure.
+	failSet := map[string]bool{"mbid-1": true, "mbid-2": true}
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		if failSet[mbid] {
+			return nil, errors.New("upstream exploded")
+		}
+		return []musicbrainz.ReleaseGroup{}, nil
+	}}
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return entries, nil }}
+	logger, buf := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(3))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle returned %v, want nil", err)
+	}
+
+	records := decodeLogRecords(t, buf)
+	var perArtistRecords []map[string]any
+	sharedCycleID := ""
+	seenMBIDs := map[string]int{}
+	for _, rec := range records {
+		msg, _ := rec["msg"].(string)
+		if msg != "poll result" && msg != "poll artist failed" {
+			continue
+		}
+		perArtistRecords = append(perArtistRecords, rec)
+
+		cycleID, ok := rec["cycle_id"].(string)
+		if !ok || cycleID == "" {
+			t.Fatalf("record %v: cycle_id missing or empty", rec)
+		}
+		if sharedCycleID == "" {
+			sharedCycleID = cycleID
+		} else if cycleID != sharedCycleID {
+			t.Fatalf("record %v: cycle_id = %q, want %q (all records in one cycle must share cycle_id)", rec, cycleID, sharedCycleID)
+		}
+
+		if rec["source"] != sourceMusicBrainz {
+			t.Fatalf("record %v: source = %v, want %q", rec, rec["source"], sourceMusicBrainz)
+		}
+
+		mbid, ok := rec["artist_mbid"].(string)
+		if !ok || mbid == "" {
+			t.Fatalf("record %v: artist_mbid missing or empty", rec)
+		}
+		seenMBIDs[mbid]++
+
+		name, ok := rec["artist_name"].(string)
+		if !ok || name == "" {
+			t.Fatalf("record %v: artist_name missing or empty", rec)
+		}
+	}
+
+	if len(perArtistRecords) != len(entries) {
+		t.Fatalf("found %d per-artist records, want %d (one per entry)", len(perArtistRecords), len(entries))
+	}
+	for _, e := range entries {
+		if seenMBIDs[e.MBID] != 1 {
+			t.Fatalf("artist_mbid %s appeared %d times across per-artist records, want exactly 1", e.MBID, seenMBIDs[e.MBID])
+		}
+	}
+}
+
 func TestPoller_RunMusicBrainzCycle_EmptyWatchlist(t *testing.T) {
 	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, nil }}
 	mb := &fakeReleaseGroupSource{}
 	events := &fakeEventRecorder{}
+	runs := pollruns.NewStore()
 	logger, _ := newTestLogger()
-	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger)
+	p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1066,6 +2066,25 @@ func TestPoller_RunMusicBrainzCycle_EmptyWatchlist(t *testing.T) {
 	if p.mbRunning.Load() {
 		t.Fatal("guard must be released after an empty-watchlist cycle")
 	}
+
+	// The zero-length-input edge: a zero-capacity result channel with zero
+	// senders is valid and the fold is a no-op, yet the cycle still records
+	// exactly one ok entry with all four counters 0 (RUN-01, probe RUN-01 empty).
+	snap := runs.Snapshot()[pollruns.SourceMusicBrainz]
+	if len(snap.History) != 1 {
+		t.Fatalf("history length = %d, want exactly 1 (every invocation records one entry)", len(snap.History))
+	}
+	lr := snap.LastRun
+	if lr.Outcome != pollruns.OutcomeOK {
+		t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeOK)
+	}
+	if lr.ArtistsChecked != 0 || lr.ArtistsSkipped != 0 || lr.ArtistsErrored != 0 || lr.EventsRecorded != 0 {
+		t.Fatalf("counters = {checked:%d skipped:%d errored:%d events:%d}, want all 0",
+			lr.ArtistsChecked, lr.ArtistsSkipped, lr.ArtistsErrored, lr.EventsRecorded)
+	}
+	if lr.FinishedAt.Before(lr.StartedAt) {
+		t.Fatalf("FinishedAt %s is before StartedAt %s", lr.FinishedAt, lr.StartedAt)
+	}
 }
 
 func TestPoller_CyclesAreIndependentAcrossSources(t *testing.T) {
@@ -1073,13 +2092,13 @@ func TestPoller_CyclesAreIndependentAcrossSources(t *testing.T) {
 	mb := &fakeReleaseGroupSource{}
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
-	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+	events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 		select {
 		case started <- struct{}{}:
 		default:
 		}
 		<-release
-		return nil
+		return 0, nil
 	}}
 	dz := &fakeAlbumSource{}
 	logger, _ := newTestLogger()
@@ -1139,11 +2158,19 @@ func TestMusicBrainzCycle_OverlapGuard_SkipsWhileInFlight(t *testing.T) {
 	if !errors.Is(err, ErrCycleInProgress) {
 		t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
 	}
+	// store.listCalls is the deterministic proof here, not mb.calls: with
+	// the default worker pool, more than one entry can be concurrently in
+	// flight and blocked inside mb.fn by the time the "started" signal
+	// fires, and the still-running first cycle's own already-dispatched
+	// workers keep incrementing mb.calls in the background regardless of
+	// what the second call does -- a snapshot-based mb.calls comparison
+	// would be racing the first cycle's own progress, not measuring the
+	// second call's behavior. store.List is the first thing the cycle body
+	// does after the CAS guard succeeds, so store.listCalls staying at 1
+	// proves the second, skipped call never performed any work at all --
+	// not just zero source calls.
 	if got := atomic.LoadInt32(&store.listCalls); got != 1 {
 		t.Fatalf("store.listCalls = %d, want 1 (the skipped tick must perform zero store reads)", got)
-	}
-	if got := atomic.LoadInt32(&mb.calls); got != 1 {
-		t.Fatalf("mb.calls = %d, want 1 (the skipped tick must perform zero source calls)", got)
 	}
 
 	close(release)
@@ -1159,6 +2186,286 @@ func TestMusicBrainzCycle_OverlapGuard_SkipsWhileInFlight(t *testing.T) {
 	}
 	if !warnFound {
 		t.Fatal("expected a warn-level log record naming the source for the skipped overlapping tick (D-09)")
+	}
+}
+
+// --- PERF-02: rate ceiling and overlap guard under concurrency ---
+
+// This is subtracted from the theoretical first-to-last elapsed-span floor
+// asserted by TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit and
+// TestDeezerCycle_ConcurrentPollingStaysInsideRateLimit below.
+//
+// The exact theoretical multiple (7*20ms) is not safely attainable as a
+// zero-margin floor: both tests record their timestamps *after*
+// limiter.Wait returns, so the measured span also absorbs goroutine
+// scheduling and timer-wakeup granularity on both the first and last call --
+// latency the rate.Limiter's internal delay computation makes no guarantee
+// about reproducing to the nanosecond.
+//
+// Concrete evidence this is real, not hypothetical: GitHub Actions run
+// 32997261111 (job "test", commit 082a19a on main) measured a span of
+// 139.873132ms against the previous zero-margin 140ms floor -- ~0.13ms
+// (0.09%) short, on a loaded shared CI runner.
+//
+// The assertion's intent survives this tolerance: an unserialised or
+// broken limiter yields a span near zero, not one a couple of milliseconds
+// short of the floor, so this 2ms tolerance (1.4% of the 140ms floor)
+// cannot mask a real regression. This is empirically verified, not just
+// argued -- see the sentinel-probe evidence recorded in
+// 260826-ia0-SUMMARY.md.
+const rateLimitSpanJitterTolerance = 2 * time.Millisecond
+
+// rateLimitedReleaseGroupSource is a test-local ReleaseGroupSource double
+// that consults a real *rate.Limiter before recording its call, mirroring
+// fakeReleaseGroupSource's inFlight/maxInFlight idiom -- used only by
+// TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit to prove the
+// limiter itself, not just the worker pool bound, still serialises
+// concurrent callers (PERF-02, 11-RESEARCH.md Pitfall 5).
+type rateLimitedReleaseGroupSource struct {
+	limiter *rate.Limiter
+
+	inFlight    int32
+	maxInFlight int32
+
+	mu         sync.Mutex
+	timestamps []time.Time
+}
+
+func (r *rateLimitedReleaseGroupSource) ReleaseGroupsByArtist(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+	// inFlight is tracked from entry, before limiter.Wait blocks -- this is
+	// what proves the worker pool actually dispatched maxInFlight callers
+	// concurrently (several sitting inside limiter.Wait at once), as opposed
+	// to only ever having one caller inside this method's body at a time,
+	// which the elapsed-span assertion alone could not distinguish from a
+	// correctly-bounded pool that just never fans out.
+	cur := atomic.AddInt32(&r.inFlight, 1)
+	defer atomic.AddInt32(&r.inFlight, -1)
+	for {
+		old := atomic.LoadInt32(&r.maxInFlight)
+		if cur <= old {
+			break
+		}
+		if atomic.CompareAndSwapInt32(&r.maxInFlight, old, cur) {
+			break
+		}
+	}
+
+	if err := r.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	r.timestamps = append(r.timestamps, time.Now())
+	r.mu.Unlock()
+
+	return nil, nil
+}
+
+// rateLimitedAlbumSource is rateLimitedReleaseGroupSource's Deezer-side
+// twin.
+type rateLimitedAlbumSource struct {
+	limiter *rate.Limiter
+
+	inFlight    int32
+	maxInFlight int32
+
+	mu         sync.Mutex
+	timestamps []time.Time
+}
+
+func (r *rateLimitedAlbumSource) ArtistAlbums(ctx context.Context, artistID string, limit int) ([]deezer.Album, error) {
+	// See rateLimitedReleaseGroupSource's identical comment on this same
+	// ordering -- inFlight is tracked from entry, before limiter.Wait
+	// blocks.
+	cur := atomic.AddInt32(&r.inFlight, 1)
+	defer atomic.AddInt32(&r.inFlight, -1)
+	for {
+		old := atomic.LoadInt32(&r.maxInFlight)
+		if cur <= old {
+			break
+		}
+		if atomic.CompareAndSwapInt32(&r.maxInFlight, old, cur) {
+			break
+		}
+	}
+
+	if err := r.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	r.timestamps = append(r.timestamps, time.Now())
+	r.mu.Unlock()
+
+	return nil, nil
+}
+
+func eightEntries() []watchlist.Entry {
+	var entries []watchlist.Entry
+	for i := 1; i <= 8; i++ {
+		id := fmt.Sprintf("%d0%d", i, i)
+		entries = append(entries, watchlist.Entry{MBID: fmt.Sprintf("mbid-%d", i), Name: fmt.Sprintf("Artist %d", i), DeezerID: deezerID(id)})
+	}
+	return entries
+}
+
+// TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit empirically
+// proves the shared *rate.Limiter still serialises concurrent workers
+// (PERF-02, 11-RESEARCH.md Pitfall 5) rather than trusting the library's
+// documented concurrency safety. burst 1 means the first call consumes the
+// initial token and every subsequent call waits a full 20ms
+// (rate.Limit(50) == 50/sec == 20ms/token); with 8 entries the aggregate
+// span from first to last recorded timestamp must therefore be at least
+// 7*20ms. maxInFlight reaching the configured worker count is asserted
+// alongside the span: without it, a purely sequential loop would also
+// satisfy the elapsed-time floor, making the test vacuous.
+func TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return eightEntries(), nil }}
+	mb := &rateLimitedReleaseGroupSource{limiter: rate.NewLimiter(rate.Limit(50), 1)}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(5))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+		t.Fatalf("RunMusicBrainzCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&mb.maxInFlight); got != 5 {
+		t.Fatalf("max in-flight = %d, want exactly 5 (otherwise the elapsed-span assertion below would also pass for a sequential loop)", got)
+	}
+
+	mb.mu.Lock()
+	timestamps := append([]time.Time(nil), mb.timestamps...)
+	mb.mu.Unlock()
+	if len(timestamps) != 8 {
+		t.Fatalf("recorded %d timestamps, want 8", len(timestamps))
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i].Before(timestamps[j]) })
+	span := timestamps[len(timestamps)-1].Sub(timestamps[0])
+	wantMin := 7*20*time.Millisecond - rateLimitSpanJitterTolerance
+	if span < wantMin {
+		t.Fatalf("elapsed span between first and last call = %s, want >= %s (the rate limiter must still serialise concurrent callers)", span, wantMin)
+	}
+}
+
+// TestDeezerCycle_ConcurrentPollingStaysInsideRateLimit is
+// TestMusicBrainzCycle_ConcurrentPollingStaysInsideRateLimit's Deezer twin.
+func TestDeezerCycle_ConcurrentPollingStaysInsideRateLimit(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return eightEntries(), nil }}
+	dz := &rateLimitedAlbumSource{limiter: rate.NewLimiter(rate.Limit(50), 1)}
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(5))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&dz.maxInFlight); got != 5 {
+		t.Fatalf("max in-flight = %d, want exactly 5 (otherwise the elapsed-span assertion below would also pass for a sequential loop)", got)
+	}
+
+	dz.mu.Lock()
+	timestamps := append([]time.Time(nil), dz.timestamps...)
+	dz.mu.Unlock()
+	if len(timestamps) != 8 {
+		t.Fatalf("recorded %d timestamps, want 8", len(timestamps))
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i].Before(timestamps[j]) })
+	span := timestamps[len(timestamps)-1].Sub(timestamps[0])
+	wantMin := 7*20*time.Millisecond - rateLimitSpanJitterTolerance
+	if span < wantMin {
+		t.Fatalf("elapsed span between first and last call = %s, want >= %s (the rate limiter must still serialise concurrent callers)", span, wantMin)
+	}
+}
+
+// TestMusicBrainzCycle_OverlapGuardHoldsWhileWorkersInFlight extends
+// TestMusicBrainzCycle_OverlapGuard_SkipsWhileInFlight to the specifically
+// concurrent case: with multiple workers genuinely blocked in flight
+// simultaneously (not just one), a second RunMusicBrainzCycle call must
+// still be rejected and must not increment the fake's call count.
+func TestMusicBrainzCycle_OverlapGuardHoldsWhileWorkersInFlight(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return eightEntries(), nil }}
+	release := make(chan struct{})
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		<-release
+		return nil, nil
+	}}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(5))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&mb.inFlight) < 5 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 5 in-flight calls, last observed %d", atomic.LoadInt32(&mb.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	callsBefore := atomic.LoadInt32(&mb.calls)
+	err = p.RunMusicBrainzCycle(context.Background())
+	if !errors.Is(err, ErrCycleInProgress) {
+		t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
+	}
+	if got := atomic.LoadInt32(&mb.calls); got != callsBefore {
+		t.Fatalf("mb.calls changed from %d to %d -- the skipped call must not have issued any source call", callsBefore, got)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first RunMusicBrainzCycle: %v", err)
+	}
+}
+
+// TestDeezerCycle_RunsWhileMusicBrainzWorkersInFlight proves the two
+// sources' overlap guards remain independent under concurrency (D-08):
+// while a MusicBrainz cycle has multiple workers genuinely blocked in
+// flight, a full Deezer cycle must still run to completion.
+func TestDeezerCycle_RunsWhileMusicBrainzWorkersInFlight(t *testing.T) {
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return eightEntries(), nil }}
+	release := make(chan struct{})
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		<-release
+		return nil, nil
+	}}
+	dz := &fakeAlbumSource{}
+	logger, _ := newTestLogger()
+	p, err := New(store, mb, dz, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(5))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&mb.inFlight) < 5 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for 5 in-flight MusicBrainz calls, last observed %d", atomic.LoadInt32(&mb.inFlight))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if err := p.RunDeezerCycle(context.Background()); err != nil {
+		t.Fatalf("RunDeezerCycle while MusicBrainz workers in flight: %v, want nil (the guards are independent, D-08)", err)
+	}
+	if got := atomic.LoadInt32(&dz.calls); got != 8 {
+		t.Fatalf("deezer calls = %d, want 8", got)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("musicbrainz cycle: %v", err)
 	}
 }
 
@@ -1470,4 +2777,440 @@ func TestPoller_StartStop_LifecycleWithRealCronTick(t *testing.T) {
 	if after != before {
 		t.Fatalf("store.listCalls changed from %d to %d after Stop -- no further calls should arrive once Stop has returned", before, after)
 	}
+}
+
+// --- Run recorder: the non-recording paths and the error outcome (18.1-02) ---
+
+// startBlockedMusicBrainzCycle builds a Poller whose MusicBrainz source blocks
+// every worker inside its fetch until the returned release func is called, and
+// launches one RunMusicBrainzCycle in a goroutine that is guaranteed to hold
+// the overlap guard by the time this helper returns. The release func is also
+// registered with t.Cleanup so a failed assertion can never leak the goroutine.
+func startBlockedMusicBrainzCycle(t *testing.T, rec RunRecorder) (p *Poller, done chan error, release func()) {
+	t.Helper()
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+	releaseCh := make(chan struct{})
+	started := make(chan struct{}, 1)
+	var once sync.Once
+	release = func() { once.Do(func() { close(releaseCh) }) }
+	t.Cleanup(release)
+
+	mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-releaseCh
+		return []musicbrainz.ReleaseGroup{}, nil
+	}}
+	logger, _ := newTestLogger()
+	var err error
+	p, err = New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(rec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done = make(chan error, 1)
+	go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the first cycle to block inside the source call")
+	}
+	return p, done, release
+}
+
+// TestRunRecorder_SkipRecordsNoEntry proves an overlap-skipped tick is a
+// signal, never a history entry (RUN-02): RecordSkip fires on the pre-CAS
+// branch, before cycleID/cycleStart or either defer exists, so a burst of
+// skips during one slow cycle can never evict real history from the 50-deep
+// ring (threat T-18.1-08).
+func TestRunRecorder_SkipRecordsNoEntry(t *testing.T) {
+	t.Run("fake recorder", func(t *testing.T) {
+		rec := &fakeRunRecorder{}
+		p, done, release := startBlockedMusicBrainzCycle(t, rec)
+
+		err := p.RunMusicBrainzCycle(context.Background())
+		if !errors.Is(err, ErrCycleInProgress) {
+			t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
+		}
+		if got := rec.skipCalls.Load(); got != 1 {
+			t.Fatalf("RecordSkip call count = %d, want exactly 1", got)
+		}
+		if got := rec.runCalls.Load(); got != 0 {
+			t.Fatalf("RecordRun call count during the skipped tick = %d, want 0 (the held cycle has not finished)", got)
+		}
+
+		release()
+		if err := <-done; err != nil {
+			t.Fatalf("first RunMusicBrainzCycle: %v", err)
+		}
+		if got := rec.runCalls.Load(); got != 1 {
+			t.Fatalf("RecordRun call count after the held cycle finished = %d, want 1", got)
+		}
+		if got := rec.skipCalls.Load(); got != 1 {
+			t.Fatalf("RecordSkip call count = %d after the cycle finished, want still 1 (the skip added nothing)", got)
+		}
+	})
+
+	t.Run("real store", func(t *testing.T) {
+		store := pollruns.NewStore()
+		p, done, release := startBlockedMusicBrainzCycle(t, store)
+
+		err := p.RunMusicBrainzCycle(context.Background())
+		if !errors.Is(err, ErrCycleInProgress) {
+			t.Fatalf("second RunMusicBrainzCycle error = %v, want ErrCycleInProgress", err)
+		}
+		snap := store.Snapshot()[pollruns.SourceMusicBrainz]
+		if len(snap.History) != 0 {
+			t.Fatalf("history length = %d during the skipped tick, want 0 (a skip is never an entry)", len(snap.History))
+		}
+		if snap.ConsecutiveSkips != 1 {
+			t.Fatalf("ConsecutiveSkips = %d, want 1", snap.ConsecutiveSkips)
+		}
+
+		release()
+		if err := <-done; err != nil {
+			t.Fatalf("first RunMusicBrainzCycle: %v", err)
+		}
+
+		// One more clean cycle: the consecutive-skip count resets inside the
+		// store's RecordRun (pollruns.go), not inside runCycle.
+		if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+			t.Fatalf("third RunMusicBrainzCycle: %v", err)
+		}
+		snap = store.Snapshot()[pollruns.SourceMusicBrainz]
+		if len(snap.History) != 2 {
+			t.Fatalf("history length = %d, want 2 (the released cycle + one clean cycle; the skip added none)", len(snap.History))
+		}
+		if snap.ConsecutiveSkips != 0 {
+			t.Fatalf("ConsecutiveSkips = %d after a completed RecordRun, want 0", snap.ConsecutiveSkips)
+		}
+	})
+}
+
+// TestRunRecorder_RecordsErrorOutcomeOnListFailure proves a watchlist List
+// failure still records exactly one entry, with outcome error, all four
+// counters 0, and no part of the underlying driver error in the entry
+// (RUN-01, threat T-18.1-07).
+func TestRunRecorder_RecordsErrorOutcomeOnListFailure(t *testing.T) {
+	sentinel := errors.New("watchlist-driver-sentinel-9c3f2a")
+	store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return nil, sentinel }}
+	runs := pollruns.NewStore()
+	logger, _ := newTestLogger()
+	p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(runs))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if cycleErr := p.RunMusicBrainzCycle(context.Background()); cycleErr == nil {
+		t.Fatal("RunMusicBrainzCycle returned nil, want a non-nil error when store.List fails")
+	}
+
+	snap := runs.Snapshot()[pollruns.SourceMusicBrainz]
+	if len(snap.History) != 1 {
+		t.Fatalf("history length = %d, want exactly 1 (a List failure still records one entry)", len(snap.History))
+	}
+	lr := snap.LastRun
+	if lr.Outcome != pollruns.OutcomeError {
+		t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeError)
+	}
+	if lr.ArtistsChecked != 0 || lr.ArtistsSkipped != 0 || lr.ArtistsErrored != 0 || lr.EventsRecorded != 0 {
+		t.Fatalf("counters = {checked:%d skipped:%d errored:%d events:%d}, want all 0 for a cycle that never ran",
+			lr.ArtistsChecked, lr.ArtistsSkipped, lr.ArtistsErrored, lr.EventsRecorded)
+	}
+	if strings.Contains(lr.Summary, sentinel.Error()) || strings.Contains(lr.Summary, "sentinel") {
+		t.Fatalf("Summary %q leaks part of the underlying driver error text", lr.Summary)
+	}
+}
+
+// TestRunRecorder_RecordsCancelledOutcome proves a shutdown-cancelled cycle
+// still records exactly one entry with outcome cancelled -- both when
+// cancellation lands mid-cycle and when it precedes any dispatch (RUN-02).
+// The store ignores its context argument, so no detached context is needed.
+func TestRunRecorder_RecordsCancelledOutcome(t *testing.T) {
+	t.Run("cancelled mid-cycle", func(t *testing.T) {
+		var served atomic.Int32
+		ctx, cancel := context.WithCancel(context.Background())
+		store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+		mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+			if mbid == "mbid-1" {
+				cancel()
+			}
+			served.Add(1)
+			return []musicbrainz.ReleaseGroup{}, nil
+		}}
+		runs := pollruns.NewStore()
+		logger, _ := newTestLogger()
+		p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(1), WithRunRecorder(runs))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		cycleErr := p.RunMusicBrainzCycle(ctx)
+		if !errors.Is(cycleErr, context.Canceled) {
+			t.Fatalf("RunMusicBrainzCycle error = %v, want context.Canceled", cycleErr)
+		}
+
+		snap := runs.Snapshot()[pollruns.SourceMusicBrainz]
+		if len(snap.History) != 1 {
+			t.Fatalf("history length = %d, want exactly 1 (a cancelled cycle still records)", len(snap.History))
+		}
+		lr := snap.LastRun
+		if lr.Outcome != pollruns.OutcomeCancelled {
+			t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeCancelled)
+		}
+		if lr.ArtistsChecked < 1 {
+			t.Fatalf("ArtistsChecked = %d, want >= 1 (mbid-1 was fetched before cancellation landed)", lr.ArtistsChecked)
+		}
+		if lr.ArtistsChecked != lr.ArtistsErrored+int(served.Load()) {
+			t.Fatalf("ArtistsChecked (%d) != ArtistsErrored (%d) + fake-served (%d)", lr.ArtistsChecked, lr.ArtistsErrored, served.Load())
+		}
+	})
+
+	t.Run("cancelled before dispatch", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+		mb := &fakeReleaseGroupSource{}
+		runs := pollruns.NewStore()
+		logger, _ := newTestLogger()
+		p, err := New(store, mb, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(1), WithRunRecorder(runs))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		cycleErr := p.RunMusicBrainzCycle(ctx)
+		if !errors.Is(cycleErr, context.Canceled) {
+			t.Fatalf("RunMusicBrainzCycle error = %v, want context.Canceled", cycleErr)
+		}
+
+		snap := runs.Snapshot()[pollruns.SourceMusicBrainz]
+		if len(snap.History) != 1 {
+			t.Fatalf("history length = %d, want exactly 1", len(snap.History))
+		}
+		lr := snap.LastRun
+		if lr.Outcome != pollruns.OutcomeCancelled {
+			t.Fatalf("Outcome = %q, want %q", lr.Outcome, pollruns.OutcomeCancelled)
+		}
+		if lr.ArtistsChecked != 0 || lr.ArtistsSkipped != 0 || lr.ArtistsErrored != 0 || lr.EventsRecorded != 0 {
+			t.Fatalf("counters = {checked:%d skipped:%d errored:%d events:%d}, want all 0 (cancelled before any dispatch)",
+				lr.ArtistsChecked, lr.ArtistsSkipped, lr.ArtistsErrored, lr.EventsRecorded)
+		}
+		if got := atomic.LoadInt32(&mb.calls); got != 0 {
+			t.Fatalf("mb.calls = %d, want 0 (every dispatched worker ctx-bails before fetching)", got)
+		}
+	})
+}
+
+// TestRunRecorder_ErrorSwallowed proves a misbehaving recorder can never break
+// a poll cycle (RUN-03): a recorder that errors, and one that is slow, both
+// leave runCycle returning its normal result, still logging "poll cycle
+// complete", still releasing the overlap guard, and never retrying the write
+// (threats T-18.1-09, T-18.1-10).
+func TestRunRecorder_ErrorSwallowed(t *testing.T) {
+	t.Run("recorder returns an error", func(t *testing.T) {
+		rec := &fakeRunRecorder{runFn: func(ctx context.Context, result pollruns.RunResult) error {
+			return errors.New("recorder write failed")
+		}}
+		store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+		logger, buf := newTestLogger()
+		p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(rec))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+			t.Fatalf("RunMusicBrainzCycle = %v, want nil (an observability write must never turn a green cycle red -- RUN-03)", err)
+		}
+
+		var sawComplete, sawRecorderFail bool
+		for _, logRec := range decodeLogRecords(t, buf) {
+			switch logRec["msg"] {
+			case "poll cycle complete":
+				sawComplete = true
+			case "record poll run failed":
+				sawRecorderFail = true
+				if _, ok := logRec["run_recorder_error"]; !ok {
+					t.Fatalf("'record poll run failed' record has no run_recorder_error attribute: %v", logRec)
+				}
+			}
+		}
+		if !sawComplete {
+			t.Fatal("no 'poll cycle complete' log record -- the cycle must still log its normal completion")
+		}
+		if !sawRecorderFail {
+			t.Fatal("no 'record poll run failed' log record -- the recorder error must be logged once")
+		}
+		if got := rec.runCalls.Load(); got != 1 {
+			t.Fatalf("RecordRun call count = %d, want exactly 1 (a failed write is never retried)", got)
+		}
+		if p.mbRunning.Load() {
+			t.Fatal("mbRunning is still held after an erroring recorder -- the overlap guard must release regardless")
+		}
+	})
+
+	t.Run("recorder is slow", func(t *testing.T) {
+		rec := &fakeRunRecorder{runFn: func(ctx context.Context, result pollruns.RunResult) error {
+			time.Sleep(50 * time.Millisecond)
+			return nil
+		}}
+		store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return threeEntries(), nil }}
+		logger, _ := newTestLogger()
+		p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, &fakeEventRecorder{}, &fakeNotifier{}, 15*time.Minute, logger, WithRunRecorder(rec))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		done := make(chan error, 1)
+		go func() { done <- p.RunMusicBrainzCycle(context.Background()) }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("RunMusicBrainzCycle = %v, want nil", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("RunMusicBrainzCycle did not return -- a slow recorder must not block the cycle unboundedly")
+		}
+		if p.mbRunning.Load() {
+			t.Fatal("mbRunning is still held after a slow recorder returned")
+		}
+		if got := rec.runCalls.Load(); got != 1 {
+			t.Fatalf("RecordRun call count = %d, want exactly 1", got)
+		}
+	})
+}
+
+// TestRunCycle_CounterInvariant is the contracted -race substitute for the
+// runCycle counter fold (D-14): 1000 iterations of a full fan-out with
+// erroring and panicking artists, exact-equality assertions every iteration.
+// A shared-counter regression, a dropped panic result, or an undersized
+// result-channel buffer each fail it by iteration index. Never an inequality:
+// a race manifests as an occasional undercount an "at least" check would hide.
+func TestRunCycle_CounterInvariant(t *testing.T) {
+	const (
+		iterations = 1000 // three runs deep under -count=3
+		M          = 20   // synthetic watchlist entries per iteration
+		K          = 3    // artists whose source fetch returns a sentinel error
+		P          = 2    // artists whose source fetch panics
+		S          = 4    // Deezer entries carrying a nil deezer_id
+		E          = 2    // events recorded per successful artist
+	)
+
+	sentinel := errors.New("counter-invariant: designated fetch error")
+	errMBIDs := map[string]bool{"mbid-1": true, "mbid-2": true, "mbid-3": true}
+	panicMBIDs := map[string]bool{"mbid-4": true, "mbid-5": true}
+
+	makeEntries := func() []watchlist.Entry {
+		out := make([]watchlist.Entry, 0, M)
+		for n := 1; n < M+1; n++ {
+			entry := watchlist.Entry{MBID: fmt.Sprintf("mbid-%d", n), Name: fmt.Sprintf("Artist %d", n)}
+			if n < M-S+1 { // the last S entries carry no deezer_id
+				entry.DeezerID = deezerID(fmt.Sprintf("%d", 1000+n))
+			}
+			out = append(out, entry)
+		}
+		return out
+	}
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("musicbrainz: erroring and panicking artists", func(t *testing.T) {
+		if len(errMBIDs) != K || len(panicMBIDs) != P {
+			t.Fatalf("test setup: want K=%d P=%d, designated %d error + %d panic mbids", K, P, len(errMBIDs), len(panicMBIDs))
+		}
+		var last *Poller
+		for i := 0; i < iterations; i++ {
+			store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return makeEntries(), nil }}
+			mb := &fakeReleaseGroupSource{fn: func(ctx context.Context, mbid string) ([]musicbrainz.ReleaseGroup, error) {
+				switch {
+				case errMBIDs[mbid]:
+					return nil, sentinel
+				case panicMBIDs[mbid]:
+					panic("counter-invariant: designated worker panic")
+				default:
+					return nil, nil
+				}
+			}}
+			events := &fakeEventRecorder{fn: func(ctx context.Context, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
+				return E, nil
+			}}
+			var result pollruns.RunResult
+			rec := &fakeRunRecorder{runFn: func(ctx context.Context, r pollruns.RunResult) error {
+				result = r
+				return nil
+			}}
+
+			p, err := New(store, mb, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithMusicBrainzWorkers(8), WithRunRecorder(rec))
+			if err != nil {
+				t.Fatalf("iteration %d: New: %v", i, err)
+			}
+			if err := p.RunMusicBrainzCycle(context.Background()); err != nil {
+				t.Fatalf("iteration %d: RunMusicBrainzCycle returned %v -- a panicking artist is an errored artist, not a failed cycle", i, err)
+			}
+
+			if result.ArtistsChecked != M {
+				t.Fatalf("iteration %d: ArtistsChecked = %d, want %d", i, result.ArtistsChecked, M)
+			}
+			if result.ArtistsErrored != K+P {
+				t.Fatalf("iteration %d: ArtistsErrored = %d, want %d (K=%d errors + P=%d panics)", i, result.ArtistsErrored, K+P, K, P)
+			}
+			if result.ArtistsChecked-result.ArtistsErrored != M-K-P {
+				t.Fatalf("iteration %d: checked-errored = %d, want %d", i, result.ArtistsChecked-result.ArtistsErrored, M-K-P)
+			}
+			if result.EventsRecorded != (M-K-P)*E {
+				t.Fatalf("iteration %d: EventsRecorded = %d, want %d", i, result.EventsRecorded, (M-K-P)*E)
+			}
+			if result.ArtistsSkipped != 0 {
+				t.Fatalf("iteration %d: ArtistsSkipped = %d, want 0 (MusicBrainz dispatches every entry)", i, result.ArtistsSkipped)
+			}
+			if result.Outcome != pollruns.OutcomeOK {
+				t.Fatalf("iteration %d: Outcome = %q, want %q", i, result.Outcome, pollruns.OutcomeOK)
+			}
+			last = p
+		}
+		if last.mbRunning.Load() {
+			t.Fatal("mbRunning still held after the loop -- a panicking worker must not wedge the overlap guard")
+		}
+	})
+
+	t.Run("deezer: nil-deezer_id entries are skipped, not checked", func(t *testing.T) {
+		var last *Poller
+		for i := 0; i < iterations; i++ {
+			store := &stubStore{listFunc: func(ctx context.Context) ([]watchlist.Entry, error) { return makeEntries(), nil }}
+			events := &fakeEventRecorder{deezerFn: func(ctx context.Context, entry watchlist.Entry, albums []deezer.Album) (int, error) {
+				return E, nil
+			}}
+			var result pollruns.RunResult
+			rec := &fakeRunRecorder{runFn: func(ctx context.Context, r pollruns.RunResult) error {
+				result = r
+				return nil
+			}}
+
+			p, err := New(store, &fakeReleaseGroupSource{}, &fakeAlbumSource{}, events, &fakeNotifier{}, 15*time.Minute, logger, WithDeezerWorkers(8), WithRunRecorder(rec))
+			if err != nil {
+				t.Fatalf("iteration %d: New: %v", i, err)
+			}
+			if err := p.RunDeezerCycle(context.Background()); err != nil {
+				t.Fatalf("iteration %d: RunDeezerCycle: %v", i, err)
+			}
+
+			if result.ArtistsSkipped != S {
+				t.Fatalf("iteration %d: ArtistsSkipped = %d, want %d", i, result.ArtistsSkipped, S)
+			}
+			if result.ArtistsChecked != M-S {
+				t.Fatalf("iteration %d: ArtistsChecked = %d, want %d", i, result.ArtistsChecked, M-S)
+			}
+			if result.ArtistsChecked+result.ArtistsSkipped != M {
+				t.Fatalf("iteration %d: checked+skipped = %d, want %d", i, result.ArtistsChecked+result.ArtistsSkipped, M)
+			}
+			if result.Outcome != pollruns.OutcomeOK {
+				t.Fatalf("iteration %d: Outcome = %q, want %q", i, result.Outcome, pollruns.OutcomeOK)
+			}
+			last = p
+		}
+		if last.dzRunning.Load() {
+			t.Fatal("dzRunning still held after the loop")
+		}
+	})
 }

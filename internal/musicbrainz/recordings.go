@@ -155,7 +155,7 @@ func (c *Client) fetchRecordingPage(ctx context.Context, mbid string, offset int
 	if err != nil {
 		return recordingEnvelope{}, fmt.Errorf("musicbrainz: recordings by artist: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		// Never echo the response body -- only the status code, which is

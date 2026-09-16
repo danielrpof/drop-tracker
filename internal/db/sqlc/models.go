@@ -9,14 +9,15 @@ import (
 )
 
 type Artist struct {
-	ID             int64              `json:"id"`
-	Mbid           string             `json:"mbid"`
-	DeezerID       *string            `json:"deezer_id"`
-	Name           string             `json:"name"`
-	Disambiguation *string            `json:"disambiguation"`
-	ImageUrl       *string            `json:"image_url"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID                  int64              `json:"id"`
+	Mbid                string             `json:"mbid"`
+	DeezerID            *string            `json:"deezer_id"`
+	Name                string             `json:"name"`
+	Disambiguation      *string            `json:"disambiguation"`
+	ImageUrl            *string            `json:"image_url"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ArtMatchAttemptedAt pgtype.Timestamptz `json:"art_match_attempted_at"`
 }
 
 type Event struct {
@@ -35,6 +36,15 @@ type Event struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	PreviousTrackCount *int32             `json:"previous_track_count"`
 	ReleaseType        *string            `json:"release_type"`
+	WatchedArtistName  *string            `json:"watched_artist_name"`
+}
+
+type NotificationSetting struct {
+	ID               int32              `json:"id"`
+	DigestEnabled    bool               `json:"digest_enabled"`
+	DigestCadence    string             `json:"digest_cadence"`
+	DigestLastSentAt pgtype.Timestamptz `json:"digest_last_sent_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Watchlist struct {

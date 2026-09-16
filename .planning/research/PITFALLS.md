@@ -1,292 +1,233 @@
 # Pitfalls Research
 
-**Domain:** Go release-tracking service (external API polling + diff/notify) with a "Full Pipeline" GitHub Actions CI/CD practice goal
-**Researched:** 2026-08-04
-**Confidence:** MEDIUM (cross-checked against official docs, GitHub issues/discussions, and multiple independent write-ups; no single-source claims treated as authoritative)
+**Domain:** Scheduled digest/batch notifications, added onto an existing real-time per-event Discord notification pipeline (drop-tracker v1.5)
+**Researched:** 2026-09-11
+**Confidence:** MEDIUM (general digest/cron/Discord findings cross-checked across multiple sources; drop-tracker-specific findings are HIGH — verified directly against this repo's schema and code)
+
+## Codebase Grounding (read this before the pitfalls below)
+
+The existing real-time notifier is **already an outbox/queue pattern**, not a fire-on-insert push:
+
+- `events.notified_at TIMESTAMPTZ` (nullable) is the queue marker. `ListUnnotified` (`queries/events.sql`) is `SELECT * FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC`.
+- `MarkNotified` is `UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL` — a per-row atomic claim, called only after a confirmed Discord send (`internal/notifier/notifier.go`, D-06/D-07/D-10).
+- `Notifier.NotifyPending` is invoked once at the end of **every** poll cycle (`internal/poller/poller.go:514`), for both the MusicBrainz and Deezer cycles independently, guarded by a single shared `notifying atomic.Bool` CAS flag so overlapping cycles never double-drain.
+- `events_unnotified_idx` is a partial index on `notified_at IS NULL`, sized for "usually near-empty."
+
+This matters enormously for digest design: **the queue already exists.** Digest mode is not "build a new buffer," it's "change who drains `notified_at IS NULL` rows, how often, and how many messages the drain produces." Most of the pitfalls below follow directly from that reframing — the dangerous move is building a *second*, parallel queueing mechanism (an in-memory buffer, a new table, a second timestamp column) instead of extending the one that's already race-tested and restart-safe.
+
+---
 
 ## Critical Pitfalls
 
-### Pitfall 1: MusicBrainz rate-limit violations get you fully blocked, not throttled
+### Pitfall 1: Real-time drain stays wired in, digest mode just adds a second consumer on top
 
 **What goes wrong:**
-The scheduler fires MusicBrainz requests for every watchlist entry back-to-back (e.g. a `for` loop over N artists with no pacing), or fan-out happens across concurrent goroutines. MusicBrainz doesn't gracefully degrade — once you exceed ~1 request/second, it declines **100%** of your requests with HTTP 503 until your rate drops, not just the requests over the limit. A missing or generic `User-Agent` header (e.g. Go's default `Go-http-client/1.1`) can get the app throttled independently of rate, or rejected outright.
+`poller.go` calls `p.notifier.NotifyPending(...)` unconditionally at the end of every poll cycle today. If digest mode is implemented as a new, separate scheduled job that also drains `notified_at IS NULL` rows, but the existing per-poll-cycle call to `NotifyPending` is left untouched, every event gets posted twice: once immediately (real-time path, still wired) and once again in the next digest batch — except `MarkNotified`'s `AND notified_at IS NULL` guard means the real-time path wins the race almost every time, so digest mode silently does nothing while looking "toggled on." Either failure mode (double-post, or digest mode that's a no-op) is easy to ship because both code paths compile and pass tests that only exercise one mode at a time.
 
 **Why it happens:**
-Developers test with 1-2 watchlist artists locally where sequential polling never approaches the limit, then it breaks once real usage has 10+ artists and the cron tick tries to check them all in the same cycle.
+The toggle is a config value, not a structural change to the call graph. It's tempting to gate the *content* of what a drain sends (batch vs. individual) while forgetting to gate *whether the per-poll-cycle drain runs at all*.
 
 **How to avoid:**
-- Build a single rate-limited MusicBrainz client (e.g. `golang.org/x/time/rate` with `rate.NewLimiter(rate.Every(1*time.Second), 1)`) that every call — poller and search-proxy alike — goes through. Never let two code paths hit MusicBrainz independently.
-- Set a descriptive `User-Agent` (`drop-tracker/0.1.0 (contact-url-or-email)`) as a package-level constant from day one, not an afterthought before shipping.
-- Serialize per-cycle MusicBrainz calls (one artist at a time), don't parallelize them.
+Make the digest toggle a single decision point that both `poller.go`'s per-cycle call site and the new scheduled digest job read from the same source: when digest mode is on, `NotifyPending`'s per-cycle invocation becomes a no-op (or is skipped entirely) and only the digest cron job drains `notified_at IS NULL`; when digest mode is off, the digest cron job's own tick is a no-op and the existing per-cycle drain resumes. One `Sink`-shaped seam deciding "who currently owns draining the outbox" is safer than two independent boolean checks that can drift out of sync.
 
-**Warning signs:** Intermittent 503s in logs that correlate with watchlist size growing; search-proxy endpoint (used by the UI) and the background poller racing for the same rate budget causes user-facing search to fail during a poll cycle.
+**Warning signs:** A test that toggles digest mode on, inserts an event, runs both the poll cycle and the digest tick, and asserts Discord received exactly one message — if that test doesn't exist, this bug is very likely live.
 
-**Phase to address:** Early — when the MusicBrainz client is first built (before the scheduler/poller phase), since the rate limiter needs to be a foundational property of the client, not bolted on later.
+**Phase to address:** The phase that wires the digest scheduler into the existing poll-cycle/notifier seam (not the phase that only builds the DB-persisted toggle and SPA control).
 
 ---
 
-### Pitfall 2: robfig/cron double-fires jobs on slow ticks or restarts, causing duplicate poll cycles
+### Pitfall 2: Operator's "9am" isn't the container's "9am" — timezone and Alpine tzdata
 
 **What goes wrong:**
-robfig/cron has no built-in overlap protection — if a poll cycle for a large watchlist takes longer than the configured interval (e.g. MusicBrainz's 1 req/sec limit makes a 30-artist cycle take 30+ seconds), the next scheduled tick can start a second poll cycle concurrently with the first, doubling API load and creating race conditions in the diff logic (see Pitfall 3).
+The Docker image is a multi-stage build on `alpine` (per this project's Dockerfile/stack decisions). Alpine's minimal base does **not** ship the IANA timezone database — Go's `time.LoadLocation("America/New_York")` (or whatever zone the operator picks in the SPA) will fail at runtime with `unknown time zone` unless `tzdata` is installed in the final stage, *or* Go's embeddable `time/tzdata` package is blank-imported so the zoneinfo is baked into the binary itself. Separately, `robfig/cron` defaults to the **host's local timezone** unless `cron.WithLocation(...)` is passed explicitly — in a container that's almost always UTC, not the operator's timezone, so a schedule entered as "fire at 9am" silently fires at 9am UTC instead.
 
 **Why it happens:**
-The interval is chosen for "how often should we check," not for "how long does a full cycle actually take" — these get conflated until watchlist size grows or an external API slows down.
+This class of bug is invisible in local dev (a developer's own machine has full tzdata and a "real" local timezone that happens to match their expectations) and only surfaces in the actual deployed container, which is a different environment than where it was written and tested.
 
 **How to avoid:**
-- Wrap the poll job with `cron.SkipIfStillRunning` (or `DelayIfStillRunning`) middleware from `robfig/cron/v3` — never use raw `AddFunc` without it.
-- Since this is a single-binary, single-instance deployment (per the locked architecture), distributed locking is not needed for v1 — but if a future phase adds horizontal scaling, note that robfig/cron has no multi-instance coordination and would double-fire across replicas without an external lock (Redis SETNX, Postgres advisory lock).
-- Schedule in UTC explicitly; avoid scheduling right at DST transition hours if any user-facing "at this local time" scheduling is ever added (not currently a requirement, but worth noting for the config layer).
+1. Store the operator's chosen IANA zone name (e.g. `"America/Chicago"`) in Postgres alongside the digest config, not a UTC offset — offsets don't carry DST information.
+2. Blank-import `time/tzdata` in `main.go` (`_ "time/tzdata"`) so the zoneinfo database is compiled into the binary and independent of the base image — cheaper and more reliable than relying on an Alpine package staying installed across image rebuilds.
+3. Pass `cron.WithLocation(loc)` explicitly when constructing the digest cron entry, using the operator's stored zone, not the process default.
+4. Never store or compute the digest fire time in UTC and then "convert for display only" — compute the next fire time using `time.Date(..., loc)` in the operator's zone so DST arithmetic is correct by construction.
 
-**Warning signs:** Duplicate log lines for the same artist within seconds of each other; Discord notifications arriving in pairs; MusicBrainz 503s that correlate with poll-cycle duration approaching the interval.
+**Warning signs:** Any code path that treats the digest time as a bare `HH:MM` string without an accompanying zone; any `time.Now()` call in the digest scheduler with no explicit `.In(loc)`.
 
-**Phase to address:** Early/mid — when the scheduler is wired up (same phase as Pitfall 1), because the overlap-guard middleware is a one-line addition at construction time but very easy to forget and hard to retrofit once diff logic assumes single-flight execution.
+**Phase to address:** The phase that builds the digest scheduler itself — this must be settled before any cron-registration code is written, and needs a Dockerfile check (or CI smoke test) that the built image can actually `time.LoadLocation` a real zone name.
 
 ---
 
-### Pitfall 3: Diff-against-seen-store race conditions produce duplicate or missing notifications
+### Pitfall 3: DST transitions skip or double-fire the digest
 
 **What goes wrong:**
-Two variants:
-1. **Duplicate notifications:** the poll cycle reads the "seen" row, compares to the fetched release, decides it's new, sends the Discord notification, *then* writes the "seen" row — if the process crashes or a second cycle overlaps between the notify and the write, the same release gets notified again on the next cycle.
-2. **Missed updates:** the diff only checks "does this release ID exist in the seen store," so an edited release (e.g. MusicBrainz release-group gets a deluxe edition added, or a track's guest-feature credit is corrected after initial ingestion) is silently ignored because the ID already exists — even though the *content* changed and that's exactly the kind of change (tracklist/feature changes) this app is supposed to catch.
+`robfig/cron` (confirmed on the maintained v3 line, which this project already depends on) has documented, still-open gaps around spring-forward and fall-back: a job scheduled inside the skipped "spring forward" hour (e.g. 2:30am when clocks jump from 2:00 to 3:00) fires immediately when the clock jumps rather than being silently lost, but the fall-back case — where the local hour repeats — has ambiguous, under-documented behavior on whether the job fires once or twice. A digest scheduled for a fixed local wall-clock time (e.g. "9:00am daily") will hit this twice a year in any timezone that observes DST.
 
-**Why it happens:** "Have I seen this ID before" is the naive first implementation, and reordering "notify" before "commit as seen" feels natural procedurally but isn't crash-safe or idempotent.
+**Why it happens:**
+Cron libraries reason in wall-clock time; DST transitions are precisely the two days a year wall-clock time is not a monotonic, one-to-one mapping onto real time. This is a known, structural limitation of wall-clock cron scheduling, not a bug specific to this project.
 
 **How to avoid:**
-- Store a content hash or a `last_seen_payload`/version marker (e.g. hash of tracklist + release date + title) per tracked entity, not just existence. Diff against the hash, not just presence, to catch edits.
-- Make the write-then-notify ordering atomic and ordered correctly: write the new "seen" state (or an "outbox" row representing the pending notification) inside the same DB transaction as detecting the change, and only mark the outbox entry "delivered" after the Discord webhook call succeeds. This is the transactional-outbox pattern — it decouples detection (which must be exactly-once against the DB) from delivery (which can safely retry).
-- Give each detected change a stable idempotency key (e.g. `sha256(artist_id + release_id + change_type + content_hash)`) so that even if the notifier retries, it can no-op against an already-delivered outbox row instead of re-sending.
+- Pick a fire time unlikely to fall in a transition window where possible (DST transitions in the US happen at 2am local, not 9am, so a mid-morning/evening digest time mostly sidesteps the ambiguous-hour case — but don't assume this holds for every timezone an operator might pick).
+- Make the digest job **idempotent on the send side**, not just the schedule side: the window-selection query (see Pitfall 4) should derive its event set from `notified_at IS NULL`, not from "did cron tick." A double-fire on a DST fall-back day then finds nothing new to send on the second tick (empty digest → suppressed, see Pitfall 7) rather than sending duplicate content.
+- Log every digest cron fire (scheduled time, actual fire time, event count) so a DST-week anomaly is visible in `/status` or logs rather than silently causing a missed or duplicate operator-facing message.
 
-**Warning signs:** Same release notified twice in Discord after a crash/restart during a poll cycle; a known tracklist edit (deluxe edition added) on MusicBrainz never triggers a "deluxe/tracklist changed" alert even though the release existed already.
+**Warning signs:** No log line distinguishing "cron ticked, N events found" from "cron ticked, 0 events found" — without that, a DST-week skip/double-fire looks identical to "just a quiet day" in the logs.
 
-**Phase to address:** Mid — this is core to the diff engine phase; get the outbox/idempotency-key design right before the notifier phase is built on top of it, since retrofitting an outbox after the notifier already assumes "detect and notify in one step" means redesigning both.
+**Phase to address:** Same phase as Pitfall 2 (scheduler construction) — add a test that advances a fake clock across both DST boundaries and asserts the digest fires exactly once per calendar day either side of the transition.
 
 ---
 
-### Pitfall 4: go:embed ships a stale or dev-only frontend build inside the Go binary
+### Pitfall 4: Window-boundary events are neither lost nor double-sent, but land in a non-obvious cycle
 
 **What goes wrong:**
-`go:embed` embeds whatever is on disk in the `dist/` (or equivalent) directory *at Go build time*. If CI builds the Go binary without first running `npm run build` (or runs it against a stale/cached `dist/`), the binary silently embeds an old or empty frontend — the app still compiles and runs, it just serves outdated or broken UI, and nothing in `go build` will catch this. A related but separate mistake: forgetting the SPA fallback route (serving `index.html` for any unmatched path so React Router can handle client-side routes) means deep-linking or a browser refresh on a non-root route 404s in production even though it worked in dev.
+If the digest job selects events by a time-range query (`created_at BETWEEN window_start AND window_end`), an event whose `created_at` lands within milliseconds of the boundary can end up in either window depending on exact commit timing versus query-snapshot timing — not "double-sent" (Postgres snapshot isolation prevents that), but attributed to a different day's digest than an operator watching a clock would expect. Worse, if the window boundaries are computed independently each run (e.g. "now minus 24h") rather than anchored to the last successful send, a delayed or skipped cron tick (Pitfall 3, Pitfall 5) silently shifts or narrows the window, and events can fall into the **gap** between two windows and never get selected by either.
 
-**Why it happens:** The Go build and the frontend build are two separate toolchains with no dependency graph between them — `go build` has no idea `dist/` needs regenerating, and local dev typically runs the Vite dev server directly (bypassing embed entirely), so the embed path is only exercised at the very end, often first noticed in CI or in the shipped image.
+**Why it happens:**
+Time-range windowing assumes cron fires exactly on schedule every time. Combined with Pitfall 5 (restarts) and Pitfall 3 (DST), that assumption doesn't hold.
 
 **How to avoid:**
-- CI pipeline order must be explicit and enforced: `npm ci && npm run build` (produces `dist/`) **before** `go build`/`docker build` — never let the Dockerfile's Go build stage run without a preceding, verified frontend build stage in the same multi-stage Dockerfile (so there's no "which ran last" ambiguity locally either).
-- Add a build-time guard: fail the build if `dist/index.html` doesn't exist before the `go:embed` directive is compiled (a simple `Makefile`/script check), so a missing frontend build fails loudly instead of embedding an empty/stale directory.
-- Implement the catch-all SPA route (serve `index.html` for any path not matched by the API prefix and not an existing embedded file) in the Go router from the start, and test it with an actual non-root-path request in CI, not just `/`.
+Don't window by time range at all — window by **outbox state**, matching the existing real-time pattern. The digest query should be `SELECT * FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC` (the exact `ListUnnotified` query that already exists), with no time-range predicate. "The digest window" becomes "everything that accumulated since the last successful digest send," which is self-correcting: a late, skipped, or double-fired cron tick changes *when* the digest goes out, never *whether* an event gets included exactly once. This also means an event detected in the last second before the digest job's query runs is safely included (it's just an unclaimed row), and an event detected one second after is safely deferred to the next cycle — no boundary ambiguity, no lost row.
 
-**Warning signs:** Local `docker build` producing a working image while a clean CI checkout produces a broken/blank UI (stale `dist/` reused locally); refreshing the browser on any route other than `/` returns 404 in the built image but works in `npm run dev`.
+**Warning signs:** Any digest query with a `created_at >= $1 AND created_at < $2` predicate instead of `notified_at IS NULL` — that's the tell that windowing is being done by wall-clock time instead of by outbox state.
 
-**Phase to address:** Mid — when the go:embed wiring and Dockerfile are built (UI integration phase), before the CI pipeline phase locks in build ordering.
+**Phase to address:** The phase that writes the digest event-selection query — should reuse/extend `ListUnnotified`, not introduce a parallel time-ranged query.
 
 ---
 
-### Pitfall 5: Discord webhook rate limits and message-size limits break notifications during release bursts
+### Pitfall 5: Process restart near the fire time silently skips that cycle (schedule, not data)
 
 **What goes wrong:**
-Album drop days (e.g. a Friday with many watched artists releasing simultaneously) can produce a burst of notifications in a short window. Discord webhooks allow roughly 30 requests/60s per webhook and 5 requests/5s per channel (shared across all webhooks posting to that channel) — a naive loop that posts one webhook call per detected change with no pacing will start hitting 429s, and mishandled 429s (retrying immediately, or retrying without honoring `Retry-After`) can escalate into a global rate-limit ban on that IP/token for up to 10 minutes, during which *all* notifications silently fail. Separately, Discord message content is capped at 2000 characters — a notification that includes a full tracklist for a large deluxe edition can exceed this and get rejected outright unless truncated or split into an embed.
+`robfig/cron`'s schedule lives entirely in process memory — it computes each entry's next fire time from `Now()` at `cron.Start()`, with no persisted "last fired at" or "missed run" catch-up. If the container restarts (a deploy — this app restarts on every merge-to-main release per its existing CI/CD pipeline) in the minute the digest was due to fire, that fire is simply gone: on restart, cron recomputes the *next* scheduled time from the new `Now()`, which for a daily digest is tomorrow, and for a weekly digest is up to six days later.
 
-**Why it happens:** Works fine in manual testing (one notification at a time); breaks under the exact "many releases detected in one poll cycle" scenario that's the app's core value proposition.
+**Why it happens:**
+This is a direct consequence of using an in-process scheduler with no persistence — which is the correct, already-validated choice for this project's poll cycles (ADR-0001 made the same call for poll-run history: single-instance, restart-reset-by-design is acceptable there). But a digest's failure mode is more visible to the operator than a poll-run history entry: "I configured a weekly digest and didn't get one this week" is a much louder signal than "the ring buffer reset."
 
 **How to avoid:**
-- Queue detected notifications and send them serially with spacing (e.g. 400ms+ apart) rather than firing concurrently per detected change.
-- Always read and honor the `Retry-After` header/`retry_after` field on a 429 response before retrying; back off further on repeated 429s rather than retrying immediately.
-- Use a Discord embed (title/fields) instead of a raw content string for release details, and truncate/paginate tracklists that could approach the 2000-character content limit or embed field limits.
-- Treat notification delivery as retryable-but-idempotent (ties back to Pitfall 3's outbox key) so a failed/rate-limited send can be retried later without risk of double-posting once it succeeds.
+- This is *not* a data-loss risk, thanks to Pitfall 4's design: skipped events stay `notified_at IS NULL` and simply roll into the next successful cycle. Make sure this stays true — do not let any digest-adjacent code mark events notified before a confirmed Discord send.
+- Store `last_digest_sent_at` in Postgres (not memory) so that on boot, the scheduler can detect "the last successful send was more than one full cadence period ago" and log a visible warning (or optionally fire an immediate catch-up send) rather than silently waiting for the next natural cron tick.
+- Surface `last_digest_sent_at` in `/status` (this project already has a "System" observability surface from v1.4 — extending it, rather than inventing a new diagnostic path, is the lower-risk move) so a missed cycle is operator-visible instead of only discoverable by an empty Discord channel.
 
-**Warning signs:** Notifications missing for some artists on high-release-volume days (Fridays) while working fine on quiet days; Discord API logs showing 429s with increasing frequency during bursts.
+**Warning signs:** No persisted "last sent" timestamp anywhere outside cron's in-memory state; a digest feature with no `/status`-visible field showing when it last actually ran.
 
-**Phase to address:** Mid — when the notifier is built, before it's exercised at any real watchlist scale.
+**Phase to address:** Scheduler-construction phase for the persisted cursor; the observability-surfacing part can ride along with whatever phase touches the SPA digest config screen, since that's already the natural place an operator checks "is this working."
 
 ---
 
-### Pitfall 6: The "Full Pipeline" GitHub Actions workflow is built in the wrong order, hiding failures or wasting CI minutes
+### Pitfall 6: Toggling digest → real-time mid-window orphans the queued events
 
 **What goes wrong:**
-A common anti-pattern is running expensive/slow steps (Trivy image scan, SBOM generation) before cheap/fast steps (lint, unit tests), so a trivial lint failure isn't caught until minutes into the run. Another is running the security/secret scan (gitleaks) *after* the image has already been pushed to ghcr.io, meaning a leaked secret is already public in a registry layer by the time it's detected. A third is not caching Go module downloads or Docker layers at all, making every CI run rebuild everything from scratch — turning a pipeline that should take 2-3 minutes into 10+.
+Say digest mode is on, three events have accumulated (`notified_at IS NULL`, waiting for Friday's digest), and the operator switches the toggle to real-time on Wednesday. If the per-poll-cycle `NotifyPending` call is simply re-enabled going forward, it will pick up those three already-queued events on the very next poll cycle and post them individually — which may be exactly right (nothing is lost, they just arrive as three separate real-time messages instead of one digest) or may be jarring if the operator's mental model was "those are gone, digest mode ate them." Conversely, if the implementation instead moves a "digest queue" into some other bucket when digest mode is on and doesn't reconcile it on toggle-off, those events never get sent at all — a genuine drop.
 
-**Why it happens:** The pipeline is often built by appending steps in the order features get built (test first, then "let's add scanning," then "let's add SBOM," then "let's add publish") rather than being deliberately ordered by cost and blast-radius.
+**Why it happens:**
+This is the direct consequence of *not* following Pitfall 1's guidance (single shared outbox, single active consumer). If the digest feature is built with its own queue separate from `notified_at IS NULL`, toggling modes mid-window becomes a data-migration problem instead of a no-op.
 
 **How to avoid:**
-- Order stages: lint/vet → unit tests → gitleaks secret scan → build → Trivy scan of the built artifact/image → SBOM generation → semantic-release (version/tag) → push to ghcr.io. Fail fast on cheap checks before spending minutes on Docker builds and scans.
-- Never push to ghcr.io before both gitleaks and Trivy have passed on that exact build artifact — the registry push should be the last step, gated on everything else green.
-- Cache Go build/module cache (`actions/setup-go`'s built-in caching, or explicit `actions/cache` on `~/go/pkg/mod` and `~/.cache/go-build`) and Docker layers (`docker/build-push-action` with `cache-from`/`cache-to: type=gha`) — note that BuildKit `--mount=type=cache` (used for `go mod download` inside the Dockerfile) is a *separate* cache mechanism from the GHA layer cache and needs its own cache action, or builds silently stop benefiting from module caching even though layer caching looks "on."
-- Pin third-party actions (`aquasecurity/trivy-action`, `gitleaks/gitleaks-action`, etc.) to full commit SHAs, not version tags — in March 2026 a real supply-chain compromise force-pushed malicious commits onto Trivy's own action tags, exfiltrating CI secrets from pipelines that used tag-pinned versions while appearing to run normally. Tags are mutable; SHAs are not.
+Keep exactly one outbox (`notified_at IS NULL`) and exactly one active consumer determined by the current mode at drain time, decided fresh on every drain attempt (poll-cycle tick or digest cron tick) rather than cached at toggle time. With that design, toggling digest → real-time mid-window has an automatic, correct, and easily-explained behavior: whatever's still unclaimed gets swept up by the next real-time poll cycle and sent individually, with no special-case flush code needed. Document this behavior explicitly in the SPA copy near the toggle ("switching to real-time will immediately send any events that built up while digest mode was on") so it's a stated contract, not an accidental side effect an operator discovers by surprise.
 
-**Warning signs:** CI runs taking 8-10+ minutes for a one-line change; a scan step failing on a build that was already pushed to the registry in an earlier step; `git log` on a pinned action tag showing a different commit than what was originally reviewed.
+**Warning signs:** Any new column/table (`digest_queue`, `pending_digest_events`, a second `*_at` timestamp) introduced specifically for digest mode — that's a sign a second, parallel outbox is being built instead of reusing the one that exists.
 
-**Phase to address:** Early-to-mid — the pipeline should be scaffolded with correct stage ordering and caching from the first CI phase, since reordering stages later means rewriting job dependencies (`needs:`) across the whole workflow file.
+**Phase to address:** Same phase as Pitfall 1 — this is really one design decision (single outbox, mode-selected consumer) with two observable consequences.
 
 ---
 
-### Pitfall 7: semantic-release misconfiguration in a Go repo (no package.json) silently no-ops or fails the release step
+### Pitfall 7: Discord embed/message limits silently truncate or drop events in a busy digest
 
 **What goes wrong:**
-semantic-release defaults to the `@semantic-release/npm` plugin, which expects a `package.json` to bump and (optionally) publish. In a pure Go repo with no `package.json`, this either errors out immediately or, if someone adds a placeholder `package.json` just to satisfy it, risks semantic-release trying to `npm publish` a meaningless package or misreading the "version" field as the source of truth instead of git tags. Related: forgetting `GITHUB_TOKEN` permissions (`contents: write`, and `packages: write` if the release step also needs to push to ghcr.io) causes the tag/release-creation step to fail with an opaque 403 rather than a clear "missing permission" message.
+A Discord embed is capped at 25 fields, 6000 total characters across all embeds in one message, and a single message can carry at most 10 embeds; per-webhook send rate is roughly 5 requests per 2 seconds. A digest that naively tries to pack every event from a busy day/week into one embed's fields will either get rejected outright by Discord's API once a limit is crossed, or — worse, if the code truncates the field list to "the first 25" without any further handling — silently drops the rest with no operator-visible signal and no corresponding `MarkNotified` skipped, meaning those events are *not* marked notified and will confusingly reappear in the *next* digest (partially mitigating data loss, but producing a duplicate-looking entry days later).
 
-**Why it happens:** Every semantic-release tutorial defaults to a Node.js/npm project; adapting it to a Go repo requires actively removing/replacing the default plugin, which is easy to skip if the setup is copy-pasted from a Node example.
-
-**How to avoid:**
-- Use a `.releaserc`/`release.config.js` that explicitly lists only the plugins needed: `@semantic-release/commit-analyzer`, `@semantic-release/release-notes-generator`, `@semantic-release/github` (for GitHub releases/tags), and skip `@semantic-release/npm` entirely — do not add a placeholder `package.json` to work around it.
-- If the pipeline needs semantic-release to determine the version used to *tag the Docker image* pushed to ghcr.io, have the release step output the computed version (via `@semantic-release/exec` or reading the created git tag) and feed it into the `docker/build-push-action` tag, rather than trying to make semantic-release itself aware of Docker/Go.
-- Explicitly set `permissions: contents: write` (and `packages: write` if applicable) on the release job in the workflow YAML — don't rely on repo-level default token permissions, which may be read-only depending on org settings.
-
-**Warning signs:** semantic-release step failing with `ENOPKGJSON`/"no package.json found" type errors; a release job that appears to succeed but no git tag or GitHub release is actually created; ghcr.io image tags not matching the semantic-release-computed version.
-
-**Phase to address:** Mid — when the release/versioning step is added to the pipeline, after lint/test/scan are already working, since it depends on the rest of the pipeline being stable first (semantic-release should be the last "gate" before publish).
-
----
-
-### Pitfall 8: Multi-stage Dockerfile non-root user is set at the wrong stage, or bloats the final image
-
-**What goes wrong:**
-Two related mistakes: (1) switching `USER nonroot` in the final stage *before* copying files that need root to place (or before an entrypoint script needs execute permission set) causes "permission denied" at container start rather than at build time, which is a worse debugging experience; (2) using a full `golang:1.x` image (not `-alpine` or a multi-stage split) as the *final* runtime stage instead of just the *builder* stage, shipping the entire Go toolchain, or copying the frontend `node_modules`/build tooling into the final image instead of only the built `dist/` output — both massively bloat the final image and expand the attack surface Trivy will flag against.
-
-**Why it happens:** Copy-pasted Dockerfile examples often don't clearly separate "what needs root" (installing packages, chown-ing directories) from "what should run as non-root" (the actual server process), and it's easy to reuse the builder's base image for the runtime stage out of inertia rather than switching to a minimal one.
+**Why it happens:**
+The existing real-time notifier only ever formats one event per embed, so there's no existing code path in this codebase that has ever had to chunk N events across multiple embeds/messages — this is genuinely new surface area, not an extension of a pattern that's already been battle-tested here.
 
 **How to avoid:**
-- Use a true multi-stage build: stage 1 builds the frontend (`node:xx` → produces `dist/`), stage 2 builds the Go binary (`golang:1.x` → `CGO_ENABLED=0 go build`), stage 3 is a minimal runtime base (`gcr.io/distroless/static-debian12:nonroot` or `alpine` + explicit non-root user) that only `COPY --from=` the compiled binary and embedded assets — never the toolchains.
-- Perform any `chown`/directory-creation as root *before* the `USER nonroot` instruction; if using distroless nonroot (UID 65532), remember it can't `chown` at runtime since there's no shell — any writable directories must be prepared and owned correctly during the build stage with `COPY --chown=`.
-- Since the frontend is embedded via `go:embed` (not served by Node at runtime), the final image needs zero Node.js presence at all — confirm the final stage's `FROM` line never derives from a Node or full Go SDK base.
-- Order Dockerfile instructions so rarely-changing layers (base image, `go.mod`/`go.sum` download) come before frequently-changing ones (application source) to maximize layer cache hits between builds.
+- Chunk events into multiple embeds (up to 25 fields each) and multiple messages (up to 10 embeds each) as needed, rather than assuming one message suffices.
+- Only call `MarkNotified` for events actually included in a message that received a confirmed 2xx from Discord — matching the existing real-time contract of "mark after confirmed send," applied per-chunk rather than per-event-in-a-loop.
+- Respect the existing 400ms inter-send spacing constant (`defaultSpacing` in `internal/notifier/notifier.go`, already tuned to Discord's 5-req/2s ceiling) between chunked digest messages, the same way the real-time path already does between individual sends — a digest firing 5 chunked messages back-to-back with no spacing can trip the same rate limit the real-time path was built to avoid.
+- For a single-operator, modest-watchlist project, this is a low-probability-but-not-impossible edge case (a very active week across many watched artists) — it doesn't need to be over-engineered, but it must degrade gracefully (multiple messages) rather than silently (dropped fields) when it does happen.
 
-**Warning signs:** Final image size in the hundreds of MB instead of tens of MB (`docker images` sanity check); container crash-looping with "permission denied" only in the built image, not in local `go run`; Trivy flagging OS-package CVEs that only exist because the final image still has a full Alpine/Debian package manager present.
+**Warning signs:** A digest formatter that builds one `discord.Embed` and appends fields in an unbounded loop with no length/count check before sending.
 
-**Phase to address:** Mid — Dockerfile phase, ideally verified with an image-size and non-root smoke test before the CI pipeline phase wires Trivy scanning against it (so the scan phase starts against an already-lean, correctly-permissioned image rather than debugging both at once).
-
----
-
-### Pitfall 9: golang-migrate and sqlc drift apart — schema and generated queries silently mismatch
-
-**What goes wrong:**
-`golang-migrate` orders migration files by numeric version prefix; if `sqlc` is configured to read the same migration directory as its schema source, it parses files in lexicographic (string) order instead. If numeric and lexicographic ordering ever disagree (e.g. `2_add_column.sql` sorts after `10_add_table.sql` lexicographically but before it numerically), `sqlc` can generate Go query code against an incorrect intermediate schema state — this doesn't fail loudly; it produces code that compiles but silently expects the wrong columns/types, and the mismatch only surfaces at runtime against a real database (or worse, only in production if CI's test DB happened to apply migrations in an order that masked it). Separately, if a migration is written but `sqlc generate` isn't re-run (or vice versa — `sqlc` code changed without a matching migration), CI can pass on stale generated code that no longer matches the actual applied schema.
-
-**Why it happens:** golang-migrate and sqlc are independent tools with independent (and different) file-ordering assumptions; nothing forces them to be re-synced, and a small team/solo project easily forgets to re-run `sqlc generate` after every migration change.
-
-**How to avoid:**
-- Always zero-pad migration version prefixes (`0001_`, `0002_`, ... `0010_`) so numeric and lexicographic ordering are always identical — this fully eliminates the ordering-drift class of bug and costs nothing.
-- Add a CI step that runs migrations against a fresh ephemeral Postgres (matching the actual `golang-migrate` CLI/library, not sqlc's own SQL parsing) and then runs `sqlc generate --file sqlc.yaml` and fails the build with a diff if the generated code doesn't match what's committed (`git diff --exit-code` after generate) — this catches "forgot to regenerate" drift directly, and running actual migrations (not just sqlc's schema parser) also catches migration syntax errors that only manifest against a real database engine.
-- Keep migrations and `sqlc` query files reviewed together in the same PR/commit; never let a migration merge without the corresponding `sqlc generate` output committed alongside it.
-
-**Warning signs:** `sqlc generate` succeeding locally but CI integration tests failing with "column does not exist"; generated query code referencing a column that was renamed/dropped in a later migration than the one sqlc actually parsed; migration file names that aren't consistently zero-padded (a code-review smell to catch early).
-
-**Phase to address:** Early — establish the zero-padded migration naming convention and the CI "migrate then generate then diff" check as soon as the first migration and sqlc query are written, since renaming existing migrations later is disruptive (breaks `schema_migrations` version history in any environment that already applied them).
+**Phase to address:** The phase that implements digest message formatting/sending — should extend `internal/discord`'s existing embed-building code and `internal/notifier`'s spacing constant rather than hand-rolling a new send path.
 
 ---
 
 ## Technical Debt Patterns
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|-----------------|------------------|
-| Skipping the outbox/idempotency-key pattern, notifying directly from the diff step | Faster to build v1 notifier | Duplicate/missed notifications on any crash or overlap (Pitfall 3) | Never past the first working demo — retrofit before any real watchlist usage |
-| Using version-tag pinning for GitHub Actions instead of SHA pinning | Simpler, human-readable workflow YAML, easier to bump | Exposed to supply-chain tag-rewrite attacks (real incident, Pitfall 6) | Only for first-party/GitHub-owned actions (`actions/checkout`, etc.) with a documented risk acceptance; never for smaller third-party security-tooling actions |
-| Committing a placeholder `package.json` to make semantic-release "just work" | Avoids configuring `.releaserc` plugins properly | Confusing dual-source-of-truth for versioning, risk of accidental `npm publish` attempts | Never |
-| Running `golang:1.x` (full SDK) as the final Docker runtime stage during early development | One Dockerfile to maintain, easier debugging (has a shell) | Bloated image, larger Trivy CVE surface, slower registry push | Acceptable only in local dev `docker-compose`, never in the image built/scanned/pushed by CI |
-| Hardcoding a single fixed poll interval with no jitter across all watchlist entries | Simple `cron.New()` call, easy to reason about | All entries poll in lockstep, worsening MusicBrainz rate-limit contention as watchlist grows | Acceptable at very small watchlist sizes (<5 artists); revisit once search-proxy live-lookups and poller are competing for the same rate budget |
+|----------|-------------------|-----------------|-----------------|
+| Separate in-memory buffer for "events pending digest," built alongside the existing `notified_at`-based outbox | Feels like a clean, isolated feature module | Reintroduces the exact restart-data-loss risk the DB-backed outbox already solved; requires new reconciliation logic for mode toggles (Pitfall 6) | Never — reuse `notified_at IS NULL` |
+| Fixed UTC-offset digest time instead of an IANA zone name | Simpler config, no tzdata dependency | Breaks twice a year at DST transitions with no natural fix | Never, once an operator-facing "pick your local time" control exists |
+| Digest window computed as `now() - 24h` / `now() - 7d` instead of outbox-state-based | Simple, intuitive-sounding query | Boundary/gap bugs under any schedule drift (restart, DST, late cron tick) | Only acceptable for a throwaway prototype/demo, never for the shipped feature |
+| Single unbounded embed with all events appended as fields, no chunking | Fastest to implement, works fine at current watchlist scale | Silent drop or hard API rejection the first time a digest crosses 25 events | Acceptable temporarily behind an explicit `TODO` + a hard cap that logs a warning, not acceptable as the final shipped behavior |
+| Reading the digest on/off + cadence config once at process boot instead of per-tick | Simpler code, no need for a config-watch mechanism | Contradicts the milestone's explicit goal ("changeable without a redeploy") — a toggle flip in the SPA would silently do nothing until the next restart | Never, given the stated requirement |
 
 ## Integration Gotchas
 
 | Integration | Common Mistake | Correct Approach |
-|-------------|-----------------|-------------------|
-| MusicBrainz | No rate limiting, or per-goroutine limiting instead of a single shared limiter | One shared `rate.Limiter` (1 req/sec) used by every code path that calls MusicBrainz, including the search-proxy |
-| MusicBrainz | Generic/default Go `User-Agent` | Set an explicit, descriptive `User-Agent` constant at client construction |
-| Deezer | Assuming Deezer's rate limits/error semantics mirror MusicBrainz's | Handle Deezer's own "Quota limit exceeded" (error code 4) response distinctly; Deezer is not officially documented for rate-limit numbers, so build in defensive backoff even without a published number |
-| Deezer | Searching with no query parameter, expecting filter-only search | Deezer search requires a non-empty query string; validate before calling |
-| Discord webhooks | Firing all detected notifications concurrently in a burst | Serial queue with spacing, honoring `Retry-After` |
-| GitHub Container Registry | Assuming `GITHUB_TOKEN` has `packages: write` by default | Explicitly set `permissions: packages: write` on the publish job |
-| golang-migrate + sqlc | Trusting sqlc's schema parse order matches golang-migrate's applied order | Zero-pad migration filenames so both orderings agree |
+|--------------|------------------|--------------------|
+| Discord webhooks (digest message) | Packing unlimited events into one embed's fields | Chunk at 25 fields/embed, 10 embeds/message, 6000 total chars/message; send multiple messages if needed |
+| Discord webhooks (digest message) | Firing several chunked messages back-to-back with no spacing | Reuse the existing 400ms inter-send spacing (`defaultSpacing`) between chunks, same as real-time sends |
+| Discord webhooks (digest message) | Treating a 429 on a digest send the same as a single dropped event | A 429 mid-digest should retry the whole failed chunk (or back off and retry the batch), not silently mark some events notified and lose others — keep the per-chunk "mark only on confirmed send" discipline |
+| `robfig/cron` (already a project dependency) | Constructing the digest cron entry with the library's default (host-local) timezone | Pass `cron.WithLocation(operatorZone)` explicitly, sourced from the Postgres-persisted config, not process default |
+| `robfig/cron` (already a project dependency) | Registering the cron schedule once at boot and expecting a Postgres config change to take effect | Support re-registering the cron entry (remove + re-add, or use a dynamically-computed `Schedule`) when the operator changes cadence/time via the SPA, without requiring a restart |
+| Postgres-persisted config (new for this milestone — everything else in the app is env-var-only per CLAUDE.md) | Treating this like the rest of the app's env-var config (read once, cached forever) | This is intentionally a runtime-mutable exception to the "env vars only" convention — design the read path (cache invalidation or per-tick read) accordingly, and call this out explicitly since it's a deliberate deviation from an established project convention |
 
 ## Performance Traps
 
 | Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|-----------------|
-| Sequential, unbounded per-artist MusicBrainz polling in a single cron tick | Poll cycle duration grows linearly with watchlist size, eventually exceeding the poll interval | Rate-limited client + cycle-duration monitoring + `SkipIfStillRunning` guard | Somewhere around 60+ watched artists at a 1-minute interval with MusicBrainz's 1 req/sec cap |
-| No caching in CI (Go modules, Docker layers) | Every PR's CI run takes the full cold-build time | `actions/setup-go` caching + `docker/build-push-action` with `cache-from`/`cache-to: type=gha` | Immediately — this is a day-one cost, not a scale threshold |
-| GitHub Actions cache silently exceeding the 10GB per-repo cap | Cache hit rate quietly drops, builds slow down with no code change | Monitor cache size in Actions UI; prune stale cache keys | Once accumulated Docker layer + Go module + node_modules caches cross ~10GB combined |
-
-## Security Mistakes
-
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Using `pull_request_target` with a checkout of the PR head to run tests/build | Fork PR can exfiltrate `GITHUB_TOKEN`/secrets via modified test/build code | Use plain `pull_request` for untrusted-code build/test (no secrets by default); never check out fork code under `pull_request_target` |
-| Pinning security-tooling GitHub Actions (Trivy, gitleaks) by version tag | Tag can be force-pushed to malicious commit (real March 2026 incident) — secrets exfiltrated while pipeline appears healthy | Pin to full commit SHA; Dependabot can still track/bump SHA pins |
-| Pushing to ghcr.io before gitleaks/Trivy gates pass | A leaked secret or known-critical CVE ends up published in a registry layer, which is very hard to fully scrub afterward | Order the pipeline so publish is strictly the last, fully-gated step |
-| Loosening Trivy severity threshold or adding blanket `--ignore-unfixed` globally to "make the pipeline green" | Real vulnerabilities silently stop blocking builds | Block only on CRITICAL/HIGH with `--exit-code 1`, use a documented, per-CVE `.trivyignore` with expiry/comment rather than a global threshold change |
+|------|-----------|-------------|-----------------|
+| Unbounded digest event count read into memory in one query | Fine at current single-operator watchlist scale | `ListUnnotified` already has no `LIMIT`; acceptable given this project's scale, but worth a sanity cap (e.g. log a warning past a few hundred pending events) so a stuck/misconfigured digest doesn't silently build an unbounded backlog | Not a near-term concern for this project's single-operator, modest-watchlist scope — flag only, don't build infrastructure for it |
+| Digest formatter re-fetching artist/cover-art data per event synchronously before sending | Slow digest send on a busy day, blocking the cron goroutine | Reuse whatever display-field caching the existing per-event notifier already does; the events table already stores denormalized display fields (title, artist_name, cover_art_url) precisely so this isn't needed | Only relevant if a future digest redesign starts re-querying MusicBrainz/Deezer at send time, which nothing here requires |
 
 ## UX Pitfalls
 
 | Pitfall | User Impact | Better Approach |
 |---------|-------------|-------------------|
-| No SPA fallback route for client-side React Router paths | Refreshing the browser on any non-root route 404s in production | Serve `index.html` for any unmatched non-API path from the Go router |
-| Search-proxy endpoint blocked/slow because it shares the same MusicBrainz rate budget as the background poller | Users see slow/failed search-to-add while a poll cycle is running | Either prioritize interactive search requests over background poll requests in the shared limiter, or accept and surface latency in the UI rather than silently timing out |
-| Silent notification loss when Discord rate-limits are hit during a release burst | Users miss real release alerts on exactly the days they'd want them most (Fridays) | Persist detected-but-undelivered changes (outbox) and retry with backoff rather than fire-and-forget |
+| No indication of "last digest sent" anywhere in the SPA | Operator can't tell whether digest mode is actually working or silently stuck (Pitfall 5) | Surface `last_digest_sent_at` and next-scheduled-fire time in the System view alongside the digest toggle |
+| Empty digest sent when zero events accumulated | A blank/near-empty Discord message every day erodes trust in the feature and trains the operator to ignore it | Suppress the send entirely when the outbox is empty at fire time; log the no-op tick instead |
+| Toggling digest → real-time with no explanation of what happens to queued events | Operator surprised by a burst of "old" individual messages, or worse, silently loses them if Pitfall 6 wasn't handled correctly | State the flush behavior explicitly in the SPA UI copy near the toggle (see Pitfall 6) |
+| Digest time picker that accepts a bare `HH:MM` with no timezone selector | Operator has no way to correctly express intent; falls back to server default (likely UTC), producing the exact bug in Pitfall 2 | Timezone selector (or auto-detected browser timezone as the default, explicitly confirmed/overridable) alongside the time picker |
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **MusicBrainz/Deezer clients:** Often missing a shared rate limiter across *all* call sites (poller + search-proxy) — verify by load-testing with a watchlist of 20+ artists, not 1-2
-- [ ] **Diff engine:** Often missing edit-detection (only checks ID existence, not content hash) — verify by manually editing a tracked release's tracklist source data and confirming an alert fires
-- [ ] **go:embed build:** Often ships whatever `dist/` happened to be on disk at Go-build time — verify by running a truly clean CI checkout (`git clean -fdx` locally) and confirming the frontend build step runs before `go build`
-- [ ] **Notifier:** Often fire-and-forget with no retry/backoff — verify by intentionally triggering a burst of 10+ simultaneous detected changes and confirming none silently drop
-- [ ] **CI pipeline ordering:** Often has scan/publish steps in whatever order they were added, not cost/risk order — verify by checking that a deliberately-introduced lint failure or leaked test secret fails fast, before any Docker build/push runs
-- [ ] **Dockerfile non-root:** Often "works on my machine" locally (root) but permission-denied only in CI/prod — verify with `docker run --rm <image> whoami` confirming non-root, and an actual container start (not just `docker build` success)
-- [ ] **sqlc/migrate sync:** Often has generated code that compiles but doesn't match the latest migration — verify with a CI step that runs `sqlc generate` fresh and diffs against committed output
+- [ ] **Digest toggle wired end-to-end:** Verify the *existing* per-poll-cycle `NotifyPending` call is actually gated off when digest mode is on — not just that a new digest job exists alongside it (Pitfall 1).
+- [ ] **Timezone correctness:** Verify the built container image (Alpine-based) can actually `time.LoadLocation` a real IANA zone name, not just that the code compiles locally where tzdata is already present (Pitfall 2).
+- [ ] **DST coverage:** Verify a test exists that advances a fake clock across both a spring-forward and a fall-back boundary and asserts exactly one digest fires per calendar day (Pitfall 3).
+- [ ] **Restart resilience:** Verify killing the process a few seconds before a scheduled digest fire, then restarting, still results in that day's events reaching Discord on the next tick — not silently lost (Pitfall 4, Pitfall 5).
+- [ ] **Toggle-mid-window behavior:** Verify switching digest → real-time with events already queued either flushes them via the next real-time poll cycle or explicitly documents/tests the chosen behavior — not left unspecified (Pitfall 6).
+- [ ] **Discord limit handling:** Verify a digest with more events than fit in one embed/message actually sends multiple chunked messages instead of erroring or truncating silently (Pitfall 7).
+- [ ] **Cadence change without redeploy:** Verify changing the digest time/cadence via the SPA takes effect on the *next* scheduled fire without a container restart — this is an explicit milestone goal, easy to accidentally regress to "read config at boot only."
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|-----------------|-------------------|
-| Duplicate Discord notifications already sent to users | LOW | Add idempotency key + outbox table retroactively; going forward, dedupe is enforced; past duplicates are cosmetic only |
-| Bloated Docker image already in ghcr.io | LOW | Rebuild final stage from distroless/minimal base, push a new tag; old bloated tags can be deleted from the registry |
-| Tag-pinned GitHub Action later found compromised | MEDIUM | Rotate any secrets that action had access to, re-pin to a verified-clean SHA, audit recent workflow run logs for exfiltration indicators |
-| sqlc-generated code drifted from actual schema (found late) | MEDIUM | Regenerate against current schema, diff against runtime queries, add integration tests that exercise every generated query against a real migrated DB before merging the fix |
-| Migration files not zero-padded, ordering already ambiguous in production | HIGH | Cannot safely rename already-applied migration files (breaks `schema_migrations` history); must add new, correctly-padded migrations going forward and document the historical ordering gap |
+| Double-send from an un-gated real-time drain running alongside digest mode (Pitfall 1) | LOW | Since `MarkNotified` is idempotent per-row, no DB cleanup is needed; fix the gating logic and ship — no data corruption occurred, only duplicate Discord messages |
+| Wrong timezone causing digests to fire at an unexpected hour (Pitfall 2) | LOW | Backfill `time/tzdata` import / operator zone config, redeploy; no data lost since events remain queued via `notified_at IS NULL` regardless of when the digest fires |
+| A missed digest cycle from a restart or DST edge case (Pitfall 4, Pitfall 5) | LOW | No recovery action needed if outbox-state windowing (Pitfall 4) was followed — the missed cycle's events are still `notified_at IS NULL` and go out on the next successful tick automatically |
+| Orphaned queued events after a mode toggle, if a separate digest-only queue was built instead of reusing `notified_at` (Pitfall 6) | MEDIUM | Requires a one-off manual query/backfill to reconcile the separate queue's state back into `notified_at`, plus a follow-up fix to collapse to a single outbox going forward |
+| Silently dropped events from an un-chunked oversized digest embed (Pitfall 7) | MEDIUM | If `MarkNotified` was (incorrectly) called before confirming the send succeeded, affected events must be identified and manually reset (`notified_at = NULL`) to re-queue them; if the "mark only on confirmed send" discipline was followed correctly, no recovery is needed — they simply remain queued |
 
 ## Pitfall-to-Phase Mapping
 
 | Pitfall | Prevention Phase | Verification |
-|---------|-------------------|----------------|
-| MusicBrainz rate-limit violations (P1) | Early — MusicBrainz client phase | Load test with 20+ watchlist entries, confirm zero 503s |
-| robfig/cron overlap (P2) | Early/mid — scheduler phase | Inject an artificially slow poll cycle, confirm the next tick skips/delays instead of overlapping |
-| Diff/notify race conditions (P3) | Mid — diff engine phase | Kill the process mid-cycle in a test, confirm no duplicate notification on restart; edit a tracked release's data, confirm an alert fires |
-| go:embed stale build (P4) | Mid — UI integration phase | Clean CI checkout builds and serves current frontend; non-root-path refresh returns 200, not 404 |
-| Discord rate limits (P5) | Mid — notifier phase | Burst-test with 10+ simultaneous notifications, confirm all eventually deliver with no ban |
-| CI pipeline ordering/caching (P6) | Early/mid — first CI pipeline phase | Deliberately failing lint/test fails the run in under a minute; Trivy/gitleaks gate registry push |
-| semantic-release Go misconfig (P7) | Mid — release/versioning phase | A merged conventional commit produces a real git tag/GitHub release with no `package.json`-related errors |
-| Dockerfile non-root/bloat (P8) | Mid — Dockerfile phase | `docker images` shows a lean final size; `docker run --rm <image> whoami` is non-root |
-| sqlc/migrate drift (P9) | Early — first migration + first sqlc query | CI step running migrate-then-generate-then-diff passes cleanly |
+|---------|--------------------|-----------------|
+| Un-gated real-time drain running alongside digest mode (1) | Scheduler/outbox-integration phase | Test: toggle digest on, insert event, run both a poll cycle and a digest tick, assert exactly one Discord send |
+| Timezone / Alpine tzdata (2) | Scheduler-construction phase | CI or image-smoke-test step that `time.LoadLocation`s a real zone inside the built container; `cron.WithLocation` unit test |
+| DST transitions (3) | Scheduler-construction phase | Fake-clock test crossing both DST boundaries, asserting exactly one fire per day |
+| Window-boundary ambiguity (4) | Event-selection query phase | Test asserting an event inserted mid-drain is included exactly once across two consecutive digest ticks, never zero or twice |
+| Restart near fire time (5) | Scheduler-construction phase + System-view extension | Kill/restart test around a scheduled fire time; `/status` shows `last_digest_sent_at` |
+| Toggle mid-window orphaning events (6) | Same phase as (1) | Test: queue events under digest mode, toggle to real-time, assert they're sent on the next poll cycle |
+| Discord embed/message limits (7) | Digest message-formatting phase | Test with an event count exceeding 25, asserting multiple embeds/messages sent and all events end up `notified_at IS NOT NULL` |
+| Cadence change requires restart (Technical Debt row) | Postgres-config-read phase | Test: change cadence via API/SPA path, assert next fire uses new cadence with no process restart |
 
 ## Sources
 
-- [MusicBrainz API / Rate Limiting](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting) — official docs
-- [MusicBrainz API/Rate Limiting - Wiki](https://wiki.musicbrainz.org/MusicBrainz_API/Rate_Limiting) — official wiki
-- [Deezer FAQs For Developers](https://support.deezer.com/hc/en-gb/articles/360011538897-Deezer-FAQs-For-Developers) — official support
-- [Deezer API Rate limit issue discussion](https://github.com/BackInBash/DeezerSync/issues/6) — community, corroborating unofficial rate behavior
-- [robfig/cron package docs](https://pkg.go.dev/github.com/robfig/cron) — official godoc
-- [Build a Simple Dynamic Scheduler in Go with robfig/cron](https://medium.com/@gauravpaudel2013/build-a-simple-dynamic-scheduler-in-go-with-robfig-cron-87c42600e21b)
-- [Idempotent Consumer - Handling Duplicate Messages](https://www.milanjovanovic.tech/blog/idempotent-consumer-handling-duplicate-messages)
-- [Sending Reliable Event Notifications with Transactional Outbox Pattern](https://medium.com/event-driven-utopia/sending-reliable-event-notifications-with-transactional-outbox-pattern-7a7c69158d1b)
-- [Developing and Compiling Webapps with Vite and Go](https://matteogassend.com/articles/go-webapp-vite)
-- [Embed Vite React in Golang binary with live reload](https://dev.to/danhawkins/embed-vite-react-in-golang-binary-with-live-reload-1k4d)
-- [Discord Webhook Rate Limits Explained (429, Retry-After, Best Practices)](https://discord-webhook.com/en/blog/discord-webhook-rate-limits/)
-- [Discord Rate Limits — official docs](https://discord.com/developers/docs/topics/rate-limits)
-- [Trivy Supply Chain Incident: GitHub Actions Compromise Breakdown](https://www.upwind.io/feed/trivy-supply-chain-incident-github-actions-compromise-breakdown)
-- [Trivy ecosystem supply chain temporarily compromised — official advisory](https://github.com/aquasecurity/trivy/security/advisories/GHSA-69fq-xp46-6x23)
-- [The Trivy Attack: Why SHA Pinning Fails GitHub Actions (nuance/counterpoint on SHA pinning)](https://dev.to/ameer-pk/the-trivy-attack-why-sha-pinning-fails-github-actions-14if)
-- [Securely using pull_request_target — GitHub official docs](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target)
-- [Keeping your GitHub Actions and workflows secure Part 1: Preventing pwn requests — GitHub Security Lab](https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/)
-- [semantic-release Configuration docs](https://semantic-release.org/usage/configuration/) — official
-- [semantic-release configuration file .releaserc precedence issue](https://github.com/semantic-release/semantic-release/issues/729)
-- [How to Configure Trivy Severity Filtering](https://oneuptime.com/blog/post/2026-01-28-trivy-severity-filtering/view)
-- [Vulnerability — Trivy official docs](https://trivy.dev/docs/v0.52/scanner/vulnerability/)
-- [distroless/static:nonroot permission denied issue](https://github.com/GoogleContainerTools/distroless/issues/718)
-- [How to add a directory where non-root user can write — distroless issue](https://github.com/GoogleContainerTools/distroless/issues/427)
-- [Modifying the database schema — sqlc official docs](https://docs.sqlc.dev/en/latest/howto/ddl.html)
-- [Database migrations in Go with golang-migrate — Better Stack](https://betterstack.com/community/guides/scaling-go/golang-migrate/)
-- [Syntax error on migration — golang-migrate issue](https://github.com/golang-migrate/migrate/issues/573)
-- [Cache management with GitHub Actions — Docker official docs](https://docs.docker.com/build/ci/github-actions/cache/)
-- [How to Cache Docker Images in GitHub Actions](https://www.dash0.com/faq/cache-docker-images-github-actions)
+- `internal/db/migrations/000003_events.up.sql`, `queries/events.sql`, `internal/notifier/notifier.go`, `internal/poller/poller.go` (this repository) — existing outbox/queue design (`notified_at`, `ListUnnotified`, `MarkNotified`, per-poll-cycle `NotifyPending` call site, 400ms spacing constant) — confidence HIGH (primary source, read directly)
+- `.planning/PROJECT.md` (this repository) — milestone goal (Postgres-persisted, no-redeploy-required toggle), Alpine-based Dockerfile decision, single-instance/restart-on-deploy deployment model — confidence HIGH
+- [github.com/robfig/cron](https://github.com/robfig/cron), [Enhancement: UTC · Issue #180](https://github.com/robfig/cron/issues/180), [Set Timezone for Scheduler · Issue #132](https://github.com/robfig/cron/issues/132), [pkg.go.dev/github.com/robfig/cron/v3](https://pkg.go.dev/github.com/robfig/cron/v3) — DST spring-forward/fall-back behavior, default-to-host-timezone behavior, `cron.WithLocation` — confidence MEDIUM (project's own dependency's issue tracker, cross-checked across multiple pages)
+- [docs.discord.com/developers/topics/rate-limits](https://docs.discord.com/developers/topics/rate-limits), [Discord Embed Limits Cheat Sheet](https://discord-webhook.com/en/blog/discord-webhook-embed-limits/), [discord.com/safety/using-webhooks-and-embeds](https://discord.com/safety/using-webhooks-and-embeds) — 25 fields/embed, 6000 chars/message, 10 embeds/message, ~5 requests/2s per webhook, global 50 req/s — confidence MEDIUM (official Discord docs plus independent corroborating sources)
+- [Wawandco: Go's Locations & Alpine Docker image](https://wawand.co/blog/posts/go-time-default-locations/), [A story about Go, Docker and time zones](https://lalatron.hashnode.dev/a-story-about-go-docker-and-time-zones) — Alpine missing tzdata, `time.LoadLocation` failure mode, `time/tzdata` blank-import fix — confidence MEDIUM (independent, corroborating sources; well-known Go/Alpine interaction)
+- [Knock: Building a batched notification engine](https://knock.app/blog/building-a-batched-notification-engine), [SuprSend: How Notification Batching and Digests Actually Work](https://www.suprsend.com/post/notification-batching-and-digest), [techinterview.org: Digest Scheduler Low-Level Design](https://www.techinterview.org/post/3233470550/lld-digest-scheduler/) — outbox-state vs. time-range windowing, idempotency-key dedup pattern, empty-digest suppression — confidence MEDIUM (industry vendor engineering blogs, corroborating on the same core patterns)
+- Kubernetes CronJob `startingDeadlineSeconds` / missed-schedule documentation (general cron catch-up pattern references) — confidence MEDIUM, used only as a general illustration of the "missed schedule window" problem class, not as a direct implementation recommendation for this project (robfig/cron has no equivalent option; the outbox-state approach in Pitfall 4 is the recommended substitute)
 
 ---
-*Pitfalls research for: Go release-tracking service with CI/CD-focused portfolio goal (drop-tracker)*
-*Researched: 2026-08-04*
+*Pitfalls research for: digest/batch notification mode, drop-tracker v1.5*
+*Researched: 2026-09-11*

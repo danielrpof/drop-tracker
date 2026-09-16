@@ -107,6 +107,19 @@ func parseWatchlistID(r *http.Request) (int64, error) {
 	return id, nil
 }
 
+// trimAndCap performs the trim + rune-count + compare mechanics shared by
+// handleAddWatchlist's five field validations (mbid, name, deezer_id,
+// disambiguation, image_url). It trims v and reports whether the trimmed
+// value's rune count is within maxRunes. Rune-counted, not byte-counted, so
+// a value with multi-byte characters is not rejected for its byte count
+// (T-02-05). The caller still owns everything else: whether the field is
+// required (the blank check, where applicable), which error message to
+// write, and the status code -- those differ per field.
+func trimAndCap(v string, maxRunes int) (trimmed string, withinLimit bool) {
+	trimmed = strings.TrimSpace(v)
+	return trimmed, utf8.RuneCountInString(trimmed) <= maxRunes
+}
+
 // addWatchlistRequest is the request DTO for POST /watchlist. It carries
 // only client-suppliable fields -- id, artist_id, created_at and updated_at
 // are server-owned and are deliberately absent so an over-posted key is
@@ -139,20 +152,18 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mbid := strings.TrimSpace(req.MBID)
-	name := strings.TrimSpace(req.Name)
+	mbid, mbidOK := trimAndCap(req.MBID, maxMBIDRunes)
+	name, nameOK := trimAndCap(req.Name, maxNameRunes)
 	if mbid == "" || name == "" {
 		writeError(w, http.StatusBadRequest, "mbid and name are required")
 		return
 	}
 
-	// Rune-counted, not byte-counted, so a name with multi-byte characters
-	// is not rejected for its byte count (T-02-05).
-	if utf8.RuneCountInString(mbid) > maxMBIDRunes {
+	if !mbidOK {
 		writeError(w, http.StatusBadRequest, "mbid must be at most 36 characters")
 		return
 	}
-	if utf8.RuneCountInString(name) > maxNameRunes {
+	if !nameOK {
 		writeError(w, http.StatusBadRequest, "name must be at most 512 characters")
 		return
 	}
@@ -163,24 +174,24 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 	// field was absent from the body) is left untouched; only a supplied
 	// value is trimmed and measured.
 	if req.DeezerID != nil {
-		v := strings.TrimSpace(*req.DeezerID)
-		if utf8.RuneCountInString(v) > maxDeezerIDRunes {
+		v, ok := trimAndCap(*req.DeezerID, maxDeezerIDRunes)
+		if !ok {
 			writeError(w, http.StatusBadRequest, "deezer_id must be at most 64 characters")
 			return
 		}
 		req.DeezerID = &v
 	}
 	if req.Disambiguation != nil {
-		v := strings.TrimSpace(*req.Disambiguation)
-		if utf8.RuneCountInString(v) > maxDisambiguationRunes {
+		v, ok := trimAndCap(*req.Disambiguation, maxDisambiguationRunes)
+		if !ok {
 			writeError(w, http.StatusBadRequest, "disambiguation must be at most 512 characters")
 			return
 		}
 		req.Disambiguation = &v
 	}
 	if req.ImageURL != nil {
-		v := strings.TrimSpace(*req.ImageURL)
-		if utf8.RuneCountInString(v) > maxImageURLRunes {
+		v, ok := trimAndCap(*req.ImageURL, maxImageURLRunes)
+		if !ok {
 			writeError(w, http.StatusBadRequest, "image_url must be at most 2048 characters")
 			return
 		}

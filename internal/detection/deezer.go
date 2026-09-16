@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/deezer"
@@ -29,7 +30,7 @@ const sourceDeezer = "deezer"
 // Deezer's client has no track- or credit-level fetch at all (D-08), and
 // Deezer's Album.Tracklist field is a URL, not real track data (D-03). This
 // is a deliberate scope decision, not an oversight.
-func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) error {
+func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, albums []deezer.Album) (int, error) {
 	if eventTypeMuted(entry, eventTypeNewRelease) {
 		logger.Info("detection result",
 			slog.String("artist_mbid", entry.MBID),
@@ -40,18 +41,18 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 			slog.Int("filtered_count", len(albums)),
 			slog.Bool("muted", true),
 		)
-		return nil
+		return 0, nil
 	}
 
 	seedMode, err := d.isSeedMode(ctx, entry.ArtistID, sourceDeezer)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	notifiedAt := seedNotifiedAt(seedMode)
+	notify := newNotifyGate(seedMode, d.notifyMaxReleaseAgeDays, time.Now().UTC())
 
 	seen, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceDeezer, eventTypeNewRelease)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	inserted := 0
@@ -75,22 +76,24 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 		// casing for non-"album" record types (single/ep/compilation) is an
 		// open upstream assumption carried from Phase 3 (03-RESEARCH.md
 		// Assumption A2), not something this line guarantees.
+		watchedName := entry.Name
 		newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
-			ArtistID:         entry.ArtistID,
-			Source:           sourceDeezer,
-			EventType:        eventTypeNewRelease,
-			ExternalID:       externalID,
-			ReleaseGroupMbid: nil,
-			Title:            a.Title,
-			ArtistName:       entry.Name,
-			ReleaseDate:      nullableString(a.ReleaseDate),
-			CoverArtUrl:      nullableString(a.Cover),
-			TrackCount:       nil,
-			ReleaseType:      nullableString(a.RecordType),
-			NotifiedAt:       notifiedAt,
+			ArtistID:          entry.ArtistID,
+			Source:            sourceDeezer,
+			EventType:         eventTypeNewRelease,
+			ExternalID:        externalID,
+			ReleaseGroupMbid:  nil,
+			Title:             a.Title,
+			ArtistName:        entry.Name,
+			ReleaseDate:       nullableString(a.ReleaseDate),
+			CoverArtUrl:       nullableString(a.Cover),
+			TrackCount:        nil,
+			ReleaseType:       nullableString(a.RecordType),
+			NotifiedAt:        notify.notifiedAt(a.ReleaseDate),
+			WatchedArtistName: &watchedName,
 		})
 		if err != nil {
-			return fmt.Errorf("detection: detect deezer: %w", err)
+			return inserted, fmt.Errorf("detection: detect deezer: %w", err)
 		}
 		if newly {
 			inserted++
@@ -107,5 +110,5 @@ func (d *Detector) DetectDeezer(ctx context.Context, logger *slog.Logger, entry 
 		slog.Bool("seed_mode", seedMode),
 	)
 
-	return nil
+	return inserted, nil
 }

@@ -36,6 +36,7 @@ type SearchArtist struct {
 	ID             string  `json:"id"`
 	Name           string  `json:"name"`
 	Disambiguation *string `json:"disambiguation"`
+	Country        *string `json:"country"`
 	Type           string  `json:"type"`
 	ImageURL       *string `json:"image_url"`
 }
@@ -77,6 +78,18 @@ func NewMusicBrainzSource(c musicbrainz.ArtistSearcher) SearchSource {
 	return musicBrainzSource{client: c}
 }
 
+// nilIfEmpty returns nil for an empty string and a pointer to the value
+// otherwise -- the shared idiom search.go's per-source adapters use to map
+// an optional upstream string field into search.go's *string JSON fields
+// (disambiguation, country, image_url), which encode as JSON null rather
+// than an empty string when absent.
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 func (s musicBrainzSource) Name() string { return "musicbrainz" }
 
 func (s musicBrainzSource) SearchArtists(ctx context.Context, q string, limit int) ([]SearchArtist, error) {
@@ -86,16 +99,14 @@ func (s musicBrainzSource) SearchArtists(ctx context.Context, q string, limit in
 	}
 	out := make([]SearchArtist, 0, len(artists))
 	for _, a := range artists {
-		var disambiguation *string
-		if a.Disambiguation != "" {
-			d := a.Disambiguation
-			disambiguation = &d
-		}
+		disambiguation := nilIfEmpty(a.Disambiguation)
+		country := nilIfEmpty(a.Country)
 		out = append(out, SearchArtist{
 			Source:         "musicbrainz",
 			ID:             a.MBID,
 			Name:           a.Name,
 			Disambiguation: disambiguation,
+			Country:        country,
 			Type:           a.Type,
 			ImageURL:       nil,
 		})
@@ -127,11 +138,7 @@ func (s deezerSource) SearchArtists(ctx context.Context, q string, limit int) ([
 	}
 	out := make([]SearchArtist, 0, len(artists))
 	for _, a := range artists {
-		var imageURL *string
-		if a.Picture != "" {
-			p := a.Picture
-			imageURL = &p
-		}
+		imageURL := nilIfEmpty(a.Picture)
 		artistType := a.Type
 		if artistType == "" {
 			artistType = "artist"
@@ -141,8 +148,10 @@ func (s deezerSource) SearchArtists(ctx context.Context, q string, limit int) ([
 			ID:             strconv.FormatInt(a.ID, 10),
 			Name:           a.Name,
 			Disambiguation: nil,
-			Type:           artistType,
-			ImageURL:       imageURL,
+			// Deezer's search response has no country-equivalent field.
+			Country:  nil,
+			Type:     artistType,
+			ImageURL: imageURL,
 		})
 	}
 	return out, nil
@@ -170,6 +179,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sources := make(map[string]sourceResult, len(s.sources))
+	sourceErrs := make(map[string]string, len(s.sources))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -181,8 +191,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			artists, err := src.SearchArtists(r.Context(), q, searchResultLimit)
 
 			var result sourceResult
+			var errText string
 			if err != nil {
-				httplog.SetAttrs(r.Context(), slog.String(src.Name()+"_search_error", err.Error()))
+				errText = err.Error()
 				result = sourceResult{Status: "error", Error: "source unavailable", Artists: []SearchArtist{}}
 			} else {
 				if artists == nil {
@@ -193,10 +204,22 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 			mu.Lock()
 			sources[src.Name()] = result
+			if errText != "" {
+				sourceErrs[src.Name()] = errText
+			}
 			mu.Unlock()
 		}(src)
 	}
 	wg.Wait()
+
+	// httplog.SetAttrs mutates state keyed off r.Context() with no internal
+	// synchronization -- it must only ever be called from a single goroutine.
+	// Calling it from each fan-out goroutine above raced (found by CI's -race
+	// run, phase 07 Task 3 PR verification); logging every source's error
+	// here, after wg.Wait() rejoins to this one goroutine, is race-free.
+	for name, errText := range sourceErrs {
+		httplog.SetAttrs(r.Context(), slog.String(name+"_search_error", errText))
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

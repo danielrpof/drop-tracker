@@ -35,8 +35,21 @@ const EVENT_BADGE: Record<
   },
 }
 
+// UNKNOWN_EVENT_BADGE covers an event_type value outside EVENT_BADGE's keys.
+// GET /events returns the event type unvalidated, so the Record type above
+// is a compile-time claim the network boundary does not enforce -- one
+// unrecognized row must not be able to take the whole History route down
+// through the top-level error boundary.
+const UNKNOWN_EVENT_BADGE = {
+  label: "Unknown",
+  emoji: "❔",
+  color: "var(--color-muted-foreground)",
+}
+
 export function EventCard({ event }: EventCardProps) {
-  const badge = EVENT_BADGE[event.event_type]
+  // Same rationale as UNKNOWN_EVENT_BADGE above: the lookup falls back
+  // rather than dereferencing undefined for an out-of-union event_type.
+  const badge = EVENT_BADGE[event.event_type] ?? UNKNOWN_EVENT_BADGE
 
   return (
     <div className="flex gap-4 rounded-2xl bg-card p-4 ring-1 ring-foreground/10">
@@ -77,11 +90,11 @@ export function EventCard({ event }: EventCardProps) {
 // mirroring the distinct Discord embed shapes from Phase 5 (D-08).
 function EventCardBody({ event }: { event: EventItem }) {
   switch (event.event_type) {
-    case 'new_release':
+    case "new_release":
       return <NewReleaseBody event={event} />
-    case 'guest_feature':
+    case "guest_feature":
       return <GuestFeatureBody event={event} />
-    case 'deluxe_change':
+    case "deluxe_change":
       return <DeluxeChangeBody event={event} />
     default:
       return null
@@ -104,25 +117,56 @@ function NewReleaseBody({ event }: { event: EventItem }) {
 // guestFeatureHref builds a link from the event's own identifier fields
 // (source + external_id) rather than passing a stored URL string straight
 // into an anchor -- this endpoint never stores a raw URL for guest_feature
-// rows, only the source-specific external id.
+// rows, only the source-specific external id. external_id is escaped with
+// encodeURIComponent before interpolation: it is an unvalidated third-party
+// string typed only as `string`, so today's UUID-shaped values are a fact
+// about the current upstreams, not a guarantee the code can rely on.
 function guestFeatureHref(event: EventItem): string | null {
   if (event.source === "musicbrainz") {
-    return `https://musicbrainz.org/recording/${event.external_id}`
+    return `https://musicbrainz.org/recording/${encodeURIComponent(event.external_id)}`
   }
   if (event.source === "deezer") {
-    return `https://www.deezer.com/track/${event.external_id}`
+    return `https://www.deezer.com/track/${encodeURIComponent(event.external_id)}`
   }
   return null
 }
 
+// watchlistNote computes the "<X> is on your watchlist" suffix for a
+// guest_feature card from a plain value comparison, never from
+// event.event_type -- the detection layer already distinguishes
+// watched_artist_name (the watchlist entry that caused this row) from
+// artist_name (the recording's primary credited artist); the UI must not
+// re-derive that distinction as a hardcoded event-type branch. Returns null
+// when watched_artist_name is absent, empty, or equal to artist_name --
+// pre-migration rows (watched_artist_name: null) and any row where the two
+// names coincide render no note, exactly like today.
+function watchlistNote(event: EventItem): string | null {
+  const watched = event.watched_artist_name
+  if (!watched || watched === event.artist_name) {
+    return null
+  }
+  return watched
+}
+
 // GuestFeatureBody shows the recording title (event.title is the recording
-// title for a guest_feature row) linked out to the source.
+// title for a guest_feature row) linked out to the source, plus a release
+// date line (OQ-01) using the identical `?? "Release date unknown"`
+// fallback expression NewReleaseBody already uses -- no new copy invented.
+// Both the linked and unlinked title branches render the date line, and,
+// when watchlistNote returns a value, an em-dash-separated note naming the
+// watchlisted artist that actually caused this row -- rendered as a plain
+// JSX text node only, so React escapes it (T-g6i-04). No raw-HTML
+// injection prop is used anywhere in this file.
 function GuestFeatureBody({ event }: { event: EventItem }) {
   const href = guestFeatureHref(event)
-  if (!href) {
-    return <p className="text-label text-muted-foreground">{event.title}</p>
-  }
-  return (
+  const dateLabel = event.release_date ?? "Release date unknown"
+  const note = watchlistNote(event)
+  const titleLine = !href ? (
+    <p className="text-label text-muted-foreground">
+      {event.title}
+      {note && ` — ${note} is on your watchlist`}
+    </p>
+  ) : (
     <p className="text-label text-muted-foreground">
       Featured on{" "}
       <a
@@ -133,23 +177,36 @@ function GuestFeatureBody({ event }: { event: EventItem }) {
       >
         {event.title}
       </a>
+      {note && ` — ${note} is on your watchlist`}
     </p>
+  )
+  return (
+    <>
+      {titleLine}
+      <p className="text-label text-muted-foreground">{dateLabel}</p>
+    </>
   )
 }
 
-// DeluxeChangeBody shows the track-count delta as previous → current
-// tracks. A null previous_track_count is defensive-only (D-04 should
+// DeluxeChangeBody shows the release date (D-04) ahead of the track-count
+// delta as previous → current tracks, reusing NewReleaseBody's exact
+// `?? "Release date unknown"` fallback expression (D-05) -- a null
+// release_date falls back to that literal rather than rendering a blank
+// segment. A null previous_track_count is defensive-only (D-04 should
 // always populate it) and renders the current track_count alone, no arrow.
 function DeluxeChangeBody({ event }: { event: EventItem }) {
+  const dateLabel = event.release_date ?? "Release date unknown"
   const current = event.track_count ?? "?"
   if (event.previous_track_count == null) {
     return (
-      <p className="text-label text-muted-foreground">{current} tracks</p>
+      <p className="text-label text-muted-foreground">
+        {dateLabel} · {current} tracks
+      </p>
     )
   }
   return (
     <p className="text-label text-muted-foreground">
-      {event.previous_track_count} → {current} tracks
+      {dateLabel} · {event.previous_track_count} → {current} tracks
     </p>
   )
 }

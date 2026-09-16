@@ -1,0 +1,700 @@
+name: Full Pipeline
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  vet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: go vet
+        run: go vet ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run integration tests
+        run: make test-integration
+      # Ordered before the gate step (15-CONTEXT.md D-15/D-18) so a coverage-gate
+      # failure still hands a complete profile to the Phase 15 PR coverage comment.
+      - name: Upload backend coverage profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-backend-pr
+          path: coverage.out
+          retention-days: 1
+      # Extends this job rather than adding a new one (09-CONTEXT.md D-11). The
+      # profile read here (coverage.out) is produced by the integration-test
+      # step above, so this step does not re-run the suite -- it only gates on
+      # the already-written profile.
+      - name: Backend coverage gate (80)
+        run: make coverage-gate
+      # Publish this run's coverage as the main baseline the PR comment diffs
+      # against, but only on a green push to main (15-CONTEXT.md D-13/D-14). The
+      # failure-tolerant flag is mandatory per D-04: a baseline write must never
+      # redden a green main.
+      - name: Write backend baseline sidecar
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        env:
+          BASELINE_SHA: ${{ github.sha }}
+        run: go run ./cmd/coverage-report --mode=sidecar --profile=coverage.out --sha="$BASELINE_SHA" --out=baseline-metrics-backend.json
+      - name: Save backend coverage baseline
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            coverage.out
+            baseline-metrics-backend.json
+          key: coverage-baseline-main-backend-${{ github.sha }}
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  trivy-fs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Scan filesystem with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+        with:
+          version: 11
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # A step inside this already-blocking job, not a new top-level job
+      # (08-REVIEW.md CR-01): a new job would have to be appended to
+      # build-scan's needs: array to gate anything, and this repo already
+      # shipped that exact defect once (frontend-test existed non-blocking
+      # for a whole phase before Phase 9 wired it in). A step inherits the
+      # job's existing needs: membership for free.
+      - name: Check formatting
+        run: pnpm exec prettier --check "**/*.{ts,tsx}"
+      - name: Run Vitest suite
+        run: pnpm test
+      # actions/* steps ignore the job's working-directory default (RESEARCH
+      # Pitfall 8), so every path input below is repository-relative.
+      - name: Upload frontend coverage profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-frontend-pr
+          path: web/coverage/coverage-summary.json
+          retention-days: 1
+      # Node one-liner rather than the Go tool (15-03 planner resolution 3): this
+      # job has no Go toolchain. It emits the same flat pct/sha/generated_at keys
+      # the tool's sidecar mode writes. Publish + save only on a green push to
+      # main (D-13/D-14); failure-tolerant per D-04.
+      - name: Write frontend baseline sidecar
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        env:
+          BASELINE_SHA: ${{ github.sha }}
+        run: |
+          node -e '
+            const s = require("./coverage/coverage-summary.json");
+            const fs = require("fs");
+            fs.writeFileSync("baseline-metrics-frontend.json", JSON.stringify({
+              pct: Number(s.total.lines.pct.toFixed(2)),
+              sha: process.env.BASELINE_SHA,
+              generated_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+            }));
+          '
+      - name: Save frontend coverage baseline
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            web/coverage/coverage-summary.json
+            web/baseline-metrics-frontend.json
+          key: coverage-baseline-main-frontend-${{ github.sha }}
+
+  # Report-only (15-CONTEXT.md D-05/D-18, ROADMAP notes): waits for the two
+  # producing jobs but joins no release-path needs: graph, so it can never block
+  # a merge. Runs when an upstream job failed (a coverage-gate failure must still
+  # surface the number) and skips when one was cancelled. The PR-write grant is
+  # scoped to this job alone; the workflow-level permission block is untouched.
+  coverage-comment:
+    needs: [test, frontend-test]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: coverage-comment-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Prefix restore-keys never hit the SHA-suffixed primary key, so baseline
+      # presence is decided by the matched-key output plus the sidecar on disk,
+      # never by the exact-hit boolean (15-CONTEXT.md D-20). Each path list
+      # matches its Task 2 save step exactly.
+      - name: Restore backend coverage baseline
+        id: restore-backend
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            coverage.out
+            baseline-metrics-backend.json
+          key: coverage-baseline-main-backend-${{ github.sha }}
+          restore-keys: coverage-baseline-main-backend-
+      - name: Restore frontend coverage baseline
+        id: restore-frontend
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            web/coverage/coverage-summary.json
+            web/baseline-metrics-frontend.json
+          key: coverage-baseline-main-frontend-${{ github.sha }}
+          restore-keys: coverage-baseline-main-frontend-
+      # Separate directories so a downloaded current profile cannot collide with
+      # a restored baseline of the same filename. The tolerance flag is required:
+      # a compile failure upstream means the artifact was never uploaded and the
+      # download would otherwise fail the step (D-18).
+      - name: Download current backend profile
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-backend-pr
+          path: pr-backend
+      - name: Download current frontend profile
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-frontend-pr
+          path: pr-frontend
+      # Every dynamic value crosses in through env, never interpolated into the
+      # shell command (T-15-V5). Each baseline path is the sidecar path only when
+      # its restore matched a key, empty otherwise (D-20). The tool writes the
+      # job summary itself, so a fork with a read-only token still gets the table.
+      - name: Render coverage comment
+        id: render
+        continue-on-error: true
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          UPSTREAM_RED: ${{ needs.test.result == 'failure' || needs.frontend-test.result == 'failure' }}
+          BASELINE_BACKEND: ${{ steps.restore-backend.outputs.cache-matched-key != '' && 'baseline-metrics-backend.json' || '' }}
+          BASELINE_FRONTEND: ${{ steps.restore-frontend.outputs.cache-matched-key != '' && 'web/baseline-metrics-frontend.json' || '' }}
+        run: |
+          go run ./cmd/coverage-report --mode=comment \
+            --profile=pr-backend/coverage.out \
+            --frontend-summary=pr-frontend/coverage-summary.json \
+            --baseline-backend="$BASELINE_BACKEND" \
+            --baseline-frontend="$BASELINE_FRONTEND" \
+            --head-sha="$HEAD_SHA" \
+            --upstream-red="$UPSTREAM_RED" \
+            --out=comment.md
+          if [ -s comment.md ]; then
+            echo "has_content=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Same-repo guard: a fork PR carries a read-only token and the comment API
+      # returns 403 (RESEARCH Pitfall 25). The non-empty-render guard uses the
+      # step output, not hashFiles -- an empty file still hashes.
+      - name: Upsert coverage comment
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && steps.render.outputs.has_content == 'true' }}
+        continue-on-error: true
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: drop-tracker-coverage
+          path: comment.md
+          skip_unchanged: true
+
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Validate PR title
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # changes and migration-check (16-CONTEXT.md D-11/D-12/D-16) are both
+  # unconditional -- no job-level if: on either one. RESEARCH.md Finding 2: a
+  # skipped needs: job skips its dependents, so gating one of these jobs
+  # instead of its own steps would silently skip build-scan and release on
+  # the ~95% of pushes that touch no migration. (n1-boot, added alongside
+  # these two, follows the identical unconditional-job / gated-step shape.)
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      migrations_changed: ${{ steps.diff.outputs.migrations_changed }}
+      migration_files: ${{ steps.diff.outputs.migration_files }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # migration-check --mode=changed-files (16-03) owns the diff-base
+      # selection (D-16) and writes migrations_changed/migration_files to
+      # $GITHUB_OUTPUT itself -- this step only supplies the GitHub event
+      # context, entirely through env: (T-16-21; never string-interpolated
+      # into the run: body).
+      - name: Compute migration diff base
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          go run ./cmd/migration-check --mode=changed-files \
+            --event-name="$EVENT_NAME" --before="$BEFORE" --sha="$SHA" --base-ref="$BASE_REF"
+
+  migration-check:
+    needs: [changes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Same pinned svu the release job uses (D-13); tolerates an empty
+      # result (true bootstrap, D-04) rather than failing the step.
+      - name: Resolve previous release tag
+        id: prevtag
+        run: |
+          set -e
+          go install github.com/caarlos0/svu/v3@v3.4.1
+          SVU="$(go env GOPATH)/bin/svu"
+          TAG="$("$SVU" current 2>/dev/null || true)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      # Cheap and unconditional: the tool itself no-ops on an empty file list
+      # and still prints the scanned-file line (D-07 transparency), so a
+      # zero-file run is visibly a zero-file run, not indistinguishable from
+      # one that examined nothing.
+      - name: Run migration-check scan
+        env:
+          MIGRATION_FILES: ${{ needs.changes.outputs.migration_files }}
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          go run ./cmd/migration-check --mode=scan --files="$MIGRATION_FILES" --prev-tag="$PREV_TAG"
+
+  # n1-boot itself is unconditional (no job-level if:), matching changes and
+  # migration-check above; every step past checkout/setup-go/teardown
+  # carries a step-level if: on needs.changes.outputs.migrations_changed, so
+  # on the ~95% of pushes that touch no migration this job succeeds in
+  # runner spin-up time alone. No services: key -- a services: container
+  # ignores step if: and would start on every push (RESEARCH Pitfall D);
+  # Postgres is brought up by a gated docker run step instead.
+  n1-boot:
+    needs: [changes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Resolve previous release tag
+        id: prevtag
+        if: needs.changes.outputs.migrations_changed == 'true'
+        run: |
+          set -e
+          go install github.com/caarlos0/svu/v3@v3.4.1
+          SVU="$(go env GOPATH)/bin/svu"
+          TAG="$("$SVU" current 2>/dev/null || true)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      # D-04/D-19a: an in-job step, not a job-level if: -- unreachable on this
+      # repo (v1.x tags exist) but the sole correct way to skip-green a
+      # genuine first-ever release with no prior tag to roll back to.
+      - name: True-bootstrap guard
+        id: bootstrap
+        if: needs.changes.outputs.migrations_changed == 'true'
+        env:
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          if [ -z "$PREV_TAG" ]; then
+            echo "::notice::no prior release tag found -- true bootstrap, N-1 check not applicable (D-04/D-19a)"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+      # G-16-1: every already-released image predates Phase 16's
+      # ahead-of-source guard, so it errors booting against any newer schema
+      # regardless of migration safety. Skip-green while the N-1 tag is
+      # pre-guard; self-clears with no workflow edit once a guard-carrying
+      # release becomes N-1.
+      - name: Guard-adoption check -- does the N-1 image carry the ahead-of-source guard?
+        id: guardcheck
+        if: needs.changes.outputs.migrations_changed == 'true'
+        env:
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          if [ -z "$PREV_TAG" ]; then
+            echo "no prior release tag -- the true-bootstrap step already reported this; nothing to check here"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          elif ! grep -q '^func maxSourceVersion(' internal/db/migrate.go; then
+            echo "::error::guard token 'func maxSourceVersion(' is absent from the checked-out internal/db/migrate.go -- the ahead-of-source guard was renamed at HEAD and this workflow's grep token is now stale. Update the token in n1-boot's guard-adoption check; until then this job cannot tell a pre-guard N-1 image from a guard-carrying one."
+            exit 1
+          elif ! PREV_MIGRATE="$(git show "$PREV_TAG:internal/db/migrate.go" 2>/dev/null)"; then
+            echo "::notice::previous release ${PREV_TAG}'s internal/db/migrate.go could not be read at that tag -- assuming it predates the ahead-of-source migration guard, so N-1 rollback boot is not verifiable this cycle (G-16-1). Self-clears once a guard-carrying release becomes N-1."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          elif ! printf '%s\n' "$PREV_MIGRATE" | grep -q '^func maxSourceVersion('; then
+            echo "::notice::the previously-released image ${PREV_TAG} predates the ahead-of-source migration guard, so it cannot boot against any newer schema and N-1 rollback boot is not verifiable this cycle (G-16-1). This self-clears with no workflow edit once a guard-carrying release becomes the N-1 rollback target."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Start throwaway Postgres
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
+        run: |
+          set -e
+          docker run -d --name drop-tracker-n1-pg --network host \
+            -e POSTGRES_USER=drop_tracker -e POSTGRES_PASSWORD=drop_tracker -e POSTGRES_DB=drop_tracker \
+            postgres:16
+          for i in $(seq 1 30); do
+            if docker exec drop-tracker-n1-pg pg_isready -U drop_tracker -d drop_tracker >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::throwaway Postgres never became ready" >&2
+          exit 1
+      # D-01: the exact embedded-iofs + bounded-retry boot path cmd/server
+      # runs, applied via cmd/migrate (16-01) -- not a docker build, not the
+      # golang-migrate CLI.
+      - name: Apply HEAD schema
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
+        env:
+          DATABASE_URL: postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable
+        run: go run ./cmd/migrate
+      # One retry after a short sleep (D-04); an immutable vX.Y.Z tag only,
+      # never a floating tag (D-13). Public package -- no registry
+      # authentication step, no packages: permission.
+      - name: Pull previous release image
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
+        env:
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          set -e
+          IMAGE="ghcr.io/danielrpof/drop-tracker:$PREV_TAG"
+          docker pull "$IMAGE" || { sleep 5; docker pull "$IMAGE"; }
+      # Exactly DATABASE_URL + HTTP_PORT -- no INSTANCE_PASSPHRASE, so the
+      # Phase 14 GATE-07 inert path leaves /watchlist and /events reachable
+      # unauthenticated and a schema break surfaces as a 500, not an auth
+      # response (D-14/S8).
+      - name: Run previous release image
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
+        env:
+          PREV_TAG: ${{ steps.prevtag.outputs.tag }}
+        run: |
+          set -e
+          docker run -d --name drop-tracker-n1 --network host \
+            -e DATABASE_URL="postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable" \
+            -e HTTP_PORT=8080 \
+            "ghcr.io/danielrpof/drop-tracker:$PREV_TAG"
+      # 8 consecutive 200s at ~2s spacing before proceeding -- a container
+      # that starts and then dies must fail here, not pass on one early 200
+      # (D-03).
+      - name: Health probe -- sustained green
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
+        run: |
+          set -e
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+              ok=$((ok+1))
+              if [ "$ok" -ge 8 ]; then
+                exit 0
+              fi
+            else
+              ok=0
+            fi
+            sleep 2
+          done
+          echo "::error::N-1 image never reached a sustained-healthy state" >&2
+          docker logs drop-tracker-n1 || true
+          exit 1
+      - name: Read probes -- GET /watchlist and GET /events
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
+        run: |
+          set -e
+          BODY="$(curl -fsS http://localhost:8080/watchlist)"
+          if [ "$BODY" != "[]" ]; then
+            echo "::error::GET /watchlist on an empty DB did not return [] (got: $BODY)" >&2
+            exit 1
+          fi
+          curl -fsS http://localhost:8080/events >/dev/null
+      # image_url is supplied so the art matcher is bypassed entirely (S1) --
+      # a pure UpsertArtist/CreateWatchlistEntry DB write, no external call.
+      # Covers the poller's insert paths a GET-only check would miss.
+      - name: Write probe -- POST /watchlist then re-GET
+        if: needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
+        run: |
+          set -e
+          STATUS="$(curl -fsS -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/watchlist \
+            -H 'Content-Type: application/json' \
+            -d '{"mbid":"00000000-0000-0000-0000-000000000001","name":"CI N-1 Boot Probe","image_url":"https://example.invalid/x.png"}')"
+          if [ "$STATUS" != "201" ]; then
+            echo "::error::POST /watchlist did not return 201 (got: $STATUS)" >&2
+            exit 1
+          fi
+          BODY="$(curl -fsS http://localhost:8080/watchlist)"
+          case "$BODY" in
+            *"CI N-1 Boot Probe"*) ;;
+            *) echo "::error::GET /watchlist after POST does not contain the probe row (got: $BODY)" >&2; exit 1 ;;
+          esac
+      # A red here must teach the rule, not report an opaque boot error (SC #2).
+      - name: N-1 boot failure -- explain the rule
+        if: failure() && needs.changes.outputs.migrations_changed == 'true' && steps.bootstrap.outputs.proceed == 'true' && steps.guardcheck.outputs.proceed == 'true'
+        run: |
+          echo "::error::This branch's migration breaks the N-1 rollback / expand-contract rule -- the previously-released image must still boot, stay healthy, read, and write against this schema. See internal/db/migrations/README.md."
+      - name: Teardown
+        if: always() && needs.changes.outputs.migrations_changed == 'true'
+        run: |
+          docker rm -f drop-tracker-n1 >/dev/null 2>&1 || true
+          docker rm -f drop-tracker-n1-pg >/dev/null 2>&1 || true
+
+  build-scan:
+    # frontend-test was created report-only in Phase 8 specifically so this
+    # phase would only have to make it blocking (08-CONTEXT.md D-04;
+    # 09-CONTEXT.md D-11) -- appended here, all five prior entries unchanged.
+    # migration-check and n1-boot (16-CONTEXT.md D-11) are appended the same
+    # way. Both stay unconditional by design (RESEARCH.md Finding 2): a
+    # skipped needs: job skips its dependents, so a job-level if: on either
+    # one would silently skip build-scan and release on the ~95% of pushes
+    # that touch no migration -- never "optimise" this into a job-level if:.
+    needs: [vet, lint, test, gitleaks, trivy-fs, frontend-test, migration-check, n1-boot]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Build image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: drop-tracker:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.sha }}
+      # The Go linker discards a wrong -ldflags -X import path with no error or
+      # warning, so a broken version injection would ship "dev" to production
+      # indefinitely. Extract the binary from the image just built and fail the
+      # pipeline unless it carries this commit's SHA (see internal/buildinfo, Dockerfile).
+      - name: Verify build provenance landed in the binary
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cid="$(docker create drop-tracker:scan)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          docker cp "$cid:/usr/local/bin/server" /tmp/scan-server
+          if ! grep -a -q "$COMMIT_SHA" /tmp/scan-server; then
+            echo "::error::built binary does not carry commit SHA $COMMIT_SHA -- the -ldflags -X injection is broken" >&2
+            exit 1
+          fi
+          echo "build provenance OK: binary carries $COMMIT_SHA"
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: drop-tracker:scan
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+      # Save the exact image that just passed the scan gate so the release
+      # job can push that artifact byte-for-byte, instead of rebuilding from
+      # the Dockerfile a second time (07-REVIEW.md CR-02: two separate
+      # `docker build` invocations of the same Dockerfile are not guaranteed
+      # to produce an identical image, which would let a scanned-clean build
+      # and a materially different pushed build silently diverge). Only
+      # needed on the path that can actually reach the release job.
+      - name: Save scanned image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker save drop-tracker:scan -o /tmp/drop-tracker-scan.tar
+      - name: Upload scanned image artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scanned-image
+          path: /tmp/drop-tracker-scan.tar
+          retention-days: 1
+
+  release:
+    needs: [build-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Job-scoped queue (not cancel) so two near-simultaneous pushes to main
+    # never run `release` concurrently (07-REVIEW.md WR-04): without this,
+    # both runs could check out before either pushes a tag, both compute the
+    # same `svu next` version, and the second run's image push would succeed
+    # before its tag push fails -- an image in the registry with no
+    # corresponding git tag. Queuing serializes them so the second run's
+    # checkout always sees the first run's already-pushed tag.
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Compute next version with svu
+        run: |
+          set -e
+          go install github.com/caarlos0/svu/v3@v3.4.1
+          SVU="$(go env GOPATH)/bin/svu"
+          CURRENT="$("$SVU" current)"
+          NEXT="$("$SVU" next)"
+          if [ "$NEXT" = "$CURRENT" ]; then
+            echo "::error::svu next ($NEXT) equals svu current ($CURRENT) -- no recognized conventional-commit prefix (feat/fix/BREAKING CHANGE) was found in the commits merged since the last tag, so no version bump could be computed. The pr-title job is the gate that normally prevents an unrecognized-prefix squash-merge message from reaching main; check the merge commit's message." >&2
+            exit 1
+          fi
+          echo "VERSION=$NEXT" >> "$GITHUB_ENV"
+      - name: Download scanned image artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: scanned-image
+          path: /tmp
+      - name: Load scanned image
+        run: docker load -i /tmp/drop-tracker-scan.tar
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag and push the scanned image
+        run: |
+          set -e
+          docker tag drop-tracker:scan "ghcr.io/danielrpof/drop-tracker:${VERSION}"
+          docker push "ghcr.io/danielrpof/drop-tracker:${VERSION}"
+      - name: Generate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ghcr.io/danielrpof/drop-tracker:${{ env.VERSION }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ env.VERSION }}
+          path: sbom.spdx.json
+          retention-days: 90
+      - name: Tag release
+        run: |
+          set -e
+          git tag "$VERSION"
+          git push origin "$VERSION"

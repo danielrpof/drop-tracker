@@ -9,6 +9,38 @@ import (
 )
 
 type Querier interface {
+	// Atomic replacement (PERF-04, 11-RESEARCH.md Pattern 2) for the former
+	// two-statement GroupTrackCountBaseline SELECT + SetGroupTrackCountBaseline
+	// UPDATE -- those two round trips left a check-then-act window where two
+	// concurrent callers racing the same release group could both read the old
+	// baseline before either wrote, letting the second writer silently clobber
+	// the first writer's correct, higher value with its own stale one. This
+	// statement closes that window entirely rather than narrowing it: the CTE's
+	// FOR UPDATE takes a row lock on the group's own new_release row, so a
+	// second concurrent caller racing the same external_id blocks on that lock
+	// until the first transaction commits, then re-evaluates against the
+	// just-committed value.
+	//
+	// Zero rows returned means no advance happened: the fresh count was not a
+	// genuine increase over the already-committed baseline (D-02's "equal or
+	// lower: no event" case, strictly greater-than, now enforced by Postgres
+	// itself). One row returned means the write landed; previous_track_count
+	// NULL vs non-NULL is the has_baseline distinction the removed
+	// GroupTrackCountBaseline query used to report, letting the caller keep
+	// branching on "silently established" vs "advanced, fire an event" from
+	// this one call's result alone.
+	//
+	// Keyed on external_id (not release_group_mbid, which the removed read
+	// query used) -- a deliberate narrowing: for a musicbrainz new_release row,
+	// external_id and release_group_mbid hold the same release-group MBID (see
+	// internal/detection/musicbrainz.go's new_release insert), and it is the
+	// new_release row's own track_count that the removed write query mutated,
+	// so this statement reads exactly the value the old pair wrote.
+	AdvanceGroupTrackCountBaseline(ctx context.Context, arg AdvanceGroupTrackCountBaselineParams) ([]*int32, error)
+	// Backs GET /status watchlist_size (STAT-01). A count(*), not len(ListWatchlist)
+	// in Go -- ListWatchlist JOINs artists and returns every row's full projection,
+	// so counting its result would pull every row just to discard it.
+	CountWatchlist(ctx context.Context) (int64, error)
 	CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error)
 	// :execrows returns the affected row count in one round trip, which is what
 	// lets the service distinguish "deleted" from "there was nothing to delete"
@@ -18,19 +50,26 @@ type Querier interface {
 	// row-level lock on this single statement is what makes the split
 	// deterministic under concurrency (T-02-15).
 	DeleteWatchlistEntry(ctx context.Context, id int64) (int64, error)
-	// Plan 04-04's baseline lookup for a release-group's deluxe-change
-	// comparison (D-01/D-02), option-a resolution (04-01's Task 1 checkpoint):
-	// track_count lives directly on the events row, not a second table.
-	// has_baseline distinguishes "no baseline recorded yet" (COUNT is 0, this
-	// group has never had track_count populated) from "baseline recorded as
-	// zero" -- collapsing those two into one COALESCE(...,0) is exactly
-	// 04-RESEARCH.md Pitfall #1's false-positive mechanism: the caller MUST
-	// branch on has_baseline before comparing, never compare against baseline
-	// alone.
-	GroupTrackCountBaseline(ctx context.Context, releaseGroupMbid *string) (GroupTrackCountBaselineRow, error)
+	GetNotificationSettings(ctx context.Context) (NotificationSetting, error)
 	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
 	// existing event rows for this artist+source means seed mode.
 	HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool, error)
+	// Phase 10 (DATA-02, D-06): answers a question ListEvents' own result page
+	// cannot -- whether this request's artist_id/event_type scope has ANY event
+	// older than the retention cutoff, so the frontend can distinguish "no
+	// events ever" from "events exist but every one of them aged out" (the
+	// History empty state cannot tell those apart from an empty page alone).
+	// Mirrors ListEvents' two optional filters exactly (same sqlc.narg casts on
+	// both sides), but deliberately omits ListEvents' pagination-position
+	// parameter: this answers a property of the whole filtered scope, not of
+	// the current page, so a "Load more" click must not change the answer.
+	// Uses EXISTS with no LIMIT inside it, following HasAnyEvent's existing
+	// idiom in this file --
+	// EXISTS already short-circuits on the first matching row. created_at <
+	// cutoff (strict less-than) is the exact complement of ListEvents' >=, so a
+	// row exactly at the boundary is never double-counted as both visible and
+	// older (D-04 stays consistent across both queries).
+	HasOlderEvents(ctx context.Context, arg HasOlderEventsParams) (bool, error)
 	// 0 rows affected means the dedup key (event_type, source, external_id)
 	// already existed (D-20) -- the caller does not treat this as an error,
 	// only as "not newly detected." Deliberately not the
@@ -41,23 +80,77 @@ type Querier interface {
 	// existing eleven columns, as $12/$13, so every pre-existing positional
 	// parameter keeps its number -- D-20's write-once guarantee applies to
 	// these two snapshot columns exactly as it does to the original nine.
+	// watched_artist_name (quick/260825-g6i) is appended as $14, after
+	// release_type/$13, for the same reason: every pre-existing positional
+	// parameter keeps its number, and D-20's write-once guarantee applies to
+	// this column identically.
 	InsertEvent(ctx context.Context, arg InsertEventParams) (int64, error)
+	// Phase 13 (bug #3, D-06/D-07/D-12, grilling round Q4): the artists a
+	// backfill sweep must visit. Three halves make up this scope decision:
+	//   - a NULL image_url is D-07's sweep predicate -- only artists with no
+	//     art at all are candidates.
+	//   - the watchlist join is D-06's: an artists row with no watchlist row is
+	//     a legitimate state (Service.Add's own doc comment already documents
+	//     this), and spending Deezer request budget on artists nobody is
+	//     watching is waste, not coverage.
+	//   - the art_match_attempted_at cooldown is D-12 (grilling round Q4):
+	//     without it, a fail-closed artist (D-09) would be re-queried against
+	//     Deezer on every single process restart forever, which matters
+	//     specifically because this project's own purpose is demonstrating
+	//     frequent, low-friction CI/CD redeploys.
+	// This query is read-only. Every write in the backfill goes through the
+	// existing UpsertArtist (image/deezer_id) and the new attempt-timestamp
+	// write below -- their semantics never overlap.
+	ListArtistsMissingImage(ctx context.Context) ([]Artist, error)
 	// Phase 6's HIST-01 history feed backing query (D-05): one global
 	// chronological read across all watched artists, newest first -- not a
-	// per-artist drill-down. Ordered and keyset-paginated on id DESC, not
-	// created_at: this file's own ListUnnotified comment already documents why
-	// created_at alone is not a unique order -- a seed cycle inserts many rows
-	// sharing one created_at timestamp, so ordering by it alone would make page
-	// boundaries non-deterministic across a "load more" click (06-RESEARCH.md
-	// Pattern 2, Pitfall 2). id (BIGSERIAL) is already unique and monotonic and
-	// needs no secondary tiebreak column.
+	// per-artist drill-down.
 	//
-	// artist_id, event_type and cursor are all optional sqlc.narg filters, each
-	// cast on both sides of its "IS NULL OR" predicate so sqlc's type inference
-	// has no ambiguity. "IS NULL OR" keeps one static SQL string sqlc can
-	// type-check, instead of building WHERE clauses in Go (06-RESEARCH.md
-	// Anti-Patterns). cursor is absent on the first page and set to the previous
-	// page's last row's id on subsequent pages.
+	// Ordering is release chronology (quick task 260825-g6i), not detection
+	// order: a newly-watched artist's seed-mode backfill inserts a whole
+	// back-catalogue in one cycle, giving old releases the freshest ids and
+	// interleaving them with genuinely new drops if ordered by id alone.
+	// release_date is TEXT holding MusicBrainz partial dates (YYYY, YYYY-MM,
+	// YYYY-MM-DD), which are zero-padded and left-anchored, so lexicographic
+	// ordering IS chronological ordering, and a year-only value sorts as the
+	// start of that year. NULLS LAST is written explicitly and is load-bearing,
+	// not decorative: Postgres defaults DESC to NULLS FIRST, so omitting it
+	// would float every undated row to the top of "latest." id DESC survives as
+	// the tiebreak because release_date is not unique (year-only precision
+	// especially), and a non-unique primary sort key alone makes page
+	// boundaries non-deterministic across a "load more" click -- the same
+	// hazard this comment previously invoked against created_at alone
+	// (06-RESEARCH.md Pattern 2, Pitfall 2).
+	//
+	// artist_id and event_type are optional sqlc.narg filters, each cast on
+	// both sides of its "IS NULL OR" predicate so sqlc's type inference has no
+	// ambiguity. "IS NULL OR" keeps one static SQL string sqlc can type-check,
+	// instead of building WHERE clauses in Go (06-RESEARCH.md Anti-Patterns).
+	//
+	// cursor_id/cursor_release_date are the composite keyset position (quick
+	// task 260825-g6i, replacing the single-bigint cursor): absent on the first
+	// page, set to the previous page's last row's (release_date, id) on
+	// subsequent pages. cursor_id IS NULL is what switches the whole predicate
+	// off -- the two params are always set or cleared together by the caller.
+	// The CASE exists because a NULLS-LAST tail needs a different "everything
+	// after me" predicate than the dated head does: inside the tail, "after me"
+	// means a strictly smaller id among other NULL rows; inside the dated head,
+	// "after me" means an earlier release_date, or the same release_date with a
+	// strictly smaller id, or (since the tail sorts after every dated row) any
+	// NULL row at all.
+	//
+	// Phase 10 (DATA-02, D-01/D-04): this is the ONLY query in this file that
+	// ever gets a retention cutoff. cutoff is sqlc.arg, not sqlc.narg -- it is
+	// never caller-optional, so there is no code path where a caller passes a
+	// null cutoff and gets back unfiltered, out-of-window rows (T-10-03). The
+	// comparison is >=, not >: an event exactly at the boundary stays visible
+	// (D-04). This is a read-side filter only, nothing is deleted -- an
+	// aged-out row stays fully present and fully visible to every query below
+	// that intentionally has no cutoff: ListExternalIDs (dedup keys),
+	// HasAnyEvent (seed-mode), AdvanceGroupTrackCountBaseline (deluxe
+	// baselines), and ListUnnotified (pending notifications). Adding this predicate to any of
+	// those four is the exact regression Phase 10's success criteria 3-5 exist
+	// to catch -- do not "fix" them to also filter by retention.
 	ListEvents(ctx context.Context, arg ListEventsParams) ([]ListEventsRow, error)
 	// Feeds the fresh-vs-seen diff (D-10): a Detector builds a
 	// map[string]struct{} from this result and skips any externally-fetched
@@ -66,7 +159,7 @@ type Querier interface {
 	// D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
 	// created_at ASC, id ASC for a deterministic total order (a plain
 	// created_at ordering alone is not unique -- a seed cycle's rows share one
-	// timestamp, see seedNotifiedAt). This is also the instrument plan 04-02's
+	// timestamp, see notifyGate). This is also the instrument plan 04-02's
 	// own tests use to prove seeded rows are excluded (D-13).
 	ListUnnotified(ctx context.Context) ([]Event, error)
 	// Both watchlist and artists have a column named id -- every selected
@@ -84,12 +177,19 @@ type Querier interface {
 	// instead of overwriting the recorded delivery time.
 	MarkNotified(ctx context.Context, id int64) (int64, error)
 	Ping(ctx context.Context) (int32, error)
-	// Mutates track_count on the group's own new_release row -- this is
-	// operational baseline state, not the D-12 display snapshot (title/
-	// artist_name/release_date/cover_art_url), which stays write-once via
-	// InsertEvent's ON CONFLICT DO NOTHING per D-20. No snapshot column is
-	// ever written twice by this statement.
-	SetGroupTrackCountBaseline(ctx context.Context, arg SetGroupTrackCountBaselineParams) (int64, error)
+	// Phase 13 (bug #3, D-12, grilling round Q4): must be called for EVERY
+	// artist the backfill sweep visits, regardless of outcome -- matched,
+	// unmatched (D-09 fail-closed), or errored -- because it is the only signal
+	// that lets a future sweep tell "never tried" apart from "tried and
+	// failed." This is deliberately a separate, minimal write from UpsertArtist:
+	// D-09 already forbids calling UpsertArtist on a Matched: false outcome (no
+	// fields to write), but the attempt itself still needs to be recorded so
+	// the read query's cooldown predicate above has something to check.
+	RecordArtMatchAttempt(ctx context.Context, mbid string) error
+	// A plain positional UPDATE, not watchlist's CASE-based merge: the route is
+	// a full-object PUT (no partial-update ambiguity to resolve), and the fixed
+	// id = 1 predicate is what makes replaying the same body a no-op.
+	UpdateNotificationSettings(ctx context.Context, arg UpdateNotificationSettingsParams) (NotificationSetting, error)
 	// The partial-update merge happens inside this statement, not in Go: each
 	// axis is resolved by a CASE whose ELSE names the column itself, so the
 	// value carried forward for an untouched axis is read from the row version

@@ -142,7 +142,7 @@ func (c *Client) sendAttempt(ctx context.Context, embed Embed, allowRetry bool) 
 		// (05-RESEARCH.md Pitfall 2, T-05-01).
 		return fmt.Errorf("discord: send webhook: request failed")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNoContent {
 		return nil

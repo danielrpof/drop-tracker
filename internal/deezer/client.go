@@ -12,10 +12,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
+	"github.com/danielrpof/drop-tracker/internal/httpclient"
 	"golang.org/x/time/rate"
 )
 
@@ -132,54 +132,17 @@ func decodeChecked(body []byte, v any) error {
 	return nil
 }
 
-// doRequest is the single request path for this package: it waits on
-// limiter before every call so no call site can bypass the rate limit
-// (D-07, D-08), sets Accept, then performs the request. Every outbound
-// Deezer request in this package -- and in plan 03-04's poll cycle -- must
-// go through this one helper.
-//
-// When httpClient.Timeout is positive, ctx is wrapped in a
-// context.WithTimeout bounded by it so the same budget also bounds
-// limiter.Wait, mirroring internal/musicbrainz's doRequest. The cancel func
-// is attached to the response body via cancelReadCloser rather than
-// deferred, so the timeout keeps bounding the caller's body read after
-// doRequest returns instead of truncating a healthy response.
+// doRequest is the single request path for this package: it sets Accept,
+// then delegates rate-limited execution to the shared
+// internal/httpclient.Do (extracted from this method's own former
+// implementation -- see internal/httpclient for the timeout-wrap,
+// limiter.Wait, cancel-on-error, and cancel-on-close logic, mirroring
+// internal/musicbrainz's doRequest). Every outbound Deezer request in this
+// package -- and in plan 03-04's poll cycle -- must go through this one
+// helper.
 func (c *Client) doRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
-	cancel := func() {}
-	if c.httpClient.Timeout > 0 {
-		var timeoutCtx context.Context
-		timeoutCtx, cancel = context.WithTimeout(ctx, c.httpClient.Timeout)
-		ctx = timeoutCtx
-	}
-	req = req.WithContext(ctx)
-
-	if err := c.limiter.Wait(ctx); err != nil {
-		cancel()
-		return nil, fmt.Errorf("deezer: rate limiter wait: %w", err)
-	}
 	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("deezer: do request: %w", err)
-	}
-	resp.Body = &cancelReadCloser{ReadCloser: resp.Body, cancel: cancel}
-	return resp, nil
-}
-
-// cancelReadCloser wraps a response body so the context.CancelFunc created
-// by doRequest's context.WithTimeout is released exactly when the caller
-// closes the body -- mirrors internal/musicbrainz's cancelReadCloser.
-type cancelReadCloser struct {
-	io.ReadCloser
-	cancel context.CancelFunc
-}
-
-func (c *cancelReadCloser) Close() error {
-	err := c.ReadCloser.Close()
-	c.cancel()
-	return err
+	return httpclient.Do(ctx, req, c.limiter, c.httpClient, "deezer")
 }
 
 // clampLimit maps a caller-requested limit onto this package's valid range:

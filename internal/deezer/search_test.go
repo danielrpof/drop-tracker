@@ -54,12 +54,21 @@ const largeIDSearchFixture = `{
   "total": 1
 }`
 
-const twoArtistsSearchFixture = `{
+const twoArtistsSearchFixtureRanked = `{
   "data": [
-    {"id": 1, "name": "Artist A", "link": "https://www.deezer.com/artist/1", "picture": "https://api.deezer.com/artist/1/image", "nb_album": 5, "type": "artist"},
-    {"id": 2, "name": "Artist B", "link": "https://www.deezer.com/artist/2", "picture": "https://api.deezer.com/artist/2/image", "nb_album": 3, "type": "artist"}
+    {"id": 1, "name": "Artist A", "link": "https://www.deezer.com/artist/1", "picture": "https://api.deezer.com/artist/1/image", "nb_album": 5, "nb_fan": 100, "type": "artist"},
+    {"id": 2, "name": "Artist B", "link": "https://www.deezer.com/artist/2", "picture": "https://api.deezer.com/artist/2/image", "nb_album": 3, "nb_fan": 900, "type": "artist"}
   ],
   "total": 2
+}`
+
+const threeArtistsTiedFanFixture = `{
+  "data": [
+    {"id": 1, "name": "Artist A", "link": "https://www.deezer.com/artist/1", "picture": "https://api.deezer.com/artist/1/image", "nb_album": 5, "nb_fan": 100, "type": "artist"},
+    {"id": 2, "name": "Artist B", "link": "https://www.deezer.com/artist/2", "picture": "https://api.deezer.com/artist/2/image", "nb_album": 3, "nb_fan": 900, "type": "artist"},
+    {"id": 3, "name": "Artist C", "link": "https://www.deezer.com/artist/3", "picture": "https://api.deezer.com/artist/3/image", "nb_album": 2, "nb_fan": 100, "type": "artist"}
+  ],
+  "total": 3
 }`
 
 const quotaErrorFixture = `{"error":{"type":"Exception","message":"Quota limit exceeded","code":4}}`
@@ -114,6 +123,9 @@ func TestSearchArtists_DecodesFixture(t *testing.T) {
 	if got.NbAlbum != 78 {
 		t.Errorf("NbAlbum = %d, want %d", got.NbAlbum, 78)
 	}
+	if got.NbFan != 24047501 {
+		t.Errorf("NbFan = %d, want %d", got.NbFan, 24047501)
+	}
 
 	if gotPath != "/search/artist" {
 		t.Errorf("path = %q, want %q", gotPath, "/search/artist")
@@ -167,25 +179,53 @@ func TestSearchArtists_EmptyResultIsNonNilZeroLength(t *testing.T) {
 	}
 }
 
-func TestSearchArtists_PreservesUpstreamOrderNoSorting(t *testing.T) {
+// TestSearchArtists_SortsByFanCountDescending proves D-04: the upstream
+// fixture order is deliberately the OPPOSITE of fan-count order (Artist A,
+// fan count 100, arrives first; Artist B, fan count 900, arrives second), so
+// this test cannot pass without a real sort.
+func TestSearchArtists_SortsByFanCountDescending(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(twoArtistsSearchFixture))
+		_, _ = w.Write([]byte(twoArtistsSearchFixtureRanked))
 	}))
 	defer ts.Close()
 
 	c := newTestClient(t, ts, unlimitedLimiter())
-	for i := 0; i < 3; i++ {
-		artists, err := c.SearchArtists(context.Background(), "artist", 25)
-		if err != nil {
-			t.Fatalf("call %d: SearchArtists: %v", i, err)
-		}
-		if len(artists) != 2 {
-			t.Fatalf("call %d: len(artists) = %d, want 2", i, len(artists))
-		}
-		if artists[0].Name != "Artist A" || artists[1].Name != "Artist B" {
-			t.Fatalf("call %d: order = [%q, %q], want [Artist A, Artist B]", i, artists[0].Name, artists[1].Name)
-		}
+	artists, err := c.SearchArtists(context.Background(), "artist", 25)
+	if err != nil {
+		t.Fatalf("SearchArtists: %v", err)
+	}
+	if len(artists) != 2 {
+		t.Fatalf("len(artists) = %d, want 2", len(artists))
+	}
+	if artists[0].Name != "Artist B" || artists[1].Name != "Artist A" {
+		t.Fatalf("order = [%q, %q], want [Artist B, Artist A] (descending nb_fan)", artists[0].Name, artists[1].Name)
+	}
+}
+
+// TestSearchArtists_EqualFanCountsPreserveUpstreamOrder proves the D-04 tie
+// guarantee that justifies using SortStableFunc rather than SortFunc: Artist
+// A and Artist C both carry fan count 100, Artist B carries 900. B must sort
+// first on popularity, and A must stay ahead of C because ties keep
+// Deezer's own upstream order -- an unstable sort would be free to swap A
+// and C, and this test is what pins the stable variant in place.
+func TestSearchArtists_EqualFanCountsPreserveUpstreamOrder(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(threeArtistsTiedFanFixture))
+	}))
+	defer ts.Close()
+
+	c := newTestClient(t, ts, unlimitedLimiter())
+	artists, err := c.SearchArtists(context.Background(), "artist", 25)
+	if err != nil {
+		t.Fatalf("SearchArtists: %v", err)
+	}
+	if len(artists) != 3 {
+		t.Fatalf("len(artists) = %d, want 3", len(artists))
+	}
+	if artists[0].Name != "Artist B" || artists[1].Name != "Artist A" || artists[2].Name != "Artist C" {
+		t.Fatalf("order = [%q, %q, %q], want [Artist B, Artist A, Artist C]", artists[0].Name, artists[1].Name, artists[2].Name)
 	}
 }
 

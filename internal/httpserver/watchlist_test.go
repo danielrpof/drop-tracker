@@ -134,7 +134,7 @@ func TestWatchlist_AddEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /watchlist: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
@@ -199,7 +199,7 @@ func TestWatchlist_Add_RejectsBlankFields(t *testing.T) {
 			if err != nil {
 				t.Fatalf("POST /watchlist: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -234,7 +234,7 @@ func TestWatchlist_Add_RejectsUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /watchlist: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -257,7 +257,7 @@ func TestWatchlist_Add_DuplicateReturns409(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /watchlist: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusConflict)
@@ -299,7 +299,7 @@ func TestWatchlist_Add_InvalidPreferenceValueReturns400(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /watchlist: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -332,7 +332,7 @@ func TestWatchlist_Add_RejectsOversizeBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /watchlist: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -372,7 +372,7 @@ func TestWatchlist_Add_RejectsOverlongFields(t *testing.T) {
 			if err != nil {
 				t.Fatalf("POST /watchlist: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -418,7 +418,7 @@ func TestWatchlist_Add_RejectsOverlongOptionalMetadata(t *testing.T) {
 			if err != nil {
 				t.Fatalf("POST /watchlist: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -459,7 +459,7 @@ func TestWatchlist_Add_TrimsOptionalMetadataWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /watchlist: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
@@ -514,7 +514,7 @@ func TestWatchlist_Add_BodyMustContainExactlyOneJSONValue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("POST /watchlist: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
@@ -554,7 +554,7 @@ func TestWatchlist_List_EmptyReturnsEmptyArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /watchlist: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -584,7 +584,7 @@ func TestWatchlist_List_NilSliceStillEncodesAsEmptyArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /watchlist: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -646,7 +646,7 @@ func TestWatchlist_Delete_ConcurrentSameIDYieldsOne204AndOne404(t *testing.T) {
 				t.Errorf("request %d: %v", idx, err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			statuses[idx] = resp.StatusCode
 		}(i)
 	}
@@ -719,7 +719,7 @@ func TestWatchlist_Patch_ConcurrentDifferentAxesBothSurvive(t *testing.T) {
 				t.Errorf("iteration %d: release_types PATCH: %v", i, err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			statuses[0] = resp.StatusCode
 		}()
 		go func() {
@@ -736,7 +736,7 @@ func TestWatchlist_Patch_ConcurrentDifferentAxesBothSurvive(t *testing.T) {
 				t.Errorf("iteration %d: muted_event_types PATCH: %v", i, err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			statuses[1] = resp.StatusCode
 		}()
 
@@ -815,7 +815,7 @@ func TestWatchlist_Patch_ConcurrentWithDeleteNeverReturns500(t *testing.T) {
 				t.Errorf("iteration %d: PATCH: %v", i, err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			patchStatus = resp.StatusCode
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
@@ -837,7 +837,7 @@ func TestWatchlist_Patch_ConcurrentWithDeleteNeverReturns500(t *testing.T) {
 				t.Errorf("iteration %d: DELETE: %v", i, err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			deleteStatus = resp.StatusCode
 		}()
 
@@ -894,7 +894,7 @@ func TestWatchlist_Delete_MissingReturns404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DELETE /watchlist/1: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
@@ -925,7 +925,7 @@ func TestWatchlist_Delete_SuccessReturns204(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DELETE /watchlist/1: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
@@ -967,7 +967,7 @@ func TestWatchlist_Delete_BadIDReturns400(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DELETE %s: %v", p, err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -1011,7 +1011,7 @@ func TestWatchlist_Patch_Returns200WithUpdatedEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PATCH /watchlist/1: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -1053,7 +1053,7 @@ func TestWatchlist_Patch_InvalidValueReturns400(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PATCH /watchlist/1: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -1086,7 +1086,7 @@ func TestWatchlist_Patch_MissingReturns404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PATCH /watchlist/1: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
@@ -1117,7 +1117,7 @@ func TestWatchlist_Patch_BadIDReturns400(t *testing.T) {
 			if err != nil {
 				t.Fatalf("PATCH %s: %v", p, err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -1149,7 +1149,7 @@ func TestWatchlist_Patch_RejectsUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PATCH /watchlist/1: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -1188,7 +1188,7 @@ func TestWatchlist_Patch_NoPreferencesSuppliedReturns400(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PATCH /watchlist/1: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -1254,7 +1254,7 @@ func TestWatchlist_Patch_EmptyBodyStillRejectedEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PATCH: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -1320,7 +1320,7 @@ func TestWatchlist_Patch_BodyMustContainExactlyOneJSONValue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("PATCH /watchlist/1: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
@@ -1372,7 +1372,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 		t.Fatalf("decode POST response: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST status = %d, want %d", resp.StatusCode, http.StatusCreated)
 	}
@@ -1386,7 +1386,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
 		t.Fatalf("decode GET response: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
@@ -1418,7 +1418,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&patched1); err != nil {
 		t.Fatalf("decode first PATCH response: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("first PATCH status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
@@ -1440,7 +1440,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&patched2); err != nil {
 		t.Fatalf("decode second PATCH response: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("second PATCH status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
@@ -1457,7 +1457,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second POST /watchlist: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("second POST status = %d, want %d", resp.StatusCode, http.StatusConflict)
 	}
@@ -1471,7 +1471,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE status = %d, want %d", resp.StatusCode, http.StatusNoContent)
 	}
@@ -1485,7 +1485,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&afterDelete); err != nil {
 		t.Fatalf("decode GET-after-delete response: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	for _, e := range afterDelete {
 		if e.ID == created.ID {
 			t.Fatalf("GET after delete still contains entry id %d", created.ID)
@@ -1501,7 +1501,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second DELETE: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("second DELETE status = %d, want %d", resp.StatusCode, http.StatusNotFound)
 	}
@@ -1515,7 +1515,7 @@ func TestWatchlist_FullLifecycle(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&recreated); err != nil {
 		t.Fatalf("decode third POST response: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("third POST status = %d, want %d", resp.StatusCode, http.StatusCreated)
 	}
@@ -1538,7 +1538,7 @@ func TestWatchlist_Add_DoesNotLeakInternals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /watchlist: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)

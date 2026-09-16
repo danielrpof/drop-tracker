@@ -9,11 +9,10 @@ package musicbrainz
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"net/http"
 	"time"
 
+	"github.com/danielrpof/drop-tracker/internal/httpclient"
 	"golang.org/x/time/rate"
 )
 
@@ -90,64 +89,18 @@ type ReleaseGroupLister interface {
 
 var _ ReleaseGroupLister = (*Client)(nil)
 
-// doRequest is the single request path for this package: it waits on
-// limiter before every call so no call site can bypass the rate limit
-// (D-07, T-03-08), then sets the identifying headers MusicBrainz's
-// throttling keys off of (T-03-04), then performs the request. Every
-// outbound MusicBrainz request in this package -- and in plan 03-03's
-// release-groups browse -- must go through this one helper.
-//
-// When httpClient.Timeout is positive, ctx is wrapped in a
-// context.WithTimeout bounded by it so the same budget also bounds
-// limiter.Wait: a caller stuck behind a saturated limiter must fail within
-// the same deadline as the request itself, not hang indefinitely on a ctx
-// with no deadline of its own (T-03-03). A zero Timeout means "no client
-// timeout" in net/http's own convention, so it is left unwrapped rather
-// than fed to context.WithTimeout, which would treat a zero duration as
-// "already expired" and fail every request immediately. The cancel func is
-// not deferred here -- it is attached to the response body via
-// cancelReadCloser so the timeout keeps bounding the caller's body read
-// after doRequest returns, and is released exactly once the caller closes
-// the body (every call site defers resp.Body.Close()).
+// doRequest is the single request path for this package: it sets the
+// identifying headers MusicBrainz's throttling keys off of (T-03-04), then
+// delegates rate-limited execution to the shared internal/httpclient.Do
+// (extracted from this method's own former implementation -- see
+// internal/httpclient for the timeout-wrap, limiter.Wait, cancel-on-error,
+// and cancel-on-close logic). Every outbound MusicBrainz request in this
+// package -- and in plan 03-03's release-groups browse -- must go through
+// this one helper.
 func (c *Client) doRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
-	cancel := func() {}
-	if c.httpClient.Timeout > 0 {
-		var timeoutCtx context.Context
-		timeoutCtx, cancel = context.WithTimeout(ctx, c.httpClient.Timeout)
-		ctx = timeoutCtx
-	}
-	req = req.WithContext(ctx)
-
-	if err := c.limiter.Wait(ctx); err != nil {
-		cancel()
-		return nil, fmt.Errorf("musicbrainz: rate limiter wait: %w", err)
-	}
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("musicbrainz: do request: %w", err)
-	}
-	resp.Body = &cancelReadCloser{ReadCloser: resp.Body, cancel: cancel}
-	return resp, nil
-}
-
-// cancelReadCloser wraps a response body so the context.CancelFunc created
-// by doRequest's context.WithTimeout is released exactly when the caller
-// closes the body -- calling cancel() any earlier (e.g. immediately after
-// httpClient.Do returns, before the body is read) would truncate a
-// perfectly healthy response.
-type cancelReadCloser struct {
-	io.ReadCloser
-	cancel context.CancelFunc
-}
-
-func (c *cancelReadCloser) Close() error {
-	err := c.ReadCloser.Close()
-	c.cancel()
-	return err
+	return httpclient.Do(ctx, req, c.limiter, c.httpClient, "musicbrainz")
 }
 
 // clampLimit maps a caller-requested limit onto MusicBrainz's valid range:

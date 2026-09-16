@@ -39,6 +39,13 @@
     --color-event-new-release: #57f287;
     --color-event-guest-feature: #fee75c;
     --color-event-deluxe-change: #eb459e;
+
+    /* 19-UI-SPEC.md Color: run-health status palette (Phase 19). Distinct
+       from the Phase 5/6 --color-event-* release-type chips (also
+       green/yellow) -- different semantic axis, and the two never co-render
+       (History card vs System panel). */
+    --color-status-ok: #22c55e;
+    --color-status-warn: #f59e0b;
 }
 
 /* 06-UI-SPEC.md Spacing Scale: the declared 4/8/16/24/32/48/64px steps are

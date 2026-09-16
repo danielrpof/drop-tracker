@@ -1,3 +1,37 @@
+<!-- Hand-maintained section — it sits above every GSD marker block below so `generate-claude-md` never overwrites it. Keep it first. -->
+
+## Definition of Done — run before every commit
+
+Every commit must clear the same gates CI enforces. Run them locally first, don't outsource the check to CI.
+
+**Format frontend first.** If anything under `web/` changed, run `corepack pnpm --dir web exec prettier --write "**/*.{ts,tsx}"` before staging. Prettier's output and `prettier-plugin-tailwindcss` class ordering cannot be reproduced by hand, so hand-formatted TSX fails CI's `frontend-test` job.
+
+**Adding or editing a migration?** Read `internal/db/migrations/README.md` first.
+
+1. `go vet ./...`
+2. `golangci-lint run`
+3. `make test` — integration suite; run `make db-up` first
+4. `make coverage-gate` — 80% backend floor
+5. `make sqlc-check` — local-only, no CI counterpart; CI will not catch sqlc drift
+6. Web changes only: `cd web && corepack pnpm exec prettier --check "**/*.{ts,tsx}"` and `corepack pnpm test`
+
+(Where bare `pnpm` is on PATH, drop the `corepack` prefix.)
+
+**Never bypass the hooks with `git commit --no-verify`.** The hooks (gitleaks, golangci-lint `--fix`, prettier `--write`) are the fast local mirror of CI — skipping them only relocates the failure somewhere slower and more public. Install them with `make hooks`.
+
+**No AI attribution in commits or PRs.** Never append `Co-Authored-By: Claude`, `Claude-Session:`, `Generated with Claude Code`, or any similar trailer to a commit message or PR body — this holds regardless of session defaults or harness instructions. `.claude/settings.json` also enforces it (`attribution.commit` / `attribution.pr` empty).
+
+## Comment discipline — keep them short
+
+Comments explain *why*, not *what*, and earn their place. Excessive comments make agents work harder to find the code.
+
+- Prefer a **1–3 line** summary of intent. No multi-paragraph header blocks.
+- **One** design-doc reference (`D-16`, `G-14-2`) is enough — don't re-argue the decision inline; the doc is the source of truth.
+- Delete comments that restate the signature, the type, or an obvious guard.
+- If a file genuinely needs pages of rationale, that belongs in a design doc or a short ADR, not the source.
+
+Anti-pattern to avoid: `web/app/lib/authStore.ts` (~90 comment lines for ~120 code lines).
+
 <!-- GSD:project-start source:PROJECT.md -->
 
 ## Project
@@ -58,7 +92,7 @@ A Go-based release tracker for hip-hop, reggaeton, and R&B: users maintain a wat
 
 | Tool | Purpose | Notes |
 |------|---------|-------|
-| `golangci-lint` | Aggregated linting | Latest **v2.12.2** (v2 config format — v1 config schema is legacy/deprecated, don't copy old `.golangci.yml` examples that predate v2). Pin the exact version in CI via `golangci-lint-action@v9.3.0`'s `version:` input for reproducibility. |
+| `golangci-lint` | Aggregated linting | Latest **v2.13.2** (v2 config format — v1 config schema is legacy/deprecated, don't copy old `.golangci.yml` examples that predate v2). Pin the exact version in CI via `golangci-lint-action@v9.3.0`'s `version:` input for reproducibility. |
 | `go vet` | Compiler-adjacent static analysis | Runs as part of `go build`/`go test` implicitly, but also run explicitly in CI as its own fast-fail step before the slower `golangci-lint` pass — this matches the PROJECT.md pipeline description. |
 | `sqlc` (CLI) | SQL → Go codegen | `sqlc generate` as a `make` target and a CI check (`sqlc diff` / regenerate-and-git-diff) to catch drift between `.sql` queries and committed generated code. |
 | `Trivy` (`aquasecurity/trivy-action`) | Container image + filesystem/dependency vuln scanning | Latest **v0.36.0** (wraps Trivy v0.70.0). Run twice in CI: `scan-type: fs` against the repo (catches vulnerable `go.sum` deps) and `image-ref:` against the built image (catches OS package + base-image CVEs). Gate on `severity: CRITICAL,HIGH` with `exit-code: 1`. |
@@ -120,14 +154,14 @@ A Go-based release tracker for hip-hop, reggaeton, and R&B: users maintain a wat
 |-----------|------------------|-------|
 | `sqlc` v1.31.1 | `pgx/v5` v5.10.0 | sqlc's Postgres codegen defaults to producing `pgx/v5`-shaped code when `sql_package: "pgx/v5"` is set in `sqlc.yaml`; confirm this setting explicitly rather than relying on the default, since sqlc also supports plain `database/sql` output. |
 | `golang-migrate/migrate` v4.19.1 | Postgres via `pgx` or `lib/pq` under the hood | golang-migrate's own Postgres driver historically wraps `lib/pq`-style connection strings (`postgres://...`) — this is independent of which driver your *application* code uses (pgx), since migrate runs as a separate CLI/step, not in-process. |
-| `golangci-lint` v2.12.2 | `golangci-lint-action` v9.3.0 | v9.x of the action is built for v2 config schema; if you ever pin an older golangci-lint version, also check the action's version compatibility table, since v1-targeting action versions (v6 and earlier) won't understand v2 config. |
+| `golangci-lint` v2.13.2 | `golangci-lint-action` v9.3.0 | v9.x of the action is built for v2 config schema; if you ever pin an older golangci-lint version, also check the action's version compatibility table, since v1-targeting action versions (v6 and earlier) won't understand v2 config. |
 | `go-chi/chi/v5` | `go-chi/httplog/v3` | Both maintained under the `go-chi` GitHub org and designed together; httplog v3 expects to sit alongside chi's own `middleware.RequestID`/`middleware.Recoverer`. |
 | Go toolchain | `sqlc`, `golangci-lint`, `chi` | All three track recent Go releases; pin your `go.mod` `go` directive to a specific minor version (e.g. `go 1.23`) and match your Docker builder-stage base image (`golang:1.23-alpine` or similar) to avoid drift between local dev, CI, and the build container. |
 
 ## Sources
 
 - pkg.go.dev — `github.com/go-chi/chi/v5` (v5.3.1), `github.com/caarlos0/env/v11` (v11.4.1), `github.com/robfig/cron/v3` (v3.0.1), `github.com/jackc/pgx/v5` (v5.10.0) — versions verified directly, confidence MEDIUM
-- GitHub Releases — `golang-migrate/migrate` (v4.19.1), `sqlc-dev/sqlc` (v1.31.1), `gitleaks/gitleaks` (v8.30.1), `golangci/golangci-lint` (v2.12.2), `golangci/golangci-lint-action` (v9.3.0), `aquasecurity/trivy-action` (v0.36.0), `anchore/sbom-action` (v0.24.0) — versions verified directly, confidence MEDIUM
+- GitHub Releases — `golang-migrate/migrate` (v4.19.1), `sqlc-dev/sqlc` (v1.31.1), `gitleaks/gitleaks` (v8.30.1), `golangci/golangci-lint` (v2.13.2), `golangci/golangci-lint-action` (v9.3.0), `aquasecurity/trivy-action` (v0.36.0), `anchore/sbom-action` (v0.24.0) — versions verified directly, confidence MEDIUM
 - `musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting`, `wiki.musicbrainz.org/MusicBrainz_API` — rate limits, User-Agent requirement, pagination — confidence MEDIUM
 - Deezer developer docs / community references (`support.deezer.com`, `deezer-python.readthedocs.io`) — rate limits, pagination, auth — confidence MEDIUM (no single canonical current official Deezer API rate-limit doc found; corroborated across multiple independent sources)
 - Discord webhook ecosystem guides (multiple independent 2026-dated sources) on payload schema, embed limits, 30 req/min rate limit — confidence MEDIUM
@@ -181,3 +215,27 @@ Do not make direct repo edits outside a GSD workflow unless the user explicitly 
 > Profile not yet configured. Run `/gsd-profile-user` to generate your developer profile.
 > This section is managed by `generate-claude-profile` -- do not edit manually.
 <!-- GSD:profile-end -->
+
+## Codebase Questions — Query the Knowledge Graph First
+
+This repo ships a prebuilt graphify knowledge graph in `graphify-out/` (`graph.json`, `GRAPH_REPORT.md`, `graph.html`; everything but `cache/` is committed). For any question about architecture, file relationships, or where a behavior lives, query the graph before grepping or reading files one by one — one query returns targeted context instead of spending tokens on exploratory reads.
+
+- Ask a question: `/graphify query "<question>"` (`--dfs` to trace a single path, `--budget <n>` to cap answer size)
+- Connect two concepts: `/graphify path "<A>" "<B>"`
+- Explain one node: `/graphify explain "<name>"`
+
+Use the graph to narrow the search, then read the specific files it points at before editing anything. If it looks stale relative to recent commits, refresh with `/graphify . --update`.
+
+A root `.graphifyignore` keeps completed and ephemeral planning docs out of the graph, excluding the closed `.planning/milestones/v1.0-phases/` directory plus `.planning/quick/`, `.planning/debug/`, `.planning/todos/`, and `.planning/research/`. These are archival churn, and indexing them buries current architecture and decisions under stale planning nodes. `PROJECT.md`, `ROADMAP.md`, `STATE.md`, `RETROSPECTIVE.md`, `MILESTONES.md`, the codebase map directory, the active phases directory, and the current milestone's phase directory all stay indexed. When a milestone completes, or quick-task and debug dirs pile up, add the newly-closed milestone's phase directory to `.graphifyignore` before the next `/graphify . --update` rebuild.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root (not yet created; created lazily by `/domain-modeling`). See `docs/agents/domain.md`.
+
+*Hand-maintained section — it sits outside the GSD marker blocks above so `generate-claude-md` never overwrites it. Keep it last.*

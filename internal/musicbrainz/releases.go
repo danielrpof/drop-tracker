@@ -163,7 +163,7 @@ func (c *Client) fetchReleasePage(ctx context.Context, groupMBID string, offset 
 	if err != nil {
 		return releaseEnvelope{}, fmt.Errorf("musicbrainz: releases by release group: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		// Never echo the response body -- only the status code, which is

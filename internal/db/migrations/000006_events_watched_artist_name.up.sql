@@ -1,0 +1,13 @@
+-- Phase quick/260825-g6i: a write-once display snapshot of the watchlist
+-- entry's own name -- the artist a user actually watchlisted, which caused
+-- this row to be inserted -- distinct from artist_name.
+--
+-- Nullable with no DEFAULT, matching 000004's own nullable-column style:
+-- no correct non-NULL value exists for a row that predates this migration.
+--
+-- Deliberately populated for every event type, not only guest_feature, so
+-- its meaning is uniform: equal to artist_name for new_release and
+-- deluxe_change (both already store the watched artist's own name there),
+-- and distinct for guest_feature, where artist_name holds the recording's
+-- primary credited artist instead of the watched artist.
+ALTER TABLE events ADD COLUMN watched_artist_name TEXT;

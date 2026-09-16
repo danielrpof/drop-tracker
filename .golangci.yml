@@ -1,0 +1,51 @@
+version: "2"
+
+# Read by two consumers:
+#   - The CI lint job in .github/workflows/full-pipeline.yml (plan 07-03),
+#     via golangci-lint-action pinned to the same v2.12.2 CLI version.
+#   - The local golangci-lint pre-commit hook (.pre-commit-config.yaml),
+#     pinned to the identical v2.12.2 rev so a commit that passes locally
+#     is never rejected by a different linter version in CI.
+#
+# v2 schema (not v1) -- golangci-lint v2.12.2 will not read a v1-era
+# `linters-settings:`-style config correctly. See CLAUDE.md's
+# "What NOT to Use" row on this exact point.
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  # gosec on top of the standard set (07-REVIEW.md WR-02): this codebase has
+  # several places where static security analysis has direct value -- DSN
+  # handling/redaction (internal/db/migrate.go), webhook URL handling that
+  # must never be logged (internal/discord/client.go), and user-supplied
+  # query strings escaped into Lucene syntax (internal/musicbrainz/search.go).
+  # errcheck/staticcheck/unused catch correctness bugs, not misuse patterns.
+  enable:
+    - gosec
+  exclusions:
+    rules:
+      # Test files legitimately construct credential-shaped fixture strings
+      # (G101) and open test-authored file paths (G304) -- neither is a real
+      # secret or a real path-traversal surface. Excluding gosec from _test.go
+      # avoids per-line #nosec comments on every test fixture without
+      # weakening the check on production code.
+      - path: '_test\.go$'
+        linters:
+          - gosec
+      # cmd/coverage-report is a CI helper that opens coverage-file paths
+      # handed to it as workflow inputs (argv / env), so gosec's G304
+      # (file inclusion via variable) flags a surface that is not a real
+      # path-traversal risk -- the paths are CI-controlled, not user input
+      # (D-19). Scoped to gosec and this directory only.
+      - path: '^cmd/coverage-report/'
+        linters:
+          - gosec
+      # cmd/migration-check is a CI helper that opens migration-file paths
+      # handed to it as workflow inputs (argv), so gosec's G304 flags a
+      # surface that is not a real path-traversal risk -- the paths are
+      # CI-controlled, not end-user input (D-19b).
+      - path: '^cmd/migration-check/'
+        linters:
+          - gosec

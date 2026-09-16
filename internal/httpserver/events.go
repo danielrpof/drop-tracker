@@ -16,12 +16,20 @@ import (
 
 // eventsResponse is the GET /events response envelope (HIST-01, UI-03):
 // events is always a JSON array, never null (Service.List's non-nil-slice
-// guarantee, reinforced by the defensive backstop below); next_cursor is
-// null once the feed is exhausted -- the client's unambiguous "hide Load
-// more" signal.
+// guarantee, reinforced by the defensive backstop below); next_cursor is an
+// opaque token -- a feed position, not an id -- once the feed is exhausted
+// it is null, the client's unambiguous "hide Load more" signal. The token
+// is opaque to the client: the only correct client behaviour is to hand it
+// back verbatim as the next request's cursor query param, never parse,
+// compare, or arithmetically manipulate it. has_older_events (DATA-02,
+// D-06) is a JSON boolean, never a day count or the raw
+// EVENT_RETENTION_DAYS value -- it tells the frontend whether this scope
+// has any event hidden by the retention window, without exposing the
+// window's configured length.
 type eventsResponse struct {
-	Events     []events.Event `json:"events"`
-	NextCursor *int64         `json:"next_cursor"`
+	Events         []events.Event `json:"events"`
+	NextCursor     *string        `json:"next_cursor"`
+	HasOlderEvents bool           `json:"has_older_events"`
 }
 
 // parseOptionalPositiveInt64 reads the named query param from r: an absent
@@ -58,7 +66,7 @@ func parseOptionalPageSize(r *http.Request) (int32, bool) {
 	if err != nil || v < 1 {
 		return 0, false
 	}
-	return int32(v), true
+	return int32(v), true //nolint:gosec // int32 wraparound from a huge v is harmless here: every reachable output is either <=0 or >MaxPageSize (caught by events.Service.List's clamp, see comment above) or lands directly in the already-valid [1,MaxPageSize] range
 }
 
 // handleListEvents implements GET /events (HIST-01, UI-03): reads four
@@ -85,10 +93,20 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 		eventType = &raw
 	}
 
-	cursor, ok := parseOptionalPositiveInt64(r, "cursor")
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid cursor")
-		return
+	// cursor is parsed through events.DecodeCursor, not
+	// parseOptionalPositiveInt64: it is now an opaque encoded token, not a
+	// raw id. Absent/empty means no cursor; any decode error means 400
+	// before the store is ever called. The response message string is
+	// reused verbatim from the pre-composite-cursor behavior so the
+	// existing 400 table cases (cursor=abc, cursor=0) keep passing.
+	var cursor *events.Cursor
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		decoded, err := events.DecodeCursor(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		cursor = &decoded
 	}
 
 	pageSize, ok := parseOptionalPageSize(r)
@@ -114,7 +132,16 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 		evs = []events.Event{}
 	}
 
+	// The decoded release-date string reaches SQL only as a bound sqlc
+	// parameter via events.Service.List -- never interpolated into a query
+	// string here or anywhere downstream (T-g6i-02).
+	var nextCursor *string
+	if page.NextCursor != nil {
+		encoded := events.EncodeCursor(*page.NextCursor)
+		nextCursor = &encoded
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(eventsResponse{Events: evs, NextCursor: page.NextCursor})
+	_ = json.NewEncoder(w).Encode(eventsResponse{Events: evs, NextCursor: nextCursor, HasOlderEvents: page.HasOlderEvents})
 }

@@ -6,6 +6,18 @@
 // 06-04 never need to edit this file -- only import from it (06-01-PLAN.md
 // Step 6).
 
+import { authStore } from "~/lib/authStore"
+
+// X-Instance-Gated is a byte-for-byte contract with the server:
+// internal/authgate/gate.go sets exactly this header (with the value below) on
+// every response that passes gate.Authenticate. Changing one side without the
+// other in the same commit silently stops the Log out control from ever
+// appearing on a gated instance -- there is no compiler or runtime error on
+// either side. This is the response-side sibling of the X-Requested-With CSRF
+// header (D-15).
+const INSTANCE_GATED_HEADER = "X-Instance-Gated"
+const INSTANCE_GATED_VALUE = "1"
+
 // ---- Wire types --------------------------------------------------------
 
 // EventItem mirrors internal/events.Event's JSON shape exactly.
@@ -18,6 +30,7 @@ export interface EventItem {
   release_group_mbid: string | null
   title: string
   artist_name: string
+  watched_artist_name: string | null
   release_date: string | null
   cover_art_url: string | null
   track_count: number | null
@@ -28,10 +41,19 @@ export interface EventItem {
 }
 
 // EventsPage mirrors internal/httpserver/events.go's eventsResponse
-// envelope.
+// envelope. has_older_events (DATA-02, D-06) is never null on the wire --
+// it mirrors the Go bool exactly -- and tells the History route whether
+// this scope has any event hidden by the retention window, distinct from
+// "no events ever." next_cursor is an opaque token (quick task
+// 260825-g6i replaced the raw numeric cursor with an encoded feed
+// position that carries both a release date and an event id) -- the only
+// correct client behaviour is to send it back verbatim as the next
+// request's cursor; callers must not parse, compare, or arithmetically
+// manipulate it.
 export interface EventsPage {
   events: EventItem[]
-  next_cursor: number | null
+  next_cursor: string | null
+  has_older_events: boolean
 }
 
 // WatchlistEntry mirrors internal/watchlist.Entry's JSON shape. GET
@@ -56,6 +78,7 @@ export interface SearchArtist {
   id: string
   name: string
   disambiguation: string | null
+  country: string | null
   type: string
   image_url: string | null
 }
@@ -74,6 +97,67 @@ export interface SourceResult {
 export interface SearchResponse {
   query: string
   sources: Record<string, SourceResult>
+}
+
+// KnownOutcome is the wire's closed set (ok | error | cancelled), widened
+// with a bare-string arm so an N-1/N deploy value keeps literal autocomplete
+// without breaking typecheck (D-04, D-07 of 19-CONTEXT.md).
+export type KnownOutcome = "ok" | "error" | "cancelled"
+
+// StatusRun mirrors internal/httpserver/status.go's statusRun exactly. Used
+// by both StatusSource.last_run and every StatusSource.history element --
+// the run object carries no source key, since the source name is already
+// the map key in StatusResponse.sources.
+export interface StatusRun {
+  cycle_id: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
+  artists_checked: number
+  artists_skipped: number
+  artists_errored: number
+  events_recorded: number
+  outcome: KnownOutcome | (string & {})
+  summary: string
+}
+
+// StatusSource mirrors statusSource. history is allocated zero-length by
+// the handler, so it always encodes as an array, never null.
+export interface StatusSource {
+  last_run: StatusRun | null
+  history: StatusRun[]
+  last_skipped_at: string | null
+  consecutive_skips: number
+}
+
+// StatusInstance mirrors statusInstance. schema_applied is null only when
+// the database was unreachable at request time; schema_expected is a plain
+// Go uint and is never absent.
+export interface StatusInstance {
+  app_version: string
+  schema_applied: number | null
+  schema_expected: number
+}
+
+// StatusResponse mirrors internal/httpserver/status.go's statusResponse --
+// the frozen GET /status contract (docs/api/status-contract.md). sources is
+// always keyed by exactly "musicbrainz" and "deezer", including on a fresh
+// instance with no recorded cycles.
+export interface StatusResponse {
+  poll_interval_seconds: number
+  watchlist_size: number
+  instance: StatusInstance
+  sources: Record<string, StatusSource>
+}
+
+// NotificationSettings mirrors internal/httpserver/settings.go's
+// settingsResponse exactly -- the GET/PUT /settings/notifications wire
+// contract (DGST-01, DGST-16).
+export interface NotificationSettings {
+  digest_enabled: boolean
+  digest_cadence: "daily" | "weekly"
+  digest_last_sent_at: string | null
+  updated_at: string
 }
 
 // ---- Error type ---------------------------------------------------------
@@ -98,7 +182,41 @@ export class ApiError extends Error {
 // every caller gets the same error shape regardless of which endpoint
 // failed.
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init)
+  // D-15 CSRF: every non-GET request to a gated route must carry a custom
+  // header a cross-site attacker cannot set without a CORS preflight the
+  // server denies. Injected here once so it covers every wrapper --
+  // including removeWatchlist/deleteSession, which otherwise send no
+  // headers at all -- rather than per wrapper. Server-side enforcement
+  // (RequireCSRFHeader) lands in plan 14-04.
+  const method = init?.method ?? "GET"
+  const headers =
+    method === "GET"
+      ? init?.headers
+      : { ...init?.headers, "X-Requested-With": "drop-tracker" }
+
+  const res = await fetch(path, { ...init, headers })
+
+  // G-14-3: a gated instance marks every response that passed gate.Authenticate
+  // with X-Instance-Gated. Latch it here -- BEFORE the 401 / 204 / !ok branches
+  // below, because a gated 204, a gated non-OK and a gated error body all
+  // passed the gate and all carry the marker. The latch is one-way and
+  // monotonic within the browser session (as 14-06 established for the
+  // storage-backed flag): it is NEVER cleared when the marker is absent,
+  // because exempt routes on a gated instance legitimately carry none -- so
+  // absence proves nothing. The latch never touches the optimistic auth flag.
+  if (res.headers.get(INSTANCE_GATED_HEADER) === INSTANCE_GATED_VALUE) {
+    authStore.markGateActive()
+  }
+
+  // D-16 global 401 interceptor: this is the ONLY place client code flips
+  // auth state on a 401. Any gated endpoint that returns 401 (initial load,
+  // mid-session expiry, a race right after login) funnels through here, so
+  // <App> renders <PassphraseScreen> without per-wrapper handling. The
+  // ApiError still carries status 401 so a caller that cares can branch.
+  if (res.status === 401) {
+    authStore.markUnauthenticated()
+    throw new ApiError(401, "unauthenticated")
+  }
 
   if (res.status === 204) {
     return undefined as T
@@ -132,12 +250,12 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listEvents(params?: {
   artistId?: number
   eventType?: string
-  cursor?: number
+  cursor?: string
 }): Promise<EventsPage> {
   const search = new URLSearchParams()
   if (params?.artistId != null) search.set("artist_id", String(params.artistId))
   if (params?.eventType) search.set("event_type", params.eventType)
-  if (params?.cursor != null) search.set("cursor", String(params.cursor))
+  if (params?.cursor != null) search.set("cursor", params.cursor)
   const qs = search.toString()
   return apiFetch<EventsPage>(`/events${qs ? `?${qs}` : ""}`)
 }
@@ -176,7 +294,7 @@ export async function addWatchlist(params: {
 // pass only the axis they're changing.
 export async function updateWatchlistPreferences(
   id: number,
-  params: { releaseTypes?: string[]; mutedEventTypes?: string[] },
+  params: { releaseTypes?: string[]; mutedEventTypes?: string[] }
 ): Promise<WatchlistEntry> {
   return apiFetch<WatchlistEntry>(`/watchlist/${id}`, {
     method: "PATCH",
@@ -196,8 +314,72 @@ export async function removeWatchlist(id: number): Promise<void> {
 
 // searchArtists fans out to every configured source (WLST-01, D-01, D-02,
 // D-03): the response's sources map is returned as-is, one entry per
-// source, never merged.
-export async function searchArtists(query: string): Promise<SearchResponse> {
+// source, never merged. An optional signal lets a caller (SearchBox) cancel
+// a superseded search at the request level rather than only discarding its
+// resolved value -- apiFetch already forwards its whole init object to
+// fetch, so placing the signal in init here is sufficient.
+export async function searchArtists(
+  query: string,
+  signal?: AbortSignal
+): Promise<SearchResponse> {
   const qs = new URLSearchParams({ q: query })
-  return apiFetch<SearchResponse>(`/search?${qs.toString()}`)
+  return apiFetch<SearchResponse>(`/search?${qs.toString()}`, { signal })
+}
+
+// ---- Session (instance passphrase gate) ---------------------------------
+
+// createSession logs the browser in: POST /session with the passphrase in
+// the JSON body only (Pitfall 14 -- the value never touches a path, a query
+// string, or a GET). It relies on apiFetch's 204 handling to resolve with
+// no value. It deliberately does NOT call authStore.markAuthenticated()
+// itself -- PassphraseScreen does that only after this promise resolves, so
+// a rejected login can never flip auth state (GATE-05).
+export async function createSession(passphrase: string): Promise<void> {
+  await apiFetch<void>("/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ passphrase }),
+  })
+}
+
+// deleteSession logs the browser out: DELETE /session, which responds 204 +
+// Set-Cookie Max-Age=0 (GATE-06, D-10 -- client-local logout only).
+export async function deleteSession(): Promise<void> {
+  await apiFetch<void>("/session", { method: "DELETE" })
+}
+
+// ---- Status (operator observability) --------------------------------------
+
+// getStatus fetches the gated operator status surface (SYS-01, SYS-02,
+// SYS-03). Routed through apiFetch so it inherits the D-16 401 interceptor
+// and the X-Instance-Gated latch -- the System view needs no per-view auth
+// code.
+export async function getStatus(): Promise<StatusResponse> {
+  return apiFetch<StatusResponse>("/status")
+}
+
+// ---- Digest settings (operator control) -----------------------------------
+
+// getDigestSettings fetches the gated digest settings resource (DGST-01,
+// DGST-16). Routed through apiFetch like every other wrapper -- no
+// per-wrapper auth code needed.
+export async function getDigestSettings(): Promise<NotificationSettings> {
+  return apiFetch<NotificationSettings>("/settings/notifications")
+}
+
+// updateDigestSettings always sends both fields (D-02 instant-apply,
+// full-object semantics matching the Go DTO) -- there is no partial-update
+// variant of this endpoint, unlike updateWatchlistPreferences.
+export async function updateDigestSettings(params: {
+  digestEnabled: boolean
+  digestCadence: "daily" | "weekly"
+}): Promise<NotificationSettings> {
+  return apiFetch<NotificationSettings>("/settings/notifications", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      digest_enabled: params.digestEnabled,
+      digest_cadence: params.digestCadence,
+    }),
+  })
 }

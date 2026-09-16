@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
@@ -18,61 +17,49 @@ const (
 	eventTypeNewRelease   = "new_release"
 	eventTypeGuestFeature = "guest_feature"
 	eventTypeDeluxeChange = "deluxe_change"
+
+	// maxNewGuestFeatureLookupsPerCycle bounds one artist's ReleasesForRecording
+	// lookups in a single detectGuestFeatures call (D-13), so a newly-added
+	// artist's seed cycle cannot spend the whole shared MusicBrainz rate budget.
+	// Recordings beyond the cap are skipped this cycle (not inserted, not marked
+	// seen), like a lookup error, and retried next cycle.
+	maxNewGuestFeatureLookupsPerCycle = 20
+
+	// deluxeRecheckWindowDays bounds how far back detectDeluxeChanges re-fetches
+	// release detail for an already-seen group. Without it every already-seen
+	// group gets a ReleasesByReleaseGroup call every cycle forever -- the largest
+	// unbounded consumer of the shared MusicBrainz limiter, starving search and
+	// detectGuestFeatures. A group older than this has finished gaining deluxe
+	// editions. Generous by design: too short risks a missed alert, too long
+	// only costs bounded extra traffic.
+	deluxeRecheckWindowDays = 90
 )
 
-// DetectMusicBrainz diffs groups -- freshly fetched for entry via
-// ReleaseGroupsByArtist -- against the seen store and records each
-// previously-unseen release-group as a new_release event (DTCT-01), gated by
-// both of entry's preference axes (D-17, D-18) and by per-source seed mode
-// (D-13/D-14/D-15). It then runs detectGuestFeatures (DTCT-03), which fetches
-// and diffs entry's recording-by-artist-credit browse in the same call, and
-// detectDeluxeChanges (DTCT-02), which fetches per-release track-count
-// detail for release-groups already in the seen store -- one MusicBrainz
-// poll cycle covers all three under the same PollInterval and rate limiter
-// (D-07), with no second scheduler cadence.
-//
-// The seed-mode decision (isSeedMode) is made exactly once, before any
-// pass, and its resulting notified_at value is threaded into every
-// insertEvent call this whole method makes -- across all three event types.
-// Reading it lazily per pass would flip the answer mid-call (an earlier
-// pass's own inserts would make a later pass see a non-zero event count for
-// the source and read as already-seeded) and leave that pass's rows
-// unseeded, violating D-13's "every row from one seed cycle shares one
-// timestamp" contract now that three event types share one (artist_id,
-// source) seed-mode scope.
-//
-// preCycleSeenGroups -- the set of release-group MBIDs already recorded as
-// new_release events -- is likewise captured exactly once, before the
-// new_release pass inserts anything this cycle, and handed to
-// detectDeluxeChanges unchanged. Re-querying it after the new_release pass
-// would include groups that pass just inserted a moment earlier in this
-// same call, so a brand-new group would receive a release-detail fetch on
-// its own discovery cycle -- exactly what D-04 forbids.
-//
-// The mute axis (D-18) is checked once per event type, before its own
-// pass's fetch/seen-set/insert work: a muted event type does no seen-set
-// lookup and no insert at all (new_release additionally skips no per-group
-// work since it never reaches the loop). The release-type axis (D-17) is
-// checked per group, inside the new_release loop, before the seen-set
-// lookup -- a group failing either check never reaches the database, so the
-// seen store only ever holds what the artist's current preferences actually
-// want.
-//
-// An id already in the seen store is skipped without an InsertEvent call --
-// the ON CONFLICT DO NOTHING clause would no-op it anyway, but skipping
-// client-side avoids a wasted round trip for what is, on a typical
-// steady-state cycle, the overwhelming majority of an artist's catalogue.
-func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) error {
+// DetectMusicBrainz diffs freshly-fetched groups against the seen store and
+// records each unseen release-group as a new_release event (DTCT-01), gated by
+// entry's two preference axes (D-17, D-18) and per-source seed mode
+// (D-13/D-14/D-15). It then runs detectGuestFeatures (DTCT-03) and
+// detectDeluxeChanges (DTCT-02) -- one poll cycle covers all three under one
+// rate limiter (D-07). isSeedMode and preCycleSeenGroups are each captured ONCE
+// before any pass inserts: reading them lazily would flip the answer mid-call
+// (D-13) and hand a just-discovered group a release-detail fetch (D-04).
+func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, groups []musicbrainz.ReleaseGroup) (int, error) {
 	seedMode, err := d.isSeedMode(ctx, entry.ArtistID, sourceMusicBrainz)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	notifiedAt := seedNotifiedAt(seedMode)
+	notify := newNotifyGate(seedMode, d.notifyMaxReleaseAgeDays, time.Now().UTC())
 
 	preCycleSeenGroups, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceMusicBrainz, eventTypeNewRelease)
 	if err != nil {
-		return err
+		return 0, err
 	}
+
+	// newRelease is function-scoped so the tail return can sum it with the
+	// guest-feature and deluxe-change pass counts (A2): reporting only this
+	// pass under-counts events_recorded on any cycle that finds a feature or
+	// a deluxe edition (RUN-01).
+	newRelease := 0
 
 	if eventTypeMuted(entry, eventTypeNewRelease) {
 		logger.Info("detection result",
@@ -86,10 +73,8 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 	} else {
 		seen := preCycleSeenGroups
 
-		inserted := 0
 		filtered := 0
-		// range only -- groups is an externally-supplied slice (T-04-01, ASVS
-		// V5); never index a fixed position on it.
+		// range only -- groups is externally-supplied (T-04-01, ASVS V5).
 		for _, g := range groups {
 			if !releaseTypeAllowed(entry, g.PrimaryType) {
 				filtered++
@@ -101,25 +86,27 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 
 			mbid := g.MBID
 			coverArt := coverArtURLForReleaseGroup(mbid)
+			watchedName := entry.Name
 			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
-				ArtistID:         entry.ArtistID,
-				Source:           sourceMusicBrainz,
-				EventType:        eventTypeNewRelease,
-				ExternalID:       mbid,
-				ReleaseGroupMbid: &mbid,
-				Title:            g.Title,
-				ArtistName:       entry.Name,
-				ReleaseDate:      nullableString(g.FirstReleaseDate),
-				CoverArtUrl:      &coverArt,
-				TrackCount:       nil,
-				ReleaseType:      releaseTypeForStorage(g.PrimaryType),
-				NotifiedAt:       notifiedAt,
+				ArtistID:          entry.ArtistID,
+				Source:            sourceMusicBrainz,
+				EventType:         eventTypeNewRelease,
+				ExternalID:        mbid,
+				ReleaseGroupMbid:  &mbid,
+				Title:             g.Title,
+				ArtistName:        entry.Name,
+				ReleaseDate:       nullableString(g.FirstReleaseDate),
+				CoverArtUrl:       &coverArt,
+				TrackCount:        nil,
+				ReleaseType:       releaseTypeForStorage(g.PrimaryType),
+				NotifiedAt:        notify.notifiedAt(g.FirstReleaseDate),
+				WatchedArtistName: &watchedName,
 			})
 			if err != nil {
-				return fmt.Errorf("detection: detect musicbrainz: %w", err)
+				return newRelease, fmt.Errorf("detection: detect musicbrainz: %w", err)
 			}
 			if newly {
-				inserted++
+				newRelease++
 			}
 		}
 
@@ -127,40 +114,30 @@ func (d *Detector) DetectMusicBrainz(ctx context.Context, logger *slog.Logger, e
 			slog.String("artist_mbid", entry.MBID),
 			slog.String("event_type", eventTypeNewRelease),
 			slog.Int("candidate_count", len(groups)),
-			slog.Int("inserted_count", inserted),
+			slog.Int("inserted_count", newRelease),
 			slog.Int("filtered_count", filtered),
 			slog.Bool("seed_mode", seedMode),
 		)
 	}
 
-	if err := d.detectGuestFeatures(ctx, logger, entry, seedMode, notifiedAt); err != nil {
-		return err
+	gf, err := d.detectGuestFeatures(ctx, logger, entry, seedMode, notify)
+	if err != nil {
+		return newRelease + gf, err
 	}
 
-	return d.detectDeluxeChanges(ctx, logger, entry, groups, preCycleSeenGroups, notifiedAt)
+	dc, err := d.detectDeluxeChanges(ctx, logger, entry, groups, preCycleSeenGroups, notify)
+	return newRelease + gf + dc, err
 }
 
-// detectGuestFeatures diffs entry's recordings-by-artist-credit browse
-// (D-05) against the seen store and records each previously-unseen guest
-// appearance as a guest_feature event (DTCT-03, D-06). seedMode/notifiedAt
-// are computed once by DetectMusicBrainz, before this pass or the
-// new_release pass runs, and threaded through here so both event types
-// share one seed decision and one notified_at timestamp for this cycle.
-//
-// The mute check (D-18) runs before any recording fetch: a muted event type
-// spends no rate-limiter budget on a fetch whose result would be discarded
-// anyway.
-//
-// A recording-source error is logged and this pass returns nil rather than
-// propagating the error -- a failed recording browse must never discard the
-// new_release events the same cycle's earlier pass already recorded.
-//
-// isGuestFeature runs against every fetched recording before any
-// event-creation logic (04-RESEARCH.md Common Pitfall #3): RecordingsByArtist
-// returns every recording the artist is credited on, in ANY position, not
-// just guest appearances -- treating the raw fetch as the guest-feature set
-// would massively over-notify.
-func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, seedMode bool, notifiedAt pgtype.Timestamptz) error {
+// detectGuestFeatures diffs entry's recordings-by-artist-credit browse (D-05)
+// against the seen store and records each unseen guest appearance as a
+// guest_feature event (DTCT-03, D-06). seedMode/notify come from
+// DetectMusicBrainz so both event types share one decision this cycle. The mute
+// check (D-18) runs before any fetch. A recording-source error is logged and
+// returns nil -- a failed browse must not discard the cycle's new_release rows.
+// isGuestFeature filters every recording first (04-RESEARCH.md Pitfall #3):
+// RecordingsByArtist returns every credit, not just guest ones.
+func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, seedMode bool, notify notifyGate) (int, error) {
 	if eventTypeMuted(entry, eventTypeGuestFeature) {
 		logger.Info("detection result",
 			slog.String("artist_mbid", entry.MBID),
@@ -171,7 +148,7 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 			slog.Bool("muted", true),
 			slog.Bool("page_ceiling_reached", false),
 		)
-		return nil
+		return 0, nil
 	}
 
 	recordings, err := d.recordings.RecordingsByArtist(ctx, entry.MBID)
@@ -181,17 +158,19 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 			slog.String("artist_name", entry.Name),
 			slog.String("musicbrainz_error", err.Error()),
 		)
-		return nil
+		return 0, nil
 	}
 
 	seen, err := d.seenExternalIDs(ctx, entry.ArtistID, sourceMusicBrainz, eventTypeGuestFeature)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	inserted := 0
-	// range only -- recordings is externally-supplied (T-04-12, ASVS V5);
-	// isGuestFeature applies its own defensive length guard before indexing.
+	lookupCount := 0
+	lookupCapReachedAt := 0
+	releaseLinkCeilingCount := 0
+	// range only -- recordings is externally-supplied (T-04-12, ASVS V5).
 	for _, rec := range recordings {
 		if !isGuestFeature(rec, entry.MBID) {
 			continue
@@ -200,25 +179,66 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 			continue
 		}
 
-		newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
-			ArtistID:   entry.ArtistID,
-			Source:     sourceMusicBrainz,
-			EventType:  eventTypeGuestFeature,
-			ExternalID: rec.MBID,
-			Title:      rec.Title,
-			ArtistName: displayArtistName(rec, entry.Name),
-			NotifiedAt: notifiedAt,
-		})
+		// D-13: past the lookup budget, remaining recordings are skipped (not
+		// inserted, not marked seen) and retried next cycle.
+		if lookupCount >= maxNewGuestFeatureLookupsPerCycle {
+			if lookupCapReachedAt == 0 {
+				lookupCapReachedAt = maxNewGuestFeatureLookupsPerCycle
+			}
+			continue
+		}
+
+		// D-01: source a release date and release-group MBID via one lookup.
+		releases, err := d.recordings.ReleasesForRecording(ctx, rec.MBID)
+		lookupCount++
 		if err != nil {
-			return fmt.Errorf("detection: detect guest features: %w", err)
+			// OQ-02: a lookup error is isolated to this recording -- not
+			// inserted, not marked seen, retried next cycle.
+			logger.Error("recording release lookup failed",
+				slog.String("artist_mbid", entry.MBID),
+				slog.String("recording_mbid", rec.MBID),
+				slog.String("musicbrainz_error", err.Error()),
+			)
+			continue
+		}
+		if len(releases) >= musicbrainz.MaxRecordingReleaseLinks {
+			releaseLinkCeilingCount++
+		}
+
+		// D-02: earliestReleaseDate picks the precision-aware earliest date;
+		// guestFeatureArt independently finds a release-group MBID for art.
+		releaseDate := earliestReleaseDate(releases)
+		releaseGroupMBID, coverArt := guestFeatureArt(releases)
+
+		// artist_name is the track's primary credit; watched_artist_name is the
+		// watchlist entry that caused the insert. Distinct facts, not redundant
+		// -- a guest_feature row's watched artist is usually not the primary credit.
+		watchedName := entry.Name
+		params := sqlc.InsertEventParams{
+			ArtistID:          entry.ArtistID,
+			Source:            sourceMusicBrainz,
+			EventType:         eventTypeGuestFeature,
+			ExternalID:        rec.MBID,
+			Title:             rec.Title,
+			ArtistName:        displayArtistName(rec, entry.Name),
+			ReleaseDate:       nullableString(releaseDate),
+			NotifiedAt:        notify.notifiedAt(releaseDate),
+			WatchedArtistName: &watchedName,
+		}
+		if releaseGroupMBID != "" {
+			groupMBID := releaseGroupMBID
+			params.ReleaseGroupMbid = &groupMBID
+			params.CoverArtUrl = &coverArt
+		}
+
+		newly, err := d.insertEvent(ctx, params)
+		if err != nil {
+			return inserted, fmt.Errorf("detection: detect guest features: %w", err)
 		}
 		if newly {
 			inserted++
-			// Guard against the same recording MBID appearing twice within
-			// one browse result (D-10's dedup key already makes this safe
-			// at the DB level via ON CONFLICT DO NOTHING; marking it seen
-			// here just avoids a second wasted round trip for the
-			// duplicate).
+			// Guard against a duplicate recording MBID in one browse result
+			// (D-10 already makes this DB-safe; this just skips a round trip).
 			seen[rec.MBID] = struct{}{}
 		}
 	}
@@ -232,64 +252,50 @@ func (d *Detector) detectGuestFeatures(ctx context.Context, logger *slog.Logger,
 		slog.Int("inserted_count", inserted),
 		slog.Bool("seed_mode", seedMode),
 		slog.Bool("page_ceiling_reached", pageCeilingReached),
+		slog.Int("release_link_ceiling_count", releaseLinkCeilingCount),
+		slog.Int("guest_feature_lookup_cap_reached_at", lookupCapReachedAt),
 	)
 
-	return nil
+	return inserted, nil
 }
 
-// detectDeluxeChanges diffs freshGroups against preCycleSeen -- the
-// pre-cycle new_release seen-set DetectMusicBrainz captured before its own
-// pass ran -- and, for every group already in that set, fetches per-release
-// track-count detail and compares it against a persisted baseline (D-01,
-// D-02). A release-group not in preCycleSeen was discovered for the first
-// time this very cycle: D-04 forbids fetching its release detail in the
-// same cycle it was discovered, so it is skipped entirely, at zero request
-// cost.
-//
-// Both preference gates (deluxeDetectionEnabled, eventTypeMuted) are
-// checked before any fetch: an artist who has not opted into deluxe alerts,
-// or who has muted deluxe_change, costs zero release-detail requests.
-//
-// For each already-seen group, the maximum TrackCount() across its fetched
-// releases is compared against groupBaseline's recorded value:
-//   - No baseline recorded yet: the fresh maximum silently BECOMES the
-//     baseline (setGroupBaseline) and no event fires -- a first measurement
-//     is a baseline, not an observed increase (04-RESEARCH.md Pitfall #1).
-//   - Baseline exists and the fresh maximum is greater: a deluxe_change
-//     event is inserted, keyed on the winning release's own MBID (D-10),
-//     and the baseline advances to the new maximum.
-//   - Baseline exists and the fresh maximum is equal or lower: no event,
-//     baseline left untouched -- D-02 counts increases only, and lowering
-//     the baseline on a downward blip would let the same tracklist re-fire
-//     later.
-//
-// A fresh maximum of 0 (absent/empty media, or media entries with no
-// track-count) means the response carried no usable data -- the group is
-// skipped and the baseline (if any) is left untouched, exactly like a
-// group that was never fetched.
-//
-// A per-group release-detail error is logged and that group is skipped;
-// the pass continues to the next group and this method still returns nil,
-// so one unreachable release-group never discards the cycle's other
-// events (mirrors detectGuestFeatures's own error-isolation contract).
-func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, freshGroups []musicbrainz.ReleaseGroup, preCycleSeen map[string]struct{}, notifiedAt pgtype.Timestamptz) error {
+// detectDeluxeChanges compares the max TrackCount() of every freshGroup already
+// in preCycleSeen against a persisted baseline (D-01, D-02) via
+// advanceGroupBaseline's atomic CAS (PERF-04, 11-RESEARCH.md Pattern 2). Groups
+// not in preCycleSeen (D-04) or outside deluxeRecheckWindowDays (quick/260826-gj8)
+// are skipped pre-fetch, as are muted/disabled preference axes. First measurement
+// becomes the baseline silently (04-RESEARCH.md Pitfall #1); a real increase
+// fires a deluxe_change keyed on the winning release MBID (D-10). Residual: a
+// crash between baseline commit and event insert permanently loses that alert.
+func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger, entry watchlist.Entry, freshGroups []musicbrainz.ReleaseGroup, preCycleSeen map[string]struct{}, notify notifyGate) (int, error) {
 	if !deluxeDetectionEnabled(entry) {
-		return nil
+		return 0, nil
 	}
 	if eventTypeMuted(entry, eventTypeDeluxeChange) {
-		return nil
+		return 0, nil
 	}
 
 	detailFetchCount := 0
 	baselineEstablishedCount := 0
+	windowSkippedCount := 0
 	inserted := 0
 	pageCeilingReached := false
+
+	// Captured once per call, not per group, so a midnight-straddling pass
+	// judges every group by one cutoff (mirrors newNotifyGate).
+	cutoff := time.Now().UTC().AddDate(0, 0, -deluxeRecheckWindowDays).Format(time.DateOnly)
 
 	// range only -- freshGroups is externally-supplied (T-04-01, ASVS V5).
 	for _, g := range freshGroups {
 		if _, ok := preCycleSeen[g.MBID]; !ok {
-			// D-04: a group discovered this very cycle gets no release-detail
-			// fetch -- it is a new_release event and nothing else.
+			// D-04: a group discovered this cycle gets no release-detail fetch.
+			continue
+		}
+
+		if !withinDeluxeRecheckWindow(g.FirstReleaseDate, cutoff) {
+			// quick/260826-gj8: outside the recheck window -- pure omission,
+			// baseline untouched, so widening the window later resumes cleanly.
+			windowSkippedCount++
 			continue
 		}
 
@@ -307,9 +313,8 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 			pageCeilingReached = true
 		}
 
-		// The comparison uses the maximum total track count across every
-		// release in the group (D-02), never the first or last encountered
-		// -- the outcome must not depend on upstream ordering.
+		// Max track count across the group (D-02), never first/last -- the
+		// outcome must not depend on upstream ordering.
 		maxCount := 0
 		var winner musicbrainz.Release
 		// range only -- releases is externally-supplied (T-04-01, ASVS V5).
@@ -320,36 +325,38 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 			}
 		}
 		if maxCount == 0 {
-			// No usable media data in this fetch -- not "the release has no
-			// tracks." Leave any existing baseline untouched.
+			// No usable media data -- not "no tracks". Leave the baseline alone.
 			continue
 		}
 
-		baseline, hasBaseline, err := d.groupBaseline(ctx, g.MBID)
+		advanced, hadBaseline, previousBaseline, err := d.advanceGroupBaseline(ctx, g.MBID, maxCount)
 		if err != nil {
-			return err
+			return inserted, err
 		}
 
 		switch {
-		case !hasBaseline:
-			if err := d.setGroupBaseline(ctx, g.MBID, maxCount); err != nil {
-				return err
-			}
+		case !advanced:
+			// Equal or lower: D-02 counts increases only, and lowering the
+			// baseline would let the same tracklist re-fire later.
+		case !hadBaseline:
 			baselineEstablishedCount++
 			logger.Info("baseline_established",
 				slog.String("artist_mbid", entry.MBID),
 				slog.String("release_group_mbid", g.MBID),
 				slog.Int("track_count", maxCount),
 			)
-		case maxCount > baseline:
+		default: // advanced && hadBaseline
 			groupMBID := g.MBID
 			coverArt := coverArtURLForReleaseGroup(groupMBID)
-			trackCount := int32(maxCount)
-			// D-04: capture the pre-update baseline now, before
-			// setGroupBaseline below overwrites the group's track_count with
-			// the new maximum -- the old count exists nowhere else once that
-			// call lands.
-			previousTrackCount := int32(baseline)
+			trackCount := int32(maxCount)                 //nolint:gosec // maxCount sums MusicBrainz media.TrackCount fields; a real release is always orders of magnitude under int32 range (worst case on a malformed upstream value is a wrong stored number, not a security defect)
+			previousTrackCount := int32(previousBaseline) //nolint:gosec // previousBaseline is read back from advanceGroupBaseline's own previously-stored int32 column, never a fresh unbounded external value
+			watchedName := entry.Name
+			// KNOWN NARROWING (accepted): the group is inside the 90-day
+			// recheck window, but notifiedAt applies the 7-day notify window to
+			// the WINNING RELEASE's date -- so a deluxe edition dated to match
+			// the original album is recorded in history but never sent. Left
+			// as-is: zero deluxe_change rows exist in production, so it narrows
+			// nothing observable; widening it is a product decision.
 			newly, err := d.insertEvent(ctx, sqlc.InsertEventParams{
 				ArtistID:           entry.ArtistID,
 				Source:             sourceMusicBrainz,
@@ -362,21 +369,24 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 				CoverArtUrl:        &coverArt,
 				TrackCount:         &trackCount,
 				PreviousTrackCount: &previousTrackCount,
-				NotifiedAt:         notifiedAt,
+				NotifiedAt:         notify.notifiedAt(winner.Date),
+				WatchedArtistName:  &watchedName,
 			})
 			if err != nil {
-				return fmt.Errorf("detection: detect deluxe changes: %w", err)
+				// Accepted edge (see the doc comment): the baseline already
+				// advanced, so this expansion is not re-detected later. Warn
+				// (like the notifier's WR-03 line), identifiable via `window`.
+				logger.Warn("deluxe change event insert failed after baseline advance: this tracklist expansion will not be re-detected",
+					slog.String("artist_mbid", entry.MBID),
+					slog.String("release_group_mbid", groupMBID),
+					slog.String("window", "baseline_advanced_insert_failed"),
+					slog.String("error", err.Error()),
+				)
+				return inserted, fmt.Errorf("detection: detect deluxe changes: %w", err)
 			}
 			if newly {
 				inserted++
 			}
-			if err := d.setGroupBaseline(ctx, g.MBID, maxCount); err != nil {
-				return err
-			}
-		default:
-			// Equal or lower: D-02 counts increases only. A lower count is
-			// an upstream data correction, and lowering the baseline would
-			// let the same tracklist re-fire later.
 		}
 	}
 
@@ -385,23 +395,19 @@ func (d *Detector) detectDeluxeChanges(ctx context.Context, logger *slog.Logger,
 		slog.String("event_type", eventTypeDeluxeChange),
 		slog.Int("detail_fetch_count", detailFetchCount),
 		slog.Int("baseline_established_count", baselineEstablishedCount),
+		slog.Int("window_skipped_count", windowSkippedCount),
 		slog.Int("inserted_count", inserted),
 		slog.Bool("page_ceiling_reached", pageCeilingReached),
 	)
 
-	return nil
+	return inserted, nil
 }
 
-// isGuestFeature implements D-06's positional rule: rec is a guest
-// appearance for watchedArtistMBID when the recording's first artist-credit
-// entry is NOT the watched artist. The length guard is load-bearing, not
-// defensive noise (T-04-12, ASVS V5) -- MusicBrainz is community-editable,
-// semi-trusted data, and indexing position zero without it is a real panic
-// risk on a malformed response.
-//
-// A first-credit entry whose nested artist MBID is empty is treated as "not
-// the watched artist" -- an unidentifiable primary credit errs toward an
-// extra alert rather than a silently missed feature.
+// isGuestFeature implements D-06's positional rule: rec is a guest appearance
+// when its first artist-credit entry is NOT the watched artist. The length guard
+// is load-bearing (T-04-12, ASVS V5) -- MusicBrainz is semi-trusted data and
+// indexing position zero without it can panic. An empty first-credit MBID counts
+// as "not the watched artist" -- errs toward an extra alert.
 func isGuestFeature(rec musicbrainz.Recording, watchedArtistMBID string) bool {
 	if len(rec.ArtistCredit) == 0 {
 		return false
@@ -409,14 +415,10 @@ func isGuestFeature(rec musicbrainz.Recording, watchedArtistMBID string) bool {
 	return rec.ArtistCredit[0].Artist.MBID != watchedArtistMBID
 }
 
-// displayArtistName is what a guest_feature row stores in artist_name
-// (D-12): the primary-credit artist's name, not the watched artist's --
-// artist_id already identifies the watched artist, so the useful display
-// datum is who the track is credited to, letting Phase 5's NTFY-02 message
-// render "<watched artist> appears on <title> by <primary artist>" without
-// a second external call. Falls back to the first entry's credited Name,
-// then to fallback (the watched artist's own name), if the nested artist
-// name is empty.
+// displayArtistName is a guest_feature row's artist_name (D-12): the
+// primary-credit artist, not the watched one (artist_id already has that), so
+// NTFY-02 can render "<watched> appears on <title> by <primary>" with no extra
+// call. Falls back to the entry's credited Name, then to fallback.
 func displayArtistName(rec musicbrainz.Recording, fallback string) string {
 	if len(rec.ArtistCredit) == 0 {
 		return fallback
@@ -431,9 +433,87 @@ func displayArtistName(rec musicbrainz.Recording, fallback string) string {
 	return fallback
 }
 
-// seenExternalIDs returns the set of external ids already recorded for
-// artistID under source/eventType -- the "seen" half of the fresh-vs-seen
-// diff (D-10).
+// earliestReleaseDate implements D-02: the earliest release date among releases,
+// compared as strings (MusicBrainz partial dates can't round-trip through
+// time.Time). Dates under 4 chars are filtered first -- empty sorts before every
+// real date and a short one would panic earlierDate's slicing (WR-01,
+// 13-REVIEW.md) -- and the rest are folded via earlierDate, whose precision rule
+// (the longer, more precise date wins a same-year prefix tie) plain `<` gets wrong.
+func earliestReleaseDate(releases []musicbrainz.RecordingRelease) string {
+	earliest := ""
+	// range only -- releases is externally-supplied (T-04-12, ASVS V5).
+	for _, r := range releases {
+		// Under 4 chars is malformed -- skip so it never reaches earlierDate's
+		// a[:4]/b[:4] slicing (WR-01, 13-REVIEW.md).
+		if len(r.Date) < 4 {
+			continue
+		}
+		if earliest == "" {
+			earliest = r.Date
+			continue
+		}
+		earliest = earlierDate(earliest, r.Date)
+	}
+	return earliest
+}
+
+// earlierDate returns whichever of a, b is earlier under earliestReleaseDate's
+// precision-aware rule. Both are guaranteed >= 4 chars by its length filter.
+func earlierDate(a, b string) string {
+	yearA, yearB := a[:4], b[:4]
+	if yearA != yearB {
+		// Fixed-width 4-digit numerals: lexicographic and numeric order agree.
+		if yearA < yearB {
+			return a
+		}
+		return b
+	}
+	// Same year, precision difference (one a strict prefix of the other): the
+	// more precise value wins, e.g. "2020" vs "2020-01-05" -> "2020-01-05".
+	if strings.HasPrefix(b, a) {
+		return b
+	}
+	if strings.HasPrefix(a, b) {
+		return a
+	}
+	// Same year, equal precision: plain comparison is correct.
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// withinDeluxeRecheckWindow reports whether firstReleaseDate is recent enough
+// (against cutoff) to warrant a fresh ReleasesByReleaseGroup fetch. Compares
+// strings only; every ambiguous case resolves to true (still check), like
+// isGuestFeature's doctrine: under 4 chars (absent/malformed) returns true;
+// otherwise compare truncated to the shorter operand, so a year-only date is
+// judged at its own precision; >= not >, so a group dated exactly on the cutoff
+// is still checked; a garbage or oddly-shaped date sorts above the cutoff -- an
+// extra fetch, never a silent skip.
+func withinDeluxeRecheckWindow(firstReleaseDate, cutoff string) bool {
+	if len(firstReleaseDate) < 4 {
+		return true
+	}
+	n := min(len(firstReleaseDate), len(cutoff))
+	return firstReleaseDate[:n] >= cutoff[:n]
+}
+
+// guestFeatureArt returns the first non-empty release-group MBID in releases (by
+// range, never a fixed index -- T-04-12, ASVS V5) and its Cover Art Archive URL,
+// or two empty strings when none carries one (D-03's fallback). Independent of
+// earliestReleaseDate -- the art source need not be the same release.
+func guestFeatureArt(releases []musicbrainz.RecordingRelease) (releaseGroupMBID string, coverArtURL string) {
+	for _, r := range releases {
+		if r.ReleaseGroup.MBID != "" {
+			return r.ReleaseGroup.MBID, coverArtURLForReleaseGroup(r.ReleaseGroup.MBID)
+		}
+	}
+	return "", ""
+}
+
+// seenExternalIDs returns the external ids already recorded for artistID under
+// source/eventType -- the "seen" half of the fresh-vs-seen diff (D-10).
 func (d *Detector) seenExternalIDs(ctx context.Context, artistID int64, source, eventType string) (map[string]struct{}, error) {
 	ids, err := d.q.ListExternalIDs(ctx, sqlc.ListExternalIDsParams{
 		ArtistID:  artistID,
@@ -451,22 +531,16 @@ func (d *Detector) seenExternalIDs(ctx context.Context, artistID int64, source, 
 	return seen, nil
 }
 
-// releaseTypeForStorage returns the same lowercased, trimmed normalization
-// releaseTypeAllowed already applies to a release-group's raw PrimaryType --
-// storing the identical vocabulary (detectableReleaseTypes) keeps a future
-// query grouping events by release_type in agreement with the preference
-// axis that let the row through in the first place. Wrapped in
-// nullableString so an absent PrimaryType stores SQL NULL rather than an
-// empty-string literal (D-04, 05-RESEARCH.md Pitfall 3) -- display
-// title-casing is the formatter's concern, not storage's.
+// releaseTypeForStorage applies the same lowercase/trim normalization
+// releaseTypeAllowed uses, so a stored release_type agrees with the preference
+// axis that admitted the row. nullableString maps an absent PrimaryType to SQL
+// NULL, not "" (D-04, 05-RESEARCH.md Pitfall 3); title-casing is display's job.
 func releaseTypeForStorage(primaryType string) *string {
 	return nullableString(strings.ToLower(strings.TrimSpace(primaryType)))
 }
 
-// coverArtURLForReleaseGroup builds the deterministic Cover Art Archive URL
-// for a release-group MBID (D-12, 04-RESEARCH.md Pitfall #6) -- MusicBrainz
-// responses never carry a cover-art field, and this URL pattern needs no
-// extra HTTP call to construct.
+// coverArtURLForReleaseGroup builds the deterministic Cover Art Archive URL for
+// a release-group MBID (D-12, 04-RESEARCH.md Pitfall #6) -- no extra HTTP call.
 func coverArtURLForReleaseGroup(mbid string) string {
 	return "https://coverartarchive.org/release-group/" + mbid + "/front"
 }
