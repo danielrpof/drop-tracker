@@ -1126,7 +1126,11 @@ func TestNotifyPending_DigestRealSettingsStore_TogglesWithoutRestart(t *testing.
 	q := sqlc.New(pool)
 	logger, _ := newTestLogger()
 
-	settingsStore := settings.NewService(sqlc.New(pool))
+	loc, err := time.LoadLocation(settings.ZoneName)
+	if err != nil {
+		t.Fatalf("time.LoadLocation(%q): %v", settings.ZoneName, err)
+	}
+	settingsStore := settings.NewService(sqlc.New(pool), loc)
 
 	artistID := insertTestArtist(t, pool, "digestrealstore")
 	id1 := insertPendingEvent(t, pool, artistID, "digestrealstore-ext-1")

@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 )
 
@@ -46,11 +48,14 @@ func ParseCadence(s string) (Cadence, error) {
 }
 
 // Settings is the API-facing shape of the singleton notification_settings
-// row.
+// row. DigestLastSlotAt is D-13's slot record (whether a digest send is
+// due) -- deliberately absent from internal/httpserver's settingsResponse,
+// which keeps exposing only the four wire-contract fields it always has.
 type Settings struct {
 	DigestEnabled    bool
 	DigestCadence    Cadence
 	DigestLastSentAt *time.Time
+	DigestLastSlotAt *time.Time
 	UpdatedAt        time.Time
 }
 
@@ -72,12 +77,33 @@ type Store interface {
 
 // Service is the sqlc-backed implementation of Store.
 type Service struct {
-	q sqlc.Querier
+	q   sqlc.Querier
+	loc *time.Location
+	now func() time.Time
 }
 
-// NewService builds a Service backed by q.
-func NewService(q sqlc.Querier) *Service {
-	return &Service{q: q}
+// Option customises a Service at construction.
+type Option func(*Service)
+
+// WithClock overrides the clock Update's re-anchor computation reads,
+// mirroring notifier.Option's shape -- test injection only (D-15); NewService
+// defaults now to time.Now.
+func WithClock(now func() time.Time) Option {
+	return func(s *Service) { s.now = now }
+}
+
+// NewService builds a Service backed by q. loc is a required positional
+// parameter, not an Option -- mirroring the identical reasoning
+// notifier.New already records for its SettingsReader parameter: a
+// forgotten option would silently ship a service scheduling against the
+// wrong zone, and a wrong-zone schedule is exactly the silent failure D-23
+// exists to prevent.
+func NewService(q sqlc.Querier, loc *time.Location, opts ...Option) *Service {
+	s := &Service{q: q, loc: loc, now: time.Now}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 var _ Store = (*Service)(nil)
@@ -101,9 +127,18 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (Settings, error) 
 		return Settings{}, err
 	}
 
+	// D-14: the re-anchor slot is always computed and supplied here; the
+	// SQL CASE (queries/notification_settings.sql) is what decides whether
+	// it is actually applied -- enabling digest mode, or changing cadence
+	// while it is already on, re-anchors digest_last_slot_at to this
+	// instant, and every other update path leaves the stored value
+	// untouched.
+	slot := MostRecentSlot(s.now(), cadence, s.loc)
+
 	row, err := s.q.UpdateNotificationSettings(ctx, sqlc.UpdateNotificationSettingsParams{
 		DigestEnabled: p.DigestEnabled,
 		DigestCadence: string(cadence),
+		ReanchorSlot:  pgtype.Timestamptz{Time: slot, Valid: true},
 	})
 	if err != nil {
 		return Settings{}, fmt.Errorf("update notification settings: %w", err)
@@ -112,18 +147,26 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (Settings, error) 
 }
 
 // toSettings maps a generated row onto the API-facing shape.
-// DigestLastSentAt is nil when the column is NULL (D-05: nothing in this
-// phase ever writes it).
+// DigestLastSentAt/DigestLastSlotAt are nil when their column is NULL
+// (D-05: nothing writes DigestLastSentAt in this phase; DigestLastSlotAt is
+// NULL until the first re-anchoring Update or the first due-check writes
+// it).
 func toSettings(row sqlc.NotificationSetting) Settings {
 	var lastSent *time.Time
 	if row.DigestLastSentAt.Valid {
 		t := row.DigestLastSentAt.Time
 		lastSent = &t
 	}
+	var lastSlot *time.Time
+	if row.DigestLastSlotAt.Valid {
+		t := row.DigestLastSlotAt.Time
+		lastSlot = &t
+	}
 	return Settings{
 		DigestEnabled:    row.DigestEnabled,
 		DigestCadence:    Cadence(row.DigestCadence),
 		DigestLastSentAt: lastSent,
+		DigestLastSlotAt: lastSlot,
 		UpdatedAt:        row.UpdatedAt.Time,
 	}
 }

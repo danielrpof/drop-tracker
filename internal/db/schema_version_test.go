@@ -12,7 +12,7 @@ import (
 // internal/db/migrations/. It is a deliberate drift alarm: bump it in the
 // same commit that adds a migration file, exactly as migrate_test.go's
 // from-scratch assertion already does.
-const expectedSchemaVersionOnDisk = 8
+const expectedSchemaVersionOnDisk = 9
 
 func TestExpectedSchemaVersion(t *testing.T) {
 	got, err := db.ExpectedSchemaVersion()

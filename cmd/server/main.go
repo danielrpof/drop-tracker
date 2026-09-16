@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // D-23/DGST-07: the Alpine runtime image ships no zoneinfo, so the tzdata the digest scheduler resolves against must be embedded in the binary.
 
 	"golang.org/x/time/rate"
 
@@ -248,11 +249,31 @@ func run(ctx context.Context) error {
 	// Phase 18.1; the store is wired but inert this phase.
 	runs := pollruns.NewStore()
 
+	// D-23/DGST-07: resolve the digest schedule's zone once, fail-fast --
+	// there is no fallback branch and no default location substituted on
+	// failure. A zone that will not load is a boot failure, not a
+	// degraded-but-running state, because a silently-wrong schedule is
+	// indistinguishable from a correct one and the operator would never be
+	// told (D-23). A successful resolution logs exactly one Info record
+	// carrying the zone name and its current offset; plan 22-04's
+	// build-scan CI step greps the running container's boot log for this
+	// exact message string, so it is a literal contract -- do not reword it
+	// here without updating that step too.
+	digestLoc, err := time.LoadLocation(settings.ZoneName)
+	if err != nil {
+		return fmt.Errorf("load digest zone %q: %w", settings.ZoneName, err)
+	}
+	logger.Info("digest zone resolved",
+		slog.String("zone", digestLoc.String()),
+		slog.String("offset", time.Now().In(digestLoc).Format("-07:00")),
+	)
+
 	// settingsStore backs GET/PUT /settings/notifications (DGST-01, DGST-03)
 	// -- its own sqlc.New(pool) instance, matching this file's existing
 	// idiom of one stateless sqlc.Queries wrapper per consumer (store,
-	// detector, eventsStore above).
-	settingsStore := settings.NewService(sqlc.New(pool))
+	// detector, eventsStore above). digestLoc is what Service.Update's D-14
+	// re-anchor computes MostRecentSlot against.
+	settingsStore := settings.NewService(sqlc.New(pool), digestLoc)
 
 	// WithAuthGate engages the instance passphrase gate (GATE-01..06) when
 	// INSTANCE_PASSPHRASE is set; with it empty the option is inert and every
