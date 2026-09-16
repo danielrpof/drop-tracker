@@ -139,7 +139,17 @@ Plans:
   4. With digest mode off, the notify path is indistinguishable from v1.4: same message per event, same 400ms inter-send spacing, same idempotent `MarkNotified` ack, same error handling on a failed send.
   5. The mode check is the notify pass's **first** decision once it holds the sender lock, and it is repeated before every Discord send. It is not a post-hoc filter: there is no code path on which an event is sent in real time *and* left pending for a later digest, and a settings read that fails skips the pass, leaving events pending, never delivering them in real time while digest mode may be on.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 21-01-PLAN.md — Tracer: `SettingsReader` seam, required constructor argument, top-of-pass digest gate, fail-closed bounded read, composition-root wiring
+- [ ] 21-03-PLAN.md — SPA helper text under the Digest mode row, plus the committed-bundle refresh
+
+**Wave 2** *(blocked on 21-01)*
+
+- [ ] 21-02-PLAN.md — Per-send mode re-read, mode-transition logging, and the `created_at`-anchored stale-release cutoff
 
 **Notes for the phase planner**
 
