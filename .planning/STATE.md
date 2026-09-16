@@ -5,10 +5,10 @@ milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 21
 current_phase_name: Real-Time ↔ Digest Mutual Exclusion
 status: "Phase 20 shipped — PR #5"
-stopped_at: Phase 20 complete, ready to plan Phase 21
-last_updated: "2026-09-16T12:37:07.165Z"
+stopped_at: Phase 21 context gathered
+last_updated: "2026-09-16T13:49:12.728Z"
 last_activity: 2026-09-16
-state_head: 515094fc8452d2c4bd4a7b323eed1f19f47187fa
+state_head: 40edef5010d83964969972876f2b775d375638c9
 progress:
   total_phases: 4
   completed_phases: 1
@@ -389,9 +389,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-13T22:35:04.103Z
-Stopped at: Phase 20 complete, ready to plan Phase 21
-Resume file: None
+Last session: 2026-09-16T13:49:12.538Z
+Stopped at: Phase 21 context gathered
+Resume file: .planning/phases/21-real-time-digest-mutual-exclusion/21-CONTEXT.md
 
 ## Operator Next Steps
 
