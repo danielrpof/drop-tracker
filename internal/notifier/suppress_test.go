@@ -183,7 +183,7 @@ func TestNotifierSuppresses_WiresMaxAgeDays(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			n := New(nil, nil, 0, WithMaxReleaseAgeDays(tt.maxAgeDays))
+			n := New(nil, nil, nil, 0, WithMaxReleaseAgeDays(tt.maxAgeDays))
 			got := n.suppresses(sqlc.Event{ReleaseDate: tt.releaseDate})
 			if got != tt.wantSuppress {
 				verb := map[bool]string{true: "suppressed", false: "delivered"}
@@ -200,7 +200,7 @@ func TestNotifierSuppresses_WiresMaxAgeDays(t *testing.T) {
 // would not fail any other test in this package, since every other case
 // passes an explicit option.
 func TestNewDefaultsMaxReleaseAgeDays(t *testing.T) {
-	if got := New(nil, nil, 0).maxAgeDays; got != defaultMaxReleaseAgeDays {
+	if got := New(nil, nil, nil, 0).maxAgeDays; got != defaultMaxReleaseAgeDays {
 		t.Fatalf("New(...).maxAgeDays = %d, want defaultMaxReleaseAgeDays (%d)", got, defaultMaxReleaseAgeDays)
 	}
 }

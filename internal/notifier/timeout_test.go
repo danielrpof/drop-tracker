@@ -24,6 +24,7 @@ import (
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/discord"
+	"github.com/danielrpof/drop-tracker/internal/settings"
 )
 
 // wedgingQuerier reproduces a pgx call on a socket that is TCP-ESTABLISHED
@@ -62,6 +63,16 @@ type noopSender struct{}
 
 func (noopSender) Send(context.Context, discord.Embed) error { return nil }
 
+// settingsDigestOff is a local SettingsReader stub for this whitebox file --
+// notifier_test.go's fakeSettingsReader lives in the external notifier_test
+// package and is unreachable here. Every test in this file must still reach
+// listUnnotified, so it always reports digest mode off (the zero value).
+type settingsDigestOff struct{}
+
+func (settingsDigestOff) Get(context.Context) (settings.Settings, error) {
+	return settings.Settings{}, nil
+}
+
 // shrinkDBOpTimeout shrinks the package's database-operation bound for the
 // duration of one test.
 func shrinkDBOpTimeout(t *testing.T, d time.Duration) {
@@ -97,7 +108,7 @@ func callNotifyPending(t *testing.T, n *Notifier, ctx context.Context, limit tim
 func TestNotifyPending_UnresponsiveDatabase_ReturnsInsteadOfWedging(t *testing.T) {
 	shrinkDBOpTimeout(t, 50*time.Millisecond)
 
-	n := New(&wedgingQuerier{}, noopSender{}, time.Millisecond)
+	n := New(&wedgingQuerier{}, noopSender{}, settingsDigestOff{}, time.Millisecond)
 
 	// context.Background() is the point: it never becomes Done, exactly like
 	// the poll cycle's runCtx (derived from signal.NotifyContext). The bound
@@ -124,7 +135,7 @@ func TestNotifyPending_RecoversAfterUnresponsiveDatabase(t *testing.T) {
 	shrinkDBOpTimeout(t, 50*time.Millisecond)
 
 	q := &wedgingQuerier{wedgeFirstCallOnly: true}
-	n := New(q, noopSender{}, time.Millisecond)
+	n := New(q, noopSender{}, settingsDigestOff{}, time.Millisecond)
 
 	if err := callNotifyPending(t, n, context.Background(), 5*time.Second); err == nil {
 		t.Fatal("first pass: want an error while the database is unresponsive, got nil")
@@ -152,7 +163,7 @@ func TestNotifyPending_ParentCancellationStillPropagates(t *testing.T) {
 	// look similar.
 	shrinkDBOpTimeout(t, time.Hour)
 
-	n := New(&wedgingQuerier{}, noopSender{}, time.Millisecond)
+	n := New(&wedgingQuerier{}, noopSender{}, settingsDigestOff{}, time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {

@@ -6,6 +6,7 @@ package notifier
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/discord"
+	"github.com/danielrpof/drop-tracker/internal/settings"
 )
 
 // defaultSpacing is the inter-send pause within one NotifyPending pass (D-07).
@@ -44,6 +46,15 @@ type Sender interface {
 
 var _ Sender = (*discord.Client)(nil)
 
+// SettingsReader is the narrow digest-mode seam NotifyPending gates on,
+// declared in the consumer (D-05) rather than imported from settings.Store
+// so a test can substitute a fake with no DB.
+type SettingsReader interface {
+	Get(ctx context.Context) (settings.Settings, error)
+}
+
+var _ SettingsReader = (*settings.Service)(nil)
+
 // Sink is what poller.Notifier is declared against -- re-declared here as the
 // type both Notifier and NoOp implement, so notifier.Select's return type does
 // not force callers to import poller.Notifier.
@@ -66,11 +77,12 @@ func (NoOp) NotifyPending(ctx context.Context, logger *slog.Logger) error { retu
 // is D-06's shared CAS-skip guard -- one guard for both poll cycles, since
 // ListUnnotified is a global query they could otherwise race.
 type Notifier struct {
-	q          sqlc.Querier
-	sender     Sender
-	spacing    time.Duration
-	maxAgeDays int
-	notifying  atomic.Bool
+	q              sqlc.Querier
+	sender         Sender
+	settingsReader SettingsReader
+	spacing        time.Duration
+	maxAgeDays     int
+	notifying      atomic.Bool
 }
 
 // Option customises a Notifier at construction, mirroring detection.Option so
@@ -83,10 +95,12 @@ func WithMaxReleaseAgeDays(days int) Option {
 	return func(n *Notifier) { n.maxAgeDays = days }
 }
 
-// New builds a Notifier backed by q for the outbox, sender for delivery, and
-// spacing between consecutive sends, mirroring detection.New.
-func New(q sqlc.Querier, sender Sender, spacing time.Duration, opts ...Option) *Notifier {
-	n := &Notifier{q: q, sender: sender, spacing: spacing, maxAgeDays: defaultMaxReleaseAgeDays}
+// New builds a Notifier backed by q for the outbox, sender for delivery,
+// settingsReader for the digest-mode gate (D-05: required, not an Option --
+// a forgotten option would silently ship an ungated notifier), and spacing
+// between consecutive sends, mirroring detection.New.
+func New(q sqlc.Querier, sender Sender, settingsReader SettingsReader, spacing time.Duration, opts ...Option) *Notifier {
+	n := &Notifier{q: q, sender: sender, settingsReader: settingsReader, spacing: spacing, maxAgeDays: defaultMaxReleaseAgeDays}
 	for _, opt := range opts {
 		opt(n)
 	}
@@ -96,12 +110,12 @@ func New(q sqlc.Querier, sender Sender, spacing time.Duration, opts ...Option) *
 // Select returns the Sink main.go wires into poller.New: D-10's gate behind an
 // exported function so it is unit-testable without booting the process. Empty
 // webhookURL logs one Info line and returns NoOp{}; otherwise a real Notifier.
-func Select(webhookURL string, q sqlc.Querier, httpClient *http.Client, logger *slog.Logger, opts ...Option) Sink {
+func Select(webhookURL string, q sqlc.Querier, settingsReader SettingsReader, httpClient *http.Client, logger *slog.Logger, opts ...Option) Sink {
 	if webhookURL == "" {
 		logger.Info("discord notifications disabled: DISCORD_WEBHOOK_URL not set")
 		return NoOp{}
 	}
-	return New(q, discord.NewClient(webhookURL, httpClient), defaultSpacing, opts...)
+	return New(q, discord.NewClient(webhookURL, httpClient), settingsReader, defaultSpacing, opts...)
 }
 
 // suppresses reports whether ev must be acked without sending, because its
@@ -146,6 +160,16 @@ func markNotified(ctx context.Context, q sqlc.Querier, id int64) (int64, error) 
 	return q.MarkNotified(opCtx, id)
 }
 
+// readSettings calls r.Get under the same dbOpTimeout bound as
+// listUnnotified/markNotified -- the only way NotifyPending reads digest
+// settings (D-03), so an unbounded read can never park the pass while it
+// holds the notifying guard.
+func readSettings(ctx context.Context, r SettingsReader) (settings.Settings, error) {
+	opCtx, cancel := context.WithTimeout(ctx, dbOpTimeout)
+	defer cancel()
+	return r.Get(opCtx)
+}
+
 // NotifyPending drains every currently-pending events row in ListUnnotified's
 // order, sending each as one Discord message and marking it notified on success.
 // The notifying CAS guard mirrors poller's mbRunning/dzRunning (CAS-skip, not a
@@ -158,6 +182,24 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 		return nil
 	}
 	defer n.notifying.Store(false)
+
+	// D-04: the digest-mode read is the pass's first decision, before any row
+	// is fetched -- never a post-hoc filter on rows already listed. D-03:
+	// fail closed on a read error rather than risk flushing a whole digest
+	// backlog as individual messages on one transient outage.
+	cfg, err := readSettings(ctx, n.settingsReader)
+	if err != nil {
+		if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			return nil
+		}
+		logger.Warn("skipping notify pass: digest settings read failed",
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+	if cfg.DigestEnabled {
+		return nil
+	}
 
 	events, err := listUnnotified(ctx, n.q)
 	if err != nil {

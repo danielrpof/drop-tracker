@@ -38,6 +38,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/discord"
 	"github.com/danielrpof/drop-tracker/internal/notifier"
+	"github.com/danielrpof/drop-tracker/internal/settings"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 )
 
@@ -68,6 +69,38 @@ func (f *fakeSender) Send(ctx context.Context, embed discord.Embed) error {
 }
 
 var _ notifier.Sender = (*fakeSender)(nil)
+
+// fakeSettingsReader is a controllable double for notifier.SettingsReader,
+// mirroring fakeSender's fn-hook-plus-atomic-counter shape so a later plan
+// can extend fn with a k-th-call flip without rewriting this double.
+type fakeSettingsReader struct {
+	fn func(ctx context.Context) (settings.Settings, error)
+
+	calls int32
+}
+
+func (f *fakeSettingsReader) Get(ctx context.Context) (settings.Settings, error) {
+	atomic.AddInt32(&f.calls, 1)
+	if f.fn != nil {
+		return f.fn(ctx)
+	}
+	return settings.Settings{}, nil
+}
+
+// Calls reports how many times Get has been called.
+func (f *fakeSettingsReader) Calls() int32 {
+	return atomic.LoadInt32(&f.calls)
+}
+
+var _ notifier.SettingsReader = (*fakeSettingsReader)(nil)
+
+// stubSettings returns a SettingsReader that always reports digest mode as
+// enabled.
+func stubSettings(enabled bool) *fakeSettingsReader {
+	return &fakeSettingsReader{fn: func(ctx context.Context) (settings.Settings, error) {
+		return settings.Settings{DigestEnabled: enabled}, nil
+	}}
+}
 
 // spacingRecorder installs a recording spacingWait seam for the duration of
 // t (via notifier.SetSpacingWaitForTest) and returns a func reporting the
@@ -179,6 +212,27 @@ func insertPendingEventTitled(t *testing.T, pool *pgxpool.Pool, artistID int64, 
 	return eventID
 }
 
+// insertPendingEventTyped inserts a pending events row of the caller-supplied
+// event_type, with today's release_date so it would survive the freshness
+// gate if the digest-mode gate did not stop delivery first -- extends
+// insertPendingEventTitled (which always inserts new_release) to cover the
+// tracer's all-three-event-types proof.
+func insertPendingEventTyped(t *testing.T, pool *pgxpool.Pool, artistID int64, eventType, externalID, title string) int64 {
+	t.Helper()
+	ctx := context.Background()
+
+	var eventID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date)
+		 VALUES ($1, 'musicbrainz', $2, $3, $4, 'Test Artist', $5)
+		 RETURNING id`,
+		artistID, eventType, externalID, title, todayDate,
+	).Scan(&eventID); err != nil {
+		t.Fatalf("insert typed pending event: %v", err)
+	}
+	return eventID
+}
+
 // isNotified reports whether eventID's notified_at is non-NULL.
 func isNotified(t *testing.T, pool *pgxpool.Pool, eventID int64) bool {
 	t.Helper()
@@ -198,12 +252,12 @@ func TestNotifyPending_ZeroPendingRows_NoRequestNoMarkNoError(t *testing.T) {
 	// query (D-06), so this proves a genuine zero-row pass rather than
 	// relying on the table happening to already be empty.
 	drain := &fakeSender{}
-	if err := notifier.New(q, drain, time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
+	if err := notifier.New(q, drain, stubSettings(false), time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("drain NotifyPending: %v", err)
 	}
 
 	sender := &fakeSender{}
-	n := notifier.New(q, sender, time.Millisecond)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil", err)
 	}
@@ -255,7 +309,7 @@ func TestNotifyPending_StaleRowsAckedWithoutSending(t *testing.T) {
 
 	// Drain anything already pending, so the counts below reflect only this
 	// test's own rows (ListUnnotified is global -- D-06).
-	if err := notifier.New(q, &fakeSender{}, time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
+	if err := notifier.New(q, &fakeSender{}, stubSettings(false), time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("drain NotifyPending: %v", err)
 	}
 	logBuf.Reset()
@@ -277,7 +331,7 @@ func TestNotifyPending_StaleRowsAckedWithoutSending(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	n := notifier.New(q, discord.NewClient(ts.URL, ts.Client()), time.Millisecond)
+	n := notifier.New(q, discord.NewClient(ts.URL, ts.Client()), stubSettings(false), time.Millisecond)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
 	}
@@ -339,7 +393,7 @@ func TestNotifyPending_OnePendingRow_204MarksNotified(t *testing.T) {
 	defer ts.Close()
 
 	client := discord.NewClient(ts.URL, ts.Client())
-	n := notifier.New(q, client, time.Millisecond)
+	n := notifier.New(q, client, stubSettings(false), time.Millisecond)
 
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
@@ -363,7 +417,7 @@ func TestNotifyPending_SendFails_LeavesNotifiedAtNullAndRePicksUpNextPass(t *tes
 	failing := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
 		return errors.New("send exploded")
 	}}
-	n := notifier.New(q, failing, time.Millisecond)
+	n := notifier.New(q, failing, stubSettings(false), time.Millisecond)
 
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil (a send failure must not abort the pass, D-09)", err)
@@ -377,7 +431,7 @@ func TestNotifyPending_SendFails_LeavesNotifiedAtNullAndRePicksUpNextPass(t *tes
 
 	// A second pass re-selects the same row (D-09's re-pickup contract).
 	succeeding := &fakeSender{}
-	n2 := notifier.New(q, succeeding, time.Millisecond)
+	n2 := notifier.New(q, succeeding, stubSettings(false), time.Millisecond)
 	if err := n2.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("second NotifyPending: %v", err)
 	}
@@ -407,7 +461,7 @@ func TestNotifyPending_ReentrantCallSkippedWhileInFlight(t *testing.T) {
 		<-release
 		return nil
 	}}
-	n := notifier.New(q, sender, time.Millisecond)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
 
 	done := make(chan error, 1)
 	go func() { done <- n.NotifyPending(context.Background(), logger) }()
@@ -434,7 +488,7 @@ func TestNotifyPending_ReentrantCallSkippedWhileInFlight(t *testing.T) {
 func TestSelect_EmptyWebhookURL_ReturnsNoOpAndLogsDisabledLine(t *testing.T) {
 	logger, buf := newTestLogger()
 
-	sink := notifier.Select("", nil, nil, logger)
+	sink := notifier.Select("", nil, nil, nil, logger)
 	if _, ok := sink.(notifier.NoOp); !ok {
 		t.Fatalf("Select(\"\", ...) = %T, want notifier.NoOp", sink)
 	}
@@ -472,7 +526,7 @@ func TestNotifyPending_ConcurrentCallsNoDoublePost(t *testing.T) {
 		<-release
 		return nil
 	}}
-	n := notifier.New(q, sender, time.Millisecond)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
 
 	done := make(chan error, 1)
 	go func() { done <- n.NotifyPending(context.Background(), logger) }()
@@ -526,7 +580,7 @@ func TestNotifyPending_BatchSpacingBetweenSends(t *testing.T) {
 
 	const spacing = 50 * time.Millisecond
 	recorded := spacingRecorder(t)
-	n := notifier.New(q, sender, spacing)
+	n := notifier.New(q, sender, stubSettings(false), spacing)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
 	}
@@ -573,7 +627,7 @@ func TestNotifyPending_MarkNotifiedFails_LogsWarnAndReturnsError(t *testing.T) {
 	eventID := insertPendingEvent(t, pool, artistID, "marknotifiedfail-ext-1")
 
 	sender := &fakeSender{}
-	n := notifier.New(markNotifiedFailingQuerier{Querier: q}, sender, time.Millisecond)
+	n := notifier.New(markNotifiedFailingQuerier{Querier: q}, sender, stubSettings(false), time.Millisecond)
 
 	err := n.NotifyPending(context.Background(), logger)
 	if err == nil {
@@ -621,7 +675,7 @@ func TestNotifyPending_SpacingAppliedEvenAfterFailedSend(t *testing.T) {
 
 	const spacing = 50 * time.Millisecond
 	recorded := spacingRecorder(t)
-	n := notifier.New(q, failing, spacing)
+	n := notifier.New(q, failing, stubSettings(false), spacing)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil (a send failure must not abort the pass, D-09)", err)
 	}
@@ -664,7 +718,7 @@ func TestNotifyPending_BatchMidFailureContinuesToLaterRows(t *testing.T) {
 		}
 		return nil
 	}}
-	n := notifier.New(q, sender, time.Millisecond)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
 
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil (a mid-batch send failure must not abort the pass)", err)
@@ -740,7 +794,7 @@ func TestNotifyPending_BatchHonorsRetryAfterWithoutDroppingOtherRows(t *testing.
 	defer ts.Close()
 
 	client := discord.NewClient(ts.URL, ts.Client())
-	n := notifier.New(q, client, time.Millisecond)
+	n := notifier.New(q, client, stubSettings(false), time.Millisecond)
 
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
@@ -808,7 +862,7 @@ func TestNotifyPending_CrossCycleRecoveryAfterOutage(t *testing.T) {
 	defer ts.Close()
 
 	client := discord.NewClient(ts.URL, ts.Client())
-	n := notifier.New(q, client, time.Millisecond)
+	n := notifier.New(q, client, stubSettings(false), time.Millisecond)
 
 	// First call: the webhook is down for the whole pass.
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
@@ -832,5 +886,43 @@ func TestNotifyPending_CrossCycleRecoveryAfterOutage(t *testing.T) {
 	}
 	if !isNotified(t, pool, eventID) {
 		t.Fatal("notified_at should be non-NULL after the recovery pass")
+	}
+}
+
+// TestNotifyPending_DigestModeOn_SendsNothingAndLeavesRowsPending is the
+// tracer's own end-to-end proof (DGST-13, ROADMAP success criterion 1): with
+// digest mode on, a notify pass over pending rows of all three event types
+// issues zero Discord requests and leaves every row pending. D-04: the mode
+// read is the pass's first decision, before listUnnotified is ever called.
+func TestNotifyPending_DigestModeOn_SendsNothingAndLeavesRowsPending(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "digeston")
+	newReleaseID := insertPendingEventTyped(t, pool, artistID, "new_release", "digeston-new-release", "Digest New Release")
+	guestFeatureID := insertPendingEventTyped(t, pool, artistID, "guest_feature", "digeston-guest-feature", "Digest Guest Feature")
+	deluxeChangeID := insertPendingEventTyped(t, pool, artistID, "deluxe_change", "digeston-deluxe-change", "Digest Deluxe Change")
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(true), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls = %d, want exactly 0: digest mode on must issue zero Discord requests", got)
+	}
+	for _, tc := range []struct {
+		name string
+		id   int64
+	}{
+		{"new_release", newReleaseID},
+		{"guest_feature", guestFeatureID},
+		{"deluxe_change", deluxeChangeID},
+	} {
+		if isNotified(t, pool, tc.id) {
+			t.Errorf("%s row was marked notified, want it left pending while digest mode is on", tc.name)
+		}
 	}
 }

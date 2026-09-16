@@ -37,6 +37,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/discord"
 	"github.com/danielrpof/drop-tracker/internal/musicbrainz"
 	"github.com/danielrpof/drop-tracker/internal/notifier"
+	"github.com/danielrpof/drop-tracker/internal/settings"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,6 +52,17 @@ import (
 // returns a nil slice and a nil error for every mbid, so the 30+ existing
 // call sites that construct fakeRecordingSource{} unchanged keep seeing no
 // per-recording lookup result, exactly as before this field existed.
+// stubDigestOff is a notifier.SettingsReader that always reports digest mode
+// off, for this package's one real NotifyPending call -- this file exercises
+// detection, not the digest gate itself (that lives in internal/notifier).
+type stubDigestOff struct{}
+
+func (stubDigestOff) Get(ctx context.Context) (settings.Settings, error) {
+	return settings.Settings{DigestEnabled: false}, nil
+}
+
+var _ notifier.SettingsReader = (*stubDigestOff)(nil)
+
 type fakeRecordingSource struct {
 	recordings           []musicbrainz.Recording
 	err                  error
@@ -1297,7 +1309,7 @@ func TestDetectMusicBrainz_GuestFeature_Muted_NeverDeliveredByNotifier(t *testin
 	defer ts.Close()
 
 	client := discord.NewClient(ts.URL, ts.Client())
-	n := notifier.New(sqlc.New(pool), client, time.Millisecond)
+	n := notifier.New(sqlc.New(pool), client, stubDigestOff{}, time.Millisecond)
 	if err := n.NotifyPending(ctx, testLogger()); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
 	}

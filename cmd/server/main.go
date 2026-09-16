@@ -296,7 +296,10 @@ func run(ctx context.Context) error {
 	// nil-checks it) rather than branching on cfg.DiscordWebhookURL here. A
 	// third sqlc.New(pool) instance, matching store/detector's own pattern
 	// above -- sqlc.Queries is a stateless wrapper over the shared pool.
-	notif := notifier.Select(cfg.DiscordWebhookURL, sqlc.New(pool), nil, logger, notifier.WithMaxReleaseAgeDays(cfg.NotifyMaxReleaseAgeDays))
+	// settingsStore is the same instance httpserver.WithSettings reads/writes
+	// through above, so a digest toggle in the SPA is exactly what the
+	// notifier's gate observes on its next pass (D-05).
+	notif := notifier.Select(cfg.DiscordWebhookURL, sqlc.New(pool), settingsStore, nil, logger, notifier.WithMaxReleaseAgeDays(cfg.NotifyMaxReleaseAgeDays))
 
 	// pollr reuses the same mbClient/dzClient instances handed to
 	// httpserver.New above rather than constructing its own -- sharing the
