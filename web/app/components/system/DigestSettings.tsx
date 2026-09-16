@@ -127,20 +127,29 @@ export function DigestSettings({ settings, onSaved }: DigestSettingsProps) {
         <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2">
           <dt
             id="digest-mode-label"
-            className="text-label text-muted-foreground"
+            className="self-start text-label text-muted-foreground"
           >
             Digest mode
           </dt>
-          <dd className="flex items-center gap-1">
-            <Switch
-              checked={displayed.digest_enabled}
-              onCheckedChange={handleDigestModeChange}
-              disabled={saving}
-              aria-labelledby="digest-mode-label"
-            />
-            <span className="text-body text-foreground">
-              {displayed.digest_enabled ? "On" : "Off"}
-            </span>
+          <dd className="flex flex-col gap-1">
+            <div className="flex items-center gap-1">
+              <Switch
+                checked={displayed.digest_enabled}
+                onCheckedChange={handleDigestModeChange}
+                disabled={saving}
+                aria-labelledby="digest-mode-label"
+              />
+              <span className="text-body text-foreground">
+                {displayed.digest_enabled ? "On" : "Off"}
+              </span>
+            </div>
+            {/* Always visible in both toggle positions (D-06) -- it's the
+                only place stating the toggle-off flush behavior (DGST-14). */}
+            <p className="text-label text-muted-foreground">
+              {
+                "While on, new events wait for the next digest; switching back off delivers them individually."
+              }
+            </p>
           </dd>
 
           <dt
