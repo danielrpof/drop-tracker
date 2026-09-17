@@ -7,7 +7,10 @@
 // (D-06/D-22), guest-feature lines carry the host credit (D-20), and deluxe
 // lines carry the track-count suffix (D-26). buildDigestEmbed's signature,
 // its call site in digest.go, and the single-embed shape do not change --
-// discord.Client.Send needs no interface change either.
+// discord.Client.Send needs no interface change either. The whole Description
+// is now capped at discordDescriptionLimit (closes T-22-15/CR-01): an
+// oversized batch truncates at a full line boundary instead of letting
+// Discord reject the request.
 package notifier
 
 import (
@@ -51,8 +54,15 @@ func escapeMarkdown(s string) string {
 // digestTitleLimit caps a digest line's title at 100 runes before escaping
 // -- Description is capped at 4096 characters and every line's URL counts
 // toward it (D-21), so per-line length is a real budget, not only
-// cosmetics.
+// cosmetics. That whole-Description cap is enforced by assembleDescription
+// below (T-22-15) -- this per-line cap alone was never sufficient once a
+// digest slot's event count grew large enough.
 const digestTitleLimit = 100
+
+// discordDescriptionLimit is Discord's documented ceiling on an embed's
+// Description field, in runes. assembleDescription never returns more than
+// this many runes.
+const discordDescriptionLimit = 4096
 
 // digestHeading pairs one event type with its fixed display heading, in
 // D-04's fixed order: New Releases, Guest Features, Deluxe Changes.
@@ -89,6 +99,9 @@ func buildDigestEmbed(events []sqlc.Event) discord.Embed {
 	// plus a test could otherwise share one (D-22).
 	collator := collate.New(language.Und, collate.IgnoreCase)
 
+	// TODO(RED, T-22-15): still the pre-fix shared-builder body -- no
+	// whole-Description cap yet. GREEN rewires this to build segments via
+	// digestLine and call assembleDescription.
 	var b strings.Builder
 	for _, h := range digestHeadings {
 		group := grouped[h.eventType]
@@ -110,9 +123,6 @@ func buildDigestEmbed(events []sqlc.Event) discord.Embed {
 			b.WriteString(eventURL(ev))
 			b.WriteString(")")
 			if h.eventType == eventTypeDeluxeChange {
-				// D-26: the track-count suffix is appended after the link's
-				// closing parenthesis, and omitted entirely (never a bare
-				// "()") when neither count is known.
 				if suffix := tracksFieldValue(ev.PreviousTrackCount, ev.TrackCount); suffix != "" {
 					b.WriteString(" (")
 					b.WriteString(suffix)
@@ -124,6 +134,42 @@ func buildDigestEmbed(events []sqlc.Event) discord.Embed {
 	}
 
 	return discord.Embed{Description: b.String()}
+}
+
+// digestLine renders exactly one event's line -- "- [label](url)" plus the
+// deluxe track-count suffix -- ending in "\n". Extracted from
+// buildDigestEmbed's former inner-loop body so assembleDescription can
+// truncate on a whole-line boundary.
+//
+// STUB (RED, T-22-15): not yet implemented -- GREEN fills this in.
+func digestLine(eventType string, ev sqlc.Event) string {
+	return ""
+}
+
+// assembleDescription joins segments (one per event, a group's first
+// segment also carrying that group's leading separator + heading) into the
+// final Description. When the full join already fits discordDescriptionLimit
+// runes, the result is byte-identical to a plain strings.Join -- no note, no
+// truncation (T-22-15's "unaffected when under budget" contract). Otherwise
+// it keeps the largest whole-segment prefix whose rune count, plus
+// truncationNote's rune count for however many segments that prefix omits,
+// stays within discordDescriptionLimit, and appends that note. It never cuts
+// inside a segment: dropped segments are dropped whole.
+//
+// STUB (RED, T-22-15): not yet implemented -- GREEN fills this in.
+func assembleDescription(segments []string) string {
+	return ""
+}
+
+// truncationNote reports how many sendable events assembleDescription
+// dropped. SendDigestIfDue's ack step does not consult Description content
+// -- every dropped event's id is still acked as delivered once Send succeeds
+// (digest.go) -- so this note exists only so the operator can see the digest
+// is incomplete.
+//
+// STUB (RED, T-22-15): not yet implemented -- GREEN fills this in.
+func truncationNote(omitted int) string {
+	return ""
 }
 
 // sortDigestGroup orders one event-type group by collated artistKey, tied

@@ -7,6 +7,7 @@ package notifier
 // DB, no HTTP.
 
 import (
+	"fmt"
 	"math/rand"
 	"strings"
 	"testing"
@@ -398,5 +399,151 @@ func TestBuildDigestEmbed_SameArtistTwoEventsRenderAsTwoLines(t *testing.T) {
 	embed := buildDigestEmbed(events)
 	if got := strings.Count(embed.Description, "- ["); got != 2 {
 		t.Fatalf("Description = %q, want exactly 2 separate lines, got %d", embed.Description, got)
+	}
+}
+
+// TestDigestLine_RendersLabelURLAndDeluxeSuffix pins digestLine's output
+// byte-for-byte -- it is the extracted-verbatim body buildDigestEmbed's
+// former inner loop wrote directly, and assembleDescription's whole-segment
+// truncation depends on it never changing shape.
+func TestDigestLine_RendersLabelURLAndDeluxeSuffix(t *testing.T) {
+	t.Run("new_release renders label and url with no suffix", func(t *testing.T) {
+		ev := sqlc.Event{EventType: eventTypeNewRelease, Source: sourceMusicBrainz, ExternalID: "rg-1", WatchedArtistName: strPtr("Bad Bunny"), Title: "Album"}
+		want := "- [Bad Bunny — Album](https://musicbrainz.org/release-group/rg-1)\n"
+		if got := digestLine(eventTypeNewRelease, ev); got != want {
+			t.Fatalf("digestLine(...) = %q, want %q", got, want)
+		}
+	})
+	t.Run("deluxe_change appends track-count suffix", func(t *testing.T) {
+		ev := sqlc.Event{
+			EventType:          eventTypeDeluxeChange,
+			ExternalID:         "rel-1",
+			WatchedArtistName:  strPtr("Artist"),
+			Title:              "Album",
+			PreviousTrackCount: i32Ptr(12),
+			TrackCount:         i32Ptr(15),
+		}
+		want := "- [Artist — Album](https://musicbrainz.org/release/rel-1) (12 → 15 tracks)\n"
+		if got := digestLine(eventTypeDeluxeChange, ev); got != want {
+			t.Fatalf("digestLine(...) = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestAssembleDescription_FitsUnderLimitReturnsJoinUnchanged pins the early
+// return that keeps every pre-existing buildDigestEmbed assertion above
+// byte-identical: a combined rune count at or under the limit produces a
+// plain join, no note.
+func TestAssembleDescription_FitsUnderLimitReturnsJoinUnchanged(t *testing.T) {
+	segments := []string{"a\n", "b\n", "c\n"}
+	want := strings.Join(segments, "")
+	got := assembleDescription(segments)
+	if got != want {
+		t.Fatalf("assembleDescription(...) = %q, want byte-identical join %q", got, want)
+	}
+	if strings.Contains(got, "more event") {
+		t.Fatalf("assembleDescription(...) = %q, must not contain a truncation note when under budget", got)
+	}
+}
+
+// TestAssembleDescription_ExceedsLimitTruncatesOnSegmentBoundary proves the
+// three properties the design contract requires once the combined rune
+// count exceeds discordDescriptionLimit: the result stays within the limit,
+// only whole segments survive (never a partial line), and the note's
+// reported omitted count reconciles exactly with how many segments were
+// dropped.
+func TestAssembleDescription_ExceedsLimitTruncatesOnSegmentBoundary(t *testing.T) {
+	// Each segment is exactly 100 runes (99 'x' plus a newline); 50 of them
+	// is 5000 runes, comfortably over the 4096 limit.
+	segment := strings.Repeat("x", 99) + "\n"
+	segments := make([]string, 50)
+	for i := range segments {
+		segments[i] = segment
+	}
+
+	got := assembleDescription(segments)
+
+	if rc := utf8.RuneCountInString(got); rc > discordDescriptionLimit {
+		t.Fatalf("assembleDescription(...) has %d runes, want <= %d", rc, discordDescriptionLimit)
+	}
+	if !strings.Contains(got, "more event") {
+		t.Fatalf("assembleDescription(...) = %q, want a truncation note", got)
+	}
+
+	kept := strings.Count(got, "x")
+	if kept%99 != 0 {
+		t.Fatalf("assembleDescription(...) cut mid-segment: %d 'x' characters is not a multiple of 99", kept)
+	}
+	keptSegments := kept / 99
+	omitted := len(segments) - keptSegments
+	wantNote := truncationNote(omitted)
+	if !strings.HasSuffix(got, wantNote) {
+		t.Fatalf("assembleDescription(...) = %q, want it to end with %q (kept=%d, omitted=%d)", got, wantNote, keptSegments, omitted)
+	}
+}
+
+func TestTruncationNote_SingularAndPlural(t *testing.T) {
+	if got := truncationNote(1); got != "... 1 more event" {
+		t.Fatalf("truncationNote(1) = %q, want singular %q", got, "... 1 more event")
+	}
+	if got := truncationNote(2); got != "... 2 more events" {
+		t.Fatalf("truncationNote(2) = %q, want plural %q", got, "... 2 more events")
+	}
+}
+
+// TestBuildDigestEmbed_SmallOrdinaryBatchNoTruncationNote pins the
+// "unaffected when under budget" contract explicitly at buildDigestEmbed's
+// level, on top of what the pre-existing suite above already implies.
+func TestBuildDigestEmbed_SmallOrdinaryBatchNoTruncationNote(t *testing.T) {
+	events := []sqlc.Event{
+		{ID: 1, EventType: eventTypeNewRelease, Source: sourceMusicBrainz, ExternalID: "nr-1", WatchedArtistName: strPtr("Artist A"), Title: "Album A"},
+		{ID: 2, EventType: eventTypeGuestFeature, ExternalID: "gf-1", WatchedArtistName: strPtr("Artist B"), ArtistName: "Host", Title: "Track B"},
+		{ID: 3, EventType: eventTypeDeluxeChange, ExternalID: "dc-1", WatchedArtistName: strPtr("Artist C"), Title: "Album C", PreviousTrackCount: i32Ptr(10), TrackCount: i32Ptr(12)},
+	}
+	embed := buildDigestEmbed(events)
+	if strings.Contains(embed.Description, "more event") {
+		t.Fatalf("Description = %q, must not contain a truncation note for a small batch well under the limit", embed.Description)
+	}
+	if rc := utf8.RuneCountInString(embed.Description); rc > discordDescriptionLimit {
+		t.Fatalf("Description has %d runes, want <= %d", rc, discordDescriptionLimit)
+	}
+}
+
+// TestBuildDigestEmbed_OversizedBatchTruncatesAndReconciles is the
+// synthetic-oversized-batch case from the design contract's behavior block:
+// enough loop-generated events that the concatenated rendered lines exceed
+// 4096 runes, proving the Description never exceeds the limit, contains the
+// note, and that rendered-line count plus the note's parsed-back omitted
+// count equals len(events).
+func TestBuildDigestEmbed_OversizedBatchTruncatesAndReconciles(t *testing.T) {
+	const n = 200
+	events := make([]sqlc.Event, n)
+	for i := 0; i < n; i++ {
+		events[i] = sqlc.Event{
+			ID:                int64(i + 1),
+			EventType:         eventTypeNewRelease,
+			Source:            sourceMusicBrainz,
+			ExternalID:        fmt.Sprintf("nr-%04d", i),
+			WatchedArtistName: strPtr(fmt.Sprintf("Artist %04d", i)),
+			Title:             fmt.Sprintf("Album Title Number %04d With Extra Padding Text To Grow The Line", i),
+		}
+	}
+	embed := buildDigestEmbed(events)
+
+	if rc := utf8.RuneCountInString(embed.Description); rc > discordDescriptionLimit {
+		t.Fatalf("Description has %d runes, want <= %d", rc, discordDescriptionLimit)
+	}
+	if !strings.Contains(embed.Description, "more event") {
+		t.Fatalf("Description = %q, want a truncation note -- fixture did not exceed the limit", embed.Description)
+	}
+
+	rendered := strings.Count(embed.Description, "- [")
+	if rendered == 0 || rendered == n {
+		t.Fatalf("rendered line count = %d, want strictly between 0 and %d to prove real truncation occurred", rendered, n)
+	}
+	omitted := n - rendered
+	wantNote := truncationNote(omitted)
+	if !strings.HasSuffix(embed.Description, wantNote) {
+		t.Fatalf("Description = %q, want it to end with %q (rendered=%d, omitted=%d)", embed.Description, wantNote, rendered, omitted)
 	}
 }
