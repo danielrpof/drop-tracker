@@ -6,6 +6,7 @@ package notifier_test
 // pass/fail; synchronisation is on channels the fake sink signals or closes.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -16,6 +17,36 @@ import (
 
 	"github.com/danielrpof/drop-tracker/internal/notifier"
 )
+
+// syncBuffer guards bytes.Buffer with a mutex -- unlike every other test's
+// newTestLogger buffer, this scheduler test keeps a loop goroutine logging
+// (check/Stop) while the test goroutine reads, which a bare *bytes.Buffer
+// cannot survive under -race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// newSyncTestLogger mirrors newTestLogger (JSON handler, LevelDebug) but
+// writes into a syncBuffer, for tests that read log output while the
+// scheduler's loop goroutine is still live.
+func newSyncTestLogger() (*slog.Logger, *syncBuffer) {
+	buf := &syncBuffer{}
+	handler := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return slog.New(handler), buf
+}
 
 // recordedDigestCall is one (ctx, now) pair fakeSink.SendDigestIfDue was
 // invoked with.
@@ -243,7 +274,7 @@ func TestDigestScheduler_CheckError_LoggedAndLoopContinues(t *testing.T) {
 	sink.fn = func(ctx context.Context, logger *slog.Logger, now time.Time) error {
 		return errors.New("boom")
 	}
-	logger, buf := newTestLogger()
+	logger, buf := newSyncTestLogger()
 	tickCh := make(chan time.Time)
 	manual := func() (<-chan time.Time, func()) { return tickCh, func() {} }
 
@@ -257,16 +288,21 @@ func TestDigestScheduler_CheckError_LoggedAndLoopContinues(t *testing.T) {
 	tickCh <- time.Now()
 	waitForCallCount(t, sink, 2, 2*time.Second)
 
+	// Stop's completed drain is the only happens-before edge proving the loop
+	// goroutine is done writing to buf: the sink notifies before fn() runs,
+	// so waitForCallCount(2) can return mid-check.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stopCancel()
+	if err := sched.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v, want nil (a non-nil error means the loop goroutine is still live and still writing)", err)
+	}
+
 	if !strings.Contains(buf.String(), "digest due-check failed") {
 		t.Fatalf("expected due-check-failed Error log, got: %s", buf.String())
 	}
 	if got := sink.callCount(); got != 2 {
 		t.Fatalf("call count = %d, want 2 (the loop kept going after the error)", got)
 	}
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer stopCancel()
-	_ = sched.Stop(stopCtx)
 }
 
 func TestDigestScheduler_ContextCancelled_LoopExitsWithoutStop(t *testing.T) {
