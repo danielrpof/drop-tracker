@@ -367,3 +367,321 @@ func TestDigestScheduler_DST_Weekly(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------
+// Task 2: the grace-window matrix.
+// ---------------------------------------------------------------------
+
+// TestDigestScheduler_Catchup_RestartInsideGrace is ROADMAP criterion 3
+// (D-10 + D-12): a freshly constructed scheduler whose clock reads a
+// missed slot plus 2 hours must send exactly once from its immediate first
+// check, before any tick source ever fires.
+func TestDigestScheduler_Catchup_RestartInsideGrace(t *testing.T) {
+	loc := time.UTC
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+
+	slot := time.Date(2026, 6, 15, 0, 5, 0, 0, loc)
+	prevSlot := slot.AddDate(0, 0, -1)
+	seedNotificationSettings(t, pool, true, settings.CadenceDaily, &prevSlot)
+
+	artistID := insertTestArtist(t, pool, "catchup-restart")
+	insertPendingEventTyped(t, pool, artistID, "new_release", "catchup-restart-ext", "Catchup Restart Title")
+
+	sender := &fakeSender{}
+	svc := settings.NewService(q, loc)
+	n := notifier.New(q, sender, svc, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	sink := newSignalingSink(n)
+	restartNow := slot.Add(2 * time.Hour)
+	sched := notifier.NewDigestScheduler(sink, logger, func() time.Time { return restartNow }, notifier.WithTickSource(neverFiringTickSource))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sched.Start(ctx)
+	waitSweepStep(t, sink.done)
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	if err := sched.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v, want nil", err)
+	}
+
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls = %d, want 1 (the immediate first check must catch up, before any tick)", got)
+	}
+	row, err := q.GetNotificationSettings(context.Background())
+	if err != nil {
+		t.Fatalf("get notification settings: %v", err)
+	}
+	if !row.DigestLastSlotAt.Valid || !row.DigestLastSlotAt.Time.Equal(slot) {
+		t.Fatalf("digest_last_slot_at = %+v, want %v", row.DigestLastSlotAt, slot)
+	}
+}
+
+// TestDigestScheduler_Grace_InsideWindow_SlotPlus11h59m proves a check well
+// inside the daily grace window still sends and writes both columns.
+func TestDigestScheduler_Grace_InsideWindow_SlotPlus11h59m(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	slot := time.Date(2026, 6, 16, 0, 5, 0, 0, loc)
+	prevSlot := slot.AddDate(0, 0, -1)
+
+	artistID := insertTestArtist(t, pool, "grace-inside")
+	insertPendingEventTyped(t, pool, artistID, "new_release", "grace-inside-ext", "Grace Inside Title")
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceDaily, &prevSlot)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	now := slot.Add(11*time.Hour + 59*time.Minute)
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls = %d, want 1", got)
+	}
+	row, err := q.GetNotificationSettings(context.Background())
+	if err != nil {
+		t.Fatalf("get notification settings: %v", err)
+	}
+	if !row.DigestLastSlotAt.Valid || !row.DigestLastSlotAt.Time.Equal(slot) {
+		t.Fatalf("digest_last_slot_at = %+v, want %v", row.DigestLastSlotAt, slot)
+	}
+	if !row.DigestLastSentAt.Valid {
+		t.Fatalf("digest_last_sent_at is NULL, want non-NULL")
+	}
+}
+
+// TestDigestScheduler_Grace_Boundary_SlotPlus12h00m_StillSends pins the
+// inclusive boundary: the rule is now-slot > grace, so equality with the
+// daily grace window still sends.
+func TestDigestScheduler_Grace_Boundary_SlotPlus12h00m_StillSends(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	slot := time.Date(2026, 6, 17, 0, 5, 0, 0, loc)
+	prevSlot := slot.AddDate(0, 0, -1)
+
+	artistID := insertTestArtist(t, pool, "grace-boundary-daily")
+	insertPendingEventTyped(t, pool, artistID, "new_release", "grace-boundary-daily-ext", "Grace Boundary Daily Title")
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceDaily, &prevSlot)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	now := slot.Add(12 * time.Hour)
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls = %d, want 1 (now-slot == grace is inside the window, not outside it)", got)
+	}
+}
+
+// TestDigestScheduler_Grace_Boundary_SlotPlus12h01m_DoesNotSend is the
+// boundary's other side: one minute past the daily grace window sends
+// nothing, logs exactly one Warn, and leaves both settings columns
+// byte-identical to their pre-check values.
+func TestDigestScheduler_Grace_Boundary_SlotPlus12h01m_DoesNotSend(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	slot := time.Date(2026, 6, 18, 0, 5, 0, 0, loc)
+	prevSlot := slot.AddDate(0, 0, -1)
+
+	artistID := insertTestArtist(t, pool, "grace-expired-daily")
+	eventID := insertPendingEventTyped(t, pool, artistID, "new_release", "grace-expired-daily-ext", "Grace Expired Daily Title")
+
+	before := snapshotSettings(t, q)
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceDaily, &prevSlot)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	now := slot.Add(12*time.Hour + time.Minute)
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls = %d, want 0", got)
+	}
+	if isNotified(t, pool, eventID) {
+		t.Fatalf("event %d was acked past the grace window", eventID)
+	}
+
+	var warns []logRecord
+	for _, r := range decodeLogRecords(t, buf) {
+		if r.Level == "WARN" {
+			warns = append(warns, r)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("WARN record count = %d, want exactly 1: %+v", len(warns), warns)
+	}
+	if after := snapshotSettings(t, q); !after.equal(before) {
+		t.Fatalf("notification_settings changed: before=%+v after=%+v", before, after)
+	}
+}
+
+// TestDigestScheduler_Grace_WeeklyBoundary_SlotPlus48h00m_StillSends mirrors
+// the daily inclusive-boundary case for the weekly cadence's 48h grace.
+func TestDigestScheduler_Grace_WeeklyBoundary_SlotPlus48h00m_StillSends(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	slot := time.Date(2026, 6, 19, 0, 5, 0, 0, loc) // a Friday
+	prevSlot := slot.AddDate(0, 0, -7)
+
+	artistID := insertTestArtist(t, pool, "grace-boundary-weekly")
+	insertPendingEventTyped(t, pool, artistID, "new_release", "grace-boundary-weekly-ext", "Grace Boundary Weekly Title")
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceWeekly, &prevSlot)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	now := slot.Add(48 * time.Hour)
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls = %d, want 1 (now-slot == grace is inside the window, not outside it)", got)
+	}
+}
+
+// TestDigestScheduler_Grace_WeeklyBoundary_SlotPlus48h01m_DoesNotSend mirrors
+// the daily past-window case for the weekly cadence's 48h grace: no send,
+// exactly one Warn, no column writes.
+func TestDigestScheduler_Grace_WeeklyBoundary_SlotPlus48h01m_DoesNotSend(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	slot := time.Date(2026, 6, 26, 0, 5, 0, 0, loc) // a Friday
+	prevSlot := slot.AddDate(0, 0, -7)
+
+	artistID := insertTestArtist(t, pool, "grace-expired-weekly")
+	eventID := insertPendingEventTyped(t, pool, artistID, "new_release", "grace-expired-weekly-ext", "Grace Expired Weekly Title")
+
+	before := snapshotSettings(t, q)
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceWeekly, &prevSlot)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	now := slot.Add(48*time.Hour + time.Minute)
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls = %d, want 0", got)
+	}
+	if isNotified(t, pool, eventID) {
+		t.Fatalf("event %d was acked past the grace window", eventID)
+	}
+
+	var warns []logRecord
+	for _, r := range decodeLogRecords(t, buf) {
+		if r.Level == "WARN" {
+			warns = append(warns, r)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("WARN record count = %d, want exactly 1: %+v", len(warns), warns)
+	}
+	if after := snapshotSettings(t, q); !after.equal(before) {
+		t.Fatalf("notification_settings changed: before=%+v after=%+v", before, after)
+	}
+}
+
+// TestDigestScheduler_Grace_NothingLost_CarriesForwardToNextSlot is the
+// assertion that turns "we did not send late" into "we did not drop
+// anything": starting from a past-the-window state (0 sends, nothing
+// written, the event still pending), an event accumulated during the
+// skipped period is inserted, then the clock advances to the next daily
+// slot. That single next-slot check must send exactly once, acking both
+// the originally-pending event and the one that accumulated during the
+// gap.
+func TestDigestScheduler_Grace_NothingLost_CarriesForwardToNextSlot(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	slot := time.Date(2026, 6, 15, 0, 5, 0, 0, loc)
+	prevSlot := slot.AddDate(0, 0, -1)
+	seedNotificationSettings(t, pool, true, settings.CadenceDaily, &prevSlot)
+
+	artistID := insertTestArtist(t, pool, "nothing-lost")
+	pendingID := insertPendingEventTyped(t, pool, artistID, "new_release", "nothing-lost-pending", "Pending During Skip")
+
+	svc := settings.NewService(q, loc)
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, svc, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	// Past the window: 0 sends, nothing written, the pending event carries.
+	pastWindow := slot.Add(12*time.Hour + time.Minute)
+	if err := n.SendDigestIfDue(context.Background(), logger, pastWindow); err != nil {
+		t.Fatalf("SendDigestIfDue (past window): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls after the past-window check = %d, want 0", got)
+	}
+	if isNotified(t, pool, pendingID) {
+		t.Fatalf("event %d was acked past the grace window", pendingID)
+	}
+
+	// Something new accumulates during the skipped period.
+	accumulatedID := insertPendingEventTyped(t, pool, artistID, "new_release", "nothing-lost-accumulated", "Accumulated During Skip")
+
+	nextSlotNow := slot.AddDate(0, 0, 1) // the next daily slot, exactly
+	if err := n.SendDigestIfDue(context.Background(), logger, nextSlotNow); err != nil {
+		t.Fatalf("SendDigestIfDue (next slot): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls after the next-slot check = %d, want 1", got)
+	}
+	for _, id := range []int64{pendingID, accumulatedID} {
+		if !isNotified(t, pool, id) {
+			t.Fatalf("event %d was not acked by the next slot's send", id)
+		}
+	}
+}
+
+// TestDigestScheduler_NotDue_Quiet_NoLogsNoWrites proves the not-due branch
+// is silent at Info level and above (D-24: Debug only) and touches
+// neither settings column.
+func TestDigestScheduler_NotDue_Quiet_NoLogsNoWrites(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	slot := time.Date(2026, 6, 20, 0, 5, 0, 0, loc)
+
+	before := snapshotSettings(t, q)
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceDaily, &slot) // already handled up to this slot
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	now := slot.Add(10 * time.Minute)
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls = %d, want 0", got)
+	}
+	for _, r := range decodeLogRecords(t, buf) {
+		if r.Level == "INFO" || r.Level == "WARN" || r.Level == "ERROR" {
+			t.Fatalf("unexpected %s record: %+v", r.Level, r)
+		}
+	}
+	if after := snapshotSettings(t, q); !after.equal(before) {
+		t.Fatalf("notification_settings changed: before=%+v after=%+v", before, after)
+	}
+}
