@@ -5,11 +5,11 @@ milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 23
 current_phase_name: Digest Readability & Discord Limits
 status: planning
-stopped_at: Phase 22 complete, ready to plan Phase 23
-last_updated: "2026-09-17T21:26:05.820Z"
+stopped_at: Phase 23 context gathered
+last_updated: "2026-09-17T22:46:40.637Z"
 last_activity: 2026-09-17
 last_activity_desc: Phase 22 complete, transitioned to Phase 23
-state_head: 0929b7ca45cb3f4f63611b87db3796068e2f2eec
+state_head: 15ecf8068c71700f8f343f0ffaec9a532d14ee99
 progress:
   total_phases: 4
   completed_phases: 3
@@ -419,9 +419,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-17T21:35:00Z
-Stopped at: Phase 22 complete (UAT passed, verification passed, security clean), ready to plan Phase 23
-Resume file: None
+Last session: 2026-09-17T22:46:39.743Z
+Stopped at: Phase 23 context gathered
+Resume file: .planning/phases/23-digest-readability-discord-limits/23-CONTEXT.md
 
 ## Operator Next Steps
 
