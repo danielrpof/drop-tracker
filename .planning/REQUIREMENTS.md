@@ -22,9 +22,9 @@ Requirements for the "Digest Notifications" milestone. Each maps to roadmap phas
 
 ### Digest Delivery
 
-- [ ] **DGST-08**: When digest mode is on, all three event types (new release, guest feature, deluxe/tracklist change) accumulated since the last digest are batched into one scheduled Discord message
+- [x] **DGST-08**: When digest mode is on, all three event types (new release, guest feature, deluxe/tracklist change) accumulated since the last digest are batched into one scheduled Discord message
 - [x] **DGST-09**: A digest with zero accumulated events is not sent (silent skip, no empty message)
-- [ ] **DGST-10**: Events within a digest are grouped for readability (by event type and/or artist) rather than an unstructured flat list
+- [x] **DGST-10**: Events within a digest are grouped for readability (by event type and/or artist) rather than an unstructured flat list
 - [ ] **DGST-11**: Each digest message shows the window it covers (e.g. "since [timestamp]")
 - [ ] **DGST-12**: A digest that would exceed Discord's per-message embed/character limits splits into multiple messages instead of silently truncating content
 
@@ -64,9 +64,9 @@ Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4
 | DGST-05 | Phase 22 | Pending |
 | DGST-06 | Phase 22 | Pending |
 | DGST-07 | Phase 22 | Pending |
-| DGST-08 | Phase 22 | Pending |
+| DGST-08 | Phase 22 | Complete |
 | DGST-09 | Phase 22 | Complete |
-| DGST-10 | Phase 22 | Pending |
+| DGST-10 | Phase 22 | Complete |
 | DGST-11 | Phase 23 | Pending |
 | DGST-12 | Phase 23 | Pending |
 | DGST-13 | Phase 21 | Complete |
