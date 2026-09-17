@@ -1,11 +1,13 @@
 // digest_format.go builds the scheduled digest's single-embed body (D-05).
 //
-// This is a first cut, not the finished shape: plan 22-03 supplies markdown
-// escaping (D-21), alphabetical collation sorting (D-06/D-22), the
+// Task 1 of plan 22-03 closed T-22-07: community-editable artist/title text
+// is now rune-capped and backslash-escaped before it reaches the Description,
+// and eventURL (format.go) is the one shared switch deciding every line's
+// link. Task 2 still owes alphabetical collation sorting (D-06/D-22), the
 // guest-feature host credit (D-20), and the deluxe track-count suffix
-// (D-26) before the phase closes. buildDigestEmbed's signature, its call
-// site in digest.go, and the single-embed shape below do not change when
-// those land -- discord.Client.Send needs no interface change either.
+// (D-26). buildDigestEmbed's signature, its call site in digest.go, and the
+// single-embed shape below do not change when those land -- discord.Client.Send
+// needs no interface change either.
 package notifier
 
 import (
@@ -14,6 +16,39 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/discord"
 )
+
+// markdownEscaper backslash-escapes Discord's markdown metacharacters so
+// community-editable text (an artist name or title) can never terminate or
+// retarget a masked link, nor bleed emphasis into a heading (D-21, closes
+// T-22-07). The backslash pair is listed first so a reviewer can see the
+// escape-the-escaper rule is honored; strings.NewReplacer performs one pass
+// over the source and never rescans its own replacement output, so pair
+// order cannot cause a double-escape regardless.
+var markdownEscaper = strings.NewReplacer(
+	`\`, `\\`,
+	`*`, `\*`,
+	`_`, `\_`,
+	`~`, `\~`,
+	"`", "\\`",
+	`|`, `\|`,
+	`>`, `\>`,
+	`#`, `\#`,
+	`[`, `\[`,
+	`]`, `\]`,
+	`(`, `\(`,
+	`)`, `\)`,
+)
+
+// escapeMarkdown applies markdownEscaper to s.
+func escapeMarkdown(s string) string {
+	return markdownEscaper.Replace(s)
+}
+
+// digestTitleLimit caps a digest line's title at 100 runes before escaping
+// -- Description is capped at 4096 characters and every line's URL counts
+// toward it (D-21), so per-line length is a real budget, not only
+// cosmetics.
+const digestTitleLimit = 100
 
 // digestHeading pairs one event type with its fixed display heading, in
 // D-04's fixed order: New Releases, Guest Features, Deluxe Changes.
@@ -57,12 +92,14 @@ func buildDigestEmbed(events []sqlc.Event) discord.Embed {
 		b.WriteString(h.title)
 		b.WriteString("**\n")
 		for _, ev := range group {
+			title := escapeMarkdown(truncateRunes(ev.Title, digestTitleLimit))
+			artist := escapeMarkdown(digestArtistName(ev))
 			b.WriteString("- [")
-			b.WriteString(digestArtistName(ev))
+			b.WriteString(artist)
 			b.WriteString(" — ")
-			b.WriteString(ev.Title)
+			b.WriteString(title)
 			b.WriteString("](")
-			b.WriteString(digestEventURL(ev))
+			b.WriteString(eventURL(ev))
 			b.WriteString(")\n")
 		}
 	}
@@ -79,22 +116,4 @@ func digestArtistName(ev sqlc.Event) string {
 		return *ev.WatchedArtistName
 	}
 	return ev.ArtistName
-}
-
-// digestEventURL derives one line's link URL by event type, reusing
-// format.go's existing external_id-based URL helpers -- never Title or
-// ArtistName (community-editable free text never builds a URL, T-05-06).
-// Plan 22-03 extracts this switch into a shared helper formatEmbed also
-// calls; duplicating it here is deliberate for this plan's scope.
-func digestEventURL(ev sqlc.Event) string {
-	switch ev.EventType {
-	case eventTypeNewRelease:
-		return newReleaseURL(ev.Source, ev.ExternalID)
-	case eventTypeGuestFeature:
-		return musicBrainzRecordingURL(ev.ExternalID)
-	case eventTypeDeluxeChange:
-		return musicBrainzReleaseURL(ev.ExternalID)
-	default:
-		return ""
-	}
 }
