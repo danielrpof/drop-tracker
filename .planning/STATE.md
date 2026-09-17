@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-09-16)
 Phase: 22 (Scheduled Digest Send) — EXECUTING
 Plan: 4 of 4
 Status: Phase complete — ready for verification
-Last activity: 2026-09-16 — Phase 22 execution started
+Last activity: 2026-09-16 - Completed quick task 260916-wao: Add an interim truncate-and-ack guard for T-22-15
 
 ## Performance Metrics
 
@@ -381,6 +381,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 260905-kfv | Extract `internal/sqlscan` from `cmd/migration-check/main.go` (Phase 16 arch-review candidate 1): the SQL comment/quote lexer, a new typed `Parse` DDL model, and the D-15 query-reference extractor (`QueryColumnRefs`/`RefSet`) become one flat stdlib-only package; `main.go` 1469 → 753 lines, all policy/I/O kept. Behavior-preserving — `mixed_findings.golden.txt` byte-identical at every commit. Retires review findings CR-01 (schema-qualified D-15 bypass) and WR-01 (re-parsed display string) by design, not by patch. sqlscan per-package coverage 92.0%; `make coverage-gate` 90.39%. Two follow-up todos filed (unify the two quote scanners; resolve D-15 prev-release files from `--prev-tag`). Verified passed 8/8. On branch `quick/260905-kfv-sqlscan`, PR pending. | 2026-09-05 | 6ccd998 | [260905-kfv-extract-an-internal-sqlscan-module-out-o](./quick/260905-kfv-extract-an-internal-sqlscan-module-out-o/) |
 | 260916-dvy | Record post-grilling Phase 21 decisions: 21-CONTEXT D-01..D-07, discussion log, ROADMAP Phase 21/22 notes, ADR 0002 (one outbox, one sender lock), glossary terms Outbox/Pending event/Flush. Docs only. | 2026-09-16 | 478f5eb | [260916-dvy-record-post-grilling-phase-21-decisions-](./quick/260916-dvy-record-post-grilling-phase-21-decisions-/) |
 | 27 | Fold Phase 22 grilling-session decisions (D-11–D-26) into 22-CONTEXT, ROADMAP Phase 22/23 notes + deploy sequencing, REQUIREMENTS DGST-05/15, STATE, and CONTEXT.md glossary. Docs only. | 2026-09-16 | 4e4e434 | — |
+| 260916-wao | Close T-22-15 (22-SECURITY.md, blocking) / CR-01 (22-REVIEW.md): `buildDigestEmbed` now caps the whole Description at Discord's 4096-rune limit, truncating on a full line boundary and appending a "... N more events" note; `SendDigestIfDue` still acks every event id in the batch (rendered or truncated-out), closing the self-sustaining retry loop. Interim guard only — DGST-12's full multi-message split stays Phase 23's job. `go vet`/`golangci-lint`/full test suite/`make coverage-gate` (91.38%) all clean; `/gsd-secure-phase 22` still needs a re-run to flip 22-SECURITY.md's frontmatter. | 2026-09-16 | 741dc93 | [260916-wao-add-an-interim-truncate-and-ack-guard-fo](./quick/260916-wao-add-an-interim-truncate-and-ack-guard-fo/) |
 
 ### Roadmap Evolution
 
