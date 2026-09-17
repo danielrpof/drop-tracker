@@ -16,9 +16,9 @@ Requirements for the "Digest Notifications" milestone. Each maps to roadmap phas
 
 ### Digest Scheduling
 
-- [ ] **DGST-05**: Digest job fires at a stable, predictable time per the chosen cadence, resilient to the process being down at the exact fire time (a missed fire is caught on the next check while still within a bounded grace window after its scheduled time; past that window it is not sent late, and its pending events go out at the next scheduled fire — never silently dropped)
-- [ ] **DGST-06**: Digest scheduling handles daylight-saving-time transitions without skipping or double-firing a digest for the same period
-- [ ] **DGST-07**: Digest scheduling works correctly in the shipped container image (Alpine base) despite its minimal timezone database
+- [x] **DGST-05**: Digest job fires at a stable, predictable time per the chosen cadence, resilient to the process being down at the exact fire time (a missed fire is caught on the next check while still within a bounded grace window after its scheduled time; past that window it is not sent late, and its pending events go out at the next scheduled fire — never silently dropped)
+- [x] **DGST-06**: Digest scheduling handles daylight-saving-time transitions without skipping or double-firing a digest for the same period
+- [x] **DGST-07**: Digest scheduling works correctly in the shipped container image (Alpine base) despite its minimal timezone database
 
 ### Digest Delivery
 
@@ -32,7 +32,7 @@ Requirements for the "Digest Notifications" milestone. Each maps to roadmap phas
 
 - [x] **DGST-13**: When digest mode is on, real-time per-event Discord notifications stop firing for the same events (no duplicate delivery)
 - [x] **DGST-14**: Toggling from digest back to real-time flushes any events accumulated during the digest window through the normal real-time path, rather than losing or re-batching them
-- [ ] **DGST-15**: A persisted record of the last handled scheduled fire (separate from the last-successful-digest-send timestamp shown to the operator) determines whether a digest is due, while outbox state determines which events it carries — so a late, skipped, or duplicate scheduler tick self-corrects instead of dropping or re-sending events
+- [x] **DGST-15**: A persisted record of the last handled scheduled fire (separate from the last-successful-digest-send timestamp shown to the operator) determines whether a digest is due, while outbox state determines which events it carries — so a late, skipped, or duplicate scheduler tick self-corrects instead of dropping or re-sending events
 
 ### Operator Visibility
 
@@ -61,9 +61,9 @@ Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4
 | DGST-02 | Phase 20 | Complete |
 | DGST-03 | Phase 20 | Complete |
 | DGST-04 | Phase 20 | Complete |
-| DGST-05 | Phase 22 | Pending |
-| DGST-06 | Phase 22 | Pending |
-| DGST-07 | Phase 22 | Pending |
+| DGST-05 | Phase 22 | Complete |
+| DGST-06 | Phase 22 | Complete |
+| DGST-07 | Phase 22 | Complete |
 | DGST-08 | Phase 22 | Complete |
 | DGST-09 | Phase 22 | Complete |
 | DGST-10 | Phase 22 | Complete |
@@ -71,7 +71,7 @@ Mapped during roadmap creation (2026-09-11). Phase numbering continues from v1.4
 | DGST-12 | Phase 23 | Pending |
 | DGST-13 | Phase 21 | Complete |
 | DGST-14 | Phase 21 | Complete |
-| DGST-15 | Phase 22 | Pending |
+| DGST-15 | Phase 22 | Complete |
 | DGST-16 | Phase 20 | Complete |
 
 **Per-phase coverage:**

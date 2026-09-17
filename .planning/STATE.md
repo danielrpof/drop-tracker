@@ -4,17 +4,17 @@ milestone: v1.5
 milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 22
 current_phase_name: Scheduled Digest Send
-status: executing
-stopped_at: Completed 22-03-PLAN.md
-last_updated: "2026-09-17T02:33:14.651Z"
+status: verifying
+stopped_at: Completed 22-04-PLAN.md (Phase 22 fully executed, 4/4 plans)
+last_updated: "2026-09-17T02:56:46.140Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 22 execution started
-state_head: 9f56eebccc8dac5b3c3441540472482f3109a788
+state_head: b41720351b6647bbc2bd153916e435f09c682b3c
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
   percent: 50
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-16)
 
 Phase: 22 (Scheduled Digest Send) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-16 — Phase 22 execution started
 
 ## Performance Metrics
@@ -140,6 +140,7 @@ Last activity: 2026-09-16 — Phase 22 execution started
 | Phase 22 P01 | 25min | 3 tasks | 15 files |
 | Phase 22 P02 | 45min | 3 tasks | 7 files |
 | Phase 22 P03 | 45min | 2 tasks | 4 files |
+| Phase 22 P04 | 20min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -331,6 +332,8 @@ Recent decisions affecting current work:
 - [Phase 22]: Renamed cmd/server/main.go's digestLoc to loc so notifier.WithLocation(loc)/DigestScheduler wiring is shared cleanly across settingsStore, notif, and digestSched. — 22-01-SUMMARY.md recorded the resolved zone var as digestLoc; this plan's Task 3 acceptance criteria and action text both name it loc -- renamed for literal compliance, no behavior change.
 - [Phase 22]: DigestScheduler.Stop uses a dedicated stopCh (closed via sync.Once) distinct from runCancel, so Stop can ask the loop to exit gracefully after its current check finishes without forcibly cancelling that check's own context. — The plan's literal Stop pseudocode could never return nil on its own -- only cancelling runCancel via a timed-out drain -- which contradicted the plan's own stated behavior (Stop returns nil once the in-flight check has finished). Caught in the RED-phase test run before GREEN.
 - [Phase 22]: Phase 22-03: eventURL (format.go) is the one shared per-event-type URL switch formatEmbed's three formatters and the digest builder now call; escapeMarkdown/digestTitleLimit close T-22-07; each digest group sorts by golang.org/x/text/collate-collated watched artist (title/id tie-break), promoted to a direct go.mod dependency at the same version with zero go.sum churn
+- [Phase 22]: [Phase 22]: 22-04: DST/grace-window matrix drives a real DigestScheduler over a real Notifier via a signalingSink + mutableClock (never SendDigestIfDue directly); sweep tests use the real settings.Service (live DB reads) so an ack is visible to the next check, single-shot grace tests reuse the existing digestSettingsReader fake
+- [Phase 22]: [Phase 22]: 22-04: build-scan gains 3 new steps proving the shipped Alpine image resolves America/New_York -- boots drop-tracker:scan (the image this run just built) against a throwaway Postgres, polls its boot log for the exact digest zone resolved / America/New_York pair, fails immediately if the container dies first; needs: and every existing step untouched
 
 ### Pending Todos
 
@@ -412,8 +415,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-17T02:33:14.277Z
-Stopped at: Completed 22-03-PLAN.md
+Last session: 2026-09-17T02:56:45.797Z
+Stopped at: Completed 22-04-PLAN.md (Phase 22 fully executed, 4/4 plans)
 Resume file: None
 
 ## Operator Next Steps
