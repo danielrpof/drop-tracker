@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
-current_phase: 22
-current_phase_name: Scheduled Digest Send
-status: verifying
-stopped_at: Completed 22-04-PLAN.md (Phase 22 fully executed, 4/4 plans)
-last_updated: "2026-09-17T02:56:46.140Z"
-last_activity: 2026-09-16
-last_activity_desc: Phase 22 execution started
-state_head: b41720351b6647bbc2bd153916e435f09c682b3c
+current_phase: 23
+current_phase_name: Digest Readability & Discord Limits
+status: planning
+stopped_at: Phase 22 complete, ready to plan Phase 23
+last_updated: "2026-09-17T21:26:05.820Z"
+last_activity: 2026-09-17
+last_activity_desc: Phase 22 complete, transitioned to Phase 23
+state_head: 0929b7ca45cb3f4f63611b87db3796068e2f2eec
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 11
   completed_plans: 11
-  percent: 50
+  percent: 75
 ---
 
 # Project State
@@ -25,20 +25,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-16)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 22 — Scheduled Digest Send
+**Current focus:** Phase 23 — Digest Readability & Discord Limits
 
 ## Current Position
 
-Phase: 22 (Scheduled Digest Send) — EXECUTING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
-Last activity: 2026-09-17 - Completed quick task 260917-mfa: Fix a data race in internal/notifier/scheduler_test.go
+Phase: 23 — Digest Readability & Discord Limits
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-17 — Phase 22 complete, transitioned to Phase 23
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 91
+- Total plans completed: 95
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -67,6 +67,7 @@ Last activity: 2026-09-17 - Completed quick task 260917-mfa: Fix a data race in 
 | 18.1 | 3 | - | - |
 | 20 | 4 | - | - |
 | 21 | 3 | - | - |
+| 22 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -334,6 +335,7 @@ Recent decisions affecting current work:
 - [Phase 22]: Phase 22-03: eventURL (format.go) is the one shared per-event-type URL switch formatEmbed's three formatters and the digest builder now call; escapeMarkdown/digestTitleLimit close T-22-07; each digest group sorts by golang.org/x/text/collate-collated watched artist (title/id tie-break), promoted to a direct go.mod dependency at the same version with zero go.sum churn
 - [Phase 22]: [Phase 22]: 22-04: DST/grace-window matrix drives a real DigestScheduler over a real Notifier via a signalingSink + mutableClock (never SendDigestIfDue directly); sweep tests use the real settings.Service (live DB reads) so an ack is visible to the next check, single-shot grace tests reuse the existing digestSettingsReader fake
 - [Phase 22]: [Phase 22]: 22-04: build-scan gains 3 new steps proving the shipped Alpine image resolves America/New_York -- boots drop-tracker:scan (the image this run just built) against a throwaway Postgres, polls its boot log for the exact digest zone resolved / America/New_York pair, fails immediately if the container dies first; needs: and every existing step untouched
+- [Phase 22 UAT, closed 2026-09-17]: The one human-verification test (build-scan's live CI boot check for the resolved digest zone) passed on the second push. The first push (CI run 35272810632) failed the `test` job before reaching `build-scan` — a genuine `go test -race` data race in this phase's own 22-02 code, diagnosed and fixed via quick task 260917-mfa (mutex-guarded log buffer + drain-checked `Stop` in `internal/notifier/scheduler_test.go`). Re-push (run 35276004417) confirmed `build-scan` green with `digest zone resolved OK`. 22-VERIFICATION.md and 22-SECURITY.md both `passed`/`threats_open: 0`; Phase 22 marked complete, transitioned to Phase 23.
 
 ### Pending Todos
 
@@ -348,7 +350,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 - ⚠️ [Phase 03] musicbrainz.org's TLS handshake fails from this developer's WSL2 network path (confirmed environmental via plain curl, not app code) -- Deezer unaffected. If future live testing on this machine needs real MusicBrainz data, expect the same failure; see PROJECT.md Context and Broken Windows Ledger entry #3 (waived).
 - ⚠️ [Phase 17, v1.3] No VPS is provisioned yet, and the TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel) is undecided. Both block Phase 17's first real deploy and its rollback drill. Resolve in Phase 17's discuss/spec pass before planning.
 - ⚠️ [Phase 16 → 17] `n1-boot`'s `guardcheck` skip path (G-16-1 fix) stays active until a release carrying the ahead-of-source guard becomes the N-1 rollback target — i.e. the first v1.3 release after Phase 16. Until then the N-1 boot probe is inert on migration branches. Phase 17 follow-up (security UF-1): re-assert the probe once a guard-carrying tag is N-1, and add an alarm if the guard-adoption window stays open unexpectedly.
-- ⚠️ [Repo-wide] `go test -race` remains unavailable on this dev box and absent from CI (ThreadSanitizer allocation failure under memory pressure). Phase 18.1 closed its specific instance of this risk with `TestRunCycle_CounterInvariant` (1000-iteration exact-equality substitute over the `runCycle` worker fold), matching Phase 18's own `pollruns.Store` precedent — but the underlying tooling gap is still open project-wide. Still worth wiring `-race` into CI on a Linux runner if a future phase needs it.
+- ⚠️ [Repo-wide] `go test -race` remains unavailable natively on this Windows dev box (`runtime/cgo: cgo.exe: exit status 2`) — WSL2 Ubuntu is the confirmed local workaround (used successfully in quick/260917-mfa). CI's own `test` job (`Makefile:76`, Linux runner) already runs `-race` and is the authoritative gate — confirmed for real on 2026-09-17 when it caught a genuine data race in `internal/notifier/scheduler_test.go` (CI run 35272810632), closed by quick task 260917-mfa. Phase 18.1 closed its own instance of the same class of risk with `TestRunCycle_CounterInvariant` before this was known to work in CI. Superseded 2026-09-17: the "absent from CI" half of this note was stale.
 
 ### Quick Tasks Completed
 
@@ -417,8 +419,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-17T02:56:45.797Z
-Stopped at: Completed 22-04-PLAN.md (Phase 22 fully executed, 4/4 plans)
+Last session: 2026-09-17T21:35:00Z
+Stopped at: Phase 22 complete (UAT passed, verification passed, security clean), ready to plan Phase 23
 Resume file: None
 
 ## Operator Next Steps

@@ -1,18 +1,21 @@
 ---
 phase: 22-scheduled-digest-send
 verified: 2026-09-17T03:12:51Z
-status: human_needed
+status: passed
 score: 5/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 deferred:
+
   - truth: "An oversized digest (Description over Discord's 4096-character limit) degrades safely instead of looping forever on every due-check."
     addressed_in: "Phase 23"
     evidence: "ROADMAP.md Phase 23 goal: 'A digest states the window it covers and stays complete — with Phase 22's grouping intact — even when it is large enough to exceed what one Discord message can hold.' ROADMAP.md 'Deploy sequencing' and 22-CONTEXT.md D-19 explicitly record that Phases 21/22/23 ship in one release precisely because Phase 22 ships without chunking; this is a release-sequencing decision, not a Phase 22 implementation gap, and none of Phase 22's own ROADMAP success criteria require chunking."
 human_verification:
+
   - test: "Push this branch (or merge per the documented 21+22+23 release-sequencing rule) and observe the `build-scan` job's new 'Boot the built image and assert it resolves the digest zone' step in a real GitHub Actions run."
   - expected: "The step's `docker logs` poll finds both `\"msg\":\"digest zone resolved\"` and `\"zone\":\"America/New_York\"` in the booted `drop-tracker:scan` container's output within 60s, and the step exits 0. If the embedded `time/tzdata` were missing or broken, the step would exit 1 with the `::error::` annotation and dump the container logs/exit code."
   - why_human: "This is the one truth in success criterion 4 that only a live CI boot can prove — Go consults the host's own zoneinfo before the binary's embedded `time/tzdata` package, so a local `go test` or `go build` run (including everything this verification exercised) passes identically whether or not tzdata is actually embedded correctly, on any machine that already has system zoneinfo (this Windows dev box does). `git status`/`git ls-remote` at verification time show this branch has never been pushed, so `full-pipeline.yml`'s `build-scan` job has not yet run against this code — the step exists, is correctly placed and wired (verified below), but its actual green/red outcome is unobserved."
+
 ---
 
 # Phase 22: Scheduled Digest Send Verification Report
