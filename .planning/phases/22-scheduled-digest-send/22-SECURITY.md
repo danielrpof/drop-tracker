@@ -1,11 +1,12 @@
 ---
 phase: "22"
 slug: "scheduled-digest-send"
-status: draft
+status: verified
 # threats_open = count of OPEN threats at or above workflow.security_block_on severity (the blocking gate)
-threats_open: 1
+threats_open: 0
 asvs_level: 1
 created: "2026-09-16"
+updated: "2026-09-16"
 ---
 
 # Phase 22 — Security
@@ -49,7 +50,7 @@ created: "2026-09-16"
 | T-22-12 | Tampering | mode flip mid-send | medium | mitigate | Second settings read immediately before POST aborts with no writes if digest mode turned off after outbox read (`digest.go:102-112`) | closed |
 | T-22-13 | Spoofing | unconfigured digest zone | medium | mitigate | `n.loc == nil` guard logs Warn and returns before any settings read (`digest.go:32-35`) | closed |
 | T-22-14 | Spoofing | link href construction | high | mitigate | Every href built via `eventURL(ev)` from `external_id` through `url.PathEscape`; `Title`/`ArtistName` never reach a URL (`format.go:160-171`) | closed |
-| T-22-15 | Denial of Service | Description length budget | **critical** *(reclassified from plan's self-rated medium)* | mitigate *(required — not accepted)* | **No mitigation present.** `buildDigestEmbed` caps only per-line title (100 runes); no cap exists on the whole `Embed.Description` against Discord's 4096-char limit. A failed oversized send (`digest.go:114-120`) returns without acking, so the same or a growing batch retries every 5 minutes until grace expires, then carries forward to the next slot in the same oversized state — a self-sustaining loop with no automatic recovery. The accepted rationale (D-19: Phases 21+22+23 ship in one release) is a process promise; `full-pipeline.yml`'s `release` job (`if: push && ref == main`) has no gate checking for Phase 23's chunking commits. | **open — BLOCKING** |
+| T-22-15 | Denial of Service | Description length budget | critical *(reclassified from plan's self-rated medium, 2026-09-16 audit)* | mitigate | **Closed by quick task 260916-wao** (`internal/notifier/digest_format.go`, `digest.go`). `assembleDescription` now caps the whole `Embed.Description` at `discordDescriptionLimit` (4096 runes): when the joined segments already fit, output is byte-identical to before; otherwise it keeps the largest whole-line prefix and appends a `truncationNote` ("... N more events"), never cutting mid-line. `SendDigestIfDue`'s `sentIDs` construction (commented at `digest.go`, closes T-22-15) already walked the full `sendable` slice unconditionally, so every event id — rendered or truncated-out — acks on the first successful send once `assembleDescription` stops `Send` from 400-ing; the retry loop cannot start. Proven by `TestBuildDigestEmbed_OversizedBatchTruncatesAndReconciles` (pure function) and `TestSendDigestIfDue_OversizedBatch_TruncatesDescriptionAndAcksEveryEvent` (200-event real-Postgres fixture: one send, Description ≤ 4096 runes, every id acked, both watermark columns advance). Re-verified directly by this audit: `go build`, `go vet`, `golangci-lint run` (0 issues), the two tests above plus all 16 pre-existing `digest_format_test.go`/13 `digest_test.go` cases (zero regressions), and `make coverage-gate` (91.38%) all re-run clean, not taken on the executor's report alone. Interim guard only — DGST-12's full multi-message split remains Phase 23's job; this closes the *unbounded retry loop*, not the eventual need to split an oversized digest across messages. | closed |
 | T-22-16 | Tampering | emphasis bleeding into headings | medium | mitigate | `*`, `_`, `~`, `` ` `` all present in `markdownEscaper` (`digest_format.go:31-44`) | closed |
 | T-22-17 | Repudiation | duplicate-line merging | low | accept | Deliberate design choice (D-26); two same-release events from two sources render as two lines, ack separately | closed |
 | T-22-18 | Spoofing | shipped image zone resolution | high | mitigate | CI boot step polls `docker logs` for `"msg":"digest zone resolved"` + `"zone":"America/New_York"` (`full-pipeline.yml:629-653`) | closed |
@@ -62,6 +63,8 @@ created: "2026-09-16"
 | T-22-SC-02 (22-02) | Tampering | npm/pip/cargo installs | n/a | accept | No installs; `go.mod`/`go.sum` untouched | closed |
 | T-22-SC-03 (22-03) | Tampering | npm/pip/cargo installs | n/a | mitigate | `golang.org/x/text` promoted indirect→direct; `go.sum` unchanged (no new hash lines) | closed |
 | T-22-SC-04 (22-04) | Tampering | npm/pip/cargo installs | n/a | accept | No installs, no new `uses:` action; `go.mod`, `go.sum`, action pin set untouched | closed |
+| T-WAO-02 (quick/260916-wao) | Tampering | `truncationNote` output | low | mitigate | The note is built from a program-computed integer only (`fmt.Sprintf`-style formatting of a count) — no community-editable text is interpolated, so it cannot retarget a link or inject markdown, consistent with T-22-07's escaping guarantee for the rest of the Description | closed |
+| T-WAO-SC (quick/260916-wao) | Tampering | npm/pip/cargo installs | n/a | accept | No installs; `go.mod`/`go.sum` untouched by this fix | closed |
 
 *Status: open · closed · open — below high threshold (non-blocking)*
 *Severity: critical > high > medium > low — only open threats at or above workflow.security_block_on (high) count toward threats_open*
@@ -77,9 +80,9 @@ created: "2026-09-16"
 | AR-22-02 | T-22-11 | `discord.Client` already refuses to wrap raw `*url.Error` (which embeds the full webhook path); this phase logs only `Sender.Send`'s error value and adds no new HTTP-error wrapping — existing control from T-05-01 carries forward. | Daniel (plan-time) | 2026-09-16 |
 | AR-22-03 | T-22-17 | Not merging duplicate-source lines is the deliberate, transparent choice (D-26): an operator sees both detections rather than silently losing one. | Daniel (plan-time) | 2026-09-16 |
 | AR-22-04 | T-22-20 | CI throwaway Postgres reuses the existing `n1-boot` job's dev-credential pattern on an ephemeral runner with no production data; accepted on the same terms as that existing job. | Daniel (plan-time) | 2026-09-16 |
-| AR-22-05 | T-22-SC-01, T-22-SC-02, T-22-SC-04 | No package installs in plans 22-01/22-02/22-04 — `go.mod`/`go.sum` untouched, so no package-legitimacy checkpoint applies. | Daniel (plan-time) | 2026-09-16 |
+| AR-22-05 | T-22-SC-01, T-22-SC-02, T-22-SC-04, T-WAO-SC | No package installs in plans 22-01/22-02/22-04 or quick task 260916-wao — `go.mod`/`go.sum` untouched, so no package-legitimacy checkpoint applies. | Daniel (plan-time) | 2026-09-16 |
 
-*T-22-15 is explicitly NOT in this log — the user chose to block rather than accept it (2026-09-16). See Threat Register above.*
+*T-22-15 was blocked, not accepted, in the 2026-09-16 audit — the user chose to fix it rather than document it as a risk. It closed via implementation (quick task 260916-wao) and does not appear in this log.*
 
 ---
 
@@ -88,6 +91,7 @@ created: "2026-09-16"
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-09-16 | 27 | 26 | 1 | gsd-security-auditor (Sonnet, ASVS L1, escalated to L2/L3 depth for T-22-15) |
+| 2026-09-16 | 29 | 29 | 0 | Orchestrator re-verification after quick task 260916-wao closed T-22-15 (interim truncate-and-ack guard); adds T-WAO-02/T-WAO-SC from the fix's own threat model. Re-run directly: `go build`, `go vet`, `golangci-lint run`, the fix's new tests plus all pre-existing `digest_format_test.go`/`digest_test.go` cases against real Postgres, and `make coverage-gate` — all confirmed clean independent of the executor's own report. |
 
 ---
 
@@ -95,7 +99,7 @@ created: "2026-09-16"
 
 - [x] All threats have a disposition (mitigate / accept / transfer)
 - [x] Accepted risks documented in Accepted Risks Log
-- [ ] `threats_open: 0` confirmed — **1 threat open (T-22-15), blocking by user decision**
-- [ ] `status: verified` set in frontmatter — held at `draft` until T-22-15 closes
+- [x] `threats_open: 0` confirmed
+- [x] `status: verified` set in frontmatter
 
-**Approval:** pending — re-run `/gsd-secure-phase 22` after T-22-15's interim guard (truncate-and-ack) or a CI/release gate enforcing D-19's Phase 23 sequencing lands.
+**Approval:** verified 2026-09-16. T-22-15's guard is interim (line-boundary truncation + full ack), not DGST-12's eventual multi-message split — that split is Phase 23's job and does not reopen this threat.
