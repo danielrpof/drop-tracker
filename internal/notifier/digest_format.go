@@ -14,8 +14,10 @@
 package notifier
 
 import (
+	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/text/collate"
 	"golang.org/x/text/language"
@@ -64,6 +66,12 @@ const digestTitleLimit = 100
 // this many runes.
 const discordDescriptionLimit = 4096
 
+// truncationNoteReserve is a generous rune-count headroom for
+// assembleDescription's trailing note; used only to size a preallocated
+// builder, never as a second hard limit -- the real invariant is checked
+// exactly against discordDescriptionLimit.
+const truncationNoteReserve = 40
+
 // digestHeading pairs one event type with its fixed display heading, in
 // D-04's fixed order: New Releases, Guest Features, Deluxe Changes.
 type digestHeading struct {
@@ -99,10 +107,7 @@ func buildDigestEmbed(events []sqlc.Event) discord.Embed {
 	// plus a test could otherwise share one (D-22).
 	collator := collate.New(language.Und, collate.IgnoreCase)
 
-	// TODO(RED, T-22-15): still the pre-fix shared-builder body -- no
-	// whole-Description cap yet. GREEN rewires this to build segments via
-	// digestLine and call assembleDescription.
-	var b strings.Builder
+	segments := make([]string, 0, len(events))
 	for _, h := range digestHeadings {
 		group := grouped[h.eventType]
 		if len(group) == 0 {
@@ -110,40 +115,50 @@ func buildDigestEmbed(events []sqlc.Event) discord.Embed {
 		}
 		sortDigestGroup(group, collator)
 
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString("**")
-		b.WriteString(h.title)
-		b.WriteString("**\n")
-		for _, ev := range group {
-			b.WriteString("- [")
-			b.WriteString(lineLabel(ev))
-			b.WriteString("](")
-			b.WriteString(eventURL(ev))
-			b.WriteString(")")
-			if h.eventType == eventTypeDeluxeChange {
-				if suffix := tracksFieldValue(ev.PreviousTrackCount, ev.TrackCount); suffix != "" {
-					b.WriteString(" (")
-					b.WriteString(suffix)
-					b.WriteString(")")
+		for i, ev := range group {
+			line := digestLine(h.eventType, ev)
+			if i == 0 {
+				// The group's first segment carries its leading separator
+				// ("\n" only when this is not the very first segment
+				// overall) plus the bold heading -- the same rule the prior
+				// shared-builder version expressed via `b.Len() > 0`, now
+				// keyed off `len(segments) > 0`.
+				heading := "**" + h.title + "**\n"
+				if len(segments) > 0 {
+					heading = "\n" + heading
 				}
+				line = heading + line
 			}
-			b.WriteString("\n")
+			segments = append(segments, line)
 		}
 	}
 
-	return discord.Embed{Description: b.String()}
+	return discord.Embed{Description: assembleDescription(segments)}
 }
 
 // digestLine renders exactly one event's line -- "- [label](url)" plus the
 // deluxe track-count suffix -- ending in "\n". Extracted from
 // buildDigestEmbed's former inner-loop body so assembleDescription can
 // truncate on a whole-line boundary.
-//
-// STUB (RED, T-22-15): not yet implemented -- GREEN fills this in.
 func digestLine(eventType string, ev sqlc.Event) string {
-	return ""
+	var b strings.Builder
+	b.WriteString("- [")
+	b.WriteString(lineLabel(ev))
+	b.WriteString("](")
+	b.WriteString(eventURL(ev))
+	b.WriteString(")")
+	if eventType == eventTypeDeluxeChange {
+		// D-26: the track-count suffix is appended after the link's
+		// closing parenthesis, and omitted entirely (never a bare
+		// "()") when neither count is known.
+		if suffix := tracksFieldValue(ev.PreviousTrackCount, ev.TrackCount); suffix != "" {
+			b.WriteString(" (")
+			b.WriteString(suffix)
+			b.WriteString(")")
+		}
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 // assembleDescription joins segments (one per event, a group's first
@@ -155,10 +170,31 @@ func digestLine(eventType string, ev sqlc.Event) string {
 // truncationNote's rune count for however many segments that prefix omits,
 // stays within discordDescriptionLimit, and appends that note. It never cuts
 // inside a segment: dropped segments are dropped whole.
-//
-// STUB (RED, T-22-15): not yet implemented -- GREEN fills this in.
 func assembleDescription(segments []string) string {
-	return ""
+	cum := make([]int, len(segments)+1)
+	for i, s := range segments {
+		cum[i+1] = cum[i] + utf8.RuneCountInString(s)
+	}
+	if cum[len(segments)] <= discordDescriptionLimit {
+		return strings.Join(segments, "")
+	}
+
+	for k := len(segments) - 1; k >= 0; k-- {
+		note := truncationNote(len(segments) - k)
+		if cum[k]+utf8.RuneCountInString(note) <= discordDescriptionLimit {
+			var b strings.Builder
+			b.Grow(discordDescriptionLimit + truncationNoteReserve)
+			for _, s := range segments[:k] {
+				b.WriteString(s)
+			}
+			b.WriteString(note)
+			return b.String()
+		}
+	}
+	// Pathological case: even omitting every segment, the note itself would
+	// not fit. Return the note alone as the best-effort result -- there is
+	// nothing smaller to fall back to.
+	return truncationNote(len(segments))
 }
 
 // truncationNote reports how many sendable events assembleDescription
@@ -166,10 +202,11 @@ func assembleDescription(segments []string) string {
 // -- every dropped event's id is still acked as delivered once Send succeeds
 // (digest.go) -- so this note exists only so the operator can see the digest
 // is incomplete.
-//
-// STUB (RED, T-22-15): not yet implemented -- GREEN fills this in.
 func truncationNote(omitted int) string {
-	return ""
+	if omitted == 1 {
+		return "... 1 more event"
+	}
+	return fmt.Sprintf("... %d more events", omitted)
 }
 
 // sortDigestGroup orders one event-type group by collated artistKey, tied
