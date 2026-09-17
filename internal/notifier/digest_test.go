@@ -10,10 +10,12 @@ package notifier_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/discord"
@@ -116,6 +118,73 @@ func TestSendDigestIfDue_DueSlotAllThreeTypes_OneSendThreeAcksBothColumns(t *tes
 	for _, id := range []int64{newReleaseID, guestID, deluxeID} {
 		if !isNotified(t, pool, id) {
 			t.Fatalf("event %d not marked notified", id)
+		}
+	}
+
+	row, err := q.GetNotificationSettings(context.Background())
+	if err != nil {
+		t.Fatalf("get notification settings: %v", err)
+	}
+	if !row.DigestLastSlotAt.Valid || !row.DigestLastSlotAt.Time.Equal(wantSlot) {
+		t.Fatalf("digest_last_slot_at = %+v, want %v", row.DigestLastSlotAt, wantSlot)
+	}
+	if !row.DigestLastSentAt.Valid {
+		t.Fatalf("digest_last_sent_at is NULL, want non-NULL")
+	}
+}
+
+// TestSendDigestIfDue_OversizedBatch_TruncatesDescriptionAndAcksEveryEvent
+// is T-22-15's end-to-end proof: an outbox large enough to force
+// digest_format.go's truncation still sends in exactly one call, and every
+// event id in the batch -- rendered or truncated-out -- is acked. This is
+// the load-bearing assertion: it proves the retry loop T-22-15 named
+// (a persistently oversized batch never advancing the watermark) cannot
+// happen once Task 1's whole-Description cap stops Send from 400-ing.
+func TestSendDigestIfDue_OversizedBatch_TruncatesDescriptionAndAcksEveryEvent(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 6, 17, 1, 5, 0, 0, time.UTC)
+	wantSlot := settings.MostRecentSlot(now, settings.CadenceDaily, loc)
+
+	artistID := insertTestArtist(t, pool, "oversized-batch")
+
+	const n = 200
+	ids := make([]int64, n)
+	for i := 0; i < n; i++ {
+		externalID := fmt.Sprintf("nr-oversized-%04d", i)
+		title := fmt.Sprintf("Oversized Batch Album Title Number %04d With Extra Padding Text To Grow The Line", i)
+		ids[i] = insertPendingEventTyped(t, pool, artistID, "new_release", externalID, title)
+	}
+
+	var gotEmbed discord.Embed
+	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		gotEmbed = embed
+		return nil
+	}}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n2 := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	if err := n2.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls = %d, want 1", got)
+	}
+	if !strings.Contains(gotEmbed.Description, "more event") {
+		t.Fatalf("embed Description = %q, want a truncation note -- fixture did not exceed the 4096-rune limit", gotEmbed.Description)
+	}
+	if rc := utf8.RuneCountInString(gotEmbed.Description); rc > 4096 {
+		t.Fatalf("embed Description has %d runes, want <= 4096", rc)
+	}
+
+	// Load-bearing: every inserted event id is acked, including whichever
+	// ones digest_format.go truncated out of the rendered Description.
+	for _, id := range ids {
+		if !isNotified(t, pool, id) {
+			t.Fatalf("event %d not marked notified -- a truncated-out event must still be acked, or the batch would retry forever", id)
 		}
 	}
 

@@ -119,6 +119,10 @@ func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now
 		return nil
 	}
 
+	// sentIDs walks the full sendable slice regardless of what
+	// digest_format.go actually rendered into embed.Description -- a
+	// buildDigestEmbed truncation never leaves an event stuck pending, since
+	// every id here still acks once Send succeeds (closes T-22-15).
 	sentIDs := make([]int64, 0, len(sendable)+len(suppressedIDs))
 	for _, ev := range sendable {
 		sentIDs = append(sentIDs, ev.ID)
