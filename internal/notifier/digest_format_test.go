@@ -7,6 +7,7 @@ package notifier
 // DB, no HTTP.
 
 import (
+	"math/rand"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -151,5 +152,251 @@ func TestDigestLine_TitleWithBracketsCannotRetargetLink(t *testing.T) {
 	gotURL := rest[:closeIdx]
 	if gotURL != wantURL {
 		t.Fatalf("link URL = %q, want %q -- title text must never retarget the link", gotURL, wantURL)
+	}
+}
+
+func TestArtistKey(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   sqlc.Event
+		want string
+	}{
+		{"non-nil non-empty WatchedArtistName wins", sqlc.Event{WatchedArtistName: strPtr("Rauw Alejandro"), ArtistName: "Drake"}, "Rauw Alejandro"},
+		{"nil WatchedArtistName falls back to ArtistName", sqlc.Event{WatchedArtistName: nil, ArtistName: "Drake"}, "Drake"},
+		{"empty-string WatchedArtistName falls back to ArtistName", sqlc.Event{WatchedArtistName: strPtr(""), ArtistName: "Drake"}, "Drake"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := artistKey(tt.ev); got != tt.want {
+				t.Errorf("artistKey(%+v) = %q, want %q", tt.ev, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLineLabel(t *testing.T) {
+	t.Run("new_release label is Artist — Title", func(t *testing.T) {
+		ev := sqlc.Event{EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Bad Bunny"), Title: "Album"}
+		want := "Bad Bunny — Album"
+		if got := lineLabel(ev); got != want {
+			t.Errorf("lineLabel(%+v) = %q, want %q", ev, got, want)
+		}
+	})
+	t.Run("guest_feature label names watched artist and host credit", func(t *testing.T) {
+		ev := sqlc.Event{
+			EventType:         eventTypeGuestFeature,
+			WatchedArtistName: strPtr("Rauw Alejandro"),
+			ArtistName:        "Drake",
+			Title:             "Track",
+		}
+		want := "Rauw Alejandro on Drake — Track"
+		if got := lineLabel(ev); got != want {
+			t.Errorf("lineLabel(%+v) = %q, want %q", ev, got, want)
+		}
+	})
+	t.Run("guest_feature host credit is escaped too", func(t *testing.T) {
+		ev := sqlc.Event{
+			EventType:         eventTypeGuestFeature,
+			WatchedArtistName: strPtr("Rauw Alejandro"),
+			ArtistName:        "Drake [Remix]",
+			Title:             "Track",
+		}
+		if got := lineLabel(ev); !strings.Contains(got, `Drake \[Remix\]`) {
+			t.Errorf("lineLabel(%+v) = %q, want the host credit escaped", ev, got)
+		}
+	})
+	t.Run("deluxe_change label is Artist — Title, no host credit", func(t *testing.T) {
+		ev := sqlc.Event{EventType: eventTypeDeluxeChange, WatchedArtistName: strPtr("Bad Bunny"), Title: "Album (Deluxe)"}
+		want := `Bad Bunny — Album \(Deluxe\)`
+		if got := lineLabel(ev); got != want {
+			t.Errorf("lineLabel(%+v) = %q, want %q", ev, got, want)
+		}
+	})
+}
+
+func TestBuildDigestEmbed_OrderingIsCollatedCaseAndAccentInsensitive(t *testing.T) {
+	events := []sqlc.Event{
+		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Zion & Lennox"), Title: "Z"},
+		{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Ñengo Flow"), Title: "N"},
+		{ID: 3, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("bad bunny"), Title: "B"},
+	}
+	embed := buildDigestEmbed(events)
+
+	iBad := strings.Index(embed.Description, "bad bunny")
+	iNengo := strings.Index(embed.Description, "Ñengo Flow")
+	iZion := strings.Index(embed.Description, "Zion & Lennox")
+	if iBad == -1 || iNengo == -1 || iZion == -1 {
+		t.Fatalf("Description = %q, want all three artists present", embed.Description)
+	}
+	if iBad >= iNengo || iNengo >= iZion {
+		t.Fatalf("Description order = %q, want bad bunny, Ñengo Flow, Zion & Lennox in that order", embed.Description)
+	}
+}
+
+func TestBuildDigestEmbed_TieBreaksByTitleThenID(t *testing.T) {
+	t.Run("same artist, different titles sort by title", func(t *testing.T) {
+		events := []sqlc.Event{
+			{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist"), Title: "Zeta"},
+			{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist"), Title: "Alpha"},
+		}
+		embed := buildDigestEmbed(events)
+		iAlpha := strings.Index(embed.Description, "Alpha")
+		iZeta := strings.Index(embed.Description, "Zeta")
+		if iAlpha == -1 || iZeta == -1 || iAlpha > iZeta {
+			t.Fatalf("Description = %q, want Alpha before Zeta", embed.Description)
+		}
+	})
+	t.Run("same artist and title sort by ascending event id", func(t *testing.T) {
+		events := []sqlc.Event{
+			{ID: 20, EventType: eventTypeNewRelease, Source: sourceMusicBrainz, WatchedArtistName: strPtr("Artist"), Title: "Same", ExternalID: "later"},
+			{ID: 5, EventType: eventTypeNewRelease, Source: sourceMusicBrainz, WatchedArtistName: strPtr("Artist"), Title: "Same", ExternalID: "earlier"},
+		}
+		embed := buildDigestEmbed(events)
+		iEarlier := strings.Index(embed.Description, "https://musicbrainz.org/release-group/earlier")
+		iLater := strings.Index(embed.Description, "https://musicbrainz.org/release-group/later")
+		if iEarlier == -1 || iLater == -1 || iEarlier > iLater {
+			t.Fatalf("Description = %q, want the id=5 line before the id=20 line", embed.Description)
+		}
+	})
+}
+
+func TestBuildDigestEmbed_ShuffleInvariant(t *testing.T) {
+	events := []sqlc.Event{
+		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Zion & Lennox"), Title: "Z"},
+		{ID: 2, EventType: eventTypeGuestFeature, WatchedArtistName: strPtr("Rauw Alejandro"), ArtistName: "Drake", Title: "Feature"},
+		{ID: 3, EventType: eventTypeDeluxeChange, WatchedArtistName: strPtr("bad bunny"), Title: "Deluxe", PreviousTrackCount: i32Ptr(12), TrackCount: i32Ptr(15)},
+		{ID: 4, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Ñengo Flow"), Title: "N"},
+		{ID: 5, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist"), Title: "Alpha"},
+	}
+	want := buildDigestEmbed(events).Description
+
+	shuffled := make([]sqlc.Event, len(events))
+	copy(shuffled, events)
+	rng := rand.New(rand.NewSource(42))
+	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
+	got := buildDigestEmbed(shuffled).Description
+	if got != want {
+		t.Fatalf("shuffled input produced a different Description.\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
+func TestBuildDigestEmbed_GuestFeatureGroupedAndSortedByWatchedArtist(t *testing.T) {
+	ev := sqlc.Event{
+		EventType:         eventTypeGuestFeature,
+		WatchedArtistName: strPtr("Rauw Alejandro"),
+		ArtistName:        "Drake",
+		Title:             "Track",
+	}
+	embed := buildDigestEmbed([]sqlc.Event{ev})
+	if !strings.Contains(embed.Description, "**Guest Features**") {
+		t.Fatalf("Description = %q, want the Guest Features heading", embed.Description)
+	}
+	if !strings.Contains(embed.Description, "Rauw Alejandro on Drake — Track") {
+		t.Fatalf("Description = %q, want the label %q", embed.Description, "Rauw Alejandro on Drake — Track")
+	}
+}
+
+func TestBuildDigestEmbed_DeluxeTrackCountSuffix(t *testing.T) {
+	t.Run("both counts known renders the suffix after the link", func(t *testing.T) {
+		ev := sqlc.Event{
+			EventType:          eventTypeDeluxeChange,
+			WatchedArtistName:  strPtr("Artist"),
+			Title:              "Album",
+			ExternalID:         "rel-1",
+			PreviousTrackCount: i32Ptr(12),
+			TrackCount:         i32Ptr(15),
+		}
+		embed := buildDigestEmbed([]sqlc.Event{ev})
+		want := "](https://musicbrainz.org/release/rel-1) (12 → 15 tracks)\n"
+		if !strings.Contains(embed.Description, want) {
+			t.Fatalf("Description = %q, want it to contain %q", embed.Description, want)
+		}
+	})
+	t.Run("both counts nil renders no suffix and no empty parens", func(t *testing.T) {
+		ev := sqlc.Event{
+			EventType:         eventTypeDeluxeChange,
+			WatchedArtistName: strPtr("Artist"),
+			Title:             "Album",
+			ExternalID:        "rel-1",
+		}
+		embed := buildDigestEmbed([]sqlc.Event{ev})
+		line := strings.TrimSuffix(strings.TrimSpace(embed.Description), "")
+		if strings.Contains(line, "()") {
+			t.Fatalf("Description = %q, must not contain an empty ()", embed.Description)
+		}
+		want := "](https://musicbrainz.org/release/rel-1)\n"
+		if !strings.Contains(embed.Description, want) {
+			t.Fatalf("Description = %q, want it to end the line right after the link with no suffix", embed.Description)
+		}
+	})
+}
+
+func TestBuildDigestEmbed_WatchedArtistNameFallback(t *testing.T) {
+	t.Run("nil falls back to artist_name for label and sort key", func(t *testing.T) {
+		ev := sqlc.Event{EventType: eventTypeNewRelease, WatchedArtistName: nil, ArtistName: "Fallback Artist", Title: "T"}
+		embed := buildDigestEmbed([]sqlc.Event{ev})
+		if !strings.Contains(embed.Description, "Fallback Artist — T") {
+			t.Fatalf("Description = %q, want it to contain %q", embed.Description, "Fallback Artist — T")
+		}
+	})
+	t.Run("empty string falls back to artist_name", func(t *testing.T) {
+		ev := sqlc.Event{EventType: eventTypeNewRelease, WatchedArtistName: strPtr(""), ArtistName: "Fallback Artist", Title: "T"}
+		embed := buildDigestEmbed([]sqlc.Event{ev})
+		if !strings.Contains(embed.Description, "Fallback Artist — T") {
+			t.Fatalf("Description = %q, want it to contain %q", embed.Description, "Fallback Artist — T")
+		}
+	})
+}
+
+func TestBuildDigestEmbed_GroupOrderFixedRegardlessOfInputOrder(t *testing.T) {
+	events := []sqlc.Event{
+		{ID: 1, EventType: eventTypeDeluxeChange, WatchedArtistName: strPtr("A"), Title: "D", ExternalID: "d1"},
+		{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("A"), Title: "N", ExternalID: "n1"},
+		{ID: 3, EventType: eventTypeGuestFeature, WatchedArtistName: strPtr("A"), ArtistName: "Host", Title: "G", ExternalID: "g1"},
+	}
+	embed := buildDigestEmbed(events)
+
+	iNew := strings.Index(embed.Description, "**New Releases**")
+	iGuest := strings.Index(embed.Description, "**Guest Features**")
+	iDeluxe := strings.Index(embed.Description, "**Deluxe Changes**")
+	if iNew == -1 || iGuest == -1 || iDeluxe == -1 {
+		t.Fatalf("Description = %q, want all three headings present", embed.Description)
+	}
+	if iNew >= iGuest || iGuest >= iDeluxe {
+		t.Fatalf("Description = %q, want headings in New Releases, Guest Features, Deluxe Changes order", embed.Description)
+	}
+}
+
+func TestBuildDigestEmbed_EmptyGroupOmitsHeadingEntirely(t *testing.T) {
+	ev := sqlc.Event{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("A"), Title: "T"}
+	embed := buildDigestEmbed([]sqlc.Event{ev})
+
+	for _, heading := range []string{"**Guest Features**", "**Deluxe Changes**"} {
+		if strings.Contains(embed.Description, heading) {
+			t.Errorf("Description = %q, must not contain the empty group's heading %q", embed.Description, heading)
+		}
+	}
+}
+
+func TestBuildDigestEmbed_DuplicateSourcesRenderAsTwoLines(t *testing.T) {
+	events := []sqlc.Event{
+		{ID: 1, EventType: eventTypeNewRelease, Source: sourceMusicBrainz, WatchedArtistName: strPtr("A"), Title: "Same Release", ExternalID: "mb-1"},
+		{ID: 2, EventType: eventTypeNewRelease, Source: sourceDeezer, WatchedArtistName: strPtr("A"), Title: "Same Release", ExternalID: "dz-1"},
+	}
+	embed := buildDigestEmbed(events)
+	if got := strings.Count(embed.Description, "Same Release"); got != 2 {
+		t.Fatalf("Description = %q, want 2 separate lines for the same release from two sources, got %d", embed.Description, got)
+	}
+}
+
+func TestBuildDigestEmbed_SameArtistTwoEventsRenderAsTwoLines(t *testing.T) {
+	events := []sqlc.Event{
+		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Bad Bunny"), Title: "Album One"},
+		{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Bad Bunny"), Title: "Album Two"},
+	}
+	embed := buildDigestEmbed(events)
+	if got := strings.Count(embed.Description, "- ["); got != 2 {
+		t.Fatalf("Description = %q, want exactly 2 separate lines, got %d", embed.Description, got)
 	}
 }
