@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-09-16)
 Phase: 22 (Scheduled Digest Send) — EXECUTING
 Plan: 4 of 4
 Status: Phase complete — ready for verification
-Last activity: 2026-09-16 - Completed quick task 260916-wao: Add an interim truncate-and-ack guard for T-22-15
+Last activity: 2026-09-17 - Completed quick task 260917-mfa: Fix a data race in internal/notifier/scheduler_test.go
 
 ## Performance Metrics
 
@@ -382,6 +382,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 260916-dvy | Record post-grilling Phase 21 decisions: 21-CONTEXT D-01..D-07, discussion log, ROADMAP Phase 21/22 notes, ADR 0002 (one outbox, one sender lock), glossary terms Outbox/Pending event/Flush. Docs only. | 2026-09-16 | 478f5eb | [260916-dvy-record-post-grilling-phase-21-decisions-](./quick/260916-dvy-record-post-grilling-phase-21-decisions-/) |
 | 27 | Fold Phase 22 grilling-session decisions (D-11–D-26) into 22-CONTEXT, ROADMAP Phase 22/23 notes + deploy sequencing, REQUIREMENTS DGST-05/15, STATE, and CONTEXT.md glossary. Docs only. | 2026-09-16 | 4e4e434 | — |
 | 260916-wao | Close T-22-15 (22-SECURITY.md, blocking) / CR-01 (22-REVIEW.md): `buildDigestEmbed` now caps the whole Description at Discord's 4096-rune limit, truncating on a full line boundary and appending a "... N more events" note; `SendDigestIfDue` still acks every event id in the batch (rendered or truncated-out), closing the self-sustaining retry loop. Interim guard only — DGST-12's full multi-message split stays Phase 23's job. `go vet`/`golangci-lint`/full test suite/`make coverage-gate` (91.38%) all clean; `/gsd-secure-phase 22` still needs a re-run to flip 22-SECURITY.md's frontmatter. | 2026-09-16 | 741dc93 | [260916-wao-add-an-interim-truncate-and-ack-guard-fo](./quick/260916-wao-add-an-interim-truncate-and-ack-guard-fo/) |
+| 260917-mfa | Fix a data race in `TestDigestScheduler_CheckError_LoggedAndLoopContinues` (internal/notifier/scheduler_test.go) caught by `go test -race` in CI, blocking the Phase 22 UAT smoke test: added a mutex-guarded `syncBuffer`/`newSyncTestLogger` local to the file, and moved the test's `Stop()` call (error checked) ahead of its log-buffer assertions, since `Stop` itself also logs and its completed drain is the only real happens-before edge proving the loop goroutine is done writing. Reproduced RED under WSL2 first; 50 consecutive `-race` iterations clean after the fix, plus 20 of the whole test family and one full-package `-race` run. No production code or shared test helpers touched. CI re-run 35276004417 confirmed `test` green and `build-scan` unblocked. | 2026-09-17 | 58ada7a | [260917-mfa-fix-a-data-race-in-internal-notifier-sch](./quick/260917-mfa-fix-a-data-race-in-internal-notifier-sch/) |
 
 ### Roadmap Evolution
 
