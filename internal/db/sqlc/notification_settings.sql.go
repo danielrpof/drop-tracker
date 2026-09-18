@@ -48,6 +48,20 @@ func (q *Queries) AckDigestBatch(ctx context.Context, arg AckDigestBatchParams) 
 	return err
 }
 
+const ackEventsOnly = `-- name: AckEventsOnly :exec
+UPDATE events SET notified_at = now()
+WHERE id = ANY($1::bigint[]) AND notified_at IS NULL
+`
+
+// Phase 23 (D-14): acks a chunk's event ids only -- runs for every delivered
+// chunk except the last. Mirrors AckDigestBatch's idempotent predicate but
+// touches no notification_settings column; only the final chunk moves
+// instance state (see AckDigestBatch below). docs/adr/0003.
+func (q *Queries) AckEventsOnly(ctx context.Context, ids []int64) error {
+	_, err := q.db.Exec(ctx, ackEventsOnly, ids)
+	return err
+}
+
 const getNotificationSettings = `-- name: GetNotificationSettings :one
 SELECT id, digest_enabled, digest_cadence, digest_last_sent_at, updated_at, digest_last_slot_at FROM notification_settings WHERE id = 1
 `

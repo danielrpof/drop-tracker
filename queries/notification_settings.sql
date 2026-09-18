@@ -23,6 +23,14 @@ SET digest_enabled      = sqlc.arg('digest_enabled'),
 WHERE id = 1
 RETURNING *;
 
+-- name: AckEventsOnly :exec
+-- Phase 23 (D-14): acks a chunk's event ids only -- runs for every delivered
+-- chunk except the last. Mirrors AckDigestBatch's idempotent predicate but
+-- touches no notification_settings column; only the final chunk moves
+-- instance state (see AckDigestBatch below). docs/adr/0003.
+UPDATE events SET notified_at = now()
+WHERE id = ANY(sqlc.arg('ids')::bigint[]) AND notified_at IS NULL;
+
 -- name: AckDigestBatch :exec
 -- Phase 22 (D-16): the digest send's single-statement batch ack. Acks every
 -- sent/suppressed event id (idempotent via the same AND notified_at IS NULL

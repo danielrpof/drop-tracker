@@ -24,6 +24,11 @@ type Querier interface {
 	// sqlc.Querier (internal/db/sqlc/db.go) exposes WithTx only on the concrete
 	// *Queries, never on the interface every production caller is typed against.
 	AckDigestBatch(ctx context.Context, arg AckDigestBatchParams) error
+	// Phase 23 (D-14): acks a chunk's event ids only -- runs for every delivered
+	// chunk except the last. Mirrors AckDigestBatch's idempotent predicate but
+	// touches no notification_settings column; only the final chunk moves
+	// instance state (see AckDigestBatch below). docs/adr/0003.
+	AckEventsOnly(ctx context.Context, ids []int64) error
 	// Atomic replacement (PERF-04, 11-RESEARCH.md Pattern 2) for the former
 	// two-statement GroupTrackCountBaseline SELECT + SetGroupTrackCountBaseline
 	// UPDATE -- those two round trips left a check-then-act window where two
