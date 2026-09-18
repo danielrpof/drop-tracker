@@ -21,10 +21,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-16)
+See: .planning/PROJECT.md (updated 2026-09-18)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 23 — Digest Readability & Discord Limits
+**Current focus:** Milestone v1.5 complete (Phases 20-23) — ready to close out
 
 ## Current Position
 
@@ -436,6 +436,6 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Phase 21 verified complete (5/5 must-haves) — `21-VERIFICATION.md`
-- Run `/gsd-plan-phase 22` (Scheduled Digest Send — no UI hint, backend-only)
-- Reminder: Phase 21 stays unmerged from `main` until Phase 22 also ships (locked deploy-sequencing note, ROADMAP.md)
+- Phase 23 verified complete (4/4 truths, 8/8 must-haves) — `23-VERIFICATION.md`
+- All 4 phases of milestone v1.5 (Phases 20-23) are now complete — run `/gsd-complete-milestone v1.5` to archive and prepare for the next milestone
+- Reminder: Phases 20-23 stay unmerged from `main` as one deploy unit until the milestone ships (locked deploy-sequencing note, ROADMAP.md)
