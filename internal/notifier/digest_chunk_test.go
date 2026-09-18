@@ -520,7 +520,10 @@ func TestChunkDigest_ContinuationMarkersNeverExceedBudget(t *testing.T) {
 // chunks after the first (D-04).
 func TestBuildDigestChunks_HeaderOnEveryChunk(t *testing.T) {
 	events := syntheticEvents(200)
-	chunks := buildDigestChunks(events, nil)
+	chunks, deferred := buildDigestChunks(events, nil)
+	if deferred != 0 {
+		t.Fatalf("deferred = %d, want 0 (this fixture must stay under maxDigestChunks)", deferred)
+	}
 
 	if len(chunks) < 2 {
 		t.Fatalf("len(chunks) = %d, want > 1 to exercise every-chunk header repetition", len(chunks))
@@ -544,9 +547,12 @@ func TestBuildDigestChunks_SingleChunkFitsOneMessage(t *testing.T) {
 	events := []sqlc.Event{
 		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist A"), Title: "Album A"},
 	}
-	chunks := buildDigestChunks(events, &ts)
+	chunks, deferred := buildDigestChunks(events, &ts)
 	if len(chunks) != 1 {
 		t.Fatalf("len(chunks) = %d, want 1", len(chunks))
+	}
+	if deferred != 0 {
+		t.Fatalf("deferred = %d, want 0", deferred)
 	}
 	if !strings.HasPrefix(chunks[0].description, digestWindowHeader(&ts)) {
 		t.Fatalf("chunks[0].description = %q, want it to start with the window header", chunks[0].description)
@@ -622,14 +628,16 @@ func TestBuildDigestChunks_ShuffleInvariant(t *testing.T) {
 		{ID: 4, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Ñengo Flow"), Title: "N"},
 		{ID: 5, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist"), Title: "Alpha"},
 	}
-	want := buildDigestChunks(events, nil)[0].description
+	wantChunks, _ := buildDigestChunks(events, nil)
+	want := wantChunks[0].description
 
 	shuffled := make([]sqlc.Event, len(events))
 	copy(shuffled, events)
 	rng := rand.New(rand.NewSource(42))
 	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
 
-	got := buildDigestChunks(shuffled, nil)[0].description
+	gotChunks, _ := buildDigestChunks(shuffled, nil)
+	got := gotChunks[0].description
 	if got != want {
 		t.Fatalf("shuffled input produced a different Description.\nwant: %q\ngot:  %q", want, got)
 	}
@@ -642,7 +650,7 @@ func TestBuildDigestChunks_GuestFeatureGroupedAndSortedByWatchedArtist(t *testin
 		ArtistName:        "Drake",
 		Title:             "Track",
 	}
-	chunks := buildDigestChunks([]sqlc.Event{ev}, nil)
+	chunks, _ := buildDigestChunks([]sqlc.Event{ev}, nil)
 	desc := chunks[0].description
 	if !strings.Contains(desc, "**Guest Features**") {
 		t.Fatalf("description = %q, want the Guest Features heading", desc)
@@ -662,7 +670,8 @@ func TestBuildDigestChunks_DeluxeTrackCountSuffix(t *testing.T) {
 			PreviousTrackCount: i32Ptr(12),
 			TrackCount:         i32Ptr(15),
 		}
-		desc := buildDigestChunks([]sqlc.Event{ev}, nil)[0].description
+		chunks, _ := buildDigestChunks([]sqlc.Event{ev}, nil)
+		desc := chunks[0].description
 		want := "](https://musicbrainz.org/release/rel-1) (12 → 15 tracks)\n"
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description = %q, want it to contain %q", desc, want)
@@ -675,7 +684,8 @@ func TestBuildDigestChunks_DeluxeTrackCountSuffix(t *testing.T) {
 			Title:             "Album",
 			ExternalID:        "rel-1",
 		}
-		desc := buildDigestChunks([]sqlc.Event{ev}, nil)[0].description
+		chunks, _ := buildDigestChunks([]sqlc.Event{ev}, nil)
+		desc := chunks[0].description
 		if strings.Contains(desc, "()") {
 			t.Fatalf("description = %q, must not contain an empty ()", desc)
 		}
@@ -689,14 +699,16 @@ func TestBuildDigestChunks_DeluxeTrackCountSuffix(t *testing.T) {
 func TestBuildDigestChunks_WatchedArtistNameFallback(t *testing.T) {
 	t.Run("nil falls back to artist_name for label and sort key", func(t *testing.T) {
 		ev := sqlc.Event{EventType: eventTypeNewRelease, WatchedArtistName: nil, ArtistName: "Fallback Artist", Title: "T"}
-		desc := buildDigestChunks([]sqlc.Event{ev}, nil)[0].description
+		chunks, _ := buildDigestChunks([]sqlc.Event{ev}, nil)
+		desc := chunks[0].description
 		if !strings.Contains(desc, "Fallback Artist — T") {
 			t.Fatalf("description = %q, want it to contain %q", desc, "Fallback Artist — T")
 		}
 	})
 	t.Run("empty string falls back to artist_name", func(t *testing.T) {
 		ev := sqlc.Event{EventType: eventTypeNewRelease, WatchedArtistName: strPtr(""), ArtistName: "Fallback Artist", Title: "T"}
-		desc := buildDigestChunks([]sqlc.Event{ev}, nil)[0].description
+		chunks, _ := buildDigestChunks([]sqlc.Event{ev}, nil)
+		desc := chunks[0].description
 		if !strings.Contains(desc, "Fallback Artist — T") {
 			t.Fatalf("description = %q, want it to contain %q", desc, "Fallback Artist — T")
 		}
@@ -709,7 +721,8 @@ func TestBuildDigestChunks_GroupOrderFixedRegardlessOfInputOrder(t *testing.T) {
 		{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("A"), Title: "N", ExternalID: "n1"},
 		{ID: 3, EventType: eventTypeGuestFeature, WatchedArtistName: strPtr("A"), ArtistName: "Host", Title: "G", ExternalID: "g1"},
 	}
-	desc := buildDigestChunks(events, nil)[0].description
+	chunks, _ := buildDigestChunks(events, nil)
+	desc := chunks[0].description
 
 	iNew := strings.Index(desc, "**New Releases**")
 	iGuest := strings.Index(desc, "**Guest Features**")
@@ -724,7 +737,8 @@ func TestBuildDigestChunks_GroupOrderFixedRegardlessOfInputOrder(t *testing.T) {
 
 func TestBuildDigestChunks_EmptyGroupOmitsHeadingEntirely(t *testing.T) {
 	ev := sqlc.Event{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("A"), Title: "T"}
-	desc := buildDigestChunks([]sqlc.Event{ev}, nil)[0].description
+	chunks, _ := buildDigestChunks([]sqlc.Event{ev}, nil)
+	desc := chunks[0].description
 
 	for _, heading := range []string{"**Guest Features**", "**Deluxe Changes**"} {
 		if strings.Contains(desc, heading) {
@@ -738,7 +752,8 @@ func TestBuildDigestChunks_DuplicateSourcesRenderAsTwoLines(t *testing.T) {
 		{ID: 1, EventType: eventTypeNewRelease, Source: sourceMusicBrainz, WatchedArtistName: strPtr("A"), Title: "Same Release", ExternalID: "mb-1"},
 		{ID: 2, EventType: eventTypeNewRelease, Source: sourceDeezer, WatchedArtistName: strPtr("A"), Title: "Same Release", ExternalID: "dz-1"},
 	}
-	desc := buildDigestChunks(events, nil)[0].description
+	chunks, _ := buildDigestChunks(events, nil)
+	desc := chunks[0].description
 	if got := strings.Count(desc, "Same Release"); got != 2 {
 		t.Fatalf("description = %q, want 2 separate lines for the same release from two sources, got %d", desc, got)
 	}
@@ -749,7 +764,8 @@ func TestBuildDigestChunks_SameArtistTwoEventsRenderAsTwoLines(t *testing.T) {
 		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Bad Bunny"), Title: "Album One"},
 		{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Bad Bunny"), Title: "Album Two"},
 	}
-	desc := buildDigestChunks(events, nil)[0].description
+	chunks, _ := buildDigestChunks(events, nil)
+	desc := chunks[0].description
 	if got := strings.Count(desc, "- ["); got != 2 {
 		t.Fatalf("description = %q, want exactly 2 separate lines, got %d", desc, got)
 	}
@@ -789,7 +805,7 @@ func TestBuildDigestChunks_OneChunkNoIndicator(t *testing.T) {
 	events := []sqlc.Event{
 		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist A"), Title: "Album A"},
 	}
-	chunks := buildDigestChunks(events, &ts)
+	chunks, _ := buildDigestChunks(events, &ts)
 	if len(chunks) != 1 {
 		t.Fatalf("len(chunks) = %d, want 1", len(chunks))
 	}
@@ -878,9 +894,13 @@ const invariantBatchSize = 700
 
 // TestChunkDigest_InvariantBatchProducesAtLeast20Chunks pins the fixture
 // size's own precondition -- if this ever fails, invariantBatchSize needs
-// raising, not the invariant tests below relaxing.
+// raising, not the invariant tests below relaxing. Runs against the pure,
+// uncapped chunkDigest (not buildDigestChunks) -- plan 23-04's cap would
+// otherwise truncate this exact batch to maxDigestChunks and hide whether
+// the fixture still forces >= 20 chunks on its own.
 func TestChunkDigest_InvariantBatchProducesAtLeast20Chunks(t *testing.T) {
-	chunks := buildDigestChunks(syntheticInvariantBatch(invariantBatchSize), nil)
+	groups := buildDigestGroups(syntheticInvariantBatch(invariantBatchSize))
+	chunks := chunkDigest(groups)
 	if len(chunks) < 20 {
 		t.Fatalf("len(chunks) = %d, want >= 20 -- raise invariantBatchSize", len(chunks))
 	}
@@ -889,9 +909,13 @@ func TestChunkDigest_InvariantBatchProducesAtLeast20Chunks(t *testing.T) {
 // TestChunkInvariant1_EveryChunkAtMostDiscordLimit is Verification
 // Invariant 1 (23-CONTEXT.md <specifics>): over a synthetic batch large
 // enough to produce at least 20 chunks, every chunk's description is at
-// most 4096 runes.
+// most 4096 runes. Tests the pure chunkDigest output, decoupled from
+// plan 23-04's cap -- TestChunkInvariant4_CappedRunEveryChunkAtMostDiscordLimit
+// (digest_chunk_test.go) covers the same bound after truncation and
+// remainder-marker stamping.
 func TestChunkInvariant1_EveryChunkAtMostDiscordLimit(t *testing.T) {
-	chunks := buildDigestChunks(syntheticInvariantBatch(invariantBatchSize), nil)
+	groups := buildDigestGroups(syntheticInvariantBatch(invariantBatchSize))
+	chunks := chunkDigest(groups)
 	for i, c := range chunks {
 		if rc := utf8.RuneCountInString(c.description); rc > discordDescriptionLimit {
 			t.Errorf("chunk %d has %d runes, want <= %d", i, rc, discordDescriptionLimit)
@@ -900,10 +924,14 @@ func TestChunkInvariant1_EveryChunkAtMostDiscordLimit(t *testing.T) {
 }
 
 // TestChunkInvariant2_IDUnionExactlyOnce is Verification Invariant 2: the
-// union of every chunk's ids equals the sendable set, each id exactly once.
+// union of every chunk's ids equals the sendable set, each id exactly
+// once. Tests the pure, uncapped chunkDigest -- once maxDigestChunks caps
+// buildDigestChunks' output, its id union only covers the kept chunks by
+// design (see TestBuildDigestChunks_CapTruncatesAndReportsDeferred).
 func TestChunkInvariant2_IDUnionExactlyOnce(t *testing.T) {
 	events := syntheticInvariantBatch(invariantBatchSize)
-	chunks := buildDigestChunks(events, nil)
+	groups := buildDigestGroups(events)
+	chunks := chunkDigest(groups)
 
 	seen := make(map[int64]int, len(events))
 	for _, c := range chunks {
@@ -955,7 +983,9 @@ func stripChunkMarkers(desc string) string {
 // Invariant 3: stripping every header line, continuation heading, and
 // trailing note from the concatenated chunk descriptions reproduces the
 // ordered line sequence a single unsplit render of the same groups
-// produces, exactly.
+// produces, exactly. Tests the pure, uncapped chunkDigest -- see
+// TestChunkInvariant2's note on why the cap decouples this invariant from
+// buildDigestChunks.
 func TestChunkInvariant3_ConcatenationReproducesUnsplitOrder(t *testing.T) {
 	events := syntheticInvariantBatch(invariantBatchSize)
 	groups := buildDigestGroups(events)
@@ -968,7 +998,7 @@ func TestChunkInvariant3_ConcatenationReproducesUnsplitOrder(t *testing.T) {
 	}
 	want := strings.Join(wantLines, "\n") + "\n"
 
-	chunks := buildDigestChunks(events, nil)
+	chunks := chunkDigest(groups)
 	var got strings.Builder
 	for _, c := range chunks {
 		got.WriteString(stripChunkMarkers(c.description))
@@ -978,20 +1008,21 @@ func TestChunkInvariant3_ConcatenationReproducesUnsplitOrder(t *testing.T) {
 	}
 }
 
-// TestBuildDigestChunks_LargeBatchShuffleInvariant is the plan's seventh
-// behavior bullet: the same event set fed in a different arrival order
-// produces byte-identical chunk descriptions and identical per-chunk id
-// sets, over the same large synthetic batch the three invariants above use.
-func TestBuildDigestChunks_LargeBatchShuffleInvariant(t *testing.T) {
+// TestChunkDigest_LargeBatchShuffleInvariant is the plan's seventh behavior
+// bullet: the same event set fed in a different arrival order produces
+// byte-identical chunk descriptions and identical per-chunk id sets, over
+// the same large synthetic batch the three invariants above use. Tests the
+// pure, uncapped chunkDigest for the same reason as Invariants 2/3.
+func TestChunkDigest_LargeBatchShuffleInvariant(t *testing.T) {
 	events := syntheticInvariantBatch(invariantBatchSize)
-	want := buildDigestChunks(events, nil)
+	want := chunkDigest(buildDigestGroups(events))
 
 	shuffled := make([]sqlc.Event, len(events))
 	copy(shuffled, events)
 	rng := rand.New(rand.NewSource(7))
 	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
 
-	got := buildDigestChunks(shuffled, nil)
+	got := chunkDigest(buildDigestGroups(shuffled))
 	if len(got) != len(want) {
 		t.Fatalf("len(got) = %d, len(want) = %d", len(got), len(want))
 	}
@@ -1006,6 +1037,134 @@ func TestBuildDigestChunks_LargeBatchShuffleInvariant(t *testing.T) {
 			if got[i].ids[j] != want[i].ids[j] {
 				t.Fatalf("chunk %d ids[%d] differs after shuffling input order: got %d, want %d", i, j, got[i].ids[j], want[i].ids[j])
 			}
+		}
+	}
+}
+
+// TestRemainderMarker_ExactWording pins D-22's capped-run marker shape:
+// appended after the position indicator, naming the deferred count and
+// that it continues in the next digest, never a message number -- mirrors
+// continuationNote's no-message-number rule for the same reason (the
+// marker is composed before any later digest exists).
+func TestRemainderMarker_ExactWording(t *testing.T) {
+	want := " · 340 events still pending, continuing in the next digest"
+	if got := remainderMarker(340); got != want {
+		t.Fatalf("remainderMarker(340) = %q, want %q", got, want)
+	}
+}
+
+// TestBuildDigestChunks_CapTruncatesAndReportsDeferred is D-16/D-23's
+// truncation proof: a batch producing more than maxDigestChunks chunks is
+// truncated to exactly maxDigestChunks, and the reported deferred count
+// equals the sendable input size minus the sum of the returned chunks' id
+// counts.
+func TestBuildDigestChunks_CapTruncatesAndReportsDeferred(t *testing.T) {
+	events := syntheticInvariantBatch(invariantBatchSize)
+	uncapped := chunkDigest(buildDigestGroups(events))
+	if len(uncapped) <= maxDigestChunks {
+		t.Fatalf("uncapped chunk count = %d, want > %d to exercise the cap -- raise invariantBatchSize", len(uncapped), maxDigestChunks)
+	}
+
+	chunks, deferred := buildDigestChunks(events, nil)
+	if len(chunks) != maxDigestChunks {
+		t.Fatalf("len(chunks) = %d, want exactly %d", len(chunks), maxDigestChunks)
+	}
+
+	kept := 0
+	for _, c := range chunks {
+		kept += len(c.ids)
+	}
+	if deferred != len(events)-kept {
+		t.Fatalf("deferred = %d, want %d (sendable size minus kept ids)", deferred, len(events)-kept)
+	}
+	if deferred == 0 {
+		t.Fatalf("deferred = 0, want > 0 for a batch that exceeds the cap")
+	}
+}
+
+// TestBuildDigestChunks_CapLastChunkCarriesRemainderMarker proves only the
+// last kept chunk of a capped run carries the remainder marker, and every
+// earlier chunk's header carries none (D-22).
+func TestBuildDigestChunks_CapLastChunkCarriesRemainderMarker(t *testing.T) {
+	events := syntheticInvariantBatch(invariantBatchSize)
+	chunks, deferred := buildDigestChunks(events, nil)
+	if deferred == 0 {
+		t.Fatalf("deferred = 0, want > 0 for this fixture")
+	}
+
+	want := remainderMarker(deferred)
+	for i, c := range chunks {
+		has := strings.Contains(c.description, "still pending, continuing in the next digest")
+		if i == len(chunks)-1 {
+			if !has {
+				t.Fatalf("last chunk description = %q, want the remainder marker", c.description)
+			}
+			if !strings.Contains(c.description, want) {
+				t.Fatalf("last chunk description = %q, want it to contain %q", c.description, want)
+			}
+		} else if has {
+			t.Fatalf("chunk %d description = %q, must not carry the remainder marker (only the last kept chunk does)", i, c.description)
+		}
+	}
+}
+
+// TestBuildDigestChunks_CapTotalReflectsKeptChunksNotUncapped proves every
+// position indicator in a capped run reads Total = maxDigestChunks, never
+// the uncapped chunk count a later run may not reach (D-22).
+func TestBuildDigestChunks_CapTotalReflectsKeptChunksNotUncapped(t *testing.T) {
+	events := syntheticInvariantBatch(invariantBatchSize)
+	chunks, deferred := buildDigestChunks(events, nil)
+	if deferred == 0 {
+		t.Fatalf("deferred = 0, want > 0 for this fixture")
+	}
+	// Every chunk but the last: the header ends right after the "(N/Total)"
+	// indicator, so its suffix pins Total directly. The last chunk's header
+	// also carries the remainder marker after the indicator (D-22), so it
+	// is checked separately by containment instead of by suffix.
+	wantTotal := fmt.Sprintf("/%d)", maxDigestChunks)
+	for i, c := range chunks[:len(chunks)-1] {
+		firstLine := strings.SplitN(c.description, "\n", 2)[0]
+		if !strings.HasSuffix(firstLine, wantTotal) {
+			t.Fatalf("chunk %d header = %q, want it to end with %q", i, firstLine, wantTotal)
+		}
+	}
+	last := chunks[len(chunks)-1]
+	lastFirstLine := strings.SplitN(last.description, "\n", 2)[0]
+	wantLast := fmt.Sprintf("(%d/%d)", maxDigestChunks, maxDigestChunks)
+	if !strings.Contains(lastFirstLine, wantLast) {
+		t.Fatalf("last chunk header = %q, want it to contain %q", lastFirstLine, wantLast)
+	}
+}
+
+// TestBuildDigestChunks_UnderCapZeroDeferredNoMarker proves a batch that
+// stays under maxDigestChunks reports zero deferred events and no chunk
+// carries the remainder marker.
+func TestBuildDigestChunks_UnderCapZeroDeferredNoMarker(t *testing.T) {
+	events := syntheticEvents(200)
+	chunks, deferred := buildDigestChunks(events, nil)
+	if deferred != 0 {
+		t.Fatalf("deferred = %d, want 0", deferred)
+	}
+	for i, c := range chunks {
+		if strings.Contains(c.description, "still pending, continuing in the next digest") {
+			t.Fatalf("chunk %d description = %q, must not carry the remainder marker under the cap", i, c.description)
+		}
+	}
+}
+
+// TestChunkInvariant4_CappedRunEveryChunkAtMostDiscordLimit proves the
+// remainder marker's addition to the last kept chunk never pushes it past
+// discordDescriptionLimit -- chunkOverheadReserve was sized to include it
+// (D-20).
+func TestChunkInvariant4_CappedRunEveryChunkAtMostDiscordLimit(t *testing.T) {
+	events := syntheticInvariantBatch(invariantBatchSize)
+	chunks, deferred := buildDigestChunks(events, nil)
+	if deferred == 0 {
+		t.Fatalf("deferred = 0, want > 0 for this fixture")
+	}
+	for i, c := range chunks {
+		if rc := utf8.RuneCountInString(c.description); rc > discordDescriptionLimit {
+			t.Fatalf("chunk %d has %d runes, want <= %d", i, rc, discordDescriptionLimit)
 		}
 	}
 }

@@ -23,10 +23,15 @@ import (
 // the last acks only the ids it rendered (ackEventsOnly, D-14), the final
 // chunk's ack also carries the suppressed ids and both settings columns
 // (ackDigestBatch, D-15) -- the only write in a run that moves instance
-// state. A send failure or a cancelled context at a chunk boundary stops
-// the loop with neither settings column advanced, so the digest stays due
-// and the next check retries from whatever is still un-acked (D-11/D-12).
-// A single-chunk digest takes exactly this same path with one iteration,
+// state. buildDigestChunks caps the split at maxDigestChunks and reports a
+// deferred count (D-23); a non-zero deferred count means this run is
+// incomplete, so it takes the same ackEventsOnly path as every other
+// non-final chunk and never reaches the settings-advancing ack (D-24) -- a
+// capped run self-drains across successive ticks inside the grace window.
+// A send failure or a cancelled context at a chunk boundary stops the loop
+// with neither settings column advanced, so the digest stays due and the
+// next check retries from whatever is still un-acked (D-11/D-12). A
+// single-chunk digest takes exactly this same path with one iteration,
 // which is Phase 22's regression-safety property (D-14).
 func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now time.Time) error {
 	if !n.notifying.CompareAndSwap(false, true) {
@@ -124,7 +129,9 @@ func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now
 		return nil
 	}
 
-	chunks := buildDigestChunks(sendable, cfg.DigestLastSentAt)
+	// deferred > 0 means the cap (D-23) truncated the split -- this run is
+	// incomplete, so the settings-advancing ack must never run (D-24).
+	chunks, deferred := buildDigestChunks(sendable, cfg.DigestLastSentAt)
 
 	for i, chunk := range chunks {
 		if i > 0 {
@@ -159,21 +166,27 @@ func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now
 			return nil
 		}
 
-		if i < len(chunks)-1 {
-			// D-14: every chunk but the last acks its own ids only, and
-			// touches no settings column -- each chunk now acks precisely
-			// what it rendered, replacing the pre-phase invariant that
-			// walked the full sendable slice regardless of what rendered.
+		if i < len(chunks)-1 || deferred > 0 {
+			// D-14/D-24: every chunk but the last acks its own ids only,
+			// and touches no settings column -- each chunk now acks
+			// precisely what it rendered, replacing the pre-phase
+			// invariant that walked the full sendable slice regardless of
+			// what rendered. A capped run's last kept chunk takes this
+			// same branch (deferred > 0): the run is incomplete, so it
+			// never reaches the settings-advancing ack below -- both
+			// settings columns stay put, the slot stays due, and the next
+			// tick continues the drain (D-24).
 			if err := ackEventsOnly(ctx, n.q, chunk.ids); err != nil {
 				return fmt.Errorf("notifier: ack digest chunk: %w", err)
 			}
 			continue
 		}
 
-		// Final chunk: the only write in this phase that moves instance
-		// state (D-14). Suppressed ids ride this ack, never an earlier
-		// chunk's -- they are never "delivered", so they belong with the
-		// write that means "this digest completed" (D-15).
+		// Final chunk of a complete run (deferred == 0): the only write in
+		// this phase that moves instance state (D-14). Suppressed ids ride
+		// this ack, never an earlier chunk's -- they are never
+		// "delivered", so they belong with the write that means "this
+		// digest completed" (D-15).
 		sentIDs := make([]int64, 0, len(chunk.ids)+len(suppressedIDs))
 		sentIDs = append(sentIDs, chunk.ids...)
 		sentIDs = append(sentIDs, suppressedIDs...)

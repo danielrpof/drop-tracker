@@ -158,6 +158,13 @@ func insertPendingEventsForChunking(t *testing.T, pool *pgxpool.Pool, artistID i
 	return ids
 }
 
+// capForcingEventCount is a fixture size empirically confirmed (whitebox
+// probe against chunkDigest, digest_chunk_test.go's syntheticEvents shape)
+// to split into 22 uncapped chunks -- comfortably over maxDigestChunks (20,
+// D-23) so a real-Postgres SendDigestIfDue call actually exercises the cap
+// rather than merely the multi-chunk path chunkForcingEventCount covers.
+const capForcingEventCount = 600
+
 // countNotified reports how many of ids currently have a non-NULL
 // notified_at.
 func countNotified(t *testing.T, pool *pgxpool.Pool, ids []int64) int {
@@ -425,6 +432,134 @@ func TestSendDigestIfDue_MultiChunk_ContextCancelledAtBoundary_StopsCleanly(t *t
 	}
 	if after := snapshotSettings(t, q); !after.equal(before) {
 		t.Fatalf("notification_settings changed after a boundary cancellation: before=%+v after=%+v", before, after)
+	}
+}
+
+// TestSendDigestIfDue_Cap_ExactlyMaxChunksSentBothColumnsUnchangedRemainderPending
+// is D-23/D-24's proof: a batch producing more than maxDigestChunks chunks
+// sends exactly 20 messages, leaves the deferred remainder (including a
+// suppressed id, D-15) pending, stamps the last delivered chunk with D-22's
+// remainder marker and a Total = maxDigestChunks indicator, and leaves both
+// settings columns byte-identical to their pre-call snapshot -- the digest
+// stays due for the next check.
+func TestSendDigestIfDue_Cap_ExactlyMaxChunksSentBothColumnsUnchangedRemainderPending(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 10, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "cap-exact")
+	ids := insertPendingEventsForChunking(t, pool, artistID, capForcingEventCount)
+	// releaseDate == "" inserts SQL NULL -- suppressed, must still stay
+	// pending after a capped run (D-15).
+	suppressedID := insertPendingEventDated(t, pool, artistID, "cap-suppressed", "Suppressed Title", "")
+
+	before := snapshotSettings(t, q)
+
+	fired := make(chan time.Time)
+	close(fired)
+	notifier.SetDigestChunkWaitForTest(t, func(time.Duration) <-chan time.Time { return fired })
+
+	var gotDescriptions []string
+	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		gotDescriptions = append(gotDescriptions, embed.Description)
+		return nil
+	}}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+
+	const wantCappedSends = 20 // mirrors notifier's unexported maxDigestChunks (D-23)
+	if got := atomic.LoadInt32(&sender.calls); got != wantCappedSends {
+		t.Fatalf("sender.calls = %d, want %d", got, wantCappedSends)
+	}
+
+	notified := countNotified(t, pool, ids)
+	if notified == 0 || notified == len(ids) {
+		t.Fatalf("notified count = %d, want strictly between 0 and %d -- a capped run delivers some but not all", notified, len(ids))
+	}
+	if isNotified(t, pool, suppressedID) {
+		t.Fatalf("suppressed event %d unexpectedly acked after a capped run -- suppressed ids ride the final ack only (D-15)", suppressedID)
+	}
+
+	last := gotDescriptions[len(gotDescriptions)-1]
+	if !strings.Contains(last, "still pending, continuing in the next digest") {
+		t.Fatalf("last delivered chunk description = %q, want it to carry the remainder marker (D-22)", last)
+	}
+	if !strings.Contains(last, "(20/20)") {
+		t.Fatalf("last delivered chunk description = %q, want the position indicator to read Total = maxDigestChunks (D-22)", last)
+	}
+
+	if after := snapshotSettings(t, q); !after.equal(before) {
+		t.Fatalf("notification_settings changed after a capped run: before=%+v after=%+v", before, after)
+	}
+}
+
+// TestSendDigestIfDue_Cap_SecondCallDrainsRemainderBothColumnsAdvanceOnce is
+// D-12/D-24's self-drain proof: a second SendDigestIfDue call at a later
+// now still inside the grace window delivers the remainder from a capped
+// first run, and on the run that finally exhausts the outbox both settings
+// columns advance exactly once.
+func TestSendDigestIfDue_Cap_SecondCallDrainsRemainderBothColumnsAdvanceOnce(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 11, 1, 5, 0, 0, time.UTC)
+	wantSlot := settings.MostRecentSlot(now, settings.CadenceDaily, loc)
+
+	artistID := insertTestArtist(t, pool, "cap-drain")
+	ids := insertPendingEventsForChunking(t, pool, artistID, capForcingEventCount)
+	suppressedID := insertPendingEventDated(t, pool, artistID, "cap-drain-suppressed", "Suppressed Title", "")
+
+	before := snapshotSettings(t, q)
+
+	fired := make(chan time.Time)
+	close(fired)
+	notifier.SetDigestChunkWaitForTest(t, func(time.Duration) <-chan time.Time { return fired })
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("first SendDigestIfDue: %v, want nil", err)
+	}
+	if got := countNotified(t, pool, ids); got == len(ids) {
+		t.Fatalf("notified count = %d after the first (capped) call, want < %d", got, len(ids))
+	}
+	if after := snapshotSettings(t, q); !after.equal(before) {
+		t.Fatalf("notification_settings changed after the first (capped) call: before=%+v after=%+v", before, after)
+	}
+
+	// Same slot is still due (D-24) -- an ordinary second call rebuilds
+	// fresh from whatever is still un-acked (D-12), which now fits well
+	// under the cap.
+	now2 := now.Add(time.Minute)
+	if err := n.SendDigestIfDue(context.Background(), logger, now2); err != nil {
+		t.Fatalf("second SendDigestIfDue: %v, want nil", err)
+	}
+
+	if got := countNotified(t, pool, ids); got != len(ids) {
+		t.Fatalf("notified count = %d after the second call, want %d -- the remainder must fully drain", got, len(ids))
+	}
+	if !isNotified(t, pool, suppressedID) {
+		t.Fatalf("suppressed event %d not acked by the completing run (D-15)", suppressedID)
+	}
+
+	row, err := q.GetNotificationSettings(context.Background())
+	if err != nil {
+		t.Fatalf("get notification settings: %v", err)
+	}
+	if !row.DigestLastSlotAt.Valid || !row.DigestLastSlotAt.Time.Equal(wantSlot) {
+		t.Fatalf("digest_last_slot_at = %+v, want %v", row.DigestLastSlotAt, wantSlot)
+	}
+	if !row.DigestLastSentAt.Valid {
+		t.Fatalf("digest_last_sent_at is NULL, want non-NULL")
 	}
 }
 

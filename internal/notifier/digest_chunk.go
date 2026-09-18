@@ -45,6 +45,13 @@ const chunkOverheadReserve = 300
 // against -- discordDescriptionLimit minus chunkOverheadReserve.
 const chunkContentBudget = discordDescriptionLimit - chunkOverheadReserve
 
+// maxDigestChunks bounds a single SendDigestIfDue run to at most this many
+// Discord messages (D-23) -- a rate limiter, not a truncation (D-24): a
+// capped run's remainder stays pending, un-acked, and the next tick sends
+// the rest. Repurposes the ROADMAP's "10 embeds per message" figure, which
+// D-05's one-embed-per-message shape made unreachable as written.
+const maxDigestChunks = 20
+
 // digestChunkSpacing paces consecutive chunk sends within one
 // SendDigestIfDue run (D-23) -- a digest-specific one-second constant, not
 // n.spacing/spacingWait, which are sized for sporadic real-time sends and
@@ -321,26 +328,58 @@ func positionIndicator(n, total int) string {
 	return fmt.Sprintf(" · (%d/%d)", n, total)
 }
 
-// buildDigestChunks is the orchestrator: group, split, then stamp D-04's
-// self-contained window header plus D-21's position indicator onto every
-// chunk (not only the first) so a message arriving out of order, or alone,
-// still states the window it covers and its place in the run. This is a
-// single forward pass spending chunkOverheadReserve (D-20/D-07 amended) --
-// never a second pass that re-measures the split after stamping, since
-// widening the indicator (e.g. "(9/9)" to "(10/10)") could otherwise push
-// a line out of a chunk and change Total, which is the exact fixed-point
-// bug D-07 forbids reintroducing. Callers must never invoke this with an
-// empty events slice -- digest.go's empty-skip branch short-circuits
-// before message assembly for that case, exactly as the former
-// buildDigestEmbed documented.
-func buildDigestChunks(events []sqlc.Event, lastSentAt *time.Time) []digestChunk {
+// remainderMarker renders D-22's capped-run marker, appended after the
+// position indicator on the last kept chunk of a capped run only -- so
+// "(20/20)" can never read as complete. Names the deferred count and that
+// it continues in the next digest, never a message number: like
+// continuationNote, this text is composed before that next digest exists.
+// Never passed through escapeMarkdown -- remaining is a computed int, not
+// event-derived text.
+func remainderMarker(remaining int) string {
+	return fmt.Sprintf(" · %d events still pending, continuing in the next digest", remaining)
+}
+
+// buildDigestChunks is the orchestrator: group, split, cap, then stamp
+// D-04's self-contained window header plus D-21's position indicator onto
+// every chunk (not only the first) so a message arriving out of order, or
+// alone, still states the window it covers and its place in the run. This
+// is a single forward pass spending chunkOverheadReserve (D-20/D-07
+// amended) -- never a second pass that re-measures the split after
+// stamping, since widening the indicator (e.g. "(9/9)" to "(10/10)") could
+// otherwise push a line out of a chunk and change Total, which is the
+// exact fixed-point bug D-07 forbids reintroducing.
+//
+// D-23/D-24: chunkDigest's raw output is truncated to maxDigestChunks
+// before stamping, and the ids in every dropped chunk are summed into the
+// returned deferredCount -- Total is computed from the *kept* chunk count
+// (D-22), never the uncapped one, since the next run rebuilds fresh from
+// whatever is still in the outbox (D-12/D-13) and a promised larger total
+// would never materialise. A non-zero deferredCount is what SendDigestIfDue
+// consults to decide the run is incomplete and must not advance the
+// settings-moving ack (D-14). Callers must never invoke this with an empty
+// events slice -- digest.go's empty-skip branch short-circuits before
+// message assembly for that case, exactly as the former buildDigestEmbed
+// documented.
+func buildDigestChunks(events []sqlc.Event, lastSentAt *time.Time) (chunks []digestChunk, deferredCount int) {
 	groups := buildDigestGroups(events)
-	chunks := chunkDigest(groups)
+	chunks = chunkDigest(groups)
+
+	if len(chunks) > maxDigestChunks {
+		for _, dropped := range chunks[maxDigestChunks:] {
+			deferredCount += len(dropped.ids)
+		}
+		chunks = chunks[:maxDigestChunks]
+	}
+
 	base := digestWindowHeader(lastSentAt)
 	total := len(chunks)
 	for i := range chunks {
-		header := base + positionIndicator(i+1, total) + "\n"
+		header := base + positionIndicator(i+1, total)
+		if i == total-1 && deferredCount > 0 {
+			header += remainderMarker(deferredCount)
+		}
+		header += "\n"
 		chunks[i].description = header + chunks[i].description
 	}
-	return chunks
+	return chunks, deferredCount
 }
