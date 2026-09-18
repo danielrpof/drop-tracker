@@ -1,7 +1,7 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.5
-milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
+milestone_name: Digest Notifications (Phases 20-23) — SHIPPED 2026-09-18
 status: Awaiting next milestone
 stopped_at: Phase 23 complete — all phases complete
 last_updated: "2026-09-18T17:00:12.677Z"
