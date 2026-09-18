@@ -77,7 +77,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 - [x] **Phase 20: Digest Settings & Operator Control** - Postgres-backed instance setting (on/off + daily/weekly), gated `GET`/`PUT` routes, and the SPA panel that drives it — notification behavior itself unchanged (completed 2026-09-13)
 - [x] **Phase 21: Real-Time ↔ Digest Mutual Exclusion** - digest mode makes the real-time notify pass stand down; events queue instead of firing, and toggling back off flushes them (completed 2026-09-16)
 - [x] **Phase 22: Scheduled Digest Send** - the digest scheduler and batched, grouped send: cadence fire slots, grace-window catch-up, DST/tzdata correctness, the slot record and watermark, and the event-grouping hierarchy (by type, then watched artist) (completed 2026-09-17)
-- [ ] **Phase 23: Digest Readability & Discord Limits** - the "since <timestamp>" window header and multi-message chunking that never truncates, preserving Phase 22's grouping across the split
+- [x] **Phase 23: Digest Readability & Discord Limits** - the "since <timestamp>" window header and multi-message chunking that never truncates, preserving Phase 22's grouping across the split (completed 2026-09-18)
 
 > **Ordering rationale.** Phase 21 (the gate) lands *before* Phase 22 (the sender) deliberately. With the real-time drain un-gated, a poll cycle empties the `notified_at IS NULL` outbox every interval, so a digest would always find zero events and silently skip — the sender is not verifiable until the gate exists. Landing the gate first also makes the in-between state safe by that phase's own success criteria: digest on means events stay pending and nothing is lost. Same posture as v1.3's Phase 16 (build the safety precondition before the thing it protects).
 >
@@ -256,7 +256,7 @@ Plans:
 | 20. Digest Settings & Operator Control | 4/4 | Complete    | 2026-09-13 |
 | 21. Real-Time ↔ Digest Mutual Exclusion | 3/3 | Complete    | 2026-09-16 |
 | 22. Scheduled Digest Send | 4/4 | Complete    | 2026-09-17 |
-| 23. Digest Readability & Discord Limits | 4/4 | In Progress|  |
+| 23. Digest Readability & Discord Limits | 4/4 | Complete    | 2026-09-18 |
 
 ## Backlog
 
