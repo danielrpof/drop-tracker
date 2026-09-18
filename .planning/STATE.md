@@ -352,6 +352,9 @@ Recent decisions affecting current work:
 
 - [minor] Delete the stale tracked `web/package-lock.json` — a drifting second lockfile Trivy also scans. `.planning/todos/pending/2026-09-05-delete-stale-web-package-lock-json.md`
 - [minor] Move `shadcn` out of `web/package.json` `dependencies` (it's a CLI no code imports) — cleanup only, NOT a security fix; reclassifying hides Trivy findings without fixing them. `.planning/todos/pending/2026-09-05-move-shadcn-out-of-frontend-dependencies.md`
+- [minor] Fix dead `resuming = true` assignment in `flushMidGroup` digest chunker (Phase 23 code review WR-01, never fixed) — `.planning/todos/pending/2026-09-18-fix-dead-resuming-assignment-in-flushmidgroup-digest-chunker.md`
+- [minor] Pin chunk-count test fixture constants with a precondition test (Phase 23 code review WR-02, never fixed) — `.planning/todos/pending/2026-09-18-pin-chunk-count-test-fixture-constants-with-a-precondition-t.md`
+- [cosmetic] Fix singular/plural grammar in digest remainder marker (Phase 23 code review IN-01, never fixed) — `.planning/todos/pending/2026-09-18-fix-singular-plural-grammar-in-digest-remainder-marker.md`
 
 _Closed 2026-09-05: trivy-fs HIGH CVE bump (browserslist/fast-uri) — quick task 260905-fa4. Confirmed CI-green on runs 33978945980 / 33979094225._
 _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick task 260905-et1. Confirmed live (guardcheck notice on run 33978945980; build-scan runs on 33979094225)._
