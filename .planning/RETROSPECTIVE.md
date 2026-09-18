@@ -170,6 +170,48 @@
 
 ---
 
+## Milestone: v1.5 — Digest Notifications
+
+**Shipped:** 2026-09-18
+**Phases:** 4 (20-23) | **Plans:** 15
+
+### What Was Built
+
+An instance-wide, Postgres-persisted digest mode (on/off + daily/weekly cadence) with a gated SPA panel (Phase 20); real-time ↔ digest mutual exclusion built on the existing outbox with no second queue, fail-closed on a settings-read error (Phase 21); a slot-based `DigestScheduler` with calendar-math DST-safe fire times, a bounded restart grace window, and one grouped Discord embed per send (Phase 22); and window-stamped, group-preserving multi-message chunking with per-chunk acking so a partial send never loses or re-sends events (Phase 23).
+
+### What Worked
+
+- **Design grillings before planning kept catching correctness bugs the roadmap's first pass had locked in** — Phase 22's plan grilling reversed a "log-and-wait, no immediate catch-up" rule that actually contradicted its own success criterion, and replaced send-timestamp-plus-duration due math with calendar-based slot math after spotting the DST failure mode; Phase 23's grilling caught that the roadmap's "10 embeds / 25 fields" Discord limits were unreachable under the locked one-embed-per-message shape, redirecting the "10" into a chunks-per-run cap instead of dead code.
+- **Deploy-sequencing as an explicit, written rule** (Phases 21-23 held to one release) closed a real production wedge: shipping the standdown gate (21) without the sender (22) would have gone dark with no ETA; shipping 21+22 without 23's chunking would have let an oversized digest get silently rejected and retried forever, growing each cycle.
+- **Two ADRs written before the code that needed them** (`docs/adr/0002` one-outbox-one-sender-lock, `docs/adr/0003` digest-ack-splits-event-ack-from-completion) turned two non-obvious concurrency/idempotence decisions into citable source-of-truth instead of tribal knowledge re-derived per phase.
+- **CI's `-race` gate on Linux caught a genuine data race in Phase 22's own test code** (quick task 260917-mfa) that this Windows dev box structurally cannot detect locally — direct, current-milestone evidence for the standing lesson that CI's own `test` job, not local dev-box testing, is the authoritative concurrency gate.
+- **Keeping one outbox (no second "digest queue" table)** made DGST-14 (toggle-off flushes the backlog) correct by construction rather than by additional reconciliation logic — the same "outbox state decides what, a separate signal decides when" shape recurred cleanly from Phase 21 into Phase 22's slot record.
+
+### What Was Inefficient
+
+- **Phase 23's code review surfaced two Warnings and one Info-level nit that shipped unfixed and untracked** — a dead `resuming = true` assignment that never takes effect (a latent trap for a future edit), two chunk-count test fixtures pinned only by code comments rather than a precondition-asserting test, and a singular/plural grammar slip in an operator-facing message. None got a todo filed; they're now recorded in PROJECT.md's Context section at milestone close instead of at the point they were found — a whole milestone later than the todo/quick-task pattern established at v1.1-v1.4 would suggest.
+- **No `/gsd-audit-milestone` run for v1.5**, continuing the pattern from v1.2-v1.4 (only v1.0 and v1.1 have one on file) — closed on ROADMAP.md/REQUIREMENTS.md self-report (16/16 requirements, 4/4 phases verified) instead, accepted given full coverage, but the audit habit still hasn't stuck project-wide.
+
+### Patterns Established
+
+- **A written deploy-sequencing rule spanning multiple phases** ("Phases N-M ship in one release") as a first-class roadmap artifact when an intermediate phase's shipped-alone state would be operationally unsafe, not just logically incomplete.
+- **Three distinct persisted signals for one feature, each owning exactly one question**: outbox state (`notified_at IS NULL`) decides *what* to send, a slot record decides *whether a send is due*, and a separate last-sent watermark stays purely the operator-facing display value — reusable shape for any future scheduled/batched delivery feature.
+- **Per-delivered-unit acking instead of per-run acking** whenever a run can partially fail and resume (`AckEventsOnly` vs. the final `AckDigestBatch`) — the same shape as Phase 21/22's outbox-state pattern, one level more granular.
+
+### Key Lessons
+
+1. Run a design/plan grilling on the phase that's actually novel (a scheduler with DST math, a hard delivery-size limit), even after roadmap-time research already covered it — RESEARCH's own assumptions got overturned twice more (grace-window rule, Discord limit shape) at planning time in this milestone alone.
+2. When a milestone's phases have a real production-safety ordering constraint beyond their dependency graph (a gate shipped without its sender, a sender shipped without its overflow handling), write the deploy-sequencing rule down in the roadmap itself — don't rely on remembering it at merge time.
+3. A code-review finding that ships unfixed needs a todo filed in the same session it's found, or it becomes a milestone-close paragraph instead of a quick-task — the discipline that held for warnings in v1.1-v1.3 lapsed here.
+
+### Cost Observations
+
+- Model mix: not tracked this milestone
+- Sessions: not tracked
+- Notable: no cost/efficiency telemetry captured for v1.5, consistent with v1.0–v1.4
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -181,6 +223,7 @@
 | v1.2 | not tracked | 2 (12-13) | Ad-hoc post-v1.1 cleanup phases (no REQUIREMENTS.md, version assigned only at close) closed via `/gsd-complete-milestone`; required manual archive/MILESTONES.md correction since the phases weren't pre-grouped under a milestone heading |
 | v1.3 | not tracked | 4 planned (14-17), 3 shipped | First **partial** milestone close — Phase 17 deferred for lack of a VPS; debug-session and todo backlog acknowledged and carried forward at close |
 | v1.4 | not tracked | 3 (18, 18.1, 19) | First milestone with a design-grilling checkpoint before planning, splitting a phase into low-risk/high-risk halves and writing the repo's first ADR; full requirement coverage (12/12) but closed without a `/gsd-audit-milestone` run |
+| v1.5 | not tracked | 4 (20-23) | Post-roadmap plan grillings overturned a locked rule twice (Phase 22 grace window, Phase 23 Discord-limit shape); first explicit multi-phase deploy-sequencing rule written into the roadmap; two more ADRs (0002, 0003); full requirement coverage (16/16) but no `/gsd-audit-milestone` run, and Phase 23's own code-review findings shipped unfixed and untracked |
 
 ### Cumulative Quality
 
@@ -191,12 +234,14 @@
 | v1.2 | backend/frontend suites extended, gates held at 80%/70% throughout | 80% backend / 70% frontend gate (unchanged) | `internal/artistart` fail-closed matcher + `ActivityGate` primitive (stdlib-only, no new deps) |
 | v1.3 | suites extended for authgate + the two CI tools; gates held at 80%/70% (backend cutover margin measured 10pp above floor) | 80% backend / 70% frontend gate (unchanged) | `internal/authgate` signed-cookie gate, `cmd/coverage-report`, `cmd/migration-check`, `internal/sqlscan` — all stdlib-only, no new deps |
 | v1.4 | suites extended for `/ready`, `/status`, `pollruns`, and the System view; gates held at 80%/70%; a 1000-iteration invariant test substitutes for `-race` on `runCycle` | 80% backend / 70% frontend gate (unchanged) | `internal/pollruns` ring buffer + `internal/buildinfo` — stdlib-only, no new deps; repo's first ADR (`docs/adr/0001`) |
+| v1.5 | suites extended for `internal/settings`, digest gating/scheduling/chunking, and property-style invariant tests over a synthetic 700-event batch; gates held at 80%/70%; CI's `-race` caught a real data race in Phase 22 test code | 80% backend / 70% frontend gate (unchanged) | `internal/settings` slot math + `golang.org/x/text` promoted to a direct dependency — no new third-party runtime deps; two more ADRs (`docs/adr/0002`, `0003`) |
 
 ### Top Lessons (Verified Across Milestones)
 
 1. Close out a milestone's archival step promptly after shipping — letting phase directories accumulate un-archived corrupts the next milestone's close (v1.1).
 2. Assign a milestone version and group phases under it in ROADMAP.md as soon as post-ship work starts, not just when `/gsd-complete-milestone` runs — otherwise both humans and the close automation lose track of which phases belong to which version (v1.2).
-3. Fixing code-review/UAT-surfaced warnings inline, in the same phase they're found, beats deferring them — held true across v1.1, v1.2, and v1.3.
+3. Fixing code-review/UAT-surfaced warnings inline, in the same phase they're found, beats deferring them — held true across v1.1, v1.2, and v1.3; **broke at v1.5** (Phase 23's two Warnings + one Info shipped unfixed with no todo filed, only caught at milestone close) — the discipline needs a forcing function (e.g. a checklist item at phase-complete), not just intent.
 4. Don't roadmap a phase gated on infrastructure you don't control — it holds the whole milestone hostage. Make it its own milestone gated on the prerequisite existing (v1.3 / Phase 17).
 5. File debug sessions as resolved when the fix ships in a plan, not only when a debug cycle closes them, or they resurface as milestone-close noise (v1.3).
 6. A phase-completion transition needs the same discipline as a debug-session resolution — flip it the moment execution finishes, or it becomes retroactive cleanup at the next milestone close (v1.4, same failure shape as lesson 5 one level up).
+7. A design/plan grilling can still overturn a locked rule after roadmap-time research already covered the same ground — run one on the genuinely novel phase (new scheduling math, a hard external limit) even when the roadmap looks settled (v1.5, twice in one milestone).
