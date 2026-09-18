@@ -217,18 +217,32 @@ Plans:
 **Success Criteria** (what must be TRUE):
 
   1. Every digest message states the window it covers ("since <timestamp>"), so a digest arriving after a late, skipped, or caught-up tick is unambiguous about what it includes.
-  2. A digest large enough to exceed Discord's per-message embed count or character budget is delivered as multiple ordered messages, spaced by the existing inter-send delay — with no event silently dropped, no content truncated away without a visible marker, and Phase 22's grouping preserved across the split (a group is never silently broken across messages without a continuation marker).
+  2. A digest large enough to exceed Discord's per-message embed count or character budget is delivered as multiple ordered messages, spaced by a deliberate inter-chunk delay — with no event silently dropped, no content truncated away without a visible marker, and Phase 22's grouping preserved across the split (a group is never silently broken across messages without a continuation marker). *(Amended 2026-09-17, Phase 23 grilling session: originally "the existing inter-send delay". A sustained chunk burst is a different regime from sporadic real-time sends, and 400ms sits by its own comment at Discord's ceiling — see 23-CONTEXT.md D-23.)*
   3. Events are acked per delivered message, not per digest run: a failure partway through a multi-message digest leaves the undelivered remainder pending for the next digest instead of losing it or re-sending what already went out.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 23-01-PLAN.md — Tracer: `AckEventsOnly` + sqlc regenerate, window header, chunk types and the pure splitter, and the `SendDigestIfDue` per-chunk send/ack loop end to end
+- [ ] 23-02-PLAN.md — `internal/discord` sentinel error for a 429 that survived the one permitted retry, plus the secret-hygiene regression
+
+**Wave 2** *(blocked on 23-01)*
+
+- [ ] 23-03-PLAN.md — Group-preferred boundaries, `(continued)` continuation markers, `(N/Total)` position indicator, and the three chunker invariants as property tests
+
+**Wave 3** *(blocked on 23-02 and 23-03)*
+
+- [ ] 23-04-PLAN.md — 20-chunk cap with remainder marker, ~3-minute whole-send budget checked at chunk boundaries, and the three observability changes (drain log, 429 discrimination, digest summary fields)
 
 **Notes for the phase planner**
 
 - *Grouping hierarchy already exists* — locked and built in Phase 22 (RESEARCH gap #2 closed there; DGST-10 moved to Phase 22 during a post-roadmap grilling session, 2026-09-11, to avoid building a flat digest here only to discard it). This phase's job is to split a grouped digest across multiple messages without silently breaking a group across the boundary, not to invent the hierarchy.
-- *Discord's real limits* are the constraint to encode explicitly as named constants with a source comment: 10 embeds per message, 25 fields per embed, and a ~6000-character total message budget. The existing `truncateRunes` helper already handles per-field truncation; what is new is the message-level budget and the split.
+- *Discord's real limits.* **Revised 2026-09-17 (Phase 23 grilling session).** Under Phase 22's locked one-description-only-embed-per-message shape, the "10 embeds per message" and "25 fields per embed" limits are both unreachable, and the ~6000-character total is not binding — 4096 runes on `Description` is. Encoding all three as named constants would ship dead code. Worth recording instead: the 6000 budget is a total across *all* embeds in one message, so packing 10 embeds buys 6000 characters rather than 40 960, which is why multi-embed packing was rejected. The "10" survives repurposed as a chunks-per-run cap. See 23-CONTEXT.md D-05/D-23.
 - *Chunking realism* (RESEARCH gap #3): with the operator's actual watchlist size, a >10-embed digest may be theoretical rather than routine. That does not make it optional — DGST-12 requires graceful degradation — but it does mean the bar is "provably correct under a synthetic large digest", not "tuned for throughput". A `+N more` marker is acceptable degradation only if it is logged as a warning and visible in the message.
 - *No SPA work in this phase.* This is Discord message composition inside `internal/notifier` and `internal/discord`; the operator-facing surface is the message itself.
-- *Built on Phase 22's slot/ack design* (added 2026-09-16). Ships in the same release as Phases 21 and 22. Per-message acking can reuse Phase 22's single-statement batch ack once per delivered chunk. Still open for this phase's own discussion: which chunk records the slot. Recording it only on the final chunk leaves a partially failed digest due, so the remainder retries within the grace window. The "since <timestamp>" label reads `digest_last_sent_at`, which is NULL for the first digest after digest mode is enabled (Phase 22 re-anchors the slot record, not last sent), so render that case explicitly. Chunk boundaries must not split a markdown-escaped line.
+- *Built on Phase 22's slot/ack design* (added 2026-09-16; **corrected 2026-09-17**). Ships in the same release as Phases 21 and 22. ~~Per-message acking can reuse Phase 22's single-statement batch ack once per delivered chunk.~~ It cannot — that statement writes the slot unconditionally, so reusing it per chunk advances the slot on chunk 1. This phase adds a second `AckEventsOnly` query and therefore **touches `queries/notification_settings.sql` and generated sqlc**, despite being framed as a message-composition phase; `make sqlc-check` has no CI counterpart and is on the critical path. See `docs/adr/0003-digest-ack-splits-event-ack-from-completion.md`. Which chunk records the slot is settled: only the final one. Recording it only on the final chunk leaves a partially failed digest due, so the remainder retries within the grace window. The "since <timestamp>" label reads `digest_last_sent_at`, which is NULL for the first digest after digest mode is enabled (Phase 22 re-anchors the slot record, not last sent), so render that case explicitly. Chunk boundaries must not split a markdown-escaped line.
 
 ## Progress
 
@@ -242,7 +256,7 @@ Plans:
 | 20. Digest Settings & Operator Control | 4/4 | Complete    | 2026-09-13 |
 | 21. Real-Time ↔ Digest Mutual Exclusion | 3/3 | Complete    | 2026-09-16 |
 | 22. Scheduled Digest Send | 4/4 | Complete    | 2026-09-17 |
-| 23. Digest Readability & Discord Limits | 0/? | Not started | - |
+| 23. Digest Readability & Discord Limits | 0/4 | Planned | - |
 
 ## Backlog
 
