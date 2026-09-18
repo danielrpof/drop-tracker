@@ -220,7 +220,7 @@ Plans:
   2. A digest large enough to exceed Discord's per-message embed count or character budget is delivered as multiple ordered messages, spaced by a deliberate inter-chunk delay — with no event silently dropped, no content truncated away without a visible marker, and Phase 22's grouping preserved across the split (a group is never silently broken across messages without a continuation marker). *(Amended 2026-09-17, Phase 23 grilling session: originally "the existing inter-send delay". A sustained chunk burst is a different regime from sporadic real-time sends, and 400ms sits by its own comment at Discord's ceiling — see 23-CONTEXT.md D-23.)*
   3. Events are acked per delivered message, not per digest run: a failure partway through a multi-message digest leaves the undelivered remainder pending for the next digest instead of losing it or re-sending what already went out.
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -234,7 +234,7 @@ Plans:
 
 **Wave 3** *(blocked on 23-02 and 23-03)*
 
-- [ ] 23-04-PLAN.md — 20-chunk cap with remainder marker, ~3-minute whole-send budget checked at chunk boundaries, and the three observability changes (drain log, 429 discrimination, digest summary fields)
+- [x] 23-04-PLAN.md — 20-chunk cap with remainder marker, ~3-minute whole-send budget checked at chunk boundaries, and the three observability changes (drain log, 429 discrimination, digest summary fields)
 
 **Notes for the phase planner**
 
@@ -256,7 +256,7 @@ Plans:
 | 20. Digest Settings & Operator Control | 4/4 | Complete    | 2026-09-13 |
 | 21. Real-Time ↔ Digest Mutual Exclusion | 3/3 | Complete    | 2026-09-16 |
 | 22. Scheduled Digest Send | 4/4 | Complete    | 2026-09-17 |
-| 23. Digest Readability & Discord Limits | 3/4 | In Progress|  |
+| 23. Digest Readability & Discord Limits | 4/4 | In Progress|  |
 
 ## Backlog
 

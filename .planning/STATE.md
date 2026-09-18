@@ -4,17 +4,17 @@ milestone: v1.5
 milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 23
 current_phase_name: Digest Readability & Discord Limits
-status: executing
-stopped_at: Completed 23-03-PLAN.md
-last_updated: "2026-09-18T04:21:23.705Z"
+status: verifying
+stopped_at: Completed 23-04-PLAN.md
+last_updated: "2026-09-18T15:02:03.755Z"
 last_activity: 2026-09-17
 last_activity_desc: Phase 23 execution started
-state_head: fb0f7b78927a7ef9d35404df1015fdad49da93e2
+state_head: 87976ff0ad9d1e69182e9f029e6c29d3f0614022
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 15
-  completed_plans: 14
+  completed_plans: 15
   percent: 75
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-16)
 
 Phase: 23 (Digest Readability & Discord Limits) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-17 — Phase 23 execution started
 
 ## Performance Metrics
@@ -145,6 +145,7 @@ Last activity: 2026-09-17 — Phase 23 execution started
 | Phase 23 P01 | 19min | 3 tasks | 9 files |
 | Phase 23 P02 | 5min | 2 tasks | 2 files |
 | Phase 23 P03 | 9min | 3 tasks | 2 files |
+| Phase 23 P04 | 35min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -343,6 +344,9 @@ Recent decisions affecting current work:
 - [Phase 23]: [Phase 23-01]: chunkOverheadReserve set to 300 runes, reserved before splitting so later plans' position indicators/continuation markers/remainder markers can only ever free headroom, never exceed the 4096-rune Discord ceiling
 - [Phase 23]: [Phase 23-02]: Added exported discord.ErrRateLimited sentinel for a 429 arriving on the retry attempt itself; checked via errors.Is, no retry-policy change, no-body-echo/no-URL-wrap conventions preserved
 - [Phase 23]: [Phase 23-03]: digestGroup gained a bare title field alongside its pre-rendered heading so continuationHeading/continuationNote can build their own wording; two pre-existing budget test assertions corrected from chunkContentBudget to discordDescriptionLimit once continuation-note stamping legitimately pushes a chunk into the reserved overhead
+- [Phase 23]: [Phase 23-04]: Resumed a session interrupted by an HTTP 429 mid-run -- verified Task 3's already-written, uncommitted implementation and tests against the plan's action/acceptance-criteria/verify blocks before trusting and committing it, rather than re-implementing
+- [Phase 23]: [Phase 23-04]: maxDigestChunks=20 cap and ~3-minute digestSendBudget both stop cleanly at chunk boundaries, never cancelling an in-flight Discord POST; both leave digest_last_slot_at/digest_last_sent_at un-advanced so the digest self-drains across successive ticks inside the grace window (D-23/D-24/D-25/D-26)
+- [Phase 23]: [Phase 23-04]: Observability -- shutdown drain line reworded from Error to Warn (D-27), chunk-failure log gained an errors.Is rate_limited discriminator against discord.ErrRateLimited (D-28), and the digest sent summary gained chunk_count/pending_remainder fields plus a separate cap/budget Warn firing only when a bound actually bit (D-29)
 
 ### Pending Todos
 
@@ -426,8 +430,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-18T04:21:22.885Z
-Stopped at: Completed 23-03-PLAN.md
+Last session: 2026-09-18T15:02:03.145Z
+Stopped at: Completed 23-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
