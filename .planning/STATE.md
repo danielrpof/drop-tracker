@@ -5,17 +5,17 @@ milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 23
 current_phase_name: Digest Readability & Discord Limits
 status: executing
-stopped_at: Phase 23 context gathered
-last_updated: "2026-09-18T03:06:22.841Z"
+stopped_at: Completed 23-01-PLAN.md
+last_updated: "2026-09-18T03:57:01.179Z"
 last_activity: 2026-09-17
-last_activity_desc: Phase 22 complete, transitioned to Phase 23
-state_head: d0cad5b140b8fb3a4596c675ec3d71f92c3791b1
+last_activity_desc: Phase 23 execution started
+state_head: 0cef6df9f6d7ef6cc71cd17f5ef5aa32f4f55430
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 15
-  completed_plans: 11
-  percent: 73
+  completed_plans: 12
+  percent: 75
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-16)
 
 ## Current Position
 
-Phase: 23 (Digest Readability & Discord Limits) — READY TO EXECUTE
-Plan: Not started
+Phase: 23 (Digest Readability & Discord Limits) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-09-17 — Phase 22 complete, transitioned to Phase 23
+Last activity: 2026-09-17 — Phase 23 execution started
 
 ## Performance Metrics
 
@@ -142,6 +142,7 @@ Last activity: 2026-09-17 — Phase 22 complete, transitioned to Phase 23
 | Phase 22 P02 | 45min | 3 tasks | 7 files |
 | Phase 22 P03 | 45min | 2 tasks | 4 files |
 | Phase 22 P04 | 20min | 3 tasks | 2 files |
+| Phase 23 P01 | 19min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -336,6 +337,8 @@ Recent decisions affecting current work:
 - [Phase 22]: [Phase 22]: 22-04: DST/grace-window matrix drives a real DigestScheduler over a real Notifier via a signalingSink + mutableClock (never SendDigestIfDue directly); sweep tests use the real settings.Service (live DB reads) so an ack is visible to the next check, single-shot grace tests reuse the existing digestSettingsReader fake
 - [Phase 22]: [Phase 22]: 22-04: build-scan gains 3 new steps proving the shipped Alpine image resolves America/New_York -- boots drop-tracker:scan (the image this run just built) against a throwaway Postgres, polls its boot log for the exact digest zone resolved / America/New_York pair, fails immediately if the container dies first; needs: and every existing step untouched
 - [Phase 22 UAT, closed 2026-09-17]: The one human-verification test (build-scan's live CI boot check for the resolved digest zone) passed on the second push. The first push (CI run 35272810632) failed the `test` job before reaching `build-scan` — a genuine `go test -race` data race in this phase's own 22-02 code, diagnosed and fixed via quick task 260917-mfa (mutex-guarded log buffer + drain-checked `Stop` in `internal/notifier/scheduler_test.go`). Re-push (run 35276004417) confirmed `build-scan` green with `digest zone resolved OK`. 22-VERIFICATION.md and 22-SECURITY.md both `passed`/`threats_open: 0`; Phase 22 marked complete, transitioned to Phase 23.
+- [Phase 23]: [Phase 23-01]: Split digest ack into two sqlc queries (AckEventsOnly narrow per-chunk ack, AckDigestBatch final-chunk-only settings write) per docs/adr/0003 -- Phase 22's single ack statement writes the slot unconditionally, which would defer a partial-failure remainder to the next slot instead of retrying within the grace window
+- [Phase 23]: [Phase 23-01]: chunkOverheadReserve set to 300 runes, reserved before splitting so later plans' position indicators/continuation markers/remainder markers can only ever free headroom, never exceed the 4096-rune Discord ceiling
 
 ### Pending Todos
 
@@ -419,9 +422,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-17T22:46:39.743Z
-Stopped at: Phase 23 context gathered
-Resume file: .planning/phases/23-digest-readability-discord-limits/23-CONTEXT.md
+Last session: 2026-09-18T03:56:51.136Z
+Stopped at: Completed 23-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
