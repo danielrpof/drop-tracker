@@ -600,6 +600,60 @@ jobs:
             exit 1
           fi
           echo "build provenance OK: binary carries $COMMIT_SHA"
+      # D-23/DGST-07: no other job in this pipeline boots the CURRENT image --
+      # n1-boot boots the previous release tag -- and a Go unit test cannot
+      # prove Alpine's tzdata behaviour either, because Go consults the host's
+      # zoneinfo before the binary's own embedded time/tzdata, so any CI
+      # runner or dev machine that happens to carry system tzdata would pass
+      # such a test whether or not the embedded database is actually present.
+      # This is why the zone-resolution proof has to boot drop-tracker:scan --
+      # the exact image build-scan just built -- rather than run as a test.
+      - name: Start throwaway Postgres for the zone boot check
+        run: |
+          set -euo pipefail
+          docker run -d --name drop-tracker-zone-pg --network host \
+            -e POSTGRES_USER=drop_tracker -e POSTGRES_PASSWORD=drop_tracker -e POSTGRES_DB=drop_tracker \
+            postgres:16
+          for i in $(seq 1 30); do
+            if docker exec drop-tracker-zone-pg pg_isready -U drop_tracker -d drop_tracker >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::throwaway Postgres for the zone boot check never became ready" >&2
+          exit 1
+      # Exactly DATABASE_URL + HTTP_PORT -- DISCORD_WEBHOOK_URL and
+      # INSTANCE_PASSPHRASE stay unset so the notifier's no-op sink and the
+      # passphrase gate stay inert, keeping this step's boot log about zone
+      # resolution and nothing else.
+      - name: Boot the built image and assert it resolves the digest zone
+        run: |
+          set -euo pipefail
+          docker run -d --name drop-tracker-zone --network host \
+            -e DATABASE_URL="postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable" \
+            -e HTTP_PORT=8080 \
+            drop-tracker:scan
+          for i in $(seq 1 60); do
+            if [ "$(docker inspect -f '{{.State.Running}}' drop-tracker-zone 2>/dev/null)" != "true" ]; then
+              echo "::error::the drop-tracker:scan container died before logging a resolved digest zone" >&2
+              docker logs drop-tracker-zone || true
+              docker inspect --format '{{.State.ExitCode}}' drop-tracker-zone || true
+              exit 1
+            fi
+            LOGS="$(docker logs drop-tracker-zone 2>&1)"
+            if printf '%s' "$LOGS" | grep -q '"msg":"digest zone resolved"' && printf '%s' "$LOGS" | grep -q '"zone":"America/New_York"'; then
+              echo "digest zone resolved OK"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the image built in this run did not log a resolved digest zone -- America/New_York was not loaded from the Alpine runtime's embedded tzdata" >&2
+          docker logs drop-tracker-zone || true
+          docker inspect --format '{{.State.ExitCode}}' drop-tracker-zone || true
+          exit 1
+      - name: Clean up zone boot check containers
+        if: always()
+        run: docker rm -f drop-tracker-zone drop-tracker-zone-pg >/dev/null 2>&1 || true
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

@@ -23,6 +23,9 @@ vi.mock("~/lib/api", async (importOriginal) => ({
 
 const mockUpdateDigestSettings = vi.mocked(updateDigestSettings)
 
+const DIGEST_HELPER_TEXT =
+  "While on, new events wait for the next digest; switching back off delivers them individually."
+
 function makeSettings(
   overrides: Partial<NotificationSettings> = {}
 ): NotificationSettings {
@@ -325,5 +328,45 @@ describe("DigestSettings", () => {
     expect(timeEl).toHaveAttribute("dateTime", iso)
     expect(timeEl).toHaveAttribute("title", formatIsoTitle(iso))
     expect(timeEl).toHaveTextContent(formatAbsoluteTime(iso))
+  })
+
+  it("shows the digest helper text under the Digest mode row when digest mode is off", () => {
+    render(
+      <DigestSettings
+        settings={makeSettings({ digest_enabled: false })}
+        onSaved={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText(DIGEST_HELPER_TEXT)).toBeInTheDocument()
+  })
+
+  it("still shows the digest helper text when digest mode is on -- it is guidance, not a state indicator", () => {
+    render(
+      <DigestSettings
+        settings={makeSettings({ digest_enabled: true })}
+        onSaved={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText(DIGEST_HELPER_TEXT)).toBeInTheDocument()
+  })
+
+  it("renders the digest helper text immediately, before any interaction or save", () => {
+    render(<DigestSettings settings={makeSettings()} onSaved={vi.fn()} />)
+
+    expect(screen.getByText(DIGEST_HELPER_TEXT)).toBeInTheDocument()
+    expect(screen.queryByText("Saved.")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("Couldn't save — reverted to the previous value.")
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps the Digest mode switch reachable by its accessible name after the helper text is added", () => {
+    render(<DigestSettings settings={makeSettings()} onSaved={vi.fn()} />)
+
+    expect(
+      screen.getByRole("switch", { name: "Digest mode" })
+    ).toBeInTheDocument()
   })
 })

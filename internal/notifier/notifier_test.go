@@ -38,6 +38,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/discord"
 	"github.com/danielrpof/drop-tracker/internal/notifier"
+	"github.com/danielrpof/drop-tracker/internal/settings"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 )
 
@@ -68,6 +69,87 @@ func (f *fakeSender) Send(ctx context.Context, embed discord.Embed) error {
 }
 
 var _ notifier.Sender = (*fakeSender)(nil)
+
+// fakeSettingsReader is a controllable double for notifier.SettingsReader,
+// mirroring fakeSender's fn-hook-plus-atomic-counter shape so a later plan
+// can extend fn with a k-th-call flip without rewriting this double.
+type fakeSettingsReader struct {
+	fn func(ctx context.Context) (settings.Settings, error)
+
+	calls int32
+}
+
+func (f *fakeSettingsReader) Get(ctx context.Context) (settings.Settings, error) {
+	atomic.AddInt32(&f.calls, 1)
+	if f.fn != nil {
+		return f.fn(ctx)
+	}
+	return settings.Settings{}, nil
+}
+
+// Calls reports how many times Get has been called.
+func (f *fakeSettingsReader) Calls() int32 {
+	return atomic.LoadInt32(&f.calls)
+}
+
+var _ notifier.SettingsReader = (*fakeSettingsReader)(nil)
+
+// stubSettings returns a SettingsReader that always reports digest mode as
+// enabled.
+func stubSettings(enabled bool) *fakeSettingsReader {
+	return &fakeSettingsReader{fn: func(ctx context.Context) (settings.Settings, error) {
+		return settings.Settings{DigestEnabled: enabled}, nil
+	}}
+}
+
+// erroringSettings returns a SettingsReader whose Get always fails with err.
+func erroringSettings(err error) *fakeSettingsReader {
+	return &fakeSettingsReader{fn: func(ctx context.Context) (settings.Settings, error) {
+		return settings.Settings{}, err
+	}}
+}
+
+// flippingSettings returns a SettingsReader whose Get reports before for
+// calls 1..k-1 and after from call k onward -- a deterministic k-th-call
+// mode flip for the mid-pass re-read tests (D-07: exact counts, not a
+// timing invariant), built on fakeSettingsReader's existing fn/calls shape.
+func flippingSettings(k int, before, after bool) *fakeSettingsReader {
+	r := &fakeSettingsReader{}
+	r.fn = func(ctx context.Context) (settings.Settings, error) {
+		if r.Calls() < int32(k) {
+			return settings.Settings{DigestEnabled: before}, nil
+		}
+		return settings.Settings{DigestEnabled: after}, nil
+	}
+	return r
+}
+
+// erroringFrom returns a SettingsReader whose Get succeeds (digest off) for
+// calls 1..k-1 and fails with err from call k onward -- the mid-pass
+// read-error counterpart to flippingSettings.
+func erroringFrom(k int, err error) *fakeSettingsReader {
+	r := &fakeSettingsReader{}
+	r.fn = func(ctx context.Context) (settings.Settings, error) {
+		if r.Calls() < int32(k) {
+			return settings.Settings{DigestEnabled: false}, nil
+		}
+		return settings.Settings{}, err
+	}
+	return r
+}
+
+// toggleableSettings returns a SettingsReader whose reported mode starts at
+// initial and can be flipped between NotifyPending calls via the returned
+// setter -- so a test can drive two passes on the SAME Notifier instance and
+// prove no per-pass caching hides a stale mode read (DGST-14).
+func toggleableSettings(initial bool) (*fakeSettingsReader, func(bool)) {
+	var enabled atomic.Bool
+	enabled.Store(initial)
+	r := &fakeSettingsReader{fn: func(ctx context.Context) (settings.Settings, error) {
+		return settings.Settings{DigestEnabled: enabled.Load()}, nil
+	}}
+	return r, func(v bool) { enabled.Store(v) }
+}
 
 // spacingRecorder installs a recording spacingWait seam for the duration of
 // t (via notifier.SetSpacingWaitForTest) and returns a func reporting the
@@ -179,6 +261,27 @@ func insertPendingEventTitled(t *testing.T, pool *pgxpool.Pool, artistID int64, 
 	return eventID
 }
 
+// insertPendingEventTyped inserts a pending events row of the caller-supplied
+// event_type, with today's release_date so it would survive the freshness
+// gate if the digest-mode gate did not stop delivery first -- extends
+// insertPendingEventTitled (which always inserts new_release) to cover the
+// tracer's all-three-event-types proof.
+func insertPendingEventTyped(t *testing.T, pool *pgxpool.Pool, artistID int64, eventType, externalID, title string) int64 {
+	t.Helper()
+	ctx := context.Background()
+
+	var eventID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date)
+		 VALUES ($1, 'musicbrainz', $2, $3, $4, 'Test Artist', $5)
+		 RETURNING id`,
+		artistID, eventType, externalID, title, todayDate,
+	).Scan(&eventID); err != nil {
+		t.Fatalf("insert typed pending event: %v", err)
+	}
+	return eventID
+}
+
 // isNotified reports whether eventID's notified_at is non-NULL.
 func isNotified(t *testing.T, pool *pgxpool.Pool, eventID int64) bool {
 	t.Helper()
@@ -198,12 +301,12 @@ func TestNotifyPending_ZeroPendingRows_NoRequestNoMarkNoError(t *testing.T) {
 	// query (D-06), so this proves a genuine zero-row pass rather than
 	// relying on the table happening to already be empty.
 	drain := &fakeSender{}
-	if err := notifier.New(q, drain, time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
+	if err := notifier.New(q, drain, stubSettings(false), time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("drain NotifyPending: %v", err)
 	}
 
 	sender := &fakeSender{}
-	n := notifier.New(q, sender, time.Millisecond)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil", err)
 	}
@@ -236,6 +339,19 @@ func insertPendingEventDated(t *testing.T, pool *pgxpool.Pool, artistID int64, e
 	return eventID
 }
 
+// insertPendingEventBackdated inserts a dated pending row via
+// insertPendingEventDated, then backdates created_at with a separate
+// UPDATE -- a separate statement because the INSERT's DEFAULT now() is what
+// every other helper in this file otherwise relies on (D-02).
+func insertPendingEventBackdated(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID, title, releaseDate string, createdAt time.Time) int64 {
+	t.Helper()
+	eventID := insertPendingEventDated(t, pool, artistID, externalID, title, releaseDate)
+	if _, err := pool.Exec(context.Background(), "UPDATE events SET created_at = $1 WHERE id = $2", createdAt, eventID); err != nil {
+		t.Fatalf("backdate created_at: %v", err)
+	}
+	return eventID
+}
+
 // TestNotifyPending_StaleRowsAckedWithoutSending is the delivery-side
 // regression test for
 // .planning/debug/resolved/backlog-songs-trigger-discord.md.
@@ -255,7 +371,7 @@ func TestNotifyPending_StaleRowsAckedWithoutSending(t *testing.T) {
 
 	// Drain anything already pending, so the counts below reflect only this
 	// test's own rows (ListUnnotified is global -- D-06).
-	if err := notifier.New(q, &fakeSender{}, time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
+	if err := notifier.New(q, &fakeSender{}, stubSettings(false), time.Millisecond).NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("drain NotifyPending: %v", err)
 	}
 	logBuf.Reset()
@@ -277,7 +393,7 @@ func TestNotifyPending_StaleRowsAckedWithoutSending(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	n := notifier.New(q, discord.NewClient(ts.URL, ts.Client()), time.Millisecond)
+	n := notifier.New(q, discord.NewClient(ts.URL, ts.Client()), stubSettings(false), time.Millisecond)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
 	}
@@ -339,7 +455,7 @@ func TestNotifyPending_OnePendingRow_204MarksNotified(t *testing.T) {
 	defer ts.Close()
 
 	client := discord.NewClient(ts.URL, ts.Client())
-	n := notifier.New(q, client, time.Millisecond)
+	n := notifier.New(q, client, stubSettings(false), time.Millisecond)
 
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
@@ -363,7 +479,7 @@ func TestNotifyPending_SendFails_LeavesNotifiedAtNullAndRePicksUpNextPass(t *tes
 	failing := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
 		return errors.New("send exploded")
 	}}
-	n := notifier.New(q, failing, time.Millisecond)
+	n := notifier.New(q, failing, stubSettings(false), time.Millisecond)
 
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil (a send failure must not abort the pass, D-09)", err)
@@ -377,7 +493,7 @@ func TestNotifyPending_SendFails_LeavesNotifiedAtNullAndRePicksUpNextPass(t *tes
 
 	// A second pass re-selects the same row (D-09's re-pickup contract).
 	succeeding := &fakeSender{}
-	n2 := notifier.New(q, succeeding, time.Millisecond)
+	n2 := notifier.New(q, succeeding, stubSettings(false), time.Millisecond)
 	if err := n2.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("second NotifyPending: %v", err)
 	}
@@ -407,7 +523,7 @@ func TestNotifyPending_ReentrantCallSkippedWhileInFlight(t *testing.T) {
 		<-release
 		return nil
 	}}
-	n := notifier.New(q, sender, time.Millisecond)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
 
 	done := make(chan error, 1)
 	go func() { done <- n.NotifyPending(context.Background(), logger) }()
@@ -434,7 +550,7 @@ func TestNotifyPending_ReentrantCallSkippedWhileInFlight(t *testing.T) {
 func TestSelect_EmptyWebhookURL_ReturnsNoOpAndLogsDisabledLine(t *testing.T) {
 	logger, buf := newTestLogger()
 
-	sink := notifier.Select("", nil, nil, logger)
+	sink := notifier.Select("", nil, nil, nil, logger)
 	if _, ok := sink.(notifier.NoOp); !ok {
 		t.Fatalf("Select(\"\", ...) = %T, want notifier.NoOp", sink)
 	}
@@ -472,7 +588,7 @@ func TestNotifyPending_ConcurrentCallsNoDoublePost(t *testing.T) {
 		<-release
 		return nil
 	}}
-	n := notifier.New(q, sender, time.Millisecond)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
 
 	done := make(chan error, 1)
 	go func() { done <- n.NotifyPending(context.Background(), logger) }()
@@ -526,7 +642,7 @@ func TestNotifyPending_BatchSpacingBetweenSends(t *testing.T) {
 
 	const spacing = 50 * time.Millisecond
 	recorded := spacingRecorder(t)
-	n := notifier.New(q, sender, spacing)
+	n := notifier.New(q, sender, stubSettings(false), spacing)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
 	}
@@ -573,7 +689,7 @@ func TestNotifyPending_MarkNotifiedFails_LogsWarnAndReturnsError(t *testing.T) {
 	eventID := insertPendingEvent(t, pool, artistID, "marknotifiedfail-ext-1")
 
 	sender := &fakeSender{}
-	n := notifier.New(markNotifiedFailingQuerier{Querier: q}, sender, time.Millisecond)
+	n := notifier.New(markNotifiedFailingQuerier{Querier: q}, sender, stubSettings(false), time.Millisecond)
 
 	err := n.NotifyPending(context.Background(), logger)
 	if err == nil {
@@ -621,7 +737,7 @@ func TestNotifyPending_SpacingAppliedEvenAfterFailedSend(t *testing.T) {
 
 	const spacing = 50 * time.Millisecond
 	recorded := spacingRecorder(t)
-	n := notifier.New(q, failing, spacing)
+	n := notifier.New(q, failing, stubSettings(false), spacing)
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil (a send failure must not abort the pass, D-09)", err)
 	}
@@ -664,7 +780,7 @@ func TestNotifyPending_BatchMidFailureContinuesToLaterRows(t *testing.T) {
 		}
 		return nil
 	}}
-	n := notifier.New(q, sender, time.Millisecond)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
 
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v, want nil (a mid-batch send failure must not abort the pass)", err)
@@ -740,7 +856,7 @@ func TestNotifyPending_BatchHonorsRetryAfterWithoutDroppingOtherRows(t *testing.
 	defer ts.Close()
 
 	client := discord.NewClient(ts.URL, ts.Client())
-	n := notifier.New(q, client, time.Millisecond)
+	n := notifier.New(q, client, stubSettings(false), time.Millisecond)
 
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
 		t.Fatalf("NotifyPending: %v", err)
@@ -808,7 +924,7 @@ func TestNotifyPending_CrossCycleRecoveryAfterOutage(t *testing.T) {
 	defer ts.Close()
 
 	client := discord.NewClient(ts.URL, ts.Client())
-	n := notifier.New(q, client, time.Millisecond)
+	n := notifier.New(q, client, stubSettings(false), time.Millisecond)
 
 	// First call: the webhook is down for the whole pass.
 	if err := n.NotifyPending(context.Background(), logger); err != nil {
@@ -832,5 +948,696 @@ func TestNotifyPending_CrossCycleRecoveryAfterOutage(t *testing.T) {
 	}
 	if !isNotified(t, pool, eventID) {
 		t.Fatal("notified_at should be non-NULL after the recovery pass")
+	}
+}
+
+// TestNotifyPending_DigestModeOn_SendsNothingAndLeavesRowsPending is the
+// tracer's own end-to-end proof (DGST-13, ROADMAP success criterion 1): with
+// digest mode on, a notify pass over pending rows of all three event types
+// issues zero Discord requests and leaves every row pending. D-04: the mode
+// read is the pass's first decision, before listUnnotified is ever called.
+func TestNotifyPending_DigestModeOn_SendsNothingAndLeavesRowsPending(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "digeston")
+	newReleaseID := insertPendingEventTyped(t, pool, artistID, "new_release", "digeston-new-release", "Digest New Release")
+	guestFeatureID := insertPendingEventTyped(t, pool, artistID, "guest_feature", "digeston-guest-feature", "Digest Guest Feature")
+	deluxeChangeID := insertPendingEventTyped(t, pool, artistID, "deluxe_change", "digeston-deluxe-change", "Digest Deluxe Change")
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(true), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls = %d, want exactly 0: digest mode on must issue zero Discord requests", got)
+	}
+	for _, tc := range []struct {
+		name string
+		id   int64
+	}{
+		{"new_release", newReleaseID},
+		{"guest_feature", guestFeatureID},
+		{"deluxe_change", deluxeChangeID},
+	} {
+		if isNotified(t, pool, tc.id) {
+			t.Errorf("%s row was marked notified, want it left pending while digest mode is on", tc.name)
+		}
+	}
+}
+
+// TestNotifyPending_DigestToggleRoundTrip_QueuedEventsFlushExactlyOnce is
+// DGST-14's toggle round-trip: three rows queue while digest mode is on, then
+// the SAME Notifier instance -- no fresh construction -- flushes them all
+// exactly once once the mode reads off. Asserted on one instance so a cached
+// mode read would surface as a failure rather than being hidden by a fresh
+// object (D-07).
+func TestNotifyPending_DigestToggleRoundTrip_QueuedEventsFlushExactlyOnce(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "toggleroundtrip")
+	id1 := insertPendingEventTitled(t, pool, artistID, "toggle-ext-1", "Toggle Row One")
+	id2 := insertPendingEventTitled(t, pool, artistID, "toggle-ext-2", "Toggle Row Two")
+	id3 := insertPendingEventTitled(t, pool, artistID, "toggle-ext-3", "Toggle Row Three")
+
+	sender := &fakeSender{}
+	reader, setEnabled := toggleableSettings(true)
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("first NotifyPending (digest on): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls after digest-on pass = %d, want exactly 0", got)
+	}
+	for _, id := range []int64{id1, id2, id3} {
+		if isNotified(t, pool, id) {
+			t.Fatal("a row was acked while digest mode was on")
+		}
+	}
+
+	setEnabled(false)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("second NotifyPending (digest off, same instance): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 3 {
+		t.Fatalf("sender.calls after digest-off pass = %d, want exactly 3", got)
+	}
+	for _, id := range []int64{id1, id2, id3} {
+		if !isNotified(t, pool, id) {
+			t.Fatal("a row is still pending after the digest-off flush")
+		}
+	}
+}
+
+// TestNotifyPending_DigestOffFlush_OrderNoDuplication proves the off-flush
+// delivers every queued row exactly once, in ListUnnotified's order -- not
+// merely that a send count matches.
+func TestNotifyPending_DigestOffFlush_OrderNoDuplication(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "digestorder")
+	insertPendingEventTitled(t, pool, artistID, "digestorder-ext-1", "Order Row One")
+	insertPendingEventTitled(t, pool, artistID, "digestorder-ext-2", "Order Row Two")
+	insertPendingEventTitled(t, pool, artistID, "digestorder-ext-3", "Order Row Three")
+
+	var mu sync.Mutex
+	var titles []string
+	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		mu.Lock()
+		titles = append(titles, embed.Title)
+		mu.Unlock()
+		return nil
+	}}
+
+	spacingRecorder(t)
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v", err)
+	}
+
+	mu.Lock()
+	got := append([]string(nil), titles...)
+	mu.Unlock()
+
+	want := []string{"Order Row One", "Order Row Two", "Order Row Three"}
+	if len(got) != len(want) {
+		t.Fatalf("recorded %d embed titles, want exactly %d: %v", len(got), len(want), got)
+	}
+	// formatEmbed prefixes an emoji, so match by containment rather than
+	// exact equality -- still element-by-element, in order.
+	for i, w := range want {
+		if !strings.Contains(got[i], w) {
+			t.Fatalf("embed title %d = %q, want it to contain %q at that exact position", i, got[i], w)
+		}
+	}
+}
+
+// TestNotifyPending_DigestOffFlush_IdempotentSecondPass proves the flush does
+// not re-send: a third pass, with the same digest-off reader, over an
+// already-acked outbox sends zero more messages.
+func TestNotifyPending_DigestOffFlush_IdempotentSecondPass(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "digestidempotent")
+	id1 := insertPendingEvent(t, pool, artistID, "digestidempotent-ext-1")
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("first NotifyPending: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls after the first pass = %d, want exactly 1", got)
+	}
+	if !isNotified(t, pool, id1) {
+		t.Fatal("row should be acked after the first pass")
+	}
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("second NotifyPending: %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls after the second pass = %d, want still exactly 1 (the outbox is empty; nothing to re-send)", got)
+	}
+}
+
+// TestNotifyPending_DigestRealSettingsStore_TogglesWithoutRestart proves the
+// seam is satisfied by the production settings.Service (DGST-13, SC#3), and
+// that flipping the singleton row via a real Update call changes behavior on
+// the next pass with no restart. Built over testutil.NewIsolatedTestPool,
+// never the shared pool: internal/httpserver/settings_test.go flips the same
+// singleton notification_settings row and packages run in parallel, so a
+// shared-schema pool would let that package's writes decide this test's
+// outcome.
+func TestNotifyPending_DigestRealSettingsStore_TogglesWithoutRestart(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	loc, err := time.LoadLocation(settings.ZoneName)
+	if err != nil {
+		t.Fatalf("time.LoadLocation(%q): %v", settings.ZoneName, err)
+	}
+	settingsStore := settings.NewService(sqlc.New(pool), loc)
+
+	artistID := insertTestArtist(t, pool, "digestrealstore")
+	id1 := insertPendingEvent(t, pool, artistID, "digestrealstore-ext-1")
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, settingsStore, time.Millisecond)
+
+	if _, err := settingsStore.Update(context.Background(), settings.UpdateParams{DigestEnabled: true, DigestCadence: settings.CadenceDaily}); err != nil {
+		t.Fatalf("Update(digest_enabled=true): %v", err)
+	}
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending (digest on): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls with the real store reporting digest on = %d, want exactly 0", got)
+	}
+	if isNotified(t, pool, id1) {
+		t.Fatal("row was acked while the real settings store reported digest mode on")
+	}
+
+	if _, err := settingsStore.Update(context.Background(), settings.UpdateParams{DigestEnabled: false, DigestCadence: settings.CadenceDaily}); err != nil {
+		t.Fatalf("Update(digest_enabled=false): %v", err)
+	}
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending (digest off): %v", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls after the real store flips to digest off = %d, want exactly 1", got)
+	}
+	if !isNotified(t, pool, id1) {
+		t.Fatal("row should be acked once the real settings store reports digest mode off")
+	}
+}
+
+// logRecord is the subset of a slog JSON line this file decodes to assert on
+// log content, rather than substring-matching the raw buffer.
+type logRecord struct {
+	Level string `json:"level"`
+	Msg   string `json:"msg"`
+}
+
+// decodeLogRecords decodes every newline-delimited JSON log line in buf.
+func decodeLogRecords(t *testing.T, buf *bytes.Buffer) []logRecord {
+	t.Helper()
+	var records []logRecord
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	for {
+		var r logRecord
+		if err := dec.Decode(&r); err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatalf("decode log record: %v", err)
+		}
+		records = append(records, r)
+	}
+	return records
+}
+
+// TestNotifyPending_SettingsReadFails_FailsClosedWithOneWarnAndNoSends is
+// D-03's fail-closed regression guard: a settings-read error must stop the
+// pass before any row is listed, never turn into a hard error (poller.go's
+// call site logs a returned error as "notify pending failed", which would
+// misread a settings-read skip as a Discord delivery failure), and log
+// exactly one distinctly-worded Warn.
+func TestNotifyPending_SettingsReadFails_FailsClosedWithOneWarnAndNoSends(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "settingsreadfail")
+	id1 := insertPendingEvent(t, pool, artistID, "settingsreadfail-ext-1")
+	id2 := insertPendingEvent(t, pool, artistID, "settingsreadfail-ext-2")
+	id3 := insertPendingEvent(t, pool, artistID, "settingsreadfail-ext-3")
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, erroringSettings(errors.New("boom")), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil -- poller.go's log-and-continue call site logs a returned error as \"notify pending failed\", which would read like a Discord delivery failure rather than a settings-read skip", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls = %d, want exactly 0", got)
+	}
+	for _, id := range []int64{id1, id2, id3} {
+		if isNotified(t, pool, id) {
+			t.Fatal("a row was acked despite the settings read failing -- failing closed must not ack anything either")
+		}
+	}
+
+	var warns []logRecord
+	for _, r := range decodeLogRecords(t, buf) {
+		if r.Level == "WARN" {
+			warns = append(warns, r)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("WARN record count = %d, want exactly 1: %+v", len(warns), warns)
+	}
+	if warns[0].Msg != "skipping notify pass: digest settings read failed" {
+		t.Fatalf("WARN msg = %q, want the exact literal %q", warns[0].Msg, "skipping notify pass: digest settings read failed")
+	}
+}
+
+// TestNotifyPending_SettingsReadCtxCancelled_NoWarnLogged is D-03's shutdown
+// carve-out: a settings-read error caused by the caller's own context
+// cancellation is not a delivery incident and must log nothing.
+func TestNotifyPending_SettingsReadCtxCancelled_NoWarnLogged(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "settingsreadcancel")
+	id1 := insertPendingEvent(t, pool, artistID, "settingsreadcancel-ext-1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	sender := &fakeSender{}
+	reader := &fakeSettingsReader{fn: func(rctx context.Context) (settings.Settings, error) {
+		return settings.Settings{}, rctx.Err()
+	}}
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(ctx, logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil on a shutdown cancellation", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 0 {
+		t.Fatalf("sender.calls = %d, want exactly 0", got)
+	}
+	if isNotified(t, pool, id1) {
+		t.Fatal("a row was acked despite the settings read failing")
+	}
+
+	for _, r := range decodeLogRecords(t, buf) {
+		if r.Level == "WARN" {
+			t.Fatalf("unexpected WARN record: %+v -- a shutdown cancellation is not a delivery incident", r)
+		}
+	}
+}
+
+// TestNotifyPending_MidPass_StopsPassAtNextSendBoundary is D-04's per-send
+// re-read proof: a mode flip landing mid-pass stops delivery at the next
+// send boundary, leaving the rest of the batch pending. It also pins the
+// accepted residual (D-04, ADR 0002): the event whose send was already
+// issued when the flip is observed is acked, not clawed back.
+func TestNotifyPending_MidPass_StopsPassAtNextSendBoundary(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "midpassflip")
+	ids := []int64{
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-1", "Mid Pass Row One"),
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-2", "Mid Pass Row Two"),
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-3", "Mid Pass Row Three"),
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-4", "Mid Pass Row Four"),
+		insertPendingEventTitled(t, pool, artistID, "midpassflip-ext-5", "Mid Pass Row Five"),
+	}
+
+	sender := &fakeSender{}
+	// Call 1 is the top-of-pass gate (off); calls 2 and 3 are the per-send
+	// re-reads that let rows one and two through; call 4 stops the pass
+	// before row three's send.
+	reader := flippingSettings(4, false, true)
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 2 {
+		t.Fatalf("sender.calls = %d, want exactly 2", got)
+	}
+	for i, id := range ids {
+		want := i < 2
+		if got := isNotified(t, pool, id); got != want {
+			t.Fatalf("row %d notified = %v, want %v", i+1, got, want)
+		}
+	}
+}
+
+// TestNotifyPending_MidPass_SuppressionAcksDoNotReRead proves a stale-event
+// suppression ack costs no settings read (D-04): the reader's call count is
+// exactly 1 (top-of-pass) plus one per FRESH row -- a re-read added to the
+// suppression path would make this number too large and fail the assertion.
+func TestNotifyPending_MidPass_SuppressionAcksDoNotReRead(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "midpasssuppress")
+	staleIDs := []int64{
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-stale-1", "Stale One", "2015-01-01"),
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-stale-2", "Stale Two", "2015-01-02"),
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-stale-3", "Stale Three", "2015-01-03"),
+	}
+	freshIDs := []int64{
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-fresh-1", "Fresh One", todayDate),
+		insertPendingEventDated(t, pool, artistID, "midpasssuppress-fresh-2", "Fresh Two", todayDate),
+	}
+
+	sender := &fakeSender{}
+	reader := stubSettings(false)
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 2 {
+		t.Fatalf("sender.calls = %d, want exactly 2 (the two fresh rows)", got)
+	}
+	if got := reader.Calls(); got != 3 {
+		t.Fatalf("reader.Calls() = %d, want exactly 3 (1 top-of-pass + one per fresh row; stale rows must not trigger a re-read)", got)
+	}
+	for _, id := range staleIDs {
+		if !isNotified(t, pool, id) {
+			t.Fatal("a stale row was left pending, want acked")
+		}
+	}
+	for _, id := range freshIDs {
+		if !isNotified(t, pool, id) {
+			t.Fatal("a fresh row was left pending, want acked")
+		}
+	}
+}
+
+// TestNotifyPending_MidPass_ReadErrorStopsPassIdenticallyToTopOfPass proves a
+// mid-pass settings-read error is indistinguishable from a top-of-pass one:
+// nil return, exactly one distinctly-worded Warn, remaining rows left
+// pending.
+func TestNotifyPending_MidPass_ReadErrorStopsPassIdenticallyToTopOfPass(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "midpasserror")
+	ids := []int64{
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-1", "Mid Pass Err Row One"),
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-2", "Mid Pass Err Row Two"),
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-3", "Mid Pass Err Row Three"),
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-4", "Mid Pass Err Row Four"),
+		insertPendingEventTitled(t, pool, artistID, "midpasserror-ext-5", "Mid Pass Err Row Five"),
+	}
+
+	sender := &fakeSender{}
+	// Calls 1..3 succeed (digest off); call 4 errors, stopping the pass
+	// before row three's send.
+	reader := erroringFrom(4, errors.New("boom"))
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 2 {
+		t.Fatalf("sender.calls = %d, want exactly 2", got)
+	}
+	for i, id := range ids {
+		want := i < 2
+		if got := isNotified(t, pool, id); got != want {
+			t.Fatalf("row %d notified = %v, want %v", i+1, got, want)
+		}
+	}
+
+	var warns []logRecord
+	for _, r := range decodeLogRecords(t, buf) {
+		if r.Level == "WARN" {
+			warns = append(warns, r)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("WARN record count = %d, want exactly 1: %+v", len(warns), warns)
+	}
+	if warns[0].Msg != "skipping notify pass: digest settings read failed" {
+		t.Fatalf("WARN msg = %q, want the exact literal %q", warns[0].Msg, "skipping notify pass: digest settings read failed")
+	}
+}
+
+// modeTransitionRecord decodes the subset of a D-01 "digest mode changed"
+// log line this file asserts on.
+type modeTransitionRecord struct {
+	Level         string `json:"level"`
+	Msg           string `json:"msg"`
+	DigestEnabled bool   `json:"digest_enabled"`
+	PendingCount  *int   `json:"pending_count"`
+}
+
+// decodeModeTransitionRecords decodes every newline-delimited JSON log line
+// in buf and returns only the records whose msg is "digest mode changed".
+func decodeModeTransitionRecords(t *testing.T, buf *bytes.Buffer) []modeTransitionRecord {
+	t.Helper()
+	var records []modeTransitionRecord
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	for {
+		var r modeTransitionRecord
+		if err := dec.Decode(&r); err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatalf("decode log record: %v", err)
+		}
+		if r.Msg == "digest mode changed" {
+			records = append(records, r)
+		}
+	}
+	return records
+}
+
+// TestNotifyPending_ModeTransitionLog_BootAlwaysLogsOperativeMode is D-01's
+// restart guarantee: the first successful read after construction logs
+// exactly one transition record, whatever the mode is.
+func TestNotifyPending_ModeTransitionLog_BootAlwaysLogsOperativeMode(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+
+	records := decodeModeTransitionRecords(t, buf)
+	if len(records) != 1 {
+		t.Fatalf("digest mode changed record count = %d, want exactly 1 (the first successful read after boot)", len(records))
+	}
+}
+
+// TestNotifyPending_ModeTransitionLog_SteadyStateLogsOnce is D-01's whole
+// point: digest mode staying unchanged across many passes must not repeat a
+// standdown line every poll cycle.
+func TestNotifyPending_ModeTransitionLog_SteadyStateLogsOnce(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+
+	for i := 0; i < 3; i++ {
+		if err := n.NotifyPending(context.Background(), logger); err != nil {
+			t.Fatalf("NotifyPending pass %d: %v, want nil", i+1, err)
+		}
+	}
+
+	records := decodeModeTransitionRecords(t, buf)
+	if len(records) != 1 {
+		t.Fatalf("digest mode changed record count across 3 unchanged passes = %d, want exactly 1", len(records))
+	}
+}
+
+// TestNotifyPending_ModeTransitionLog_OnToOffCarriesFlushCount proves the
+// on-to-off transition line names the count about to be flushed, taken from
+// the list the pass already fetched (no COUNT query).
+func TestNotifyPending_ModeTransitionLog_OnToOffCarriesFlushCount(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "modelogontooff")
+
+	sender := &fakeSender{}
+	reader, setEnabled := toggleableSettings(true)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("first NotifyPending (digest on): %v, want nil", err)
+	}
+
+	insertPendingEventTitled(t, pool, artistID, "modelogontooff-ext-1", "Row One")
+	insertPendingEventTitled(t, pool, artistID, "modelogontooff-ext-2", "Row Two")
+	insertPendingEventTitled(t, pool, artistID, "modelogontooff-ext-3", "Row Three")
+	insertPendingEventTitled(t, pool, artistID, "modelogontooff-ext-4", "Row Four")
+
+	setEnabled(false)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("second NotifyPending (digest off): %v, want nil", err)
+	}
+
+	records := decodeModeTransitionRecords(t, buf)
+	if len(records) != 2 {
+		t.Fatalf("digest mode changed record count = %d, want exactly 2 (on at pass 1, off at pass 2): %+v", len(records), records)
+	}
+	last := records[len(records)-1]
+	if last.DigestEnabled {
+		t.Fatal("second record digest_enabled = true, want false")
+	}
+	if last.PendingCount == nil || *last.PendingCount != 4 {
+		t.Fatalf("second record pending_count = %v, want 4", last.PendingCount)
+	}
+}
+
+// TestNotifyPending_ModeTransitionLog_MidLoopFlipLogsPendingCount proves a
+// mid-loop stop (the re-read reporting on) logs the count it left pending.
+func TestNotifyPending_ModeTransitionLog_MidLoopFlipLogsPendingCount(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "modelogmidloop")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-1", "Row One")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-2", "Row Two")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-3", "Row Three")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-4", "Row Four")
+	insertPendingEventTitled(t, pool, artistID, "modelogmidloop-ext-5", "Row Five")
+
+	sender := &fakeSender{}
+	reader := flippingSettings(4, false, true)
+	spacingRecorder(t)
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+
+	var onRecord *modeTransitionRecord
+	for _, r := range decodeModeTransitionRecords(t, buf) {
+		r := r
+		if r.DigestEnabled {
+			onRecord = &r
+		}
+	}
+	if onRecord == nil {
+		t.Fatalf("no digest mode changed record with digest_enabled=true was logged")
+	}
+	if onRecord.PendingCount == nil || *onRecord.PendingCount != 3 {
+		t.Fatalf("mid-loop transition pending_count = %v, want 3", onRecord.PendingCount)
+	}
+}
+
+// TestNotifyPending_ModeTransitionLog_FailedReadDoesNotUpdateLastObserved is
+// D-01's last guarantee: a failed read neither fabricates a transition nor
+// swallows the next real one.
+func TestNotifyPending_ModeTransitionLog_FailedReadDoesNotUpdateLastObserved(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, buf := newTestLogger()
+
+	sender := &fakeSender{}
+	var stage int32 // 0=off, 1=error, 2=on
+	reader := &fakeSettingsReader{fn: func(ctx context.Context) (settings.Settings, error) {
+		switch atomic.LoadInt32(&stage) {
+		case 1:
+			return settings.Settings{}, errors.New("boom")
+		case 2:
+			return settings.Settings{DigestEnabled: true}, nil
+		default:
+			return settings.Settings{DigestEnabled: false}, nil
+		}
+	}}
+	n := notifier.New(q, sender, reader, time.Millisecond)
+
+	atomic.StoreInt32(&stage, 0)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("pass 1 (digest off): %v, want nil", err)
+	}
+
+	atomic.StoreInt32(&stage, 1)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("pass 2 (settings read error): %v, want nil", err)
+	}
+
+	atomic.StoreInt32(&stage, 2)
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("pass 3 (digest on): %v, want nil", err)
+	}
+
+	records := decodeModeTransitionRecords(t, buf)
+	if len(records) != 2 {
+		t.Fatalf("digest mode changed record count = %d, want exactly 2 (off at pass 1, on at pass 3): %+v", len(records), records)
+	}
+	if records[0].DigestEnabled {
+		t.Fatal("first record digest_enabled = true, want false (pass 1)")
+	}
+	if !records[1].DigestEnabled {
+		t.Fatal("second record digest_enabled = false, want true (pass 3)")
+	}
+}
+
+// TestNotifyPending_StaleAnchor_EventDetectedLongAgoStillDelivered is D-02's
+// end-to-end proof: an events row backdated 60 days, with a release_date 2
+// days before that created_at, is actually sent by a real NotifyPending pass
+// with digest mode off -- proving the created_at anchor reaches the real
+// drain path, not just the suppresses unit.
+func TestNotifyPending_StaleAnchor_EventDetectedLongAgoStillDelivered(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	logger, _ := newTestLogger()
+
+	artistID := insertTestArtist(t, pool, "staleanchor")
+	backdatedCreatedAt := time.Now().UTC().AddDate(0, 0, -60)
+	releaseDate := backdatedCreatedAt.AddDate(0, 0, -2).Format(time.DateOnly)
+	eventID := insertPendingEventBackdated(t, pool, artistID, "staleanchor-ext-1", "Old But Fresh Release", releaseDate, backdatedCreatedAt)
+
+	sender := &fakeSender{}
+	n := notifier.New(q, sender, stubSettings(false), time.Millisecond)
+
+	if err := n.NotifyPending(context.Background(), logger); err != nil {
+		t.Fatalf("NotifyPending: %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls = %d, want exactly 1", got)
+	}
+	if !isNotified(t, pool, eventID) {
+		t.Fatal("notified_at is still NULL after the pass; the created_at-anchored freshness gate should have delivered this row")
 	}
 }

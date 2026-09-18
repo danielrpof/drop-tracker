@@ -1,43 +1,42 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.5
-milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
-current_phase: 21
-current_phase_name: Real-Time ↔ Digest Mutual Exclusion
-status: "Phase 20 shipped — PR #5"
-stopped_at: Phase 20 complete, ready to plan Phase 21
-last_updated: "2026-09-16T12:37:07.165Z"
-last_activity: 2026-09-16
-state_head: 515094fc8452d2c4bd4a7b323eed1f19f47187fa
+status: "v1.5 shipped — PR #6"
+stopped_at: Phase 23 complete — all phases complete
+last_updated: "2026-09-18T18:01:45.200Z"
+last_activity: 2026-09-18
+state_head: 63df9f525c6b6ea727259b45b017572428051e39
+milestone_name: Digest Notifications (Phases 20-23) — SHIPPED 2026-09-18
+current_phase: 23
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
-  percent: 25
+  completed_phases: 4
+  total_plans: 15
+  completed_plans: 15
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-13)
+See: .planning/PROJECT.md (updated 2026-09-18)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 21 — Real-Time ↔ Digest Mutual Exclusion
+**Current focus:** Milestone v1.5 complete (Phases 20-23) — ready to close out
 
 ## Current Position
 
-Phase: 21 — Real-Time ↔ Digest Mutual Exclusion
-Plan: Not started
-Status: Phase 20 shipped — PR #5
-Last activity: 2026-09-16
+Phase: Milestone v1.5 complete
+Plan: —
+Status: v1.5 shipped — PR #6
+Last activity: 2026-09-18
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 88
+- Total plans completed: 99
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -65,6 +64,9 @@ Last activity: 2026-09-16
 | 19 | 5 | - | - |
 | 18.1 | 3 | - | - |
 | 20 | 4 | - | - |
+| 21 | 3 | - | - |
+| 22 | 4 | - | - |
+| 23 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -132,6 +134,17 @@ Last activity: 2026-09-16
 | Phase 20 P02 | 40min | 2 tasks | 1 files |
 | Phase 20 P03 | 40min | 2 tasks | 6 files |
 | Phase 20 P04 | 35min | 3 tasks | 5 files |
+| Phase 21 P01 | 22min | 3 tasks | 6 files |
+| Phase 21 P03 | 10min | 2 tasks | 5 files |
+| Phase 21 P02 | 20min | 3 tasks | 3 files |
+| Phase 22 P01 | 25min | 3 tasks | 15 files |
+| Phase 22 P02 | 45min | 3 tasks | 7 files |
+| Phase 22 P03 | 45min | 2 tasks | 4 files |
+| Phase 22 P04 | 20min | 3 tasks | 2 files |
+| Phase 23 P01 | 19min | 3 tasks | 9 files |
+| Phase 23 P02 | 5min | 2 tasks | 2 files |
+| Phase 23 P03 | 9min | 3 tasks | 2 files |
+| Phase 23 P04 | 35min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -311,11 +324,36 @@ Recent decisions affecting current work:
 - [Phase 20]: [Phase 20-04] shadcn add select mis-resolved cn as a package again (19-03 precedent) -- reverted package.json/pnpm-lock.yaml and hand-fixed the one import instead of discarding the CLI's otherwise-correct output
 - [Phase 20]: [Phase 20-04] Generalized the digest-mode save handler into a shared save({digestEnabled, digestCadence}) helper both the switch and the new cadence Select call, so the full-object PUT always carries both fields (T-20-19)
 - [Phase 20]: [Phase 20-04] go test -race still unusable on this Windows dev box (cgo/ThreadSanitizer, same limitation as Phase 11.1/15) -- substituted plain go test for make test's verification; coverage-gate confirmed 90.72%
+- [Phase 21]: [Phase 21-01]: SettingsReader declared in internal/notifier, returns full settings.Settings (not a bool) so Phase 22 can reuse the same read for cadence/watermark; required constructor argument on New/Select, never a functional Option (D-05)
+- [Phase 21]: [Phase 21-01]: erroringSettings test double deferred from Task 1 to Task 3 (first-use point) to keep golangci-lint's unused-function check clean at every per-task commit, per CLAUDE.md's Definition of Done
+- [Phase 21]: [Phase 21]: [21-03] Digest standdown helper text rendered via a single-line JSX expression container ({"..."}) rather than a bare text child -- the 93-char sentence exceeds prettier's 80-col printWidth and would be wrapped across lines, breaking the plan's own grep-based acceptance check; same DOM output, no interpolation.
+- [Phase 21]: [Phase 21-02]: Per-send readSettings re-read sits strictly between the suppression-ack branch (exempt, D-04) and the Discord send; a shared logSettingsReadFailure helper applies identical fail-closed Warn/nil-return behavior at both the top-of-pass gate and the per-send re-read
+- [Phase 21]: [Phase 21-02]: lastDigestMode/lastDigestModeSet are plain (non-atomic) fields on Notifier, race-free under the existing notifying CAS lock's happens-before guarantee; observeDigestMode is the single emitter of the digest mode changed line, wired at exactly three call sites (D-01)
+- [Phase 21]: [Phase 21-02]: suppresses' stale-release cutoff now anchors on ev.CreatedAt (falling back to time.Now() only for the structurally-unreachable zero-value test literal case) plus one day of D-02 slack, instead of time.Now() minus maxAgeDays -- staleReleaseDate and the shared detection/notifier gateCases truth table are unchanged
+- [Phase 22 Grilling]: A `/mattpocock-skills:grill-with-docs` session (2026-09-16) challenged the Phase 22 plan and recorded D-11–D-26 in `22-CONTEXT.md`, synced into ROADMAP.md (Phase 22 criteria 3/5 and planner notes, Phase 23 notes, deploy sequencing) and REQUIREMENTS.md (DGST-05/15 reworded). Headline changes: **catch-up is a 12h/48h grace window**, superseding the 2026-09-11 log-and-wait lock (entry (b) above), which contradicted criterion 3 and D-10. **The due rule is slot-based calendar math** in America/New_York, not "watermark + cadence". **A new `digest_last_slot_at` column (migration 000009)** records the last handled slot separately from `digest_last_sent_at`, and is re-anchored when digest mode is enabled or the cadence changes, so empty fires and enabling never cause off-schedule sends. **The ack is one data-modifying CTE** through `sqlc.Querier`, with no Go transaction. **`Sink.SendDigestIfDue` + a `DigestScheduler`** is modeled on `Poller.Start`/`Stop`. **Phases 21, 22, and 23 ship in one release**, because an oversized single-embed digest would otherwise wedge. Guest-feature lines are keyed by watched artist and name the host. Markdown is escaped, sorting is collated, the zone check fails fast at startup, and a `build-scan` step boots the current image.
+- [Phase 22]: sqlc generates pgtype.Timestamptz (not *time.Time) for the new digest slot columns/params, matching existing codebase convention; recorded verbatim for plan 22-02
+- [Phase 22]: Task 3's tdd=true RED/GREEN commits were not split (6 interdependent files) -- delivered as one feat commit, documented as a process deviation in 22-01-SUMMARY.md
+- [Phase 22]: Renamed cmd/server/main.go's digestLoc to loc so notifier.WithLocation(loc)/DigestScheduler wiring is shared cleanly across settingsStore, notif, and digestSched. — 22-01-SUMMARY.md recorded the resolved zone var as digestLoc; this plan's Task 3 acceptance criteria and action text both name it loc -- renamed for literal compliance, no behavior change.
+- [Phase 22]: DigestScheduler.Stop uses a dedicated stopCh (closed via sync.Once) distinct from runCancel, so Stop can ask the loop to exit gracefully after its current check finishes without forcibly cancelling that check's own context. — The plan's literal Stop pseudocode could never return nil on its own -- only cancelling runCancel via a timed-out drain -- which contradicted the plan's own stated behavior (Stop returns nil once the in-flight check has finished). Caught in the RED-phase test run before GREEN.
+- [Phase 22]: Phase 22-03: eventURL (format.go) is the one shared per-event-type URL switch formatEmbed's three formatters and the digest builder now call; escapeMarkdown/digestTitleLimit close T-22-07; each digest group sorts by golang.org/x/text/collate-collated watched artist (title/id tie-break), promoted to a direct go.mod dependency at the same version with zero go.sum churn
+- [Phase 22]: [Phase 22]: 22-04: DST/grace-window matrix drives a real DigestScheduler over a real Notifier via a signalingSink + mutableClock (never SendDigestIfDue directly); sweep tests use the real settings.Service (live DB reads) so an ack is visible to the next check, single-shot grace tests reuse the existing digestSettingsReader fake
+- [Phase 22]: [Phase 22]: 22-04: build-scan gains 3 new steps proving the shipped Alpine image resolves America/New_York -- boots drop-tracker:scan (the image this run just built) against a throwaway Postgres, polls its boot log for the exact digest zone resolved / America/New_York pair, fails immediately if the container dies first; needs: and every existing step untouched
+- [Phase 22 UAT, closed 2026-09-17]: The one human-verification test (build-scan's live CI boot check for the resolved digest zone) passed on the second push. The first push (CI run 35272810632) failed the `test` job before reaching `build-scan` — a genuine `go test -race` data race in this phase's own 22-02 code, diagnosed and fixed via quick task 260917-mfa (mutex-guarded log buffer + drain-checked `Stop` in `internal/notifier/scheduler_test.go`). Re-push (run 35276004417) confirmed `build-scan` green with `digest zone resolved OK`. 22-VERIFICATION.md and 22-SECURITY.md both `passed`/`threats_open: 0`; Phase 22 marked complete, transitioned to Phase 23.
+- [Phase 23]: [Phase 23-01]: Split digest ack into two sqlc queries (AckEventsOnly narrow per-chunk ack, AckDigestBatch final-chunk-only settings write) per docs/adr/0003 -- Phase 22's single ack statement writes the slot unconditionally, which would defer a partial-failure remainder to the next slot instead of retrying within the grace window
+- [Phase 23]: [Phase 23-01]: chunkOverheadReserve set to 300 runes, reserved before splitting so later plans' position indicators/continuation markers/remainder markers can only ever free headroom, never exceed the 4096-rune Discord ceiling
+- [Phase 23]: [Phase 23-02]: Added exported discord.ErrRateLimited sentinel for a 429 arriving on the retry attempt itself; checked via errors.Is, no retry-policy change, no-body-echo/no-URL-wrap conventions preserved
+- [Phase 23]: [Phase 23-03]: digestGroup gained a bare title field alongside its pre-rendered heading so continuationHeading/continuationNote can build their own wording; two pre-existing budget test assertions corrected from chunkContentBudget to discordDescriptionLimit once continuation-note stamping legitimately pushes a chunk into the reserved overhead
+- [Phase 23]: [Phase 23-04]: Resumed a session interrupted by an HTTP 429 mid-run -- verified Task 3's already-written, uncommitted implementation and tests against the plan's action/acceptance-criteria/verify blocks before trusting and committing it, rather than re-implementing
+- [Phase 23]: [Phase 23-04]: maxDigestChunks=20 cap and ~3-minute digestSendBudget both stop cleanly at chunk boundaries, never cancelling an in-flight Discord POST; both leave digest_last_slot_at/digest_last_sent_at un-advanced so the digest self-drains across successive ticks inside the grace window (D-23/D-24/D-25/D-26)
+- [Phase 23]: [Phase 23-04]: Observability -- shutdown drain line reworded from Error to Warn (D-27), chunk-failure log gained an errors.Is rate_limited discriminator against discord.ErrRateLimited (D-28), and the digest sent summary gained chunk_count/pending_remainder fields plus a separate cap/budget Warn firing only when a bound actually bit (D-29)
 
 ### Pending Todos
 
 - [minor] Delete the stale tracked `web/package-lock.json` — a drifting second lockfile Trivy also scans. `.planning/todos/pending/2026-09-05-delete-stale-web-package-lock-json.md`
 - [minor] Move `shadcn` out of `web/package.json` `dependencies` (it's a CLI no code imports) — cleanup only, NOT a security fix; reclassifying hides Trivy findings without fixing them. `.planning/todos/pending/2026-09-05-move-shadcn-out-of-frontend-dependencies.md`
+- [minor] Fix dead `resuming = true` assignment in `flushMidGroup` digest chunker (Phase 23 code review WR-01, never fixed) — `.planning/todos/pending/2026-09-18-fix-dead-resuming-assignment-in-flushmidgroup-digest-chunker.md`
+- [minor] Pin chunk-count test fixture constants with a precondition test (Phase 23 code review WR-02, never fixed) — `.planning/todos/pending/2026-09-18-pin-chunk-count-test-fixture-constants-with-a-precondition-t.md`
+- [cosmetic] Fix singular/plural grammar in digest remainder marker (Phase 23 code review IN-01, never fixed) — `.planning/todos/pending/2026-09-18-fix-singular-plural-grammar-in-digest-remainder-marker.md`
 
 _Closed 2026-09-05: trivy-fs HIGH CVE bump (browserslist/fast-uri) — quick task 260905-fa4. Confirmed CI-green on runs 33978945980 / 33979094225._
 _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick task 260905-et1. Confirmed live (guardcheck notice on run 33978945980; build-scan runs on 33979094225)._
@@ -325,7 +363,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 - ⚠️ [Phase 03] musicbrainz.org's TLS handshake fails from this developer's WSL2 network path (confirmed environmental via plain curl, not app code) -- Deezer unaffected. If future live testing on this machine needs real MusicBrainz data, expect the same failure; see PROJECT.md Context and Broken Windows Ledger entry #3 (waived).
 - ⚠️ [Phase 17, v1.3] No VPS is provisioned yet, and the TLS reverse-proxy choice (Caddy on-VPS vs. Cloudflare Tunnel) is undecided. Both block Phase 17's first real deploy and its rollback drill. Resolve in Phase 17's discuss/spec pass before planning.
 - ⚠️ [Phase 16 → 17] `n1-boot`'s `guardcheck` skip path (G-16-1 fix) stays active until a release carrying the ahead-of-source guard becomes the N-1 rollback target — i.e. the first v1.3 release after Phase 16. Until then the N-1 boot probe is inert on migration branches. Phase 17 follow-up (security UF-1): re-assert the probe once a guard-carrying tag is N-1, and add an alarm if the guard-adoption window stays open unexpectedly.
-- ⚠️ [Repo-wide] `go test -race` remains unavailable on this dev box and absent from CI (ThreadSanitizer allocation failure under memory pressure). Phase 18.1 closed its specific instance of this risk with `TestRunCycle_CounterInvariant` (1000-iteration exact-equality substitute over the `runCycle` worker fold), matching Phase 18's own `pollruns.Store` precedent — but the underlying tooling gap is still open project-wide. Still worth wiring `-race` into CI on a Linux runner if a future phase needs it.
+- ⚠️ [Repo-wide] `go test -race` remains unavailable natively on this Windows dev box (`runtime/cgo: cgo.exe: exit status 2`) — WSL2 Ubuntu is the confirmed local workaround (used successfully in quick/260917-mfa). CI's own `test` job (`Makefile:76`, Linux runner) already runs `-race` and is the authoritative gate — confirmed for real on 2026-09-17 when it caught a genuine data race in `internal/notifier/scheduler_test.go` (CI run 35272810632), closed by quick task 260917-mfa. Phase 18.1 closed its own instance of the same class of risk with `TestRunCycle_CounterInvariant` before this was known to work in CI. Superseded 2026-09-17: the "absent from CI" half of this note was stale.
 
 ### Quick Tasks Completed
 
@@ -356,6 +394,10 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 260905-et1 | n1-boot skip-greens when the previous release image predates the ahead-of-source migration guard (Phase 16 gap G-16-1). New gated `guardcheck` step in full-pipeline.yml + README/16-CONTEXT docs. Static fix only — G-16-1 stays open until a live migration push confirms green. | 2026-09-05 | 9876c4e | [260905-et1-n1-boot-skip-greens-when-the-previous-re](./quick/260905-et1-n1-boot-skip-greens-when-the-previous-re/) |
 | 260905-fa4 | Bump browserslist (→4.28.9) and fast-uri (→3.1.7) past 6 HIGH CVEs via caret `overrides:` in web/pnpm-workspace.yaml + lockfile regen (pnpm 11.8.0) + `make web`. Trivy 0.70.0 local scan: 6 HIGH → 0. Two follow-up todos filed. CI-green confirmation pending a scratch-branch push. | 2026-09-05 | efd9ea0 | [260905-fa4-bump-frontend-transitive-deps-to-clear-t](./quick/260905-fa4-bump-frontend-transitive-deps-to-clear-t/) |
 | 260905-kfv | Extract `internal/sqlscan` from `cmd/migration-check/main.go` (Phase 16 arch-review candidate 1): the SQL comment/quote lexer, a new typed `Parse` DDL model, and the D-15 query-reference extractor (`QueryColumnRefs`/`RefSet`) become one flat stdlib-only package; `main.go` 1469 → 753 lines, all policy/I/O kept. Behavior-preserving — `mixed_findings.golden.txt` byte-identical at every commit. Retires review findings CR-01 (schema-qualified D-15 bypass) and WR-01 (re-parsed display string) by design, not by patch. sqlscan per-package coverage 92.0%; `make coverage-gate` 90.39%. Two follow-up todos filed (unify the two quote scanners; resolve D-15 prev-release files from `--prev-tag`). Verified passed 8/8. On branch `quick/260905-kfv-sqlscan`, PR pending. | 2026-09-05 | 6ccd998 | [260905-kfv-extract-an-internal-sqlscan-module-out-o](./quick/260905-kfv-extract-an-internal-sqlscan-module-out-o/) |
+| 260916-dvy | Record post-grilling Phase 21 decisions: 21-CONTEXT D-01..D-07, discussion log, ROADMAP Phase 21/22 notes, ADR 0002 (one outbox, one sender lock), glossary terms Outbox/Pending event/Flush. Docs only. | 2026-09-16 | 478f5eb | [260916-dvy-record-post-grilling-phase-21-decisions-](./quick/260916-dvy-record-post-grilling-phase-21-decisions-/) |
+| 27 | Fold Phase 22 grilling-session decisions (D-11–D-26) into 22-CONTEXT, ROADMAP Phase 22/23 notes + deploy sequencing, REQUIREMENTS DGST-05/15, STATE, and CONTEXT.md glossary. Docs only. | 2026-09-16 | 4e4e434 | — |
+| 260916-wao | Close T-22-15 (22-SECURITY.md, blocking) / CR-01 (22-REVIEW.md): `buildDigestEmbed` now caps the whole Description at Discord's 4096-rune limit, truncating on a full line boundary and appending a "... N more events" note; `SendDigestIfDue` still acks every event id in the batch (rendered or truncated-out), closing the self-sustaining retry loop. Interim guard only — DGST-12's full multi-message split stays Phase 23's job. `go vet`/`golangci-lint`/full test suite/`make coverage-gate` (91.38%) all clean; `/gsd-secure-phase 22` still needs a re-run to flip 22-SECURITY.md's frontmatter. | 2026-09-16 | 741dc93 | [260916-wao-add-an-interim-truncate-and-ack-guard-fo](./quick/260916-wao-add-an-interim-truncate-and-ack-guard-fo/) |
+| 260917-mfa | Fix a data race in `TestDigestScheduler_CheckError_LoggedAndLoopContinues` (internal/notifier/scheduler_test.go) caught by `go test -race` in CI, blocking the Phase 22 UAT smoke test: added a mutex-guarded `syncBuffer`/`newSyncTestLogger` local to the file, and moved the test's `Stop()` call (error checked) ahead of its log-buffer assertions, since `Stop` itself also logs and its completed drain is the only real happens-before edge proving the loop goroutine is done writing. Reproduced RED under WSL2 first; 50 consecutive `-race` iterations clean after the fix, plus 20 of the whole test family and one full-package `-race` run. No production code or shared test helpers touched. CI re-run 35276004417 confirmed `test` green and `build-scan` unblocked. | 2026-09-17 | 58ada7a | [260917-mfa-fix-a-data-race-in-internal-notifier-sch](./quick/260917-mfa-fix-a-data-race-in-internal-notifier-sch/) |
 
 ### Roadmap Evolution
 
@@ -368,6 +410,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 - v1.4 milestone opened (2026-09-09): Phases 18-19 added — Backend (Readiness, Poll-Run History & Status API) and Frontend (System View). Phase numbering continued from 17 (deferred, archived, still carried forward) rather than resetting. Deliberately a two-phase split: the research's 18.1-18.4 breakdown is plan-level wave structure inside Phase 18, not separate roadmap phases, and the 18/19 boundary is the frozen `/status` JSON contract.
 
 - v1.5 milestone opened (2026-09-11): Phases 20-23 added — Digest Settings & Operator Control, Real-Time ↔ Digest Mutual Exclusion, Scheduled Digest Send, Digest Readability & Discord Limits. Phase numbering continued from 19. Two deliberate deviations from the research's five-phase proposal: its inert "Digest Foundation" phase was folded into the settings/UI phase, and the mutual-exclusion gate was moved *ahead* of the digest sender (an un-gated real-time drain empties the outbox every poll cycle, which would make the sender unverifiable and the digest look broken rather than duplicated).
+- Phase 21 context revised (2026-09-16) after a `/grill-with-docs` pass: the settings read now fails closed (reversing the 2026-09-11 fail-open lock), all outbox sends share the `notifying` lock (ADR 0002, which constrains Phase 22's digest send to a `Notifier` method), the mode is re-read before each send, staleness is anchored to `created_at`, logging happens only on mode changes, `SettingsReader` is a required argument, and SPA helper text is back in scope. See `21-CONTEXT.md` D-01..D-07.
 
 ## Deferred Items
 
@@ -389,11 +432,10 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-13T22:35:04.103Z
-Stopped at: Phase 20 complete, ready to plan Phase 21
+Last session: 2026-09-18T15:02:03.145Z
+Stopped at: Phase 23 complete — all phases complete
 Resume file: None
 
 ## Operator Next Steps
 
-- Review `.planning/ROADMAP.md` (Phases 20-23) and confirm the phase split
-- Run `/gsd-ui-phase 20` (Phase 20 carries a UI hint), then `/gsd-plan-phase 20`
+- Start the next milestone with /gsd-new-milestone

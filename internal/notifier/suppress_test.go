@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 )
 
@@ -128,45 +130,56 @@ func TestStaleReleaseDate(t *testing.T) {
 }
 
 // TestNotifierSuppresses_WiresMaxAgeDays proves suppresses actually consults
-// n.maxAgeDays and today's date, not just staleReleaseDate in isolation --
-// the table test above pins the predicate, this pins the wiring. Cases use
-// wide day offsets (never the exact boundary) so no assertion can flake on
-// a midnight straddle, since suppresses reads time.Now() internally.
+// n.maxAgeDays and ev.CreatedAt (D-02), not just staleReleaseDate in
+// isolation -- the table test above pins the predicate, this pins the
+// wiring. Every case is computed relative to a single fixed anchor instant,
+// so no assertion can flake on a midnight straddle even at the exact slack
+// boundary D-02 introduces.
 func TestNotifierSuppresses_WiresMaxAgeDays(t *testing.T) {
+	anchor := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
 	day := func(offset int) *string {
-		s := time.Now().UTC().AddDate(0, 0, offset).Format(time.DateOnly)
+		s := anchor.AddDate(0, 0, offset).Format(time.DateOnly)
 		return &s
+	}
+	createdAt := func(t time.Time) pgtype.Timestamptz {
+		return pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
 	tests := []struct {
 		name         string
 		maxAgeDays   int
+		createdAt    time.Time
 		releaseDate  *string
 		wantSuppress bool
 	}{
 		{
 			name:         "default window delivers a release from yesterday",
 			maxAgeDays:   defaultMaxReleaseAgeDays,
+			createdAt:    anchor,
 			releaseDate:  day(-1),
 			wantSuppress: false,
 		},
 		{
 			name:         "default window suppresses a release from 30 days ago",
 			maxAgeDays:   defaultMaxReleaseAgeDays,
+			createdAt:    anchor,
 			releaseDate:  day(-30),
 			wantSuppress: true,
 		},
 		{
 			// The strict reading an operator gets from
-			// NOTIFY_MAX_RELEASE_AGE_DAYS=0: only today's releases survive.
+			// NOTIFY_MAX_RELEASE_AGE_DAYS=0: only a release dated today (or,
+			// per D-02's slack, yesterday) survives.
 			name:         "zero window suppresses a release from 3 days ago",
 			maxAgeDays:   0,
+			createdAt:    anchor,
 			releaseDate:  day(-3),
 			wantSuppress: true,
 		},
 		{
 			name:         "zero window still delivers a release dated today",
 			maxAgeDays:   0,
+			createdAt:    anchor,
 			releaseDate:  day(0),
 			wantSuppress: false,
 		},
@@ -176,19 +189,57 @@ func TestNotifierSuppresses_WiresMaxAgeDays(t *testing.T) {
 			// is read rather than a constant being applied.
 			name:         "wide window delivers a release from 30 days ago",
 			maxAgeDays:   365,
+			createdAt:    anchor,
 			releaseDate:  day(-30),
 			wantSuppress: false,
+		},
+		{
+			// D-02, the point of the change: an event detected 60 days ago
+			// with a release dated 2 days before its own created_at is
+			// delivered -- fresh relative to when it was detected. Under a
+			// wall-clock anchor this would be suppressed.
+			name:         "an event detected 60 days ago with a release just before its own created_at is delivered",
+			maxAgeDays:   defaultMaxReleaseAgeDays,
+			createdAt:    anchor.AddDate(0, 0, -60),
+			releaseDate:  strPtr(anchor.AddDate(0, 0, -62).Format(time.DateOnly)),
+			wantSuppress: false,
+		},
+		{
+			// The pre-fix backlog guard survives the re-anchor: a 2015
+			// release is old relative to its own created_at, not merely
+			// relative to now.
+			name:         "a pre-fix backlog row detected 60 days ago with a 2015 release date is still suppressed",
+			maxAgeDays:   defaultMaxReleaseAgeDays,
+			createdAt:    anchor.AddDate(0, 0, -60),
+			releaseDate:  strPtr("2015-05-21"),
+			wantSuppress: true,
+		},
+		{
+			// D-02's 1-day slack, inclusive edge: created_at minus
+			// (maxAgeDays + 1) days is delivered.
+			name:         "a release dated exactly on the slack boundary is delivered",
+			maxAgeDays:   7,
+			createdAt:    anchor,
+			releaseDate:  strPtr(anchor.AddDate(0, 0, -8).Format(time.DateOnly)),
+			wantSuppress: false,
+		},
+		{
+			name:         "a release one day beyond the slack boundary is suppressed",
+			maxAgeDays:   7,
+			createdAt:    anchor,
+			releaseDate:  strPtr(anchor.AddDate(0, 0, -9).Format(time.DateOnly)),
+			wantSuppress: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			n := New(nil, nil, 0, WithMaxReleaseAgeDays(tt.maxAgeDays))
-			got := n.suppresses(sqlc.Event{ReleaseDate: tt.releaseDate})
+			n := New(nil, nil, nil, 0, WithMaxReleaseAgeDays(tt.maxAgeDays))
+			got := n.suppresses(sqlc.Event{ReleaseDate: tt.releaseDate, CreatedAt: createdAt(tt.createdAt)})
 			if got != tt.wantSuppress {
 				verb := map[bool]string{true: "suppressed", false: "delivered"}
-				t.Fatalf("suppresses(release_date=%s) with maxAgeDays=%d was %s, want %s",
-					fmtDate(tt.releaseDate), tt.maxAgeDays, verb[got], verb[tt.wantSuppress])
+				t.Fatalf("suppresses(release_date=%s, created_at=%s) with maxAgeDays=%d was %s, want %s",
+					fmtDate(tt.releaseDate), tt.createdAt.Format(time.DateOnly), tt.maxAgeDays, verb[got], verb[tt.wantSuppress])
 			}
 		})
 	}
@@ -200,7 +251,7 @@ func TestNotifierSuppresses_WiresMaxAgeDays(t *testing.T) {
 // would not fail any other test in this package, since every other case
 // passes an explicit option.
 func TestNewDefaultsMaxReleaseAgeDays(t *testing.T) {
-	if got := New(nil, nil, 0).maxAgeDays; got != defaultMaxReleaseAgeDays {
+	if got := New(nil, nil, nil, 0).maxAgeDays; got != defaultMaxReleaseAgeDays {
 		t.Fatalf("New(...).maxAgeDays = %d, want defaultMaxReleaseAgeDays (%d)", got, defaultMaxReleaseAgeDays)
 	}
 }

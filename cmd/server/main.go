@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // D-23/DGST-07: the Alpine runtime image ships no zoneinfo, so the tzdata the digest scheduler resolves against must be embedded in the binary.
 
 	"golang.org/x/time/rate"
 
@@ -248,11 +249,33 @@ func run(ctx context.Context) error {
 	// Phase 18.1; the store is wired but inert this phase.
 	runs := pollruns.NewStore()
 
+	// D-23/DGST-07: resolve the digest schedule's zone once, fail-fast --
+	// there is no fallback branch and no default location substituted on
+	// failure. A zone that will not load is a boot failure, not a
+	// degraded-but-running state, because a silently-wrong schedule is
+	// indistinguishable from a correct one and the operator would never be
+	// told (D-23). A successful resolution logs exactly one Info record
+	// carrying the zone name and its current offset; plan 22-04's
+	// build-scan CI step greps the running container's boot log for this
+	// exact message string, so it is a literal contract -- do not reword it
+	// here without updating that step too.
+	loc, err := time.LoadLocation(settings.ZoneName)
+	if err != nil {
+		return fmt.Errorf("load digest zone %q: %w", settings.ZoneName, err)
+	}
+	logger.Info("digest zone resolved",
+		slog.String("zone", loc.String()),
+		slog.String("offset", time.Now().In(loc).Format("-07:00")),
+	)
+
 	// settingsStore backs GET/PUT /settings/notifications (DGST-01, DGST-03)
 	// -- its own sqlc.New(pool) instance, matching this file's existing
 	// idiom of one stateless sqlc.Queries wrapper per consumer (store,
-	// detector, eventsStore above).
-	settingsStore := settings.NewService(sqlc.New(pool))
+	// detector, eventsStore above). loc is what Service.Update's D-14
+	// re-anchor computes MostRecentSlot against, and what plan 22-02's
+	// notifier.WithLocation/DigestScheduler further down reuse -- one
+	// resolved zone for the whole composition root, never a second load.
+	settingsStore := settings.NewService(sqlc.New(pool), loc)
 
 	// WithAuthGate engages the instance passphrase gate (GATE-01..06) when
 	// INSTANCE_PASSPHRASE is set; with it empty the option is inert and every
@@ -296,7 +319,23 @@ func run(ctx context.Context) error {
 	// nil-checks it) rather than branching on cfg.DiscordWebhookURL here. A
 	// third sqlc.New(pool) instance, matching store/detector's own pattern
 	// above -- sqlc.Queries is a stateless wrapper over the shared pool.
-	notif := notifier.Select(cfg.DiscordWebhookURL, sqlc.New(pool), nil, logger, notifier.WithMaxReleaseAgeDays(cfg.NotifyMaxReleaseAgeDays))
+	// settingsStore is the same instance httpserver.WithSettings reads/writes
+	// through above, so a digest toggle in the SPA is exactly what the
+	// notifier's gate observes on its next pass (D-05). WithLocation(loc)
+	// (plan 22-02, D-18) is what SendDigestIfDue computes digest slots
+	// against -- the same zone settingsStore's re-anchor already uses.
+	notif := notifier.Select(cfg.DiscordWebhookURL, sqlc.New(pool), settingsStore, nil, logger, notifier.WithMaxReleaseAgeDays(cfg.NotifyMaxReleaseAgeDays), notifier.WithLocation(loc))
+
+	// digestSched drives notif's SendDigestIfDue on D-09's fixed 5-minute
+	// due-check interval (D-18). Built from notif (the Sink), never from a
+	// concrete *notifier.Notifier and never behind a type assertion --
+	// NoOp implements SendDigestIfDue precisely so an unset
+	// DISCORD_WEBHOOK_URL leaves the scheduler running and inert, with no
+	// branch here. Started alongside the poller below, using the same run
+	// context, so an in-flight digest is bounded by the identical shutdown
+	// signal a poll cycle already is.
+	digestSched := notifier.NewDigestScheduler(notif, logger, time.Now)
+	digestSched.Start(ctx)
 
 	// pollr reuses the same mbClient/dzClient instances handed to
 	// httpserver.New above rather than constructing its own -- sharing the
@@ -321,6 +360,38 @@ func run(ctx context.Context) error {
 		defer cancel()
 		if err := pollr.Stop(drainCtx); err != nil {
 			logger.Error("poller drain failed", "poller_error", err.Error())
+		}
+	}()
+
+	// Deferred AFTER the poller's own drain defer immediately above (and
+	// still after defer pool.Close() at the top of run()) -- Go's LIFO
+	// defer ordering is what runs this digest drain BEFORE the poller
+	// drain, and both before the pool closes (plan 22-02, D-18). An
+	// in-flight digest still holding a pooled connection when the pool
+	// closes would surface as an intermittent connection error at
+	// shutdown that reads like data corruption rather than a shutdown
+	// race (03-RESEARCH.md pitfall 4, the same failure mode the poller
+	// drain above already guards against). Do not move this defer above
+	// defer pool.Close(): doing so would silently reverse the
+	// drain-before-close ordering it depends on. Reuses pollDrainTimeout
+	// rather than a second constant -- the reasoning is identical and a
+	// second knob with the same value is noise.
+	defer func() {
+		drainCtx, cancel := context.WithTimeout(context.Background(), pollDrainTimeout)
+		defer cancel()
+		if err := digestSched.Stop(drainCtx); err != nil {
+			// D-27: Stop only ever returns ctx.Err() here (a fresh
+			// WithTimeout, never externally cancelled), so this branch means
+			// exactly one thing -- the drain deadline was reached with a
+			// digest run still in flight. At maxDigestChunks (20) a large
+			// burst runs roughly 25-40s, so a deploy landing mid-digest
+			// predictably hits pollDrainTimeout (10s); that outcome is
+			// correct (the chunk loop's own boundary check already left the
+			// remainder pending and neither settings column advanced), not a
+			// failure. Warn keeps it visible at the default level without
+			// training the operator to ignore the one log they'd need to
+			// trust if the scheduler genuinely wedged.
+			logger.Warn("digest scheduler drain deadline reached: remainder stays pending for the next check", "scheduler_error", err.Error())
 		}
 	}()
 

@@ -16,12 +16,26 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/httpserver"
 	"github.com/danielrpof/drop-tracker/internal/settings"
 	"github.com/danielrpof/drop-tracker/internal/testutil"
 )
+
+// mustLoadNYForSettings loads the fixed digest zone (D-01) NewService now
+// requires as a positional argument, failing the test on any load error.
+// Named distinctly from any sibling _test.go helper in this package, since
+// package httpserver_test already has other file-local test fixtures.
+func mustLoadNYForSettings(t *testing.T) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(settings.ZoneName)
+	if err != nil {
+		t.Fatalf("time.LoadLocation(%q): %v", settings.ZoneName, err)
+	}
+	return loc
+}
 
 // settingsBody mirrors the fields of settingsResponse this test asserts on,
 // decoded by field name rather than raw string comparison.
@@ -39,7 +53,7 @@ func TestSettings_RoundTrip(t *testing.T) {
 	// internal/notifier's own reason for the same helper).
 	pool := testutil.NewIsolatedTestPool(t, "settings_http_test")
 
-	store := settings.NewService(sqlc.New(pool))
+	store := settings.NewService(sqlc.New(pool), mustLoadNYForSettings(t))
 	srv := httpserver.New(pool, stubStore{}, stubEventsStore{}, nil, discardLogger(), httpserver.WithSettings(store))
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
@@ -86,20 +100,37 @@ func TestSettings_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT /settings/notifications: %v", err)
 	}
-	var updated settingsBody
 	if putResp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", putResp.StatusCode, http.StatusOK)
 	}
-	if err := json.NewDecoder(putResp.Body).Decode(&updated); err != nil {
-		t.Fatalf("decode PUT response body: %v", err)
+	putRaw, err := io.ReadAll(putResp.Body)
+	if err != nil {
+		t.Fatalf("read PUT response body: %v", err)
 	}
 	_ = putResp.Body.Close()
+
+	var updated settingsBody
+	if err := json.Unmarshal(putRaw, &updated); err != nil {
+		t.Fatalf("decode PUT response body: %v", err)
+	}
 
 	if updated.DigestEnabled != true {
 		t.Fatalf("digest_enabled = %v, want true", updated.DigestEnabled)
 	}
 	if updated.DigestCadence != "weekly" {
 		t.Fatalf("digest_cadence = %q, want %q", updated.DigestCadence, "weekly")
+	}
+
+	// The wire contract stays byte-identical to before this plan: D-13 keeps
+	// digest_last_slot_at off the operator-facing surface, so the decoded
+	// object must carry exactly the four pre-existing keys and no fifth
+	// slot key.
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(putRaw, &rawFields); err != nil {
+		t.Fatalf("decode PUT response body as raw map: %v", err)
+	}
+	if len(rawFields) != 4 {
+		t.Fatalf("PUT response body has %d keys, want exactly 4: %v", len(rawFields), rawFields)
 	}
 
 	// A second GET reads the change back from Postgres, not from any
@@ -133,7 +164,7 @@ func TestSettings_RoundTrip(t *testing.T) {
 func newSettingsRejectionServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	pool := testutil.NewIsolatedTestPool(t, "settings_http_test")
-	store := settings.NewService(sqlc.New(pool))
+	store := settings.NewService(sqlc.New(pool), mustLoadNYForSettings(t))
 	srv := httpserver.New(pool, stubStore{}, stubEventsStore{}, nil, discardLogger(), httpserver.WithSettings(store))
 	t.Cleanup(srv.Close)
 	ts := httptest.NewServer(srv.Router())

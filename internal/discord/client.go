@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -29,6 +30,13 @@ const defaultTimeout = 10 * time.Second
 // const) so client_test.go can shrink it to make the clamp's regression
 // test fast and deterministic rather than waiting out a real 30s window.
 var maxRetryAfter = 30 * time.Second
+
+// ErrRateLimited identifies a 429 that arrived on the retry attempt itself
+// -- the one permitted retry (D-08) was already spent. Distinct from the
+// generic unexpected-status error every other non-204 response returns, so
+// a caller can tell "rate limited after retry" apart from a 500 via
+// errors.Is (D-28).
+var ErrRateLimited = errors.New("discord: rate limited after retry")
 
 // Embed is Discord's webhook embed object -- the fields this project uses.
 // Color is a decimal RGB int, never a hex string; Discord ignores a string
@@ -168,6 +176,13 @@ func (c *Client) sendAttempt(ctx context.Context, embed Embed, allowRetry bool) 
 			return ctx.Err()
 		}
 		return c.sendAttempt(ctx, embed, false)
+	}
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		// The retry itself came back 429 -- allowRetry is false here, so
+		// this is reached only once the one permitted retry is spent.
+		// Carries the status code and nothing else (no body).
+		return fmt.Errorf("discord: send webhook: unexpected status %d: %w", resp.StatusCode, ErrRateLimited)
 	}
 
 	// Never echo the response body -- only the status code (mirrors

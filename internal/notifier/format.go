@@ -79,7 +79,7 @@ func formatNewRelease(ev sqlc.Event) discord.Embed {
 	embed := discord.Embed{
 		Title: truncateRunes(emojiNewRelease+" "+ev.Title, titleLimit),
 		Color: colorNewRelease,
-		URL:   newReleaseURL(ev.Source, ev.ExternalID),
+		URL:   eventURL(ev),
 	}
 	embed.Fields = appendField(embed.Fields, "Artist", ev.ArtistName)
 	if ev.ReleaseDate != nil {
@@ -101,7 +101,7 @@ func formatGuestFeature(ev sqlc.Event) discord.Embed {
 	embed := discord.Embed{
 		Title: truncateRunes(emojiGuestFeature+" "+ev.Title, titleLimit),
 		Color: colorGuestFeature,
-		URL:   musicBrainzRecordingURL(ev.ExternalID),
+		URL:   eventURL(ev),
 	}
 	embed.Fields = appendField(embed.Fields, "Artist", ev.ArtistName)
 	return embed
@@ -113,7 +113,7 @@ func formatDeluxeChange(ev sqlc.Event) discord.Embed {
 	embed := discord.Embed{
 		Title: truncateRunes(emojiDeluxeChange+" "+ev.Title, titleLimit),
 		Color: colorDeluxeChange,
-		URL:   musicBrainzReleaseURL(ev.ExternalID),
+		URL:   eventURL(ev),
 	}
 	embed.Fields = appendField(embed.Fields, "Tracks", tracksFieldValue(ev.PreviousTrackCount, ev.TrackCount))
 	if ev.CoverArtUrl != nil && *ev.CoverArtUrl != "" {
@@ -150,6 +150,24 @@ func appendField(fields []discord.EmbedField, name, value string) []discord.Embe
 		return fields
 	}
 	return append(fields, discord.EmbedField{Name: name, Value: value})
+}
+
+// eventURL is the single switch that decides every event's outbound link,
+// shared by formatEmbed's three formatters and the digest line builder
+// (T-22-14, extracted from three separate call sites per plan 22-03). Every
+// branch builds its URL from external_id, never from Title or ArtistName
+// (community-editable free text never builds a URL, T-05-06).
+func eventURL(ev sqlc.Event) string {
+	switch ev.EventType {
+	case eventTypeNewRelease:
+		return newReleaseURL(ev.Source, ev.ExternalID)
+	case eventTypeGuestFeature:
+		return musicBrainzRecordingURL(ev.ExternalID)
+	case eventTypeDeluxeChange:
+		return musicBrainzReleaseURL(ev.ExternalID)
+	default:
+		return ""
+	}
 }
 
 // newReleaseURL branches on ev.Source (the two legal values enforced by the

@@ -6,6 +6,7 @@ package notifier
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/discord"
+	"github.com/danielrpof/drop-tracker/internal/settings"
 )
 
 // defaultSpacing is the inter-send pause within one NotifyPending pass (D-07).
@@ -44,11 +46,25 @@ type Sender interface {
 
 var _ Sender = (*discord.Client)(nil)
 
+// SettingsReader is the narrow digest-mode seam NotifyPending gates on,
+// declared in the consumer (D-05) rather than imported from settings.Store
+// so a test can substitute a fake with no DB.
+type SettingsReader interface {
+	Get(ctx context.Context) (settings.Settings, error)
+}
+
+var _ SettingsReader = (*settings.Service)(nil)
+
 // Sink is what poller.Notifier is declared against -- re-declared here as the
 // type both Notifier and NoOp implement, so notifier.Select's return type does
-// not force callers to import poller.Notifier.
+// not force callers to import poller.Notifier. SendDigestIfDue (D-18) is
+// declared here rather than behind a type assertion so NoOp's inert
+// implementation covers the digest path the same way it already covers
+// NotifyPending -- an unset DISCORD_WEBHOOK_URL leaves the digest scheduler
+// running and inert with no branch at any call site.
 type Sink interface {
 	NotifyPending(ctx context.Context, logger *slog.Logger) error
+	SendDigestIfDue(ctx context.Context, logger *slog.Logger, now time.Time) error
 }
 
 var _ Sink = (*Notifier)(nil)
@@ -61,16 +77,33 @@ type NoOp struct{}
 // NotifyPending on NoOp issues no request and touches no row.
 func (NoOp) NotifyPending(ctx context.Context, logger *slog.Logger) error { return nil }
 
+// SendDigestIfDue on NoOp issues no request and touches no row, mirroring
+// NotifyPending (D-18).
+func (NoOp) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now time.Time) error {
+	return nil
+}
+
 // Notifier drains the events outbox: fetch pending rows, format each to a
 // discord.Embed, send serially with spacing, mark notified on success. notifying
 // is D-06's shared CAS-skip guard -- one guard for both poll cycles, since
 // ListUnnotified is a global query they could otherwise race.
 type Notifier struct {
-	q          sqlc.Querier
-	sender     Sender
-	spacing    time.Duration
-	maxAgeDays int
-	notifying  atomic.Bool
+	q              sqlc.Querier
+	sender         Sender
+	settingsReader SettingsReader
+	spacing        time.Duration
+	maxAgeDays     int
+	loc            *time.Location
+	notifying      atomic.Bool
+
+	// lastDigestMode/lastDigestModeSet are D-01's mode-transition logging
+	// state, read and written only by the goroutine currently holding the
+	// notifying CAS lock -- plain fields, not atomics, are race-free here
+	// because notifying.Store(false) at the end of one pass happens-before
+	// the next successful CompareAndSwap (sync/atomic is sequentially
+	// consistent).
+	lastDigestMode    bool
+	lastDigestModeSet bool
 }
 
 // Option customises a Notifier at construction, mirroring detection.Option so
@@ -83,10 +116,19 @@ func WithMaxReleaseAgeDays(days int) Option {
 	return func(n *Notifier) { n.maxAgeDays = days }
 }
 
-// New builds a Notifier backed by q for the outbox, sender for delivery, and
-// spacing between consecutive sends, mirroring detection.New.
-func New(q sqlc.Querier, sender Sender, spacing time.Duration, opts ...Option) *Notifier {
-	n := &Notifier{q: q, sender: sender, spacing: spacing, maxAgeDays: defaultMaxReleaseAgeDays}
+// WithLocation sets the zone SendDigestIfDue computes digest slots against
+// (D-18). Without it, loc stays nil and SendDigestIfDue refuses to send --
+// there is no substitute location on the send path (D-23).
+func WithLocation(loc *time.Location) Option {
+	return func(n *Notifier) { n.loc = loc }
+}
+
+// New builds a Notifier backed by q for the outbox, sender for delivery,
+// settingsReader for the digest-mode gate (D-05: required, not an Option --
+// a forgotten option would silently ship an ungated notifier), and spacing
+// between consecutive sends, mirroring detection.New.
+func New(q sqlc.Querier, sender Sender, settingsReader SettingsReader, spacing time.Duration, opts ...Option) *Notifier {
+	n := &Notifier{q: q, sender: sender, settingsReader: settingsReader, spacing: spacing, maxAgeDays: defaultMaxReleaseAgeDays}
 	for _, opt := range opts {
 		opt(n)
 	}
@@ -96,12 +138,12 @@ func New(q sqlc.Querier, sender Sender, spacing time.Duration, opts ...Option) *
 // Select returns the Sink main.go wires into poller.New: D-10's gate behind an
 // exported function so it is unit-testable without booting the process. Empty
 // webhookURL logs one Info line and returns NoOp{}; otherwise a real Notifier.
-func Select(webhookURL string, q sqlc.Querier, httpClient *http.Client, logger *slog.Logger, opts ...Option) Sink {
+func Select(webhookURL string, q sqlc.Querier, settingsReader SettingsReader, httpClient *http.Client, logger *slog.Logger, opts ...Option) Sink {
 	if webhookURL == "" {
 		logger.Info("discord notifications disabled: DISCORD_WEBHOOK_URL not set")
 		return NoOp{}
 	}
-	return New(q, discord.NewClient(webhookURL, httpClient), defaultSpacing, opts...)
+	return New(q, discord.NewClient(webhookURL, httpClient), settingsReader, defaultSpacing, opts...)
 }
 
 // suppresses reports whether ev must be acked without sending, because its
@@ -112,8 +154,22 @@ func Select(webhookURL string, q sqlc.Querier, httpClient *http.Client, logger *
 // An absent or partial date SUPPRESSES -- conservative by design, opposite the
 // usual "err toward an extra alert", because an undated row is absence of
 // evidence, not evidence of freshness.
+//
+// The cutoff is anchored to ev.CreatedAt, not time.Now() (D-02): time an
+// event spends pending -- a digest window, a long standdown, a weekly
+// cadence -- must not age it out of delivery. Pre-fix backlog rows still
+// suppress, because their release dates are old relative to their own
+// created_at, not merely relative to now. The extra day is D-02's slack:
+// created_at is the database's own now() at insert, a different clock and
+// strictly later than the now() detection captured, so without it a
+// release dated exactly on the cutoff day could clear detection and then
+// be suppressed at delivery.
 func (n *Notifier) suppresses(ev sqlc.Event) bool {
-	cutoff := time.Now().UTC().AddDate(0, 0, -n.maxAgeDays).Format(time.DateOnly)
+	anchor := time.Now()
+	if ev.CreatedAt.Valid {
+		anchor = ev.CreatedAt.Time
+	}
+	cutoff := anchor.UTC().AddDate(0, 0, -n.maxAgeDays-1).Format(time.DateOnly)
 	return staleReleaseDate(ev.ReleaseDate, cutoff)
 }
 
@@ -146,6 +202,49 @@ func markNotified(ctx context.Context, q sqlc.Querier, id int64) (int64, error) 
 	return q.MarkNotified(opCtx, id)
 }
 
+// readSettings calls r.Get under the same dbOpTimeout bound as
+// listUnnotified/markNotified -- the only way NotifyPending reads digest
+// settings (D-03), so an unbounded read can never park the pass while it
+// holds the notifying guard.
+func readSettings(ctx context.Context, r SettingsReader) (settings.Settings, error) {
+	opCtx, cancel := context.WithTimeout(ctx, dbOpTimeout)
+	defer cancel()
+	return r.Get(opCtx)
+}
+
+// logSettingsReadFailure applies D-03's fail-closed posture identically
+// whether the read happened at the top of the pass or before an individual
+// send: silent on the caller's own context cancellation (not a delivery
+// incident), otherwise exactly one Warn with the shared literal.
+func logSettingsReadFailure(ctx context.Context, logger *slog.Logger, err error) {
+	if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return
+	}
+	logger.Warn("skipping notify pass: digest settings read failed",
+		slog.String("error", err.Error()),
+	)
+}
+
+// observeDigestMode is the single place D-01's transition line is emitted:
+// it logs one Info record only when the observed mode differs from the last
+// one recorded (or none has been recorded yet, so a restart always shows the
+// operative mode), then updates the last-observed mode. pendingCount is
+// included only when havePendingCount is true, so the on-to-off line can
+// carry the count about to be flushed with no COUNT query. This is a
+// logging-only record: nothing in the send/ack decision may read it.
+func (n *Notifier) observeDigestMode(logger *slog.Logger, enabled bool, pendingCount int, havePendingCount bool) {
+	if n.lastDigestModeSet && n.lastDigestMode == enabled {
+		return
+	}
+	fields := []any{slog.Bool("digest_enabled", enabled)}
+	if havePendingCount {
+		fields = append(fields, slog.Int("pending_count", pendingCount))
+	}
+	logger.Info("digest mode changed", fields...)
+	n.lastDigestMode = enabled
+	n.lastDigestModeSet = true
+}
+
 // NotifyPending drains every currently-pending events row in ListUnnotified's
 // order, sending each as one Discord message and marking it notified on success.
 // The notifying CAS guard mirrors poller's mbRunning/dzRunning (CAS-skip, not a
@@ -159,10 +258,30 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 	}
 	defer n.notifying.Store(false)
 
+	// D-04: the digest-mode read is the pass's first decision, before any row
+	// is fetched -- never a post-hoc filter on rows already listed. D-03:
+	// fail closed on a read error rather than risk flushing a whole digest
+	// backlog as individual messages on one transient outage.
+	cfg, err := readSettings(ctx, n.settingsReader)
+	if err != nil {
+		logSettingsReadFailure(ctx, logger, err)
+		return nil
+	}
+	if cfg.DigestEnabled {
+		// No count: the pass never listed, so nothing is being flushed.
+		n.observeDigestMode(logger, true, 0, false)
+		return nil
+	}
+
 	events, err := listUnnotified(ctx, n.q)
 	if err != nil {
 		return fmt.Errorf("notifier: list unnotified: %w", err)
 	}
+	// The on-to-off transition line's pending count is len(events) here --
+	// no COUNT query, no sqlc change (D-01). This ordering is load-bearing:
+	// it is what lets the line carry the count with what the pass already
+	// fetched.
+	n.observeDigestMode(logger, false, len(events), true)
 
 	suppressed := 0
 	for i, ev := range events {
@@ -175,6 +294,23 @@ func (n *Notifier) NotifyPending(ctx context.Context, logger *slog.Logger) error
 			suppressed++
 			continue
 		}
+
+		// D-04: re-read the mode before every send, not once per pass -- a
+		// toggle to digest mode landing mid-pass must stop the pass at the
+		// next send boundary, leaving the rest of the batch pending. The
+		// suppression ack above is exempt: it issues no Discord request, so
+		// it can neither duplicate a message nor violate the mode.
+		cfg, err := readSettings(ctx, n.settingsReader)
+		if err != nil {
+			logSettingsReadFailure(ctx, logger, err)
+			return nil
+		}
+		if cfg.DigestEnabled {
+			// The count left pending is everything from this row onward.
+			n.observeDigestMode(logger, true, len(events)-i, true)
+			return nil
+		}
+
 		embed := formatEmbed(ev)
 		if err := n.sender.Send(ctx, embed); err != nil {
 			logger.Error("notify send failed",
