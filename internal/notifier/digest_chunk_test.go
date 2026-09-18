@@ -8,6 +8,7 @@ package notifier
 import (
 	"fmt"
 	"math/rand"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -95,7 +96,9 @@ func TestChunkDigest_UnderBudgetSingleChunk(t *testing.T) {
 
 // TestChunkDigest_OverBudgetMultipleChunks proves a synthetic batch large
 // enough to need several chunks returns more than one chunk, every chunk's
-// description is at most chunkContentBudget runes, and no chunk ends
+// description is at most discordDescriptionLimit runes (chunkContentBudget
+// plus D-20's reserved overhead, since this single-group batch triggers
+// splitOversizedGroup's continuation-note stamping), and no chunk ends
 // mid-line.
 func TestChunkDigest_OverBudgetMultipleChunks(t *testing.T) {
 	groups := buildDigestGroups(syntheticEvents(200))
@@ -105,8 +108,8 @@ func TestChunkDigest_OverBudgetMultipleChunks(t *testing.T) {
 		t.Fatalf("len(chunks) = %d, want > 1", len(chunks))
 	}
 	for i, c := range chunks {
-		if rc := utf8.RuneCountInString(c.description); rc > chunkContentBudget {
-			t.Fatalf("chunk %d has %d runes, want <= %d", i, rc, chunkContentBudget)
+		if rc := utf8.RuneCountInString(c.description); rc > discordDescriptionLimit {
+			t.Fatalf("chunk %d has %d runes, want <= %d", i, rc, discordDescriptionLimit)
 		}
 		if !strings.HasSuffix(c.description, "\n") {
 			t.Fatalf("chunk %d description = %q, want it to end on a newline (no partial line)", i, c.description)
@@ -228,7 +231,7 @@ func makeSyntheticGroup(title string, startID int64, n, lineLen int) digestGroup
 	for i := 0; i < n; i++ {
 		lines[i] = digestEntry{text: strings.Repeat("x", lineLen-1) + "\n", id: startID + int64(i)}
 	}
-	return digestGroup{heading: "**" + title + "**\n", lines: lines}
+	return digestGroup{title: title, heading: "**" + title + "**\n", lines: lines}
 }
 
 // containsID reports whether id is present in ids.
@@ -383,6 +386,131 @@ func TestChunkDigest_NoEmptyChunkNoEmptyIDs(t *testing.T) {
 		}
 		if len(c.ids) == 0 {
 			t.Fatalf("chunk %d has an empty ids slice", i)
+		}
+	}
+}
+
+// TestContinuationHeading_ExactWording pins D-09's exact locked shape.
+func TestContinuationHeading_ExactWording(t *testing.T) {
+	want := "**Guest Features (continued)**"
+	if got := continuationHeading("Guest Features"); got != want {
+		t.Fatalf("continuationHeading(%q) = %q, want %q", "Guest Features", got, want)
+	}
+}
+
+// TestContinuationNote_NoDigit proves D-10's amended trailing note names no
+// message number: no digit anywhere in its output.
+func TestContinuationNote_NoDigit(t *testing.T) {
+	re := regexp.MustCompile(`^[^0-9]*$`)
+	for _, title := range []string{"New Releases", "Guest Features", "Deluxe Changes"} {
+		got := continuationNote(title)
+		if !re.MatchString(got) {
+			t.Fatalf("continuationNote(%q) = %q, want no digit anywhere", title, got)
+		}
+		if !strings.Contains(got, title) {
+			t.Fatalf("continuationNote(%q) = %q, want it to name the group", title, got)
+		}
+	}
+}
+
+// TestChunkDigest_OversizedGroupContinuationMarkersAtBothEnds proves a
+// group split across two chunks carries D-09's "(continued)" heading on
+// the resuming chunk and D-10's trailing note on the chunk it was cut
+// away from, and that the note contains no digit.
+func TestChunkDigest_OversizedGroupContinuationMarkersAtBothEnds(t *testing.T) {
+	g := makeSyntheticGroup("Guest Features", 1, 60, 100) // 6000 runes, > budget
+	chunks := chunkDigest([]digestGroup{g})
+	if len(chunks) < 2 {
+		t.Fatalf("len(chunks) = %d, want >= 2", len(chunks))
+	}
+
+	if !strings.Contains(chunks[0].description, "*Guest Features continues in the next message*") {
+		t.Fatalf("chunks[0].description = %q, want it to end with the trailing continuation note", chunks[0].description)
+	}
+	if strings.ContainsAny(chunks[0].description[strings.LastIndex(chunks[0].description, "*Guest Features continues"):], "0123456789") {
+		t.Fatalf("chunks[0].description trailing note contains a digit: %q", chunks[0].description)
+	}
+	if !strings.Contains(chunks[1].description, "**Guest Features (continued)**") {
+		t.Fatalf("chunks[1].description = %q, want it to open with the continuation heading", chunks[1].description)
+	}
+	if strings.Contains(chunks[1].description, "**Guest Features**\n") {
+		t.Fatalf("chunks[1].description = %q, must not also carry the plain (non-continuation) heading", chunks[1].description)
+	}
+}
+
+// TestChunkDigest_OversizedGroupThreeChunksBothMarkersRepeat proves a group
+// split across three chunks carries the continuation heading on chunks two
+// and three, and the trailing note on chunks one and two (not the last).
+func TestChunkDigest_OversizedGroupThreeChunksBothMarkersRepeat(t *testing.T) {
+	g := makeSyntheticGroup("Deluxe Changes", 1, 120, 100) // 12000 runes
+	chunks := chunkDigest([]digestGroup{g})
+	if len(chunks) < 3 {
+		t.Fatalf("len(chunks) = %d, want >= 3", len(chunks))
+	}
+
+	for i, c := range chunks {
+		hasNote := strings.Contains(c.description, "continues in the next message")
+		hasContinuedHeading := strings.Contains(c.description, "**Deluxe Changes (continued)**")
+		switch {
+		case i == 0:
+			if !hasNote {
+				t.Errorf("chunk 0 description = %q, want the trailing note", c.description)
+			}
+			if hasContinuedHeading {
+				t.Errorf("chunk 0 description = %q, must not carry the continuation heading (it's the group's first chunk)", c.description)
+			}
+		case i == len(chunks)-1:
+			if hasNote {
+				t.Errorf("last chunk (%d) description = %q, must not carry a trailing note -- nothing follows it", i, c.description)
+			}
+			if !hasContinuedHeading {
+				t.Errorf("last chunk (%d) description = %q, want the continuation heading", i, c.description)
+			}
+		default:
+			if !hasNote {
+				t.Errorf("middle chunk %d description = %q, want the trailing note", i, c.description)
+			}
+			if !hasContinuedHeading {
+				t.Errorf("middle chunk %d description = %q, want the continuation heading", i, c.description)
+			}
+		}
+	}
+}
+
+// TestChunkDigest_GroupBoundaryCarriesNoContinuationMarkers proves the
+// common case -- a chunk boundary falling between two whole groups -- never
+// stamps either continuation marker.
+func TestChunkDigest_GroupBoundaryCarriesNoContinuationMarkers(t *testing.T) {
+	groups := []digestGroup{
+		makeSyntheticGroup("G1", 1, 1, 1800),
+		makeSyntheticGroup("G2", 101, 1, 1800),
+		makeSyntheticGroup("G3", 201, 1, 1800),
+	}
+	chunks := chunkDigest(groups)
+	if len(chunks) < 2 {
+		t.Fatalf("len(chunks) = %d, want > 1 to exercise a real group boundary", len(chunks))
+	}
+	for i, c := range chunks {
+		if strings.Contains(c.description, "(continued)") {
+			t.Errorf("chunk %d description = %q, must not carry a continuation heading -- boundary falls between whole groups", i, c.description)
+		}
+		if strings.Contains(c.description, "continues in the next message") {
+			t.Errorf("chunk %d description = %q, must not carry a trailing note -- boundary falls between whole groups", i, c.description)
+		}
+	}
+}
+
+// TestChunkDigest_ContinuationMarkersNeverExceedBudget proves stamping
+// both continuation markers never pushes a chunk past
+// discordDescriptionLimit (D-20's reserve is what makes this true),
+// using a group deliberately sized to land just under chunkContentBudget's
+// boundary.
+func TestChunkDigest_ContinuationMarkersNeverExceedBudget(t *testing.T) {
+	g := makeSyntheticGroup("Deluxe Changes", 1, 50, 100)
+	chunks := chunkDigest([]digestGroup{g})
+	for i, c := range chunks {
+		if rc := utf8.RuneCountInString(c.description); rc > discordDescriptionLimit {
+			t.Fatalf("chunk %d has %d runes, want <= %d", i, rc, discordDescriptionLimit)
 		}
 	}
 }

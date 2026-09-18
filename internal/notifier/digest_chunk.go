@@ -69,8 +69,11 @@ type digestEntry struct {
 // digestGroup is one event-type heading plus its collated-sorted lines.
 // heading is its own string, not glued onto the first line (D-17) -- the
 // chunker needs that boundary to decide whether/how to re-stamp it when a
-// group's lines land in more than one chunk.
+// group's lines land in more than one chunk. title is the bare heading
+// text with no bold markers -- continuationHeading/continuationNote need
+// it undecorated to build their own wording (D-09/D-10).
 type digestGroup struct {
+	title   string
 	heading string
 	lines   []digestEntry
 }
@@ -109,7 +112,7 @@ func buildDigestGroups(events []sqlc.Event) []digestGroup {
 		for _, ev := range group {
 			lines = append(lines, digestEntry{text: digestLine(h.eventType, ev), id: ev.ID})
 		}
-		groups = append(groups, digestGroup{heading: "**" + h.title + "**\n", lines: lines})
+		groups = append(groups, digestGroup{title: h.title, heading: "**" + h.title + "**\n", lines: lines})
 	}
 	return groups
 }
@@ -191,18 +194,37 @@ func renderGroup(g digestGroup) (text string, ids []int64, runeLen int) {
 
 // splitOversizedGroup is D-06's whole-line-boundary fallback for the one
 // group that alone exceeds chunkContentBudget -- the pre-group-preferred
-// splitter's algorithm, unchanged, now scoped to a single group instead of
-// the full groups slice. Only the group's first line carries the heading;
-// a line whose own rendered unit still can't fit an empty chunk degrades
-// via oversizedLineNote (D-19) so the loop provably terminates and the
-// event still acks.
+// splitter's algorithm, now scoped to a single group instead of the full
+// groups slice, and stamping D-09/D-10's continuation markers at both ends
+// of every mid-group cut: the chunk being left carries continuationNote as
+// its last line, and the chunk being resumed opens with continuationHeading
+// in place of the group's ordinary heading. A chunk boundary that falls
+// between two whole groups (chunkDigest's common case) never calls this
+// function and so never carries either marker. A line whose own rendered
+// unit still can't fit an empty chunk degrades via oversizedLineNote
+// (D-19) so the loop provably terminates and the event still acks;
+// resuming is left true afterward so the (rare, nested) next line still
+// picks up the continuation heading.
 func splitOversizedGroup(g digestGroup) []digestChunk {
 	var chunks []digestChunk
 	var cur strings.Builder
 	var curIDs []int64
 	curLen := 0
+	resuming := false
 
-	flush := func() {
+	flushMidGroup := func() {
+		if curLen == 0 {
+			return
+		}
+		cur.WriteString(continuationNote(g.title))
+		chunks = append(chunks, digestChunk{description: cur.String(), ids: curIDs})
+		cur.Reset()
+		curIDs = nil
+		curLen = 0
+		resuming = true
+	}
+
+	flushFinal := func() {
 		if curLen == 0 {
 			return
 		}
@@ -213,15 +235,23 @@ func splitOversizedGroup(g digestGroup) []digestChunk {
 	}
 
 	for i, entry := range g.lines {
-		unit := entry.text
-		if i == 0 {
-			unit = g.heading + entry.text
+		heading := ""
+		switch {
+		case i == 0:
+			heading = g.heading
+		case resuming:
+			heading = continuationHeading(g.title) + "\n"
 		}
+		unit := heading + entry.text
 		n := utf8.RuneCountInString(unit)
 
 		if curLen > 0 && curLen+n > chunkContentBudget {
-			flush()
+			flushMidGroup()
+			heading = continuationHeading(g.title) + "\n"
+			unit = heading + entry.text
+			n = utf8.RuneCountInString(unit)
 		}
+		resuming = false
 
 		if curLen == 0 && n > chunkContentBudget {
 			note := oversizedLineNote()
@@ -230,6 +260,7 @@ func splitOversizedGroup(g digestGroup) []digestChunk {
 				budget = 0
 			}
 			chunks = append(chunks, digestChunk{description: truncateRunes(unit, budget) + note, ids: []int64{entry.id}})
+			resuming = true
 			continue
 		}
 
@@ -237,8 +268,32 @@ func splitOversizedGroup(g digestGroup) []digestChunk {
 		curIDs = append(curIDs, entry.id)
 		curLen += n
 	}
-	flush()
+	flushFinal()
 	return chunks
+}
+
+// continuationHeading renders D-09's "(continued)" heading, stamped at the
+// top of any chunk where a group resumes after a line-boundary split --
+// same bold style digestHeadings' plain heading uses, exact wording
+// 23-CONTEXT.md's <specifics> locks (e.g. "**Guest Features (continued)**").
+// Never passed through escapeMarkdown: title is a compile-time
+// digestHeadings literal, not event-derived text.
+func continuationHeading(title string) string {
+	return "**" + title + " (continued)**"
+}
+
+// continuationNote renders D-10's trailing note, appended as the last line
+// of the chunk a group's remaining lines are cut away from. It names the
+// group and says it continues in the next message, but never a message
+// number or total (regex-verified digit-free by its own test): the note
+// is composed and sent before the next message exists, so a failed send
+// or an expired grace window would leave a numbered pointer dangling with
+// nothing on the other end. The "(continued)" heading half is verifiable
+// at send time; this half is a best-effort forward reference only -- D-10
+// reduces that hazard, it does not remove it. Never passed through
+// escapeMarkdown, for the same reason continuationHeading is not.
+func continuationNote(title string) string {
+	return "\n*" + title + " continues in the next message*\n"
 }
 
 // digestWindowHeader renders D-03's two locked wordings: a Discord
