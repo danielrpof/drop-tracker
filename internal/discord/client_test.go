@@ -8,6 +8,7 @@ package discord
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -147,6 +148,9 @@ func TestSend_429Twice_ReturnsErrorAfterSingleRetry(t *testing.T) {
 	if got := atomic.LoadInt32(&reqCount); got != 2 {
 		t.Fatalf("request count = %d, want 2 (one original + one retry, no third request)", got)
 	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("errors.Is(err, ErrRateLimited) = false, want true (D-28): err = %v", err)
+	}
 }
 
 // TestSend_429RetryAfterClamped is the WR-04 regression guard: an
@@ -204,6 +208,61 @@ func TestSend_UnexpectedStatus_ReturnsErrorNamingOnlyTheCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "500") {
 		t.Fatalf("error = %q, want it to name status 500", err.Error())
+	}
+	if errors.Is(err, ErrRateLimited) {
+		t.Fatalf("errors.Is(err, ErrRateLimited) = true, want false for a 500 response: err = %v", err)
+	}
+}
+
+// TestSend_400_ReturnsErrorNotMatchingSentinel is the negative case for
+// D-28: a 400 is a generic unexpected-status error like a 500, never
+// ErrRateLimited.
+func TestSend_400_ReturnsErrorNotMatchingSentinel(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer ts.Close()
+
+	c := NewClient(ts.URL, ts.Client())
+	err := c.Send(context.Background(), Embed{Title: "x"})
+	if err == nil {
+		t.Fatal("Send: expected error for a 400 response")
+	}
+	if !strings.Contains(err.Error(), "400") {
+		t.Fatalf("error = %q, want it to name status 400", err.Error())
+	}
+	if errors.Is(err, ErrRateLimited) {
+		t.Fatalf("errors.Is(err, ErrRateLimited) = true, want false for a 400 response: err = %v", err)
+	}
+}
+
+// TestSend_429Exhausted_ErrorNeverLeaksBodyOrToken is the D-28 secret-hygiene
+// guard for the new sentinel branch: the returned error must not echo the
+// 429 response body or any part of the webhook URL's secret token segment.
+func TestSend_429Exhausted_ErrorNeverLeaksBodyOrToken(t *testing.T) {
+	const bodyMarker = "distinctive-429-body-marker-xyz"
+	const tokenSegment = "fake-webhook-token-abc123"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"` + bodyMarker + `","retry_after":0.01,"global":false}`))
+	}))
+	defer ts.Close()
+
+	c := NewClient(ts.URL+"/api/webhooks/123456789012345678/"+tokenSegment, ts.Client())
+	err := c.Send(context.Background(), Embed{Title: "x"})
+	if err == nil {
+		t.Fatal("Send: expected error after the single retry is exhausted")
+	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("errors.Is(err, ErrRateLimited) = false, want true: err = %v", err)
+	}
+	msg := err.Error()
+	if strings.Contains(msg, bodyMarker) {
+		t.Fatalf("error %q leaks the 429 response body", msg)
+	}
+	if strings.Contains(msg, tokenSegment) {
+		t.Fatalf("error %q leaks the webhook token segment", msg)
 	}
 }
 
