@@ -10,20 +10,22 @@ A single Go binary that reliably detects and notifies on new releases for watche
 
 ## Current State
 
-**Shipped:** v1.4 Operator Observability (2026-09-11)
+**Shipped:** v1.5 Digest Notifications (2026-09-18)
 
-v1.4 made the running service legible without reading container logs. `GET /ready` (RDY-01…03) tells a live instance apart from a merely-running one — 200 only when Postgres is reachable and the schema is current and not dirty, 503 with a machine reason otherwise, unauthenticated and unchanged from `/health`'s own contract. Poll-cycle history moved into an in-process, mutex-guarded ring buffer (`internal/pollruns.Store`, `docs/adr/0001`) rather than a `poll_runs` table — a design grilling found the table version carried a prune-on-insert race, a cross-source deadlock, and a skip-row-eviction hazard for history that resets on restart by design anyway. That grilling also split the original Phase 18 into 18 (additive: `/ready`, the store, app version, the frozen `/status` contract) and 18.1 (the milestone's riskiest change — wiring `runCycle` to record through the seam via a channel-fold, proven correct by a 1000-iteration invariant test standing in for the `go test -race` this dev box can't run). `GET /status` ships gated behind the existing passphrase gate, and Phase 19 gives it a face: a "System" tab in the SPA showing per-source run health, a recent-runs table, and an About block, built as a five-state render machine with a keep-stale manual Refresh. Phase 17 (VPS deploy) remains deferred, still blocked on a provisioned VPS + domain — the `/ready` probe this milestone built is what its health-gate will poll once un-deferred.
+v1.5 changed how the app talks, not what it detects. An instance-wide, Postgres-persisted digest mode (Phase 20) lets an operator switch from real-time to a batched daily/weekly Discord digest from the SPA, effective without a redeploy or restart. Turning it on makes the real-time notifier stand down cleanly — the existing `events.notified_at IS NULL` outbox is the only queue, so nothing new was invented to hold pending events, and toggling back off flushes the backlog through the ordinary real-time path exactly once (Phase 21). A slot-based `DigestScheduler` (calendar-math fire slots in `America/New_York`, a bounded 12h/48h grace window for restart catch-up, DST-proven across all four 2026/2027 transitions) turns a due slot's outbox into one grouped Discord embed and one atomic ack, with the shipped Alpine image's `time/tzdata` proven live by a `build-scan` CI boot step (Phase 22). A digest states the window it covers and never silently truncates: large digests split into multiple ordered, group-preserving messages with continuation markers and a position indicator, each acked independently so a partial failure only defers the undelivered remainder (Phase 23). Phase 17 (VPS deploy) remains deferred, still blocked on a provisioned VPS + domain.
 
-## Current Milestone: v1.5 Digest Notifications
+**Known minor tech debt (Phase 23 code review, not blocking):** a dead `resuming = true` assignment in `splitOversizedGroup`'s `flushMidGroup` closure that never takes effect (`internal/notifier/digest_chunk.go`) — harmless today only because the call site duplicates the recompute it was meant to drive, a latent trap for a future edit; two chunk-count test fixtures (`chunkForcingEventCount`, `capForcingEventCount` in `digest_test.go`) pinned only by comments, not a precondition-asserting test; and a singular/plural grammar nit in the remainder marker ("1 events still pending").
+
+<details>
+<summary>Milestone v1.5 Digest Notifications (shipped 2026-09-18)</summary>
 
 **Goal:** An operator can switch the instance from today's one-Discord-message-per-event notifications to a batched daily-or-weekly digest, without losing the real-time behavior as the default.
 
-**Target features:**
-- Instance-wide digest toggle (on/off + daily/weekly cadence), configurable from the SPA and persisted in Postgres — changeable without a redeploy, unlike the env-var-only config used elsewhere in the app.
-- When digest mode is on, every event type (new release, guest feature, deluxe/tracklist change) batches into one scheduled Discord message instead of firing individually; default stays real-time/off, matching today's behavior.
-- Uses only the existing `events` table as its data source — no new polling, no change to MusicBrainz/Deezer request volume.
+**Delivered:** Postgres-backed digest on/off + cadence setting with a gated SPA panel, real-time behavior provably unchanged when off (Phase 20); real-time ↔ digest mutual exclusion with a fail-closed settings read and zero-loss toggle-off flush (Phase 21); slot-based scheduled send with DST/grace-window correctness and one-embed grouped delivery (Phase 22); window-stamped, group-preserving multi-message chunking with per-chunk acking (Phase 23).
 
-**Out of scope this cycle:** multi-channel notification sinks (RSS/webhook/email — parked Option A), per-event-type digest overrides, upcoming-release calendar (Option D), watchlist tags/notes/bulk-add (Option E).
+**Considered and rejected this cycle:** a second "digest queue" table alongside the existing outbox (one queue keeps toggle-off correct for free); send-timestamp-plus-cadence-duration due math (a late catch-up would permanently shift the fire time, and DST would land it an hour off — calendar-based slot math chosen instead); multi-embed packing per Discord message (the 6000-char budget is a total across all embeds in one message, so packing buys less per embed, not more); an operator-configurable time-of-day/timezone picker and per-event-type digest overrides (both parked out of scope — see `.planning/milestones/v1.5-REQUIREMENTS.md`).
+
+</details>
 
 <details>
 <summary>Milestone v1.4 Operator Observability (shipped 2026-09-11)</summary>
@@ -132,7 +134,7 @@ v1.4 made the running service legible without reading container logs. `GET /read
 - MusicBrainz and Deezer clients should be real, testable HTTP clients — tests mock the external calls with `httptest.Server`, not fake/stub business logic.
 - musicbrainz.org's TLS handshake fails with an `unexpected eof`/server `decode_error` alert from this developer's WSL2 network path specifically — reproduced identically with plain `curl` (bypassing drop-tracker's Go client entirely), confirmed environmental (not a code defect) during Phase 03 UAT. Deezer is unaffected. If a future phase's live testing hits the same MusicBrainz-only TLS failure on this machine, this is already a known, accepted limitation — see `.planning/phases/03-external-clients-search/03-VERIFICATION.md` Acknowledged Gaps and Broken Windows Ledger entry #3 (waived).
 - Config/settings library (pydantic-settings equivalent — e.g. envconfig/viper) and exact structured-logging setup are implementation details left to phase research/planning rather than locked here.
-- Current codebase size (as of Phase 20 close, 2026-09-13): ~41,700 LOC Go across 133 files including tests (~12,650 LOC / 65 files excluding tests), ~4,400 LOC TypeScript/TSX across 38 files (`web/app/`, excludes tests and generated build output). Phases 14-16 added `internal/authgate`, `cmd/coverage-report`, `cmd/migration-check`, and `internal/sqlscan`; Phase 18/18.1 added `internal/pollruns` and `internal/buildinfo`; Phase 20 added `internal/settings` and the `web/app/components/ui/select.tsx` vendored primitive.
+- Current codebase size (as of v1.5 close, 2026-09-18): ~48,300 LOC Go across 144 files including tests (~14,100 LOC / 70 files excluding tests), ~4,440 LOC TypeScript/TSX across 39 files (`web/app/`, excludes tests and generated build output). Phases 14-16 added `internal/authgate`, `cmd/coverage-report`, `cmd/migration-check`, and `internal/sqlscan`; Phase 18/18.1 added `internal/pollruns` and `internal/buildinfo`; Phase 20 added `internal/settings` and the `web/app/components/ui/select.tsx` vendored primitive; Phases 22-23 added the digest scheduler/chunking code in `internal/notifier` and the `docs/adr/0002`/`0003` design records.
 - CI's `svu`-computed image tags have run ahead of the milestone-doc versioning for a while (git tags reach `v1.8.x`+ while milestone cycles are at v1.4) — the two numbering schemes are independent by design; the milestone label is the planning cycle, the git tag is the published image.
 - Phase 17's deploy health-gate was always meant to poll a readiness endpoint, not liveness. The `/ready` probe it needs now exists (shipped v1.4, Phase 18) — un-defer Phase 17 as its own milestone once a VPS + domain exist.
 - The `CoverArt.tsx` image-load-error-never-resets bug (noted at v1.1 close as pre-existing, non-blocking tech debt) was fixed in Phase 12.
@@ -226,4 +228,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-18 — after Phase 23*
+*Last updated: 2026-09-18 — after v1.5 milestone close*

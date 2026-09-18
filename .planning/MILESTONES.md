@@ -1,5 +1,30 @@
 # Milestones
 
+## v1.5 Digest Notifications (Shipped: 2026-09-18)
+
+**Phases completed:** 4 phases, 15 plans, 39 tasks
+**Known verification overrides:** 0 newly acknowledged, 4 carried forward from a prior close (see STATE.md Deferred Items)
+
+**Key accomplishments:**
+
+- Singleton `notification_settings` Postgres row (CHECK id=1 + seed row) reachable through gated GET/PUT /settings/notifications, backed by a narrow no-cache `internal/settings.Store`
+- Thirteen new real-request test cases pin every rejection, gate, CSRF, 503, and no-leak guarantee on GET/PUT /settings/notifications -- all pass against plan 20-01's handler unmodified, so this plan is a pure pinning-test commit pair with zero production-code change.
+- Digest mode toggle on /system, wired end to end through a new base-ui Switch card, instant-apply PUT, and a widened Promise.all mount/Refresh fetch — no cadence control or last-sent row yet (plan 20-04)
+- Daily/weekly cadence Select and an honest "Never sent yet" last-sent row complete the DigestSettings card, both routed through one shared instant-apply save helper, with the embedded SPA bundle rebuilt to close the phase
+- `notifier.SettingsReader` as a required constructor argument gates `NotifyPending` on the singleton digest-mode row, read under `dbOpTimeout` before any pending event is listed, failing closed on error.
+- `NotifyPending` now re-reads digest mode before every individual Discord send (not just once per pass), logs exactly one line per observed mode change, and anchors its stale-release cutoff to each event's own `created_at` instead of the clock at delivery time.
+- Always-visible helper text under the `/system` Digest mode row explaining the standdown and toggle-off flush, plus a refreshed committed SPA bundle carrying the copy.
+- Migration 000009 plus a D-14 re-anchoring UpdateNotificationSettings and a new D-16 AckDigestBatch, calendar-based (never duration-based) DST-safe slot math in internal/settings/slot.go, and a fail-fast America/New_York zone resolution at cmd/server boot.
+- `SendDigestIfDue` turns a due slot's outbox into one Discord embed and one atomic ack, `DigestScheduler` drives it on an immediate-then-5-minute loop, and `cmd/server` starts and drains it alongside the poller.
+- Digest lines are now markdown-escaped and rune-capped (closing T-22-07), sorted by collated watched artist with a total title/id tie-break, and carry the guest-feature host credit and the deluxe track-count suffix -- via one shared `eventURL` switch and `golang.org/x/text` promoted to a direct dependency.
+- A real DigestScheduler swept in 5-minute steps across all four 2026/2027 America/New_York DST transitions proves exactly one digest per period for both cadences, a restart/grace-window matrix proves bounded catch-up with nothing lost, and a new build-scan CI step boots the shipped image to assert it resolves the zone it schedules against.
+- Chunked, window-stamped digest delivery: every message opens with a "since <timestamp>" header, a large digest splits into N ordered ≤4096-rune Discord messages instead of truncating, and each chunk acks independently via a new narrow `AckEventsOnly` query so a partial send failure leaves only the undelivered remainder pending.
+- Added an exported `discord.ErrRateLimited` sentinel so "rate-limited after the one permitted retry was already spent" is distinguishable via `errors.Is` from every other non-204 Discord response, with a regression test proving neither the sentinel branch nor any pre-existing error path leaks the webhook token or a response body.
+- Expanded plan 23-01's legal-but-greedy digest splitter into a group-preferred packer with rare-path continuation markers and a per-chunk "(N/Total)" indicator, all pinned by three property-style invariants over a 700-event synthetic batch that forces 20+ chunks.
+- Bounded the digest run with a 20-chunk-per-run cap and an explicit remainder marker, added a ~3-minute whole-send wall-clock budget checked only at chunk boundaries, and made a partial or capped digest diagnosable in the logs -- a reworded Warn-level drain line, a 429-vs-other-failure discriminator, and cap/budget-aware summary fields with a single companion Warn only when a bound actually fired.
+
+---
+
 ## v1.4 Operator Observability (Shipped: 2026-09-11)
 
 **Phases completed:** 3 phases, 12 plans, 31 tasks

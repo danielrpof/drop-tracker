@@ -1,0 +1,1 @@
+No external API integration: this phase adds a DB-backed settings row and two internal chi routes read via the app's own apiFetch client; detector fired on the internal api.ts module name, not an external service.
