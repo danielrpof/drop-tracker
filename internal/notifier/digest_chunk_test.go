@@ -220,6 +220,173 @@ func TestChunkDigest_SingleOversizedLineOwnChunkTerminates(t *testing.T) {
 	}
 }
 
+// makeSyntheticGroup builds a digestGroup directly (bypassing
+// buildDigestGroups) so a test can control exact chunk-boundary arithmetic
+// -- each of n lines is lineLen runes long including its trailing "\n".
+func makeSyntheticGroup(title string, startID int64, n, lineLen int) digestGroup {
+	lines := make([]digestEntry, n)
+	for i := 0; i < n; i++ {
+		lines[i] = digestEntry{text: strings.Repeat("x", lineLen-1) + "\n", id: startID + int64(i)}
+	}
+	return digestGroup{heading: "**" + title + "**\n", lines: lines}
+}
+
+// containsID reports whether id is present in ids.
+func containsID(ids []int64, id int64) bool {
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+// TestChunkDigest_GroupPreferredBoundariesOnlyBetweenGroups proves that
+// when three groups each individually fit chunkContentBudget but their
+// combined size does not, every returned chunk contains only whole groups
+// -- each group's heading and its complete line set land in exactly one
+// chunk (D-06 group-preferred).
+func TestChunkDigest_GroupPreferredBoundariesOnlyBetweenGroups(t *testing.T) {
+	groups := []digestGroup{
+		makeSyntheticGroup("G1", 1, 1, 1800),
+		makeSyntheticGroup("G2", 101, 1, 1800),
+		makeSyntheticGroup("G3", 201, 1, 1800),
+	}
+	chunks := chunkDigest(groups)
+	if len(chunks) < 2 {
+		t.Fatalf("len(chunks) = %d, want > 1 to exercise a real boundary", len(chunks))
+	}
+
+	for _, g := range groups {
+		found := -1
+		for ci, c := range chunks {
+			hasHeading := strings.Contains(c.description, g.heading)
+			for _, entry := range g.lines {
+				hasID := containsID(c.ids, entry.id)
+				if hasID != hasHeading {
+					t.Fatalf("chunk %d: heading %q present=%v but line id %d present=%v -- boundary fell inside a group", ci, g.heading, hasHeading, entry.id, hasID)
+				}
+			}
+			if hasHeading {
+				if found != -1 {
+					t.Fatalf("group %q's heading appears in more than one chunk (%d and %d)", g.heading, found, ci)
+				}
+				found = ci
+			}
+		}
+		if found == -1 {
+			t.Fatalf("group %q's heading not found in any chunk", g.heading)
+		}
+	}
+}
+
+// TestChunkDigest_SecondGroupStartsFreshChunkRatherThanSpillingLines proves
+// that when a first group fills most of a chunk and a second group would
+// overflow the remainder, the second group starts an entirely fresh chunk
+// rather than spilling only the lines that would have fit.
+func TestChunkDigest_SecondGroupStartsFreshChunkRatherThanSpillingLines(t *testing.T) {
+	// chunkContentBudget is 3796. G1 fills most of it (3600), leaving ~196
+	// runes of remainder -- not enough for any of G2's 100-rune lines'
+	// heading, but individually G2's lines would fit that remainder.
+	g1 := makeSyntheticGroup("G1", 1, 1, 3600)
+	g2 := makeSyntheticGroup("G2", 101, 5, 100)
+	chunks := chunkDigest([]digestGroup{g1, g2})
+
+	if len(chunks) != 2 {
+		t.Fatalf("len(chunks) = %d, want 2", len(chunks))
+	}
+	if !strings.Contains(chunks[0].description, "**G1**") || strings.Contains(chunks[0].description, "**G2**") {
+		t.Fatalf("chunks[0].description = %q, want only G1", chunks[0].description)
+	}
+	if !strings.Contains(chunks[1].description, "**G2**") || strings.Contains(chunks[1].description, "**G1**") {
+		t.Fatalf("chunks[1].description = %q, want only G2, all in a fresh chunk", chunks[1].description)
+	}
+	for _, entry := range g2.lines {
+		if !containsID(chunks[1].ids, entry.id) {
+			t.Fatalf("chunks[1].ids = %v, want it to contain G2's line id %d", chunks[1].ids, entry.id)
+		}
+	}
+}
+
+// TestChunkDigest_OversizedGroupLineSplitDoesNotSwallowNextGroupHeading
+// proves a group alone larger than chunkContentBudget is split across
+// chunks on whole-line boundaries, and the following group (which fits)
+// still gets its own visible heading rather than being absorbed into the
+// oversized group's line-split output.
+func TestChunkDigest_OversizedGroupLineSplitDoesNotSwallowNextGroupHeading(t *testing.T) {
+	big := makeSyntheticGroup("Big", 1, 100, 100) // 100 * 100 = 10000 runes, > budget
+	small := makeSyntheticGroup("Small", 1001, 1, 50)
+	chunks := chunkDigest([]digestGroup{big, small})
+
+	if len(chunks) < 3 {
+		t.Fatalf("len(chunks) = %d, want >= 3 (multiple line-split chunks for Big, plus Small)", len(chunks))
+	}
+	last := chunks[len(chunks)-1]
+	if !strings.Contains(last.description, "**Small**") {
+		t.Fatalf("last chunk description = %q, want it to contain Small's heading", last.description)
+	}
+	if !containsID(last.ids, 1001) {
+		t.Fatalf("last chunk ids = %v, want it to contain Small's line id 1001", last.ids)
+	}
+
+	seen := make(map[int64]int)
+	for _, c := range chunks {
+		for _, id := range c.ids {
+			seen[id]++
+		}
+	}
+	for i := int64(1); i <= 100; i++ {
+		if seen[i] != 1 {
+			t.Fatalf("Big's line id %d appears %d times across chunks, want exactly 1", i, seen[i])
+		}
+	}
+	if seen[1001] != 1 {
+		t.Fatalf("Small's line id 1001 appears %d times across chunks, want exactly 1", seen[1001])
+	}
+}
+
+// TestChunkDigest_SeparatorOnlyOnNonFirstGroupInChunk proves a chunk's
+// first group heading carries no leading newline, and a subsequent group
+// heading in the same chunk carries exactly one (the corrected D-17 rule).
+func TestChunkDigest_SeparatorOnlyOnNonFirstGroupInChunk(t *testing.T) {
+	g1 := makeSyntheticGroup("First", 1, 1, 50)
+	g2 := makeSyntheticGroup("Second", 101, 1, 50)
+	chunks := chunkDigest([]digestGroup{g1, g2})
+	if len(chunks) != 1 {
+		t.Fatalf("len(chunks) = %d, want 1 (both groups small enough to share a chunk)", len(chunks))
+	}
+	desc := chunks[0].description
+	if strings.HasPrefix(desc, "\n") {
+		t.Fatalf("description = %q, first group heading must not carry a leading newline", desc)
+	}
+	g1Rendered, _, _ := renderGroup(g1)
+	g2Rendered, _, _ := renderGroup(g2)
+	want := g1Rendered + "\n" + g2Rendered
+	if desc != want {
+		t.Fatalf("description = %q, want %q (exactly one separator newline between the two whole-group renders)", desc, want)
+	}
+}
+
+// TestChunkDigest_NoEmptyChunkNoEmptyIDs proves the degenerate cases above
+// never produce a chunk with an empty description or an empty ids slice.
+func TestChunkDigest_NoEmptyChunkNoEmptyIDs(t *testing.T) {
+	groups := []digestGroup{
+		makeSyntheticGroup("G1", 1, 1, 1800),
+		makeSyntheticGroup("G2", 101, 1, 1800),
+		makeSyntheticGroup("G3", 201, 1, 1800),
+		makeSyntheticGroup("Big", 301, 100, 100),
+	}
+	chunks := chunkDigest(groups)
+	for i, c := range chunks {
+		if c.description == "" {
+			t.Fatalf("chunk %d has an empty description", i)
+		}
+		if len(c.ids) == 0 {
+			t.Fatalf("chunk %d has an empty ids slice", i)
+		}
+	}
+}
+
 // TestBuildDigestChunks_HeaderOnEveryChunk proves buildDigestChunks stamps
 // the window header as the first line of every chunk it returns, including
 // chunks after the first (D-04).

@@ -114,15 +114,19 @@ func buildDigestGroups(events []sqlc.Event) []digestGroup {
 	return groups
 }
 
-// chunkDigest walks groups in order and packs heading+lines into
-// chunkContentBudget-sized chunks, never cutting inside a rendered line
-// (D-06's legality rule -- group-preferred fill policy is plan 23-03's
-// expansion, not this function's job). Each appended line's id is carried
-// into the current chunk's ids in the same step, never a second pass. A
-// single line that alone exceeds chunkContentBudget (D-18 makes this
-// unreachable in practice) is emitted truncated as its own chunk via
-// oversizedLineNote, so the loop provably terminates and the event still
-// acks (D-19).
+// chunkDigest walks groups in D-06's amended group-preferred fill order:
+// append whole groups until the next group would overflow the current
+// chunk, then break there and start a fresh chunk with that group -- so a
+// chunk boundary falls between two whole groups in the common case, never
+// inside one. The one exception is a group that alone exceeds
+// chunkContentBudget: splitOversizedGroup is the whole-line-boundary
+// fallback for that rare case (D-06's legality rule, unchanged from the
+// pre-group-preferred splitter and kept intact rather than deleted, since
+// it is the floor the rare oversized group lands on). A group that does
+// not fit even an empty chunk is line-split immediately rather than
+// deferred to a next chunk with the same problem -- the loop's
+// termination argument. D-08 makes the resulting partly-empty messages
+// irrelevant, so no packing heuristic recovers the unused remainder.
 func chunkDigest(groups []digestGroup) []digestChunk {
 	var chunks []digestChunk
 	var cur strings.Builder
@@ -139,31 +143,84 @@ func chunkDigest(groups []digestGroup) []digestChunk {
 		curLen = 0
 	}
 
-	// appendLine is the sole place a rendered unit (a line, optionally
-	// heading-prefixed) lands in the output -- flushing to a fresh chunk
-	// when it wouldn't fit, and degrading to the oversized-line floor when
-	// it still wouldn't fit alone.
-	appendLine := func(text string, id int64, heading string) {
-		unit := text
-		if heading != "" {
-			h := heading
+	for _, g := range groups {
+		rendered, ids, groupLen := renderGroup(g)
+
+		switch {
+		case groupLen > chunkContentBudget:
+			// The only case D-06 allows a boundary inside a group.
+			flush()
+			chunks = append(chunks, splitOversizedGroup(g)...)
+		case curLen > 0 && curLen+1+groupLen > chunkContentBudget:
+			// Fits an empty chunk but not this chunk's remainder: break
+			// here rather than spilling the next group's lines into the
+			// gap (D-06's group-preferred policy).
+			flush()
+			cur.WriteString(rendered)
+			curIDs = append(curIDs, ids...)
+			curLen = groupLen
+		default:
+			// Fits (either into the current chunk's remainder, or fresh).
 			if curLen > 0 {
-				h = "\n" + h
+				cur.WriteString("\n")
+				curLen++
 			}
-			unit = h + text
+			cur.WriteString(rendered)
+			curIDs = append(curIDs, ids...)
+			curLen += groupLen
+		}
+	}
+	flush()
+	return chunks
+}
+
+// renderGroup concatenates one group's heading and every line with no
+// leading separator, returning the ids in the same order -- the atomic
+// unit chunkDigest's group-preferred fast path packs whole.
+func renderGroup(g digestGroup) (text string, ids []int64, runeLen int) {
+	var b strings.Builder
+	b.WriteString(g.heading)
+	ids = make([]int64, 0, len(g.lines))
+	for _, l := range g.lines {
+		b.WriteString(l.text)
+		ids = append(ids, l.id)
+	}
+	text = b.String()
+	return text, ids, utf8.RuneCountInString(text)
+}
+
+// splitOversizedGroup is D-06's whole-line-boundary fallback for the one
+// group that alone exceeds chunkContentBudget -- the pre-group-preferred
+// splitter's algorithm, unchanged, now scoped to a single group instead of
+// the full groups slice. Only the group's first line carries the heading;
+// a line whose own rendered unit still can't fit an empty chunk degrades
+// via oversizedLineNote (D-19) so the loop provably terminates and the
+// event still acks.
+func splitOversizedGroup(g digestGroup) []digestChunk {
+	var chunks []digestChunk
+	var cur strings.Builder
+	var curIDs []int64
+	curLen := 0
+
+	flush := func() {
+		if curLen == 0 {
+			return
+		}
+		chunks = append(chunks, digestChunk{description: cur.String(), ids: curIDs})
+		cur.Reset()
+		curIDs = nil
+		curLen = 0
+	}
+
+	for i, entry := range g.lines {
+		unit := entry.text
+		if i == 0 {
+			unit = g.heading + entry.text
 		}
 		n := utf8.RuneCountInString(unit)
 
 		if curLen > 0 && curLen+n > chunkContentBudget {
 			flush()
-			// Fresh chunk: the heading (if any) no longer needs a leading
-			// separator, since it is now first in its own chunk.
-			if heading != "" {
-				unit = heading + text
-			} else {
-				unit = text
-			}
-			n = utf8.RuneCountInString(unit)
 		}
 
 		if curLen == 0 && n > chunkContentBudget {
@@ -172,23 +229,13 @@ func chunkDigest(groups []digestGroup) []digestChunk {
 			if budget < 0 {
 				budget = 0
 			}
-			chunks = append(chunks, digestChunk{description: truncateRunes(unit, budget) + note, ids: []int64{id}})
-			return
+			chunks = append(chunks, digestChunk{description: truncateRunes(unit, budget) + note, ids: []int64{entry.id}})
+			continue
 		}
 
 		cur.WriteString(unit)
-		curIDs = append(curIDs, id)
+		curIDs = append(curIDs, entry.id)
 		curLen += n
-	}
-
-	for _, g := range groups {
-		for i, entry := range g.lines {
-			heading := ""
-			if i == 0 {
-				heading = g.heading
-			}
-			appendLine(entry.text, entry.id, heading)
-		}
 	}
 	flush()
 	return chunks
