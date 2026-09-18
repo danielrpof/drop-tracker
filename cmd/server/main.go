@@ -380,7 +380,18 @@ func run(ctx context.Context) error {
 		drainCtx, cancel := context.WithTimeout(context.Background(), pollDrainTimeout)
 		defer cancel()
 		if err := digestSched.Stop(drainCtx); err != nil {
-			logger.Error("digest scheduler drain failed", "scheduler_error", err.Error())
+			// D-27: Stop only ever returns ctx.Err() here (a fresh
+			// WithTimeout, never externally cancelled), so this branch means
+			// exactly one thing -- the drain deadline was reached with a
+			// digest run still in flight. At maxDigestChunks (20) a large
+			// burst runs roughly 25-40s, so a deploy landing mid-digest
+			// predictably hits pollDrainTimeout (10s); that outcome is
+			// correct (the chunk loop's own boundary check already left the
+			// remainder pending and neither settings column advanced), not a
+			// failure. Warn keeps it visible at the default level without
+			// training the operator to ignore the one log they'd need to
+			// trust if the scheduler genuinely wedged.
+			logger.Warn("digest scheduler drain deadline reached: remainder stays pending for the next check", "scheduler_error", err.Error())
 		}
 	}()
 

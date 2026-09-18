@@ -1079,6 +1079,132 @@ func TestSendDigestIfDue_NoLocation_ZeroSendOneWarn(t *testing.T) {
 	}
 }
 
+// TestSendDigestIfDue_ChunkFailure_RateLimitedDiscriminatorTrue is D-28's
+// proof: a send failure wrapping discord.ErrRateLimited is logged with the
+// rate_limited discriminator set true, distinguishing a spent-retry 429
+// from every other failure shape.
+func TestSendDigestIfDue_ChunkFailure_RateLimitedDiscriminatorTrue(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 30, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "rate-limited-true")
+	insertPendingEventTyped(t, pool, artistID, "new_release", "rl-true", "Rate Limited Title")
+
+	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		return fmt.Errorf("discord: send webhook: unexpected status %d: %w", 429, discord.ErrRateLimited)
+	}}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+	if !strings.Contains(buf.String(), `"rate_limited":true`) {
+		t.Fatalf("expected rate_limited=true in the send-failure log, got: %s", buf.String())
+	}
+}
+
+// TestSendDigestIfDue_ChunkFailure_RateLimitedDiscriminatorFalse proves a
+// plain (non-rate-limit) send failure is logged with the discriminator set
+// false -- the discriminator only fires for discord.ErrRateLimited.
+func TestSendDigestIfDue_ChunkFailure_RateLimitedDiscriminatorFalse(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 31, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "rate-limited-false")
+	insertPendingEventTyped(t, pool, artistID, "new_release", "rl-false", "Plain Failure Title")
+
+	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		return errors.New("discord unavailable")
+	}}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+	if !strings.Contains(buf.String(), `"rate_limited":false`) {
+		t.Fatalf("expected rate_limited=false in the send-failure log, got: %s", buf.String())
+	}
+}
+
+// TestSendDigestIfDue_Summary_CompleteRunOneInfoNoCapWarn proves the common
+// path -- a complete, uncapped run -- emits exactly one "digest sent"
+// summary line with pending_remainder 0, and no companion cap Warn (D-29).
+func TestSendDigestIfDue_Summary_CompleteRunOneInfoNoCapWarn(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 8, 1, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "summary-complete")
+	insertPendingEventTyped(t, pool, artistID, "new_release", "summary-nr", "Summary Title")
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+
+	if got := strings.Count(buf.String(), `"msg":"digest sent"`); got != 1 {
+		t.Fatalf(`"digest sent" line count = %d, want 1: %s`, got, buf.String())
+	}
+	if !strings.Contains(buf.String(), `"pending_remainder":0`) {
+		t.Fatalf(`expected "pending_remainder":0 in the summary log, got: %s`, buf.String())
+	}
+	if strings.Contains(buf.String(), "digest run capped") {
+		t.Fatalf("unexpected cap Warn on a complete, uncapped run: %s", buf.String())
+	}
+}
+
+// TestSendDigestIfDue_Summary_CappedRunOneInfoPlusOneWarn proves a capped
+// run emits the extended summary line plus exactly one companion Warn
+// naming the cap and the deferred count (D-29).
+func TestSendDigestIfDue_Summary_CappedRunOneInfoPlusOneWarn(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 8, 2, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "summary-capped")
+	insertPendingEventsForChunking(t, pool, artistID, capForcingEventCount)
+
+	fired := make(chan time.Time)
+	close(fired)
+	notifier.SetDigestChunkWaitForTest(t, func(time.Duration) <-chan time.Time { return fired })
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+
+	if got := strings.Count(buf.String(), `"msg":"digest sent"`); got != 1 {
+		t.Fatalf(`"digest sent" line count = %d, want 1: %s`, got, buf.String())
+	}
+	if strings.Contains(buf.String(), `"pending_remainder":0`) {
+		t.Fatalf(`expected a non-zero pending_remainder in the summary log, got: %s`, buf.String())
+	}
+	if !strings.Contains(buf.String(), `"chunk_count":20`) {
+		t.Fatalf(`expected "chunk_count":20 in the summary log, got: %s`, buf.String())
+	}
+	if got := strings.Count(buf.String(), "digest run capped: remainder deferred to the next digest"); got != 1 {
+		t.Fatalf(`cap Warn line count = %d, want exactly 1: %s`, got, buf.String())
+	}
+}
+
 // TestNoOp_SendDigestIfDue_ReturnsNilTouchesNothing proves NoOp's
 // implementation is a true no-op, mirroring NoOp.NotifyPending.
 func TestNoOp_SendDigestIfDue_ReturnsNilTouchesNothing(t *testing.T) {

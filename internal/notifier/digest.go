@@ -2,6 +2,7 @@ package notifier
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -177,11 +178,18 @@ func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now
 			// process: neither settings column advances (D-11), so the
 			// slot stays due and the next check retries from whatever is
 			// still un-acked (D-12) -- chunks 1..i-1 already acked below,
-			// this chunk and every chunk after it stay pending.
+			// this chunk and every chunk after it stay pending. D-28: a 429
+			// that survived internal/discord's one permitted retry is
+			// distinguishable here from every other failure shape (e.g. a
+			// 500) via errors.Is against its exported sentinel -- under
+			// D-23's burst pacing, rate-limiting is the most likely cause
+			// of a partial digest. No retry-policy change: honour-once
+			// stays (D-08), this is a logging addition only.
 			logger.Error("digest send failed",
 				slog.Int("chunk_index", i),
 				slog.Int("chunk_count", len(chunks)),
 				slog.Int("sendable_count", len(sendable)),
+				slog.Bool("rate_limited", errors.Is(err, discord.ErrRateLimited)),
 				slog.String("error", err.Error()),
 			)
 			return nil
@@ -218,12 +226,28 @@ func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now
 		}
 	}
 
+	// sent_count is the sendable slice minus whatever the cap deferred
+	// (D-16's invariant: kept-chunk ids plus deferred always sum to
+	// len(sendable)) -- on a capped run len(sendable) itself would
+	// misreport events that were never actually delivered this run.
 	logger.Info("digest sent",
-		slog.Int("sent_count", len(sendable)),
+		slog.Int("sent_count", len(sendable)-deferred),
 		slog.Int("suppressed_count", len(suppressedIDs)),
 		slog.Int("chunk_count", len(chunks)),
+		slog.Int("pending_remainder", deferred),
 		slog.Time("slot", slot),
 	)
+	if deferred > 0 {
+		// D-29: a separate line, fired only when the cap actually bit --
+		// the common (uncapped) path above gains no companion. The
+		// time-budget bound has its own single Warn where it fires,
+		// above, since a budget stop returns before reaching this summary
+		// at all; this one names the cap specifically.
+		logger.Warn("digest run capped: remainder deferred to the next digest",
+			slog.Int("chunk_count", len(chunks)),
+			slog.Int("deferred_count", deferred),
+		)
+	}
 
 	return nil
 }
