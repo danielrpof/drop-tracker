@@ -303,3 +303,94 @@ func TestSend_TransportFailure_ErrorNeverLeaksHostOrToken(t *testing.T) {
 		t.Fatalf("error %q leaks the webhook host", msg)
 	}
 }
+
+// TestSend_ErrorPaths_NeverLeakTokenOrBody is the Task 2 regression guard
+// (T-23-08/T-23-09): every error-producing path out of sendAttempt --
+// transport failure, 429-exhausted, 500, and 400 -- must never surface the
+// webhook URL's token segment or a response body marker in its Error()
+// string. Pins both secret-hygiene conventions against the new
+// 429-exhausted branch (Task 1) as well as the pre-existing paths, so a
+// future edit to sendAttempt cannot quietly reintroduce a leak.
+func TestSend_ErrorPaths_NeverLeakTokenOrBody(t *testing.T) {
+	const tokenSegment = "regression-fake-token-def456"
+	const bodyMarker = "regression-distinctive-body-marker-987"
+	webhookPath := "/api/webhooks/123456789012345678/" + tokenSegment
+
+	cases := []struct {
+		name      string
+		send      func(t *testing.T) error
+		checkBody bool
+	}{
+		{
+			name: "transport failure",
+			send: func(t *testing.T) error {
+				ln, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatalf("listen: %v", err)
+				}
+				addr := ln.Addr().String()
+				if err := ln.Close(); err != nil {
+					t.Fatalf("close listener: %v", err)
+				}
+				c := NewClient("http://"+addr+webhookPath, &http.Client{Timeout: 2 * time.Second})
+				return c.Send(context.Background(), Embed{Title: "x"})
+			},
+		},
+		{
+			name: "429 exhausted",
+			send: func(t *testing.T) error {
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusTooManyRequests)
+					_, _ = w.Write([]byte(`{"message":"` + bodyMarker + `","retry_after":0.01,"global":false}`))
+				}))
+				defer ts.Close()
+				c := NewClient(ts.URL+webhookPath, ts.Client())
+				return c.Send(context.Background(), Embed{Title: "x"})
+			},
+			checkBody: true,
+		},
+		{
+			name: "500",
+			send: func(t *testing.T) error {
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusInternalServerError)
+					_, _ = w.Write([]byte(bodyMarker))
+				}))
+				defer ts.Close()
+				c := NewClient(ts.URL+webhookPath, ts.Client())
+				return c.Send(context.Background(), Embed{Title: "x"})
+			},
+			checkBody: true,
+		},
+		{
+			name: "400",
+			send: func(t *testing.T) error {
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(bodyMarker))
+				}))
+				defer ts.Close()
+				c := NewClient(ts.URL+webhookPath, ts.Client())
+				return c.Send(context.Background(), Embed{Title: "x"})
+			},
+			checkBody: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.send(t)
+			if err == nil {
+				t.Fatalf("Send: expected an error for case %q", tc.name)
+			}
+			msg := err.Error()
+			if strings.Contains(msg, tokenSegment) {
+				t.Fatalf("error %q leaks the webhook token segment", msg)
+			}
+			if tc.checkBody && strings.Contains(msg, bodyMarker) {
+				t.Fatalf("error %q leaks the response body", msg)
+			}
+		})
+	}
+}
