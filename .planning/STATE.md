@@ -1,20 +1,19 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.5
-milestone_name: Digest Notifications (Phases 20-23) — SHIPPED 2026-09-18
-status: Awaiting next milestone
+status: "v1.5 shipped — PR #6"
 stopped_at: Phase 23 complete — all phases complete
-last_updated: "2026-09-18T17:00:12.677Z"
+last_updated: "2026-09-18T18:01:45.200Z"
 last_activity: 2026-09-18
-last_activity_desc: Milestone v1.5 completed and archived
-state_head: 239d77afb0bb92234b036e54308d04b4d7eda463
+state_head: 63df9f525c6b6ea727259b45b017572428051e39
+milestone_name: Digest Notifications (Phases 20-23) — SHIPPED 2026-09-18
+current_phase: 23
 progress:
   total_phases: 4
   completed_phases: 4
   total_plans: 15
   completed_plans: 15
   percent: 100
-current_phase: 23
 ---
 
 # Project State
@@ -30,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-09-18)
 
 Phase: Milestone v1.5 complete
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-09-18 — Milestone v1.5 completed and archived
+Status: v1.5 shipped — PR #6
+Last activity: 2026-09-18
 
 ## Performance Metrics
 
