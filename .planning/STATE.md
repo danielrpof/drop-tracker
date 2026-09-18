@@ -5,16 +5,16 @@ milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 23
 current_phase_name: Digest Readability & Discord Limits
 status: executing
-stopped_at: Completed 23-02-PLAN.md
-last_updated: "2026-09-18T04:03:55.329Z"
+stopped_at: Completed 23-03-PLAN.md
+last_updated: "2026-09-18T04:21:23.705Z"
 last_activity: 2026-09-17
 last_activity_desc: Phase 23 execution started
-state_head: d3274d6ef0b8bb5ecd3992e652c56335cd11ab7b
+state_head: fb0f7b78927a7ef9d35404df1015fdad49da93e2
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 15
-  completed_plans: 13
+  completed_plans: 14
   percent: 75
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-16)
 ## Current Position
 
 Phase: 23 (Digest Readability & Discord Limits) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-09-17 — Phase 23 execution started
 
@@ -144,6 +144,7 @@ Last activity: 2026-09-17 — Phase 23 execution started
 | Phase 22 P04 | 20min | 3 tasks | 2 files |
 | Phase 23 P01 | 19min | 3 tasks | 9 files |
 | Phase 23 P02 | 5min | 2 tasks | 2 files |
+| Phase 23 P03 | 9min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -341,6 +342,7 @@ Recent decisions affecting current work:
 - [Phase 23]: [Phase 23-01]: Split digest ack into two sqlc queries (AckEventsOnly narrow per-chunk ack, AckDigestBatch final-chunk-only settings write) per docs/adr/0003 -- Phase 22's single ack statement writes the slot unconditionally, which would defer a partial-failure remainder to the next slot instead of retrying within the grace window
 - [Phase 23]: [Phase 23-01]: chunkOverheadReserve set to 300 runes, reserved before splitting so later plans' position indicators/continuation markers/remainder markers can only ever free headroom, never exceed the 4096-rune Discord ceiling
 - [Phase 23]: [Phase 23-02]: Added exported discord.ErrRateLimited sentinel for a 429 arriving on the retry attempt itself; checked via errors.Is, no retry-policy change, no-body-echo/no-URL-wrap conventions preserved
+- [Phase 23]: [Phase 23-03]: digestGroup gained a bare title field alongside its pre-rendered heading so continuationHeading/continuationNote can build their own wording; two pre-existing budget test assertions corrected from chunkContentBudget to discordDescriptionLimit once continuation-note stamping legitimately pushes a chunk into the reserved overhead
 
 ### Pending Todos
 
@@ -424,8 +426,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-18T04:03:54.771Z
-Stopped at: Completed 23-02-PLAN.md
+Last session: 2026-09-18T04:21:22.885Z
+Stopped at: Completed 23-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
