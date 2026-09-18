@@ -5,16 +5,16 @@ milestone_name: Digest Notifications (Phases 20-23) — IN PROGRESS
 current_phase: 23
 current_phase_name: Digest Readability & Discord Limits
 status: executing
-stopped_at: Completed 23-01-PLAN.md
-last_updated: "2026-09-18T03:57:01.179Z"
+stopped_at: Completed 23-02-PLAN.md
+last_updated: "2026-09-18T04:03:55.329Z"
 last_activity: 2026-09-17
 last_activity_desc: Phase 23 execution started
-state_head: 0cef6df9f6d7ef6cc71cd17f5ef5aa32f4f55430
+state_head: d3274d6ef0b8bb5ecd3992e652c56335cd11ab7b
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 15
-  completed_plans: 12
+  completed_plans: 13
   percent: 75
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-16)
 ## Current Position
 
 Phase: 23 (Digest Readability & Discord Limits) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-09-17 — Phase 23 execution started
 
@@ -143,6 +143,7 @@ Last activity: 2026-09-17 — Phase 23 execution started
 | Phase 22 P03 | 45min | 2 tasks | 4 files |
 | Phase 22 P04 | 20min | 3 tasks | 2 files |
 | Phase 23 P01 | 19min | 3 tasks | 9 files |
+| Phase 23 P02 | 5min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -339,6 +340,7 @@ Recent decisions affecting current work:
 - [Phase 22 UAT, closed 2026-09-17]: The one human-verification test (build-scan's live CI boot check for the resolved digest zone) passed on the second push. The first push (CI run 35272810632) failed the `test` job before reaching `build-scan` — a genuine `go test -race` data race in this phase's own 22-02 code, diagnosed and fixed via quick task 260917-mfa (mutex-guarded log buffer + drain-checked `Stop` in `internal/notifier/scheduler_test.go`). Re-push (run 35276004417) confirmed `build-scan` green with `digest zone resolved OK`. 22-VERIFICATION.md and 22-SECURITY.md both `passed`/`threats_open: 0`; Phase 22 marked complete, transitioned to Phase 23.
 - [Phase 23]: [Phase 23-01]: Split digest ack into two sqlc queries (AckEventsOnly narrow per-chunk ack, AckDigestBatch final-chunk-only settings write) per docs/adr/0003 -- Phase 22's single ack statement writes the slot unconditionally, which would defer a partial-failure remainder to the next slot instead of retrying within the grace window
 - [Phase 23]: [Phase 23-01]: chunkOverheadReserve set to 300 runes, reserved before splitting so later plans' position indicators/continuation markers/remainder markers can only ever free headroom, never exceed the 4096-rune Discord ceiling
+- [Phase 23]: [Phase 23-02]: Added exported discord.ErrRateLimited sentinel for a 429 arriving on the retry attempt itself; checked via errors.Is, no retry-policy change, no-body-echo/no-URL-wrap conventions preserved
 
 ### Pending Todos
 
@@ -422,8 +424,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-18T03:56:51.136Z
-Stopped at: Completed 23-01-PLAN.md
+Last session: 2026-09-18T04:03:54.771Z
+Stopped at: Completed 23-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
