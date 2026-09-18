@@ -563,6 +563,146 @@ func TestSendDigestIfDue_Cap_SecondCallDrainsRemainderBothColumnsAdvanceOnce(t *
 	}
 }
 
+// TestSendDigestIfDue_Budget_ExceededAtBoundaryStopsPartialAckBothColumnsUnchanged
+// is D-25's proof: the wall-clock budget check at a chunk boundary stops
+// the loop before the next send when the injectable clock has advanced
+// past the deadline, leaving the remainder pending and both settings
+// columns byte-identical to their pre-call snapshot.
+func TestSendDigestIfDue_Budget_ExceededAtBoundaryStopsPartialAckBothColumnsUnchanged(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 20, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "budget-exceeded")
+	ids := insertPendingEventsForChunking(t, pool, artistID, chunkForcingEventCount)
+
+	before := snapshotSettings(t, q)
+
+	fired := make(chan time.Time)
+	close(fired)
+	notifier.SetDigestChunkWaitForTest(t, func(time.Duration) <-chan time.Time { return fired })
+
+	// The clock seam reports now (not past the deadline) until the second
+	// send completes, at which point it jumps well past digestSendBudget --
+	// simulating "budget exceeded between chunk 2 and chunk 3" without
+	// waiting out a real ~3-minute window.
+	var pastDeadline atomic.Bool
+	notifier.SetDigestNowForTest(t, func() time.Time {
+		if pastDeadline.Load() {
+			return now.Add(4 * time.Minute)
+		}
+		return now
+	})
+
+	var sender *fakeSender
+	sender = &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		if atomic.LoadInt32(&sender.calls) == 2 {
+			pastDeadline.Store(true)
+		}
+		return nil
+	}}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+
+	if got := atomic.LoadInt32(&sender.calls); got != 2 {
+		t.Fatalf("sender.calls = %d, want 2 (the budget stops the loop before a third send)", got)
+	}
+	if !strings.Contains(buf.String(), "digest send budget exceeded") {
+		t.Fatalf("expected budget-exceeded Warn log, got: %s", buf.String())
+	}
+
+	notified := countNotified(t, pool, ids)
+	if notified == 0 || notified == len(ids) {
+		t.Fatalf("notified count = %d, want strictly between 0 and %d (chunks 1-2 acked, the remainder pending)", notified, len(ids))
+	}
+	if after := snapshotSettings(t, q); !after.equal(before) {
+		t.Fatalf("notification_settings changed after a budget stop: before=%+v after=%+v", before, after)
+	}
+}
+
+// TestSendDigestIfDue_Budget_NotExceededNormalRunCompletes proves the
+// budget check never fires on the common path -- a fast test never
+// advances real wall-clock time anywhere near digestSendBudget, so the
+// default digestNow seam (real time.Now) lets a multi-chunk run complete
+// normally.
+func TestSendDigestIfDue_Budget_NotExceededNormalRunCompletes(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 21, 1, 5, 0, 0, time.UTC)
+	wantSlot := settings.MostRecentSlot(now, settings.CadenceDaily, loc)
+
+	artistID := insertTestArtist(t, pool, "budget-not-exceeded")
+	ids := insertPendingEventsForChunking(t, pool, artistID, chunkForcingEventCount)
+
+	fired := make(chan time.Time)
+	close(fired)
+	notifier.SetDigestChunkWaitForTest(t, func(time.Duration) <-chan time.Time { return fired })
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+	if strings.Contains(buf.String(), "digest send budget exceeded") {
+		t.Fatalf("unexpected budget-exceeded Warn log on a normal run: %s", buf.String())
+	}
+	if got := countNotified(t, pool, ids); got != len(ids) {
+		t.Fatalf("notified count = %d, want %d", got, len(ids))
+	}
+	row, err := q.GetNotificationSettings(context.Background())
+	if err != nil {
+		t.Fatalf("get notification settings: %v", err)
+	}
+	if !row.DigestLastSlotAt.Valid || !row.DigestLastSlotAt.Time.Equal(wantSlot) {
+		t.Fatalf("digest_last_slot_at = %+v, want %v", row.DigestLastSlotAt, wantSlot)
+	}
+}
+
+// TestSendDigestIfDue_Budget_SendContextNeverCarriesBudgetDeadline pins
+// D-25's central prohibition: the context handed to Sender.Send is never
+// wrapped with a deadline derived from digestSendBudget -- cancelling an
+// in-flight POST would create an accepted-but-unacked duplicate, so the
+// budget is checked only at chunk boundaries, never against the send
+// itself.
+func TestSendDigestIfDue_Budget_SendContextNeverCarriesBudgetDeadline(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 22, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "budget-no-ctx-deadline")
+	insertPendingEventTyped(t, pool, artistID, "new_release", "budget-nctx", "Budget No Ctx Deadline")
+
+	var gotCtx context.Context
+	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		gotCtx = ctx
+		return nil
+	}}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+	if gotCtx == nil {
+		t.Fatal("sender.Send was never called")
+	}
+	if _, ok := gotCtx.Deadline(); ok {
+		t.Fatalf("sender received a context with a deadline, want none -- the budget (D-25) must never wrap the POST's context")
+	}
+}
+
 // TestSendDigestIfDue_DueSlotOnlyNewRelease_OtherHeadingsOmitted proves a
 // heading is omitted entirely when its group has zero sendable events.
 func TestSendDigestIfDue_DueSlotOnlyNewRelease_OtherHeadingsOmitted(t *testing.T) {

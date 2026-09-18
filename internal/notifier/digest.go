@@ -133,8 +133,29 @@ func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now
 	// incomplete, so the settings-advancing ack must never run (D-24).
 	chunks, deferred := buildDigestChunks(sendable, cfg.DigestLastSentAt)
 
+	// D-25: derived once on entry, from digestNow -- not the now parameter
+	// threaded through this call for slot math. now is the tick's nominal
+	// timestamp and, especially in a test, need not track real wall-clock
+	// time; anchoring the deadline to it while checking it against
+	// digestNow's own domain would compare two different clocks and could
+	// read as already-expired on entry. digestNow() is read once here and
+	// then only at chunk boundaries below, never per iteration -- a fresh
+	// deadline read every loop would never expire.
+	deadline := digestNow().Add(digestSendBudget)
+
 	for i, chunk := range chunks {
 		if i > 0 {
+			// D-25: boundary-only budget check, before the spacing wait so
+			// an already-exceeded budget stops without a further pause.
+			// Never checked against the ctx passed to sender.Send below --
+			// only this select-adjacent boundary read.
+			if digestNow().After(deadline) {
+				logger.Warn("digest send budget exceeded at a chunk boundary: remainder stays pending, slot un-advanced",
+					slog.Int("chunk_index", i),
+					slog.Int("chunk_count", len(chunks)),
+				)
+				return nil
+			}
 			// D-23/D-26: digest-specific pacing, deliberately not the
 			// real-time path's 400ms inter-send seam. ctx.Done() is observed
 			// at this chunk boundary, not mid-POST, so a forced drain stops

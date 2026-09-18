@@ -36,3 +36,15 @@ func SetDigestChunkWaitForTest(t *testing.T, fn func(time.Duration) <-chan time.
 	digestChunkWait = fn
 	t.Cleanup(func() { digestChunkWait = orig })
 }
+
+// SetDigestNowForTest swaps SendDigestIfDue's digestSendBudget clock seam
+// (digestNow) for fn for the duration of the calling test, restoring the
+// original via t.Cleanup -- same shape as SetSpacingWaitForTest/
+// SetDigestChunkWaitForTest, applied to the wall-clock read the budget
+// check (D-25) compares against its deadline.
+func SetDigestNowForTest(t *testing.T, fn func() time.Time) {
+	t.Helper()
+	orig := digestNow
+	digestNow = fn
+	t.Cleanup(func() { digestNow = orig })
+}

@@ -65,6 +65,23 @@ const digestChunkSpacing = time.Second
 // elapsed-wall-clock assertion into a deterministic requested-duration one.
 var digestChunkWait = time.After
 
+// digestSendBudget bounds one SendDigestIfDue run's whole wall-clock
+// duration (D-25) -- checked at chunk boundaries only, never passed as the
+// POST's context, since cancelling an in-flight request would create an
+// accepted-but-unacked duplicate. At maxDigestChunks (20) the unbounded
+// worst case is 20 iterations of digestChunkSpacing (1s) plus up to the
+// discord package's defaultTimeout (10s) plus up to its maxRetryAfter
+// (30s) on an honoured 429 -- roughly 14 minutes with real-time
+// notification dark behind the shared notifying lock (ADR-0002). ~3
+// minutes keeps a run's worst case well inside that bound.
+const digestSendBudget = 3 * time.Minute
+
+// digestNow is the wall-clock source SendDigestIfDue's budget check reads
+// against a deadline derived from digestSendBudget (D-25). A var, not
+// time.Now directly, so a test can substitute a fake source and advance it
+// between chunks rather than waiting out a real ~3-minute budget.
+var digestNow = time.Now
+
 // digestEntry is one rendered event line plus the id it came from -- the
 // pairing per-chunk acking needs (D-16), which digest_format.go's former
 // bare []string segments discarded.
