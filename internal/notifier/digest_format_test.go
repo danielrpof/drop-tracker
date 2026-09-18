@@ -1,14 +1,13 @@
 package notifier
 
 // This file is package notifier (whitebox), not notifier_test -- escapeMarkdown,
-// eventURL, and buildDigestEmbed are unexported, mirroring format_test.go's,
+// eventURL, digestLine, and lineLabel are unexported, mirroring format_test.go's,
 // musicbrainz_test.go's, and normalize_test.go's whitebox convention for
 // testing unexported functions directly. Pure table-driven unit tests, no
-// DB, no HTTP.
+// DB, no HTTP. Grouping/chunking/header tests live in digest_chunk_test.go
+// (D-17) -- this file covers only line/label/sort rendering.
 
 import (
-	"fmt"
-	"math/rand"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -134,21 +133,21 @@ func TestDigestLine_TitleWithBracketsCannotRetargetLink(t *testing.T) {
 		Title:      "Album [Deluxe]",
 		ArtistName: "Bad Bunny",
 	}
-	embed := buildDigestEmbed([]sqlc.Event{ev})
+	line := digestLine(eventTypeNewRelease, ev)
 
-	if !strings.Contains(embed.Description, `Album \[Deluxe\]`) {
-		t.Fatalf("Description = %q, want it to contain the escaped title %q", embed.Description, `Album \[Deluxe\]`)
+	if !strings.Contains(line, `Album \[Deluxe\]`) {
+		t.Fatalf("line = %q, want it to contain the escaped title %q", line, `Album \[Deluxe\]`)
 	}
 
 	wantURL := "https://musicbrainz.org/release-group/rg-1"
-	openIdx := strings.Index(embed.Description, "](")
+	openIdx := strings.Index(line, "](")
 	if openIdx == -1 {
-		t.Fatalf("Description = %q, want it to contain a markdown link", embed.Description)
+		t.Fatalf("line = %q, want it to contain a markdown link", line)
 	}
-	rest := embed.Description[openIdx+2:]
+	rest := line[openIdx+2:]
 	closeIdx := strings.Index(rest, ")")
 	if closeIdx == -1 {
-		t.Fatalf("Description = %q, link has no closing paren", embed.Description)
+		t.Fatalf("line = %q, link has no closing paren", line)
 	}
 	gotURL := rest[:closeIdx]
 	if gotURL != wantURL {
@@ -213,199 +212,39 @@ func TestLineLabel(t *testing.T) {
 			t.Errorf("lineLabel(%+v) = %q, want %q", ev, got, want)
 		}
 	})
-}
-
-func TestBuildDigestEmbed_OrderingIsCollatedCaseAndAccentInsensitive(t *testing.T) {
-	events := []sqlc.Event{
-		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Zion & Lennox"), Title: "Z"},
-		{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Ñengo Flow"), Title: "N"},
-		{ID: 3, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("bad bunny"), Title: "B"},
-	}
-	embed := buildDigestEmbed(events)
-
-	iBad := strings.Index(embed.Description, "bad bunny")
-	iNengo := strings.Index(embed.Description, "Ñengo Flow")
-	iZion := strings.Index(embed.Description, "Zion & Lennox")
-	if iBad == -1 || iNengo == -1 || iZion == -1 {
-		t.Fatalf("Description = %q, want all three artists present", embed.Description)
-	}
-	if iBad >= iNengo || iNengo >= iZion {
-		t.Fatalf("Description order = %q, want bad bunny, Ñengo Flow, Zion & Lennox in that order", embed.Description)
-	}
-}
-
-func TestBuildDigestEmbed_TieBreaksByTitleThenID(t *testing.T) {
-	t.Run("same artist, different titles sort by title", func(t *testing.T) {
-		events := []sqlc.Event{
-			{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist"), Title: "Zeta"},
-			{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist"), Title: "Alpha"},
+	t.Run("watched artist over digestArtistLimit runes is capped on a rune boundary before escaping", func(t *testing.T) {
+		long := strings.Repeat("水", digestArtistLimit+10)
+		ev := sqlc.Event{EventType: eventTypeNewRelease, WatchedArtistName: strPtr(long), Title: "Album"}
+		got := lineLabel(ev)
+		wantWatched := strings.Repeat("水", digestArtistLimit)
+		if !strings.HasPrefix(got, wantWatched+" — ") {
+			t.Fatalf("lineLabel(%+v) = %q, want it to start with the %d-rune-capped watched artist", ev, got, digestArtistLimit)
 		}
-		embed := buildDigestEmbed(events)
-		iAlpha := strings.Index(embed.Description, "Alpha")
-		iZeta := strings.Index(embed.Description, "Zeta")
-		if iAlpha == -1 || iZeta == -1 || iAlpha > iZeta {
-			t.Fatalf("Description = %q, want Alpha before Zeta", embed.Description)
+		if !utf8.ValidString(got) {
+			t.Fatal("result is not valid UTF-8")
 		}
 	})
-	t.Run("same artist and title sort by ascending event id", func(t *testing.T) {
-		events := []sqlc.Event{
-			{ID: 20, EventType: eventTypeNewRelease, Source: sourceMusicBrainz, WatchedArtistName: strPtr("Artist"), Title: "Same", ExternalID: "later"},
-			{ID: 5, EventType: eventTypeNewRelease, Source: sourceMusicBrainz, WatchedArtistName: strPtr("Artist"), Title: "Same", ExternalID: "earlier"},
-		}
-		embed := buildDigestEmbed(events)
-		iEarlier := strings.Index(embed.Description, "https://musicbrainz.org/release-group/earlier")
-		iLater := strings.Index(embed.Description, "https://musicbrainz.org/release-group/later")
-		if iEarlier == -1 || iLater == -1 || iEarlier > iLater {
-			t.Fatalf("Description = %q, want the id=5 line before the id=20 line", embed.Description)
-		}
-	})
-}
-
-func TestBuildDigestEmbed_ShuffleInvariant(t *testing.T) {
-	events := []sqlc.Event{
-		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Zion & Lennox"), Title: "Z"},
-		{ID: 2, EventType: eventTypeGuestFeature, WatchedArtistName: strPtr("Rauw Alejandro"), ArtistName: "Drake", Title: "Feature"},
-		{ID: 3, EventType: eventTypeDeluxeChange, WatchedArtistName: strPtr("bad bunny"), Title: "Deluxe", PreviousTrackCount: i32Ptr(12), TrackCount: i32Ptr(15)},
-		{ID: 4, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Ñengo Flow"), Title: "N"},
-		{ID: 5, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist"), Title: "Alpha"},
-	}
-	want := buildDigestEmbed(events).Description
-
-	shuffled := make([]sqlc.Event, len(events))
-	copy(shuffled, events)
-	rng := rand.New(rand.NewSource(42))
-	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
-
-	got := buildDigestEmbed(shuffled).Description
-	if got != want {
-		t.Fatalf("shuffled input produced a different Description.\nwant: %q\ngot:  %q", want, got)
-	}
-}
-
-func TestBuildDigestEmbed_GuestFeatureGroupedAndSortedByWatchedArtist(t *testing.T) {
-	ev := sqlc.Event{
-		EventType:         eventTypeGuestFeature,
-		WatchedArtistName: strPtr("Rauw Alejandro"),
-		ArtistName:        "Drake",
-		Title:             "Track",
-	}
-	embed := buildDigestEmbed([]sqlc.Event{ev})
-	if !strings.Contains(embed.Description, "**Guest Features**") {
-		t.Fatalf("Description = %q, want the Guest Features heading", embed.Description)
-	}
-	if !strings.Contains(embed.Description, "Rauw Alejandro on Drake — Track") {
-		t.Fatalf("Description = %q, want the label %q", embed.Description, "Rauw Alejandro on Drake — Track")
-	}
-}
-
-func TestBuildDigestEmbed_DeluxeTrackCountSuffix(t *testing.T) {
-	t.Run("both counts known renders the suffix after the link", func(t *testing.T) {
+	t.Run("guest_feature host credit over digestArtistLimit runes is capped on a rune boundary before escaping", func(t *testing.T) {
+		long := strings.Repeat("a", digestArtistLimit+10)
 		ev := sqlc.Event{
-			EventType:          eventTypeDeluxeChange,
-			WatchedArtistName:  strPtr("Artist"),
-			Title:              "Album",
-			ExternalID:         "rel-1",
-			PreviousTrackCount: i32Ptr(12),
-			TrackCount:         i32Ptr(15),
+			EventType:         eventTypeGuestFeature,
+			WatchedArtistName: strPtr("Watched"),
+			ArtistName:        long,
+			Title:             "Track",
 		}
-		embed := buildDigestEmbed([]sqlc.Event{ev})
-		want := "](https://musicbrainz.org/release/rel-1) (12 → 15 tracks)\n"
-		if !strings.Contains(embed.Description, want) {
-			t.Fatalf("Description = %q, want it to contain %q", embed.Description, want)
-		}
-	})
-	t.Run("both counts nil renders no suffix and no empty parens", func(t *testing.T) {
-		ev := sqlc.Event{
-			EventType:         eventTypeDeluxeChange,
-			WatchedArtistName: strPtr("Artist"),
-			Title:             "Album",
-			ExternalID:        "rel-1",
-		}
-		embed := buildDigestEmbed([]sqlc.Event{ev})
-		line := strings.TrimSuffix(strings.TrimSpace(embed.Description), "")
-		if strings.Contains(line, "()") {
-			t.Fatalf("Description = %q, must not contain an empty ()", embed.Description)
-		}
-		want := "](https://musicbrainz.org/release/rel-1)\n"
-		if !strings.Contains(embed.Description, want) {
-			t.Fatalf("Description = %q, want it to end the line right after the link with no suffix", embed.Description)
+		got := lineLabel(ev)
+		wantHost := strings.Repeat("a", digestArtistLimit)
+		want := "Watched on " + wantHost + " — Track"
+		if got != want {
+			t.Fatalf("lineLabel(%+v) = %q, want %q", ev, got, want)
 		}
 	})
-}
-
-func TestBuildDigestEmbed_WatchedArtistNameFallback(t *testing.T) {
-	t.Run("nil falls back to artist_name for label and sort key", func(t *testing.T) {
-		ev := sqlc.Event{EventType: eventTypeNewRelease, WatchedArtistName: nil, ArtistName: "Fallback Artist", Title: "T"}
-		embed := buildDigestEmbed([]sqlc.Event{ev})
-		if !strings.Contains(embed.Description, "Fallback Artist — T") {
-			t.Fatalf("Description = %q, want it to contain %q", embed.Description, "Fallback Artist — T")
-		}
-	})
-	t.Run("empty string falls back to artist_name", func(t *testing.T) {
-		ev := sqlc.Event{EventType: eventTypeNewRelease, WatchedArtistName: strPtr(""), ArtistName: "Fallback Artist", Title: "T"}
-		embed := buildDigestEmbed([]sqlc.Event{ev})
-		if !strings.Contains(embed.Description, "Fallback Artist — T") {
-			t.Fatalf("Description = %q, want it to contain %q", embed.Description, "Fallback Artist — T")
-		}
-	})
-}
-
-func TestBuildDigestEmbed_GroupOrderFixedRegardlessOfInputOrder(t *testing.T) {
-	events := []sqlc.Event{
-		{ID: 1, EventType: eventTypeDeluxeChange, WatchedArtistName: strPtr("A"), Title: "D", ExternalID: "d1"},
-		{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("A"), Title: "N", ExternalID: "n1"},
-		{ID: 3, EventType: eventTypeGuestFeature, WatchedArtistName: strPtr("A"), ArtistName: "Host", Title: "G", ExternalID: "g1"},
-	}
-	embed := buildDigestEmbed(events)
-
-	iNew := strings.Index(embed.Description, "**New Releases**")
-	iGuest := strings.Index(embed.Description, "**Guest Features**")
-	iDeluxe := strings.Index(embed.Description, "**Deluxe Changes**")
-	if iNew == -1 || iGuest == -1 || iDeluxe == -1 {
-		t.Fatalf("Description = %q, want all three headings present", embed.Description)
-	}
-	if iNew >= iGuest || iGuest >= iDeluxe {
-		t.Fatalf("Description = %q, want headings in New Releases, Guest Features, Deluxe Changes order", embed.Description)
-	}
-}
-
-func TestBuildDigestEmbed_EmptyGroupOmitsHeadingEntirely(t *testing.T) {
-	ev := sqlc.Event{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("A"), Title: "T"}
-	embed := buildDigestEmbed([]sqlc.Event{ev})
-
-	for _, heading := range []string{"**Guest Features**", "**Deluxe Changes**"} {
-		if strings.Contains(embed.Description, heading) {
-			t.Errorf("Description = %q, must not contain the empty group's heading %q", embed.Description, heading)
-		}
-	}
-}
-
-func TestBuildDigestEmbed_DuplicateSourcesRenderAsTwoLines(t *testing.T) {
-	events := []sqlc.Event{
-		{ID: 1, EventType: eventTypeNewRelease, Source: sourceMusicBrainz, WatchedArtistName: strPtr("A"), Title: "Same Release", ExternalID: "mb-1"},
-		{ID: 2, EventType: eventTypeNewRelease, Source: sourceDeezer, WatchedArtistName: strPtr("A"), Title: "Same Release", ExternalID: "dz-1"},
-	}
-	embed := buildDigestEmbed(events)
-	if got := strings.Count(embed.Description, "Same Release"); got != 2 {
-		t.Fatalf("Description = %q, want 2 separate lines for the same release from two sources, got %d", embed.Description, got)
-	}
-}
-
-func TestBuildDigestEmbed_SameArtistTwoEventsRenderAsTwoLines(t *testing.T) {
-	events := []sqlc.Event{
-		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Bad Bunny"), Title: "Album One"},
-		{ID: 2, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Bad Bunny"), Title: "Album Two"},
-	}
-	embed := buildDigestEmbed(events)
-	if got := strings.Count(embed.Description, "- ["); got != 2 {
-		t.Fatalf("Description = %q, want exactly 2 separate lines, got %d", embed.Description, got)
-	}
 }
 
 // TestDigestLine_RendersLabelURLAndDeluxeSuffix pins digestLine's output
-// byte-for-byte -- it is the extracted-verbatim body buildDigestEmbed's
-// former inner loop wrote directly, and assembleDescription's whole-segment
-// truncation depends on it never changing shape.
+// byte-for-byte -- chunkDigest (digest_chunk.go) depends on it never
+// changing shape, since a chunk boundary can only fall between two whole
+// digestLine outputs.
 func TestDigestLine_RendersLabelURLAndDeluxeSuffix(t *testing.T) {
 	t.Run("new_release renders label and url with no suffix", func(t *testing.T) {
 		ev := sqlc.Event{EventType: eventTypeNewRelease, Source: sourceMusicBrainz, ExternalID: "rg-1", WatchedArtistName: strPtr("Bad Bunny"), Title: "Album"}
@@ -428,122 +267,4 @@ func TestDigestLine_RendersLabelURLAndDeluxeSuffix(t *testing.T) {
 			t.Fatalf("digestLine(...) = %q, want %q", got, want)
 		}
 	})
-}
-
-// TestAssembleDescription_FitsUnderLimitReturnsJoinUnchanged pins the early
-// return that keeps every pre-existing buildDigestEmbed assertion above
-// byte-identical: a combined rune count at or under the limit produces a
-// plain join, no note.
-func TestAssembleDescription_FitsUnderLimitReturnsJoinUnchanged(t *testing.T) {
-	segments := []string{"a\n", "b\n", "c\n"}
-	want := strings.Join(segments, "")
-	got := assembleDescription(segments)
-	if got != want {
-		t.Fatalf("assembleDescription(...) = %q, want byte-identical join %q", got, want)
-	}
-	if strings.Contains(got, "more event") {
-		t.Fatalf("assembleDescription(...) = %q, must not contain a truncation note when under budget", got)
-	}
-}
-
-// TestAssembleDescription_ExceedsLimitTruncatesOnSegmentBoundary proves the
-// three properties the design contract requires once the combined rune
-// count exceeds discordDescriptionLimit: the result stays within the limit,
-// only whole segments survive (never a partial line), and the note's
-// reported omitted count reconciles exactly with how many segments were
-// dropped.
-func TestAssembleDescription_ExceedsLimitTruncatesOnSegmentBoundary(t *testing.T) {
-	// Each segment is exactly 100 runes (99 'x' plus a newline); 50 of them
-	// is 5000 runes, comfortably over the 4096 limit.
-	segment := strings.Repeat("x", 99) + "\n"
-	segments := make([]string, 50)
-	for i := range segments {
-		segments[i] = segment
-	}
-
-	got := assembleDescription(segments)
-
-	if rc := utf8.RuneCountInString(got); rc > discordDescriptionLimit {
-		t.Fatalf("assembleDescription(...) has %d runes, want <= %d", rc, discordDescriptionLimit)
-	}
-	if !strings.Contains(got, "more event") {
-		t.Fatalf("assembleDescription(...) = %q, want a truncation note", got)
-	}
-
-	kept := strings.Count(got, "x")
-	if kept%99 != 0 {
-		t.Fatalf("assembleDescription(...) cut mid-segment: %d 'x' characters is not a multiple of 99", kept)
-	}
-	keptSegments := kept / 99
-	omitted := len(segments) - keptSegments
-	wantNote := truncationNote(omitted)
-	if !strings.HasSuffix(got, wantNote) {
-		t.Fatalf("assembleDescription(...) = %q, want it to end with %q (kept=%d, omitted=%d)", got, wantNote, keptSegments, omitted)
-	}
-}
-
-func TestTruncationNote_SingularAndPlural(t *testing.T) {
-	if got := truncationNote(1); got != "... 1 more event" {
-		t.Fatalf("truncationNote(1) = %q, want singular %q", got, "... 1 more event")
-	}
-	if got := truncationNote(2); got != "... 2 more events" {
-		t.Fatalf("truncationNote(2) = %q, want plural %q", got, "... 2 more events")
-	}
-}
-
-// TestBuildDigestEmbed_SmallOrdinaryBatchNoTruncationNote pins the
-// "unaffected when under budget" contract explicitly at buildDigestEmbed's
-// level, on top of what the pre-existing suite above already implies.
-func TestBuildDigestEmbed_SmallOrdinaryBatchNoTruncationNote(t *testing.T) {
-	events := []sqlc.Event{
-		{ID: 1, EventType: eventTypeNewRelease, Source: sourceMusicBrainz, ExternalID: "nr-1", WatchedArtistName: strPtr("Artist A"), Title: "Album A"},
-		{ID: 2, EventType: eventTypeGuestFeature, ExternalID: "gf-1", WatchedArtistName: strPtr("Artist B"), ArtistName: "Host", Title: "Track B"},
-		{ID: 3, EventType: eventTypeDeluxeChange, ExternalID: "dc-1", WatchedArtistName: strPtr("Artist C"), Title: "Album C", PreviousTrackCount: i32Ptr(10), TrackCount: i32Ptr(12)},
-	}
-	embed := buildDigestEmbed(events)
-	if strings.Contains(embed.Description, "more event") {
-		t.Fatalf("Description = %q, must not contain a truncation note for a small batch well under the limit", embed.Description)
-	}
-	if rc := utf8.RuneCountInString(embed.Description); rc > discordDescriptionLimit {
-		t.Fatalf("Description has %d runes, want <= %d", rc, discordDescriptionLimit)
-	}
-}
-
-// TestBuildDigestEmbed_OversizedBatchTruncatesAndReconciles is the
-// synthetic-oversized-batch case from the design contract's behavior block:
-// enough loop-generated events that the concatenated rendered lines exceed
-// 4096 runes, proving the Description never exceeds the limit, contains the
-// note, and that rendered-line count plus the note's parsed-back omitted
-// count equals len(events).
-func TestBuildDigestEmbed_OversizedBatchTruncatesAndReconciles(t *testing.T) {
-	const n = 200
-	events := make([]sqlc.Event, n)
-	for i := 0; i < n; i++ {
-		events[i] = sqlc.Event{
-			ID:                int64(i + 1),
-			EventType:         eventTypeNewRelease,
-			Source:            sourceMusicBrainz,
-			ExternalID:        fmt.Sprintf("nr-%04d", i),
-			WatchedArtistName: strPtr(fmt.Sprintf("Artist %04d", i)),
-			Title:             fmt.Sprintf("Album Title Number %04d With Extra Padding Text To Grow The Line", i),
-		}
-	}
-	embed := buildDigestEmbed(events)
-
-	if rc := utf8.RuneCountInString(embed.Description); rc > discordDescriptionLimit {
-		t.Fatalf("Description has %d runes, want <= %d", rc, discordDescriptionLimit)
-	}
-	if !strings.Contains(embed.Description, "more event") {
-		t.Fatalf("Description = %q, want a truncation note -- fixture did not exceed the limit", embed.Description)
-	}
-
-	rendered := strings.Count(embed.Description, "- [")
-	if rendered == 0 || rendered == n {
-		t.Fatalf("rendered line count = %d, want strictly between 0 and %d to prove real truncation occurred", rendered, n)
-	}
-	omitted := n - rendered
-	wantNote := truncationNote(omitted)
-	if !strings.HasSuffix(embed.Description, wantNote) {
-		t.Fatalf("Description = %q, want it to end with %q (rendered=%d, omitted=%d)", embed.Description, wantNote, rendered, omitted)
-	}
 }

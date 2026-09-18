@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
+	"github.com/danielrpof/drop-tracker/internal/discord"
 	"github.com/danielrpof/drop-tracker/internal/settings"
 )
 
@@ -97,7 +98,12 @@ func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now
 		return nil
 	}
 
-	embed := buildDigestEmbed(sendable)
+	// Interim single-chunk shim: plan 23-01 task 2 lands the chunker with no
+	// caller change yet -- task 3 replaces this whole block with the real
+	// per-chunk send/ack loop (D-14/D-17). Sending only chunks[0] here is
+	// deliberately incomplete and never reaches production between commits.
+	chunks := buildDigestChunks(sendable, cfg.DigestLastSentAt)
+	embed := discord.Embed{Description: chunks[0].description}
 
 	// D-17 step 5: re-read settings immediately before the POST -- a toggle
 	// landing between the outbox read and here must abort with no send and

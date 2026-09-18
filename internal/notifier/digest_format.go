@@ -1,29 +1,22 @@
-// digest_format.go builds the scheduled digest's single-embed body (D-05).
-//
-// Community-editable artist/title text is rune-capped and backslash-escaped
-// before it reaches the Description (D-21, closes T-22-07), eventURL
-// (format.go) is the one shared switch deciding every line's link (T-22-14),
-// each group sorts by collated watched artist with a total tie-break
-// (D-06/D-22), guest-feature lines carry the host credit (D-20), and deluxe
-// lines carry the track-count suffix (D-26). buildDigestEmbed's signature,
-// its call site in digest.go, and the single-embed shape do not change --
-// discord.Client.Send needs no interface change either. The whole Description
-// is now capped at discordDescriptionLimit (closes T-22-15/CR-01): an
-// oversized batch truncates at a full line boundary instead of letting
-// Discord reject the request.
+// digest_format.go renders one event's digest line and label (D-05):
+// community-editable artist/title text is rune-capped and
+// backslash-escaped before it reaches a line (D-21, closes T-22-07),
+// eventURL (format.go) is the one shared switch deciding every line's link
+// (T-22-14), each group sorts by collated watched artist with a total
+// tie-break (D-06/D-22), guest-feature lines carry the host credit (D-20),
+// and deluxe lines carry the track-count suffix (D-26). Grouping, chunk
+// splitting, and the window header now live in digest_chunk.go (D-17) --
+// this file keeps only line/label/sort rendering, the per-chunk-consumed
+// unit the chunker builds on.
 package notifier
 
 import (
-	"fmt"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"golang.org/x/text/collate"
-	"golang.org/x/text/language"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
-	"github.com/danielrpof/drop-tracker/internal/discord"
 )
 
 // markdownEscaper backslash-escapes Discord's markdown metacharacters so
@@ -54,23 +47,19 @@ func escapeMarkdown(s string) string {
 }
 
 // digestTitleLimit caps a digest line's title at 100 runes before escaping
-// -- Description is capped at 4096 characters and every line's URL counts
-// toward it (D-21), so per-line length is a real budget, not only
-// cosmetics. That whole-Description cap is enforced by assembleDescription
-// below (T-22-15) -- this per-line cap alone was never sufficient once a
-// digest slot's event count grew large enough.
+// -- a chunk's content budget is finite and every line's URL counts toward
+// it (D-21), so per-line length is a real budget, not only cosmetics.
 const digestTitleLimit = 100
 
-// discordDescriptionLimit is Discord's documented ceiling on an embed's
-// Description field, in runes. assembleDescription never returns more than
-// this many runes.
-const discordDescriptionLimit = 4096
-
-// truncationNoteReserve is a generous rune-count headroom for
-// assembleDescription's trailing note; used only to size a preallocated
-// builder, never as a second hard limit -- the real invariant is checked
-// exactly against discordDescriptionLimit.
-const truncationNoteReserve = 40
+// digestArtistLimit caps a digest line's watched-artist name and (on a
+// guest_feature line) its host credit at 60 runes before escaping, digest
+// path only (D-18) -- formatEmbed's real-time path has its own caps and is
+// untouched. events.artist_name/watched_artist_name are unbounded TEXT, so
+// without this a single line has no upper bound, and D-06 forbids a
+// mid-line chunk boundary -- an oversized line would otherwise have no
+// legal placement. Capping both fields bounds the worst-case line to well
+// under chunkContentBudget.
+const digestArtistLimit = 60
 
 // digestHeading pairs one event type with its fixed display heading, in
 // D-04's fixed order: New Releases, Guest Features, Deluxe Changes.
@@ -85,61 +74,9 @@ var digestHeadings = []digestHeading{
 	{eventTypeDeluxeChange, "Deluxe Changes"},
 }
 
-// buildDigestEmbed assembles D-05's single embed: one Description carrying
-// every sendable event grouped under its type's bold heading, in
-// digestHeadings' fixed order, each group sorted by collated watched artist
-// with a total tie-break (D-06/D-22) so the rendered output is fully
-// determined by the input set and never by ListUnnotified's arrival order.
-// A heading whose group has zero events is omitted entirely. Event content
-// lives in Description text only -- the embed's structured-field array is
-// never populated here, which is what lets one embed carry an entire digest
-// instead of one event per message (D-05). Callers must never invoke this
-// with an empty events slice; digest.go's empty-skip branch short-circuits
-// before message assembly for that case.
-func buildDigestEmbed(events []sqlc.Event) discord.Embed {
-	grouped := make(map[string][]sqlc.Event, len(digestHeadings))
-	for _, ev := range events {
-		grouped[ev.EventType] = append(grouped[ev.EventType], ev)
-	}
-
-	// One collator per call, never a package-level value: collate.Collator
-	// is not safe for concurrent use, and two schedulers or a scheduler
-	// plus a test could otherwise share one (D-22).
-	collator := collate.New(language.Und, collate.IgnoreCase)
-
-	segments := make([]string, 0, len(events))
-	for _, h := range digestHeadings {
-		group := grouped[h.eventType]
-		if len(group) == 0 {
-			continue
-		}
-		sortDigestGroup(group, collator)
-
-		for i, ev := range group {
-			line := digestLine(h.eventType, ev)
-			if i == 0 {
-				// The group's first segment carries its leading separator
-				// ("\n" only when this is not the very first segment
-				// overall) plus the bold heading -- the same rule the prior
-				// shared-builder version expressed via `b.Len() > 0`, now
-				// keyed off `len(segments) > 0`.
-				heading := "**" + h.title + "**\n"
-				if len(segments) > 0 {
-					heading = "\n" + heading
-				}
-				line = heading + line
-			}
-			segments = append(segments, line)
-		}
-	}
-
-	return discord.Embed{Description: assembleDescription(segments)}
-}
-
 // digestLine renders exactly one event's line -- "- [label](url)" plus the
-// deluxe track-count suffix -- ending in "\n". Extracted from
-// buildDigestEmbed's former inner-loop body so assembleDescription can
-// truncate on a whole-line boundary.
+// deluxe track-count suffix -- ending in "\n". Its output is the atomic
+// unit chunkDigest (digest_chunk.go) never cuts inside.
 func digestLine(eventType string, ev sqlc.Event) string {
 	var b strings.Builder
 	b.WriteString("- [")
@@ -161,52 +98,15 @@ func digestLine(eventType string, ev sqlc.Event) string {
 	return b.String()
 }
 
-// assembleDescription joins segments (one per event, a group's first
-// segment also carrying that group's leading separator + heading) into the
-// final Description. When the full join already fits discordDescriptionLimit
-// runes, the result is byte-identical to a plain strings.Join -- no note, no
-// truncation (T-22-15's "unaffected when under budget" contract). Otherwise
-// it keeps the largest whole-segment prefix whose rune count, plus
-// truncationNote's rune count for however many segments that prefix omits,
-// stays within discordDescriptionLimit, and appends that note. It never cuts
-// inside a segment: dropped segments are dropped whole.
-func assembleDescription(segments []string) string {
-	cum := make([]int, len(segments)+1)
-	for i, s := range segments {
-		cum[i+1] = cum[i] + utf8.RuneCountInString(s)
-	}
-	if cum[len(segments)] <= discordDescriptionLimit {
-		return strings.Join(segments, "")
-	}
-
-	for k := len(segments) - 1; k >= 0; k-- {
-		note := truncationNote(len(segments) - k)
-		if cum[k]+utf8.RuneCountInString(note) <= discordDescriptionLimit {
-			var b strings.Builder
-			b.Grow(discordDescriptionLimit + truncationNoteReserve)
-			for _, s := range segments[:k] {
-				b.WriteString(s)
-			}
-			b.WriteString(note)
-			return b.String()
-		}
-	}
-	// Pathological case: even omitting every segment, the note itself would
-	// not fit. Return the note alone as the best-effort result -- there is
-	// nothing smaller to fall back to.
-	return truncationNote(len(segments))
-}
-
-// truncationNote reports how many sendable events assembleDescription
-// dropped. SendDigestIfDue's ack step does not consult Description content
-// -- every dropped event's id is still acked as delivered once Send succeeds
-// (digest.go) -- so this note exists only so the operator can see the digest
-// is incomplete.
-func truncationNote(omitted int) string {
-	if omitted == 1 {
-		return "... 1 more event"
-	}
-	return fmt.Sprintf("... %d more events", omitted)
+// oversizedLineNote is D-19's floor for a single rendered line that alone
+// exceeds chunkContentBudget (digest_chunk.go's chunkDigest): the line is
+// rune-truncated and this note appended, so that chunk stays within budget
+// and the splitter provably terminates rather than looping or wedging. The
+// event still acks -- an event that renders but never acks re-enters every
+// future digest without bound. digestArtistLimit/digestTitleLimit make this
+// path unreachable in practice, but it must still exist as a legal floor.
+func oversizedLineNote() string {
+	return " ...(truncated)\n"
 }
 
 // sortDigestGroup orders one event-type group by collated artistKey, tied
@@ -251,9 +151,9 @@ func artistKey(ev sqlc.Event) string {
 // the same community-editable artist_name column.
 func lineLabel(ev sqlc.Event) string {
 	title := escapeMarkdown(truncateRunes(ev.Title, digestTitleLimit))
-	watched := escapeMarkdown(artistKey(ev))
+	watched := escapeMarkdown(truncateRunes(artistKey(ev), digestArtistLimit))
 	if ev.EventType == eventTypeGuestFeature {
-		host := escapeMarkdown(ev.ArtistName)
+		host := escapeMarkdown(truncateRunes(ev.ArtistName, digestArtistLimit))
 		return watched + " on " + host + " — " + title
 	}
 	return watched + " — " + title
