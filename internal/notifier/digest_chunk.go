@@ -309,17 +309,37 @@ func digestWindowHeader(lastSentAt *time.Time) string {
 	return fmt.Sprintf("Everything pending since <t:%d:R>", lastSentAt.Unix())
 }
 
+// positionIndicator renders D-21's " · (N/Total)" fragment, empty when
+// total is 1 -- so an ordinary single-message digest differs from the
+// pre-phase output by exactly one line (D-21), the cheapest possible
+// regression surface. Total means chunks in this run (D-07 amended), not
+// an uncapped count a later run might never reach.
+func positionIndicator(n, total int) string {
+	if total <= 1 {
+		return ""
+	}
+	return fmt.Sprintf(" · (%d/%d)", n, total)
+}
+
 // buildDigestChunks is the orchestrator: group, split, then stamp D-04's
-// self-contained window header onto every chunk (not only the first) so a
-// message arriving out of order, or alone, still states the window it
-// covers. Callers must never invoke it with an empty events slice --
-// digest.go's empty-skip branch short-circuits before message assembly for
-// that case, exactly as the former buildDigestEmbed documented.
+// self-contained window header plus D-21's position indicator onto every
+// chunk (not only the first) so a message arriving out of order, or alone,
+// still states the window it covers and its place in the run. This is a
+// single forward pass spending chunkOverheadReserve (D-20/D-07 amended) --
+// never a second pass that re-measures the split after stamping, since
+// widening the indicator (e.g. "(9/9)" to "(10/10)") could otherwise push
+// a line out of a chunk and change Total, which is the exact fixed-point
+// bug D-07 forbids reintroducing. Callers must never invoke this with an
+// empty events slice -- digest.go's empty-skip branch short-circuits
+// before message assembly for that case, exactly as the former
+// buildDigestEmbed documented.
 func buildDigestChunks(events []sqlc.Event, lastSentAt *time.Time) []digestChunk {
 	groups := buildDigestGroups(events)
 	chunks := chunkDigest(groups)
-	header := digestWindowHeader(lastSentAt) + "\n"
+	base := digestWindowHeader(lastSentAt)
+	total := len(chunks)
 	for i := range chunks {
+		header := base + positionIndicator(i+1, total) + "\n"
 		chunks[i].description = header + chunks[i].description
 	}
 	return chunks

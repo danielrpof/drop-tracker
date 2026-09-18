@@ -754,3 +754,258 @@ func TestBuildDigestChunks_SameArtistTwoEventsRenderAsTwoLines(t *testing.T) {
 		t.Fatalf("description = %q, want exactly 2 separate lines, got %d", desc, got)
 	}
 }
+
+// TestPositionIndicator_EmptyAtTotalOne proves D-21's indicator is omitted
+// entirely when total is 1, not rendered as "(1/1)".
+func TestPositionIndicator_EmptyAtTotalOne(t *testing.T) {
+	if got := positionIndicator(1, 1); got != "" {
+		t.Fatalf("positionIndicator(1, 1) = %q, want empty string", got)
+	}
+}
+
+// TestPositionIndicator_NonEmptyAboveTotalOne proves every total greater
+// than 1 renders a non-empty parenthesised N-of-Total fragment.
+func TestPositionIndicator_NonEmptyAboveTotalOne(t *testing.T) {
+	tests := []struct {
+		n, total int
+		want     string
+	}{
+		{1, 3, " · (1/3)"},
+		{2, 3, " · (2/3)"},
+		{3, 3, " · (3/3)"},
+		{9, 10, " · (9/10)"},
+	}
+	for _, tt := range tests {
+		if got := positionIndicator(tt.n, tt.total); got != tt.want {
+			t.Errorf("positionIndicator(%d, %d) = %q, want %q", tt.n, tt.total, got, tt.want)
+		}
+	}
+}
+
+// TestBuildDigestChunks_OneChunkNoIndicator proves a one-chunk digest's
+// header line carries no parenthesis at all.
+func TestBuildDigestChunks_OneChunkNoIndicator(t *testing.T) {
+	ts := time.Date(2026, 9, 17, 1, 0, 0, 0, time.UTC)
+	events := []sqlc.Event{
+		{ID: 1, EventType: eventTypeNewRelease, WatchedArtistName: strPtr("Artist A"), Title: "Album A"},
+	}
+	chunks := buildDigestChunks(events, &ts)
+	if len(chunks) != 1 {
+		t.Fatalf("len(chunks) = %d, want 1", len(chunks))
+	}
+	firstLine := strings.SplitN(chunks[0].description, "\n", 2)[0]
+	want := fmt.Sprintf("Everything pending since <t:%d:R>", ts.Unix())
+	if firstLine != want {
+		t.Fatalf("first line = %q, want %q (no indicator)", firstLine, want)
+	}
+	if strings.Contains(firstLine, "(") {
+		t.Fatalf("first line = %q, want no parenthesis at all", firstLine)
+	}
+}
+
+// TestBuildDigestChunks_ThreeChunksIndicatorsMatchPosition proves a
+// three-chunk digest's three header lines carry indicators for positions
+// 1, 2 and 3, all with total 3, and a nil watermark uses the
+// digest-mode-enabled wording plus the same indicator.
+func TestBuildDigestChunks_ThreeChunksIndicatorsMatchPosition(t *testing.T) {
+	groups := []digestGroup{
+		makeSyntheticGroup("G1", 1, 1, 2000),
+		makeSyntheticGroup("G2", 101, 1, 2000),
+		makeSyntheticGroup("G3", 201, 1, 2000),
+	}
+	// buildDigestChunks always groups from raw events via buildDigestGroups,
+	// so drive chunkDigest directly and stamp headers the same way
+	// buildDigestChunks does, to control exactly three chunks. Each group
+	// is over half of chunkContentBudget so no two groups can share a
+	// chunk, forcing one group per chunk.
+	chunks := chunkDigest(groups)
+	if len(chunks) != 3 {
+		t.Fatalf("test fixture produced %d chunks, want exactly 3 (adjust makeSyntheticGroup sizes)", len(chunks))
+	}
+	base := digestWindowHeader(nil)
+	total := len(chunks)
+	for i := range chunks {
+		chunks[i].description = base + positionIndicator(i+1, total) + "\n" + chunks[i].description
+	}
+
+	for i, c := range chunks {
+		firstLine := strings.SplitN(c.description, "\n", 2)[0]
+		want := fmt.Sprintf("%s · (%d/3)", base, i+1)
+		if firstLine != want {
+			t.Fatalf("chunk %d first line = %q, want %q", i, firstLine, want)
+		}
+	}
+}
+
+// syntheticInvariantBatch builds n events cycling through all three event
+// types with a deterministic, reproducible index-driven generator (no
+// randomness), each with a distinct id, so a failure reproduces exactly.
+// Titles and artist names mix multi-byte (Á, ñ, 水) and emoji (🎵)
+// characters so the invariants' rune-count assertions measure what they
+// claim to measure rather than ASCII only.
+func syntheticInvariantBatch(n int) []sqlc.Event {
+	types := []string{eventTypeNewRelease, eventTypeGuestFeature, eventTypeDeluxeChange}
+	events := make([]sqlc.Event, n)
+	for i := 0; i < n; i++ {
+		et := types[i%len(types)]
+		ev := sqlc.Event{
+			ID:                int64(i + 1),
+			EventType:         et,
+			Source:            sourceMusicBrainz,
+			ExternalID:        fmt.Sprintf("ext-%05d", i),
+			WatchedArtistName: strPtr(fmt.Sprintf("Ártist Ñame 水 %04d", i)),
+			Title:             fmt.Sprintf("Álbum 水 Title Number %04d 🎵 With Extra Padding Text To Grow The Line", i),
+		}
+		if et == eventTypeGuestFeature {
+			ev.ArtistName = fmt.Sprintf("Host 水 %04d", i)
+		} else {
+			ev.ArtistName = fmt.Sprintf("Fallback Ártist %04d", i)
+		}
+		if et == eventTypeDeluxeChange {
+			ev.PreviousTrackCount = i32Ptr(int32(i % 20))
+			ev.TrackCount = i32Ptr(int32(i%20 + 3))
+		}
+		events[i] = ev
+	}
+	return events
+}
+
+// invariantBatchSize is large enough to force chunkDigest's oversized-group
+// line-split fallback across all three groups and produce at least 20
+// chunks (verified by TestChunkDigest_InvariantBatchProducesAtLeast20Chunks
+// below) -- also reusable by plan 23-04's cap tests per the plan's own note.
+const invariantBatchSize = 700
+
+// TestChunkDigest_InvariantBatchProducesAtLeast20Chunks pins the fixture
+// size's own precondition -- if this ever fails, invariantBatchSize needs
+// raising, not the invariant tests below relaxing.
+func TestChunkDigest_InvariantBatchProducesAtLeast20Chunks(t *testing.T) {
+	chunks := buildDigestChunks(syntheticInvariantBatch(invariantBatchSize), nil)
+	if len(chunks) < 20 {
+		t.Fatalf("len(chunks) = %d, want >= 20 -- raise invariantBatchSize", len(chunks))
+	}
+}
+
+// TestChunkInvariant1_EveryChunkAtMostDiscordLimit is Verification
+// Invariant 1 (23-CONTEXT.md <specifics>): over a synthetic batch large
+// enough to produce at least 20 chunks, every chunk's description is at
+// most 4096 runes.
+func TestChunkInvariant1_EveryChunkAtMostDiscordLimit(t *testing.T) {
+	chunks := buildDigestChunks(syntheticInvariantBatch(invariantBatchSize), nil)
+	for i, c := range chunks {
+		if rc := utf8.RuneCountInString(c.description); rc > discordDescriptionLimit {
+			t.Errorf("chunk %d has %d runes, want <= %d", i, rc, discordDescriptionLimit)
+		}
+	}
+}
+
+// TestChunkInvariant2_IDUnionExactlyOnce is Verification Invariant 2: the
+// union of every chunk's ids equals the sendable set, each id exactly once.
+func TestChunkInvariant2_IDUnionExactlyOnce(t *testing.T) {
+	events := syntheticInvariantBatch(invariantBatchSize)
+	chunks := buildDigestChunks(events, nil)
+
+	seen := make(map[int64]int, len(events))
+	for _, c := range chunks {
+		for _, id := range c.ids {
+			seen[id]++
+		}
+	}
+	if len(seen) != len(events) {
+		t.Fatalf("union has %d distinct ids, want %d", len(seen), len(events))
+	}
+	for _, ev := range events {
+		if seen[ev.ID] != 1 {
+			t.Errorf("event id %d appears %d times across chunks, want exactly 1", ev.ID, seen[ev.ID])
+		}
+	}
+}
+
+// stripChunkMarkers removes every chunk's header line, group heading
+// (plain or "(continued)"), and trailing continuation note from a chunk
+// description, so Invariant 3 can compare event lines to event lines only.
+// Test-only -- not a production helper.
+func stripChunkMarkers(desc string) string {
+	lines := strings.Split(desc, "\n")
+	var kept []string
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "Everything pending since"):
+			continue
+		case strings.HasPrefix(line, "**") && strings.HasSuffix(line, "**"):
+			// A group heading, plain or "(continued)" -- both open and
+			// close with the bold markers digestHeadings/continuationHeading
+			// use, and no rendered event line does.
+			continue
+		case strings.HasPrefix(line, "*") && strings.HasSuffix(line, "continues in the next message*"):
+			continue
+		case line == "":
+			continue
+		default:
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, "\n") + "\n"
+}
+
+// TestChunkInvariant3_ConcatenationReproducesUnsplitOrder is Verification
+// Invariant 3: stripping every header line, continuation heading, and
+// trailing note from the concatenated chunk descriptions reproduces the
+// ordered line sequence a single unsplit render of the same groups
+// produces, exactly.
+func TestChunkInvariant3_ConcatenationReproducesUnsplitOrder(t *testing.T) {
+	events := syntheticInvariantBatch(invariantBatchSize)
+	groups := buildDigestGroups(events)
+
+	var wantLines []string
+	for _, g := range groups {
+		for _, line := range g.lines {
+			wantLines = append(wantLines, strings.TrimSuffix(line.text, "\n"))
+		}
+	}
+	want := strings.Join(wantLines, "\n") + "\n"
+
+	chunks := buildDigestChunks(events, nil)
+	var got strings.Builder
+	for _, c := range chunks {
+		got.WriteString(stripChunkMarkers(c.description))
+	}
+	if got.String() != want {
+		t.Fatalf("stripped concatenation does not match the unsplit render.\nwant %d runes, got %d runes", utf8.RuneCountInString(want), utf8.RuneCountInString(got.String()))
+	}
+}
+
+// TestBuildDigestChunks_LargeBatchShuffleInvariant is the plan's seventh
+// behavior bullet: the same event set fed in a different arrival order
+// produces byte-identical chunk descriptions and identical per-chunk id
+// sets, over the same large synthetic batch the three invariants above use.
+func TestBuildDigestChunks_LargeBatchShuffleInvariant(t *testing.T) {
+	events := syntheticInvariantBatch(invariantBatchSize)
+	want := buildDigestChunks(events, nil)
+
+	shuffled := make([]sqlc.Event, len(events))
+	copy(shuffled, events)
+	rng := rand.New(rand.NewSource(7))
+	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
+	got := buildDigestChunks(shuffled, nil)
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, len(want) = %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i].description != want[i].description {
+			t.Fatalf("chunk %d description differs after shuffling input order", i)
+		}
+		if len(got[i].ids) != len(want[i].ids) {
+			t.Fatalf("chunk %d ids length differs after shuffling input order: got %d, want %d", i, len(got[i].ids), len(want[i].ids))
+		}
+		for j := range want[i].ids {
+			if got[i].ids[j] != want[i].ids[j] {
+				t.Fatalf("chunk %d ids[%d] differs after shuffling input order: got %d, want %d", i, j, got[i].ids[j], want[i].ids[j])
+			}
+		}
+	}
+}
