@@ -12,10 +12,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 	"github.com/danielrpof/drop-tracker/internal/discord"
@@ -133,59 +136,82 @@ func TestSendDigestIfDue_DueSlotAllThreeTypes_OneSendThreeAcksBothColumns(t *tes
 	}
 }
 
-// TestSendDigestIfDue_OversizedBatch_TruncatesDescriptionAndAcksEveryEvent
-// is T-22-15's end-to-end proof: an outbox large enough to force
-// digest_format.go's truncation still sends in exactly one call, and every
-// event id in the batch -- rendered or truncated-out -- is acked. This is
-// the load-bearing assertion: it proves the retry loop T-22-15 named
-// (a persistently oversized batch never advancing the watermark) cannot
-// happen once Task 1's whole-Description cap stops Send from 400-ing.
-func TestSendDigestIfDue_OversizedBatch_TruncatesDescriptionAndAcksEveryEvent(t *testing.T) {
+// chunkForcingEventCount is a fixture size empirically confirmed (whitebox
+// probe against chunkDigest, digest_chunk_test.go's syntheticEvents shape)
+// to split into exactly 3 chunks across a wide stable margin (70-87 events
+// all produce 3; 75 sits comfortably inside it) -- deterministic without
+// this external test package reaching into unexported chunker internals.
+const chunkForcingEventCount = 75
+
+// insertPendingEventsForChunking inserts n new_release rows shaped like
+// digest_chunk_test.go's syntheticEvents (same title/artist padding), so
+// this package's real-Postgres SendDigestIfDue tests split into the same
+// chunk count the whitebox chunker tests already pin.
+func insertPendingEventsForChunking(t *testing.T, pool *pgxpool.Pool, artistID int64, n int) []int64 {
+	t.Helper()
+	ids := make([]int64, n)
+	for i := 0; i < n; i++ {
+		externalID := fmt.Sprintf("chunk-%04d", i)
+		title := fmt.Sprintf("Album Title Number %04d With Extra Padding Text To Grow The Line", i)
+		ids[i] = insertPendingEventTyped(t, pool, artistID, "new_release", externalID, title)
+	}
+	return ids
+}
+
+// countNotified reports how many of ids currently have a non-NULL
+// notified_at.
+func countNotified(t *testing.T, pool *pgxpool.Pool, ids []int64) int {
+	t.Helper()
+	n := 0
+	for _, id := range ids {
+		if isNotified(t, pool, id) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestSendDigestIfDue_MultiChunk_AllSucceed_ThreeSendsAllAckedBothColumnsAdvanceOnce
+// is success criterion 2's proof: a sendable set too large for one message
+// sends more than one Discord message, and every event acks exactly once,
+// with both settings columns advanced exactly once by the final chunk's ack
+// (D-14).
+func TestSendDigestIfDue_MultiChunk_AllSucceed_ThreeSendsAllAckedBothColumnsAdvanceOnce(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
 	q := sqlc.New(pool)
 	loc := time.UTC
-	now := time.Date(2026, 6, 17, 1, 5, 0, 0, time.UTC)
+	now := time.Date(2026, 7, 1, 1, 5, 0, 0, time.UTC)
 	wantSlot := settings.MostRecentSlot(now, settings.CadenceDaily, loc)
 
-	artistID := insertTestArtist(t, pool, "oversized-batch")
+	artistID := insertTestArtist(t, pool, "multi-chunk-all-succeed")
+	ids := insertPendingEventsForChunking(t, pool, artistID, chunkForcingEventCount)
 
-	const n = 200
-	ids := make([]int64, n)
-	for i := 0; i < n; i++ {
-		externalID := fmt.Sprintf("nr-oversized-%04d", i)
-		title := fmt.Sprintf("Oversized Batch Album Title Number %04d With Extra Padding Text To Grow The Line", i)
-		ids[i] = insertPendingEventTyped(t, pool, artistID, "new_release", externalID, title)
-	}
-
-	var gotEmbed discord.Embed
+	var gotDescriptions []string
 	sender := &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
-		gotEmbed = embed
+		gotDescriptions = append(gotDescriptions, embed.Description)
 		return nil
 	}}
 	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
-	n2 := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
 	logger, _ := newTestLogger()
 
-	if err := n2.SendDigestIfDue(context.Background(), logger, now); err != nil {
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
 		t.Fatalf("SendDigestIfDue: %v, want nil", err)
 	}
 
-	if got := atomic.LoadInt32(&sender.calls); got != 1 {
-		t.Fatalf("sender.calls = %d, want 1", got)
+	if got := atomic.LoadInt32(&sender.calls); got != 3 {
+		t.Fatalf("sender.calls = %d, want 3", got)
 	}
-	if !strings.Contains(gotEmbed.Description, "more event") {
-		t.Fatalf("embed Description = %q, want a truncation note -- fixture did not exceed the 4096-rune limit", gotEmbed.Description)
-	}
-	if rc := utf8.RuneCountInString(gotEmbed.Description); rc > 4096 {
-		t.Fatalf("embed Description has %d runes, want <= 4096", rc)
-	}
-
-	// Load-bearing: every inserted event id is acked, including whichever
-	// ones digest_format.go truncated out of the rendered Description.
-	for _, id := range ids {
-		if !isNotified(t, pool, id) {
-			t.Fatalf("event %d not marked notified -- a truncated-out event must still be acked, or the batch would retry forever", id)
+	for i, desc := range gotDescriptions {
+		if rc := utf8.RuneCountInString(desc); rc > 4096 {
+			t.Fatalf("chunk %d description has %d runes, want <= 4096", i, rc)
 		}
+		if !strings.HasPrefix(desc, "Everything pending since digest mode was enabled") {
+			t.Fatalf("chunk %d description does not open with the window header:\n%s", i, desc)
+		}
+	}
+	if got := countNotified(t, pool, ids); got != len(ids) {
+		t.Fatalf("notified count = %d, want %d (every event acked exactly once)", got, len(ids))
 	}
 
 	row, err := q.GetNotificationSettings(context.Background())
@@ -197,6 +223,208 @@ func TestSendDigestIfDue_OversizedBatch_TruncatesDescriptionAndAcksEveryEvent(t 
 	}
 	if !row.DigestLastSentAt.Valid {
 		t.Fatalf("digest_last_sent_at is NULL, want non-NULL")
+	}
+}
+
+// TestSendDigestIfDue_MultiChunk_FailureAtChunk2_PartialAckBothColumnsUnchanged
+// is success criterion 3's proof and D-14/D-15's load-bearing assertion: a
+// sender failure on the second of three chunks leaves the remainder
+// (including a suppressed id, D-15) pending and neither settings column
+// advances -- the digest stays due for the next check.
+func TestSendDigestIfDue_MultiChunk_FailureAtChunk2_PartialAckBothColumnsUnchanged(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 2, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "multi-chunk-fail-at-2")
+	ids := insertPendingEventsForChunking(t, pool, artistID, chunkForcingEventCount)
+	// releaseDate == "" inserts SQL NULL -- suppressed, never sent, must
+	// still stay pending after a mid-run failure (D-15).
+	suppressedID := insertPendingEventDated(t, pool, artistID, "chunk-suppressed", "Suppressed Title", "")
+
+	before := snapshotSettings(t, q)
+
+	var sender *fakeSender
+	sender = &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		if atomic.LoadInt32(&sender.calls) == 2 {
+			return errors.New("discord unavailable")
+		}
+		return nil
+	}}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+
+	if got := atomic.LoadInt32(&sender.calls); got != 2 {
+		t.Fatalf("sender.calls = %d, want 2", got)
+	}
+	if !strings.Contains(buf.String(), "digest send failed") {
+		t.Fatalf("expected send-failure Error log, got: %s", buf.String())
+	}
+
+	notified := countNotified(t, pool, ids)
+	if notified == 0 || notified == len(ids) {
+		t.Fatalf("notified count = %d, want strictly between 0 and %d (chunk 1 acked, chunks 2-3 still pending)", notified, len(ids))
+	}
+	if isNotified(t, pool, suppressedID) {
+		t.Fatalf("suppressed event %d unexpectedly acked after a mid-run failure -- suppressed ids ride the final ack only (D-15)", suppressedID)
+	}
+
+	if after := snapshotSettings(t, q); !after.equal(before) {
+		t.Fatalf("notification_settings changed after a partial failure: before=%+v after=%+v", before, after)
+	}
+}
+
+// TestSendDigestIfDue_MultiChunk_RetryAfterFailureSendsRemainder is D-12's
+// proof: a second SendDigestIfDue call after a partial failure is an
+// ordinary call that rebuilds fresh from whatever is still un-acked and
+// delivers it -- no state tracks which chunk failed.
+func TestSendDigestIfDue_MultiChunk_RetryAfterFailureSendsRemainder(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 3, 1, 5, 0, 0, time.UTC)
+	wantSlot := settings.MostRecentSlot(now, settings.CadenceDaily, loc)
+
+	artistID := insertTestArtist(t, pool, "multi-chunk-retry")
+	ids := insertPendingEventsForChunking(t, pool, artistID, chunkForcingEventCount)
+
+	var failingSender *fakeSender
+	failingSender = &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		if atomic.LoadInt32(&failingSender.calls) == 2 {
+			return errors.New("discord unavailable")
+		}
+		return nil
+	}}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n1 := notifier.New(q, failingSender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	if err := n1.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("first SendDigestIfDue: %v, want nil", err)
+	}
+	if got := countNotified(t, pool, ids); got == len(ids) {
+		t.Fatalf("notified count = %d after the first (partial-failure) call, want < %d", got, len(ids))
+	}
+
+	succeedingSender := &fakeSender{}
+	n2 := notifier.New(q, succeedingSender, reader, time.Millisecond, notifier.WithLocation(loc))
+	if err := n2.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("second SendDigestIfDue: %v, want nil", err)
+	}
+
+	if got := countNotified(t, pool, ids); got != len(ids) {
+		t.Fatalf("notified count = %d after the retry, want %d -- the retry must deliver the remainder", got, len(ids))
+	}
+	row, err := q.GetNotificationSettings(context.Background())
+	if err != nil {
+		t.Fatalf("get notification settings: %v", err)
+	}
+	if !row.DigestLastSlotAt.Valid || !row.DigestLastSlotAt.Time.Equal(wantSlot) {
+		t.Fatalf("digest_last_slot_at = %+v, want %v", row.DigestLastSlotAt, wantSlot)
+	}
+	if !row.DigestLastSentAt.Valid {
+		t.Fatalf("digest_last_sent_at is NULL, want non-NULL")
+	}
+}
+
+// TestSendDigestIfDue_MultiChunk_SpacingRequestedLenMinus1Times proves
+// consecutive chunk sends request digestChunkSpacing through the injectable
+// seam exactly len(chunks)-1 times (D-23).
+func TestSendDigestIfDue_MultiChunk_SpacingRequestedLenMinus1Times(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 4, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "multi-chunk-spacing")
+	insertPendingEventsForChunking(t, pool, artistID, chunkForcingEventCount)
+
+	var mu sync.Mutex
+	var requested []time.Duration
+	fired := make(chan time.Time)
+	close(fired)
+	notifier.SetDigestChunkWaitForTest(t, func(d time.Duration) <-chan time.Time {
+		mu.Lock()
+		requested = append(requested, d)
+		mu.Unlock()
+		return fired
+	})
+
+	sender := &fakeSender{}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, _ := newTestLogger()
+
+	if err := n.SendDigestIfDue(context.Background(), logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+
+	calls := atomic.LoadInt32(&sender.calls)
+	if calls < 2 {
+		t.Fatalf("sender.calls = %d, want >= 2 to exercise inter-chunk spacing", calls)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requested) != int(calls)-1 {
+		t.Fatalf("digestChunkWait requested %d times, want %d (len(chunks)-1)", len(requested), calls-1)
+	}
+	for _, d := range requested {
+		if d != time.Second {
+			t.Fatalf("digestChunkWait requested duration = %v, want the digest-specific 1s constant (D-23)", d)
+		}
+	}
+}
+
+// TestSendDigestIfDue_MultiChunk_ContextCancelledAtBoundary_StopsCleanly
+// proves a cancelled context at a chunk boundary stops the loop between
+// chunks: the sender receives no further call and no ack advances the slot
+// (D-26).
+func TestSendDigestIfDue_MultiChunk_ContextCancelledAtBoundary_StopsCleanly(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "notifier_test")
+	q := sqlc.New(pool)
+	loc := time.UTC
+	now := time.Date(2026, 7, 5, 1, 5, 0, 0, time.UTC)
+
+	artistID := insertTestArtist(t, pool, "multi-chunk-ctx-cancel")
+	insertPendingEventsForChunking(t, pool, artistID, chunkForcingEventCount)
+
+	before := snapshotSettings(t, q)
+
+	// A channel that never fires: only ctx.Done() can win the inter-chunk
+	// select, making the cancellation deterministic rather than a race.
+	neverFires := make(chan time.Time)
+	notifier.SetDigestChunkWaitForTest(t, func(time.Duration) <-chan time.Time { return neverFires })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var sender *fakeSender
+	sender = &fakeSender{fn: func(ctx context.Context, embed discord.Embed) error {
+		if atomic.LoadInt32(&sender.calls) == 1 {
+			cancel()
+		}
+		return nil
+	}}
+	reader := digestSettingsReader(true, settings.CadenceDaily, nil)
+	n := notifier.New(q, sender, reader, time.Millisecond, notifier.WithLocation(loc))
+	logger, buf := newTestLogger()
+
+	if err := n.SendDigestIfDue(ctx, logger, now); err != nil {
+		t.Fatalf("SendDigestIfDue: %v, want nil", err)
+	}
+
+	if got := atomic.LoadInt32(&sender.calls); got != 1 {
+		t.Fatalf("sender.calls = %d, want 1 (no further call after the boundary cancellation)", got)
+	}
+	if !strings.Contains(buf.String(), "chunk loop stopped at a chunk boundary") {
+		t.Fatalf("expected the boundary-cancellation Warn log, got: %s", buf.String())
+	}
+	if after := snapshotSettings(t, q); !after.equal(before) {
+		t.Fatalf("notification_settings changed after a boundary cancellation: before=%+v after=%+v", before, after)
 	}
 }
 

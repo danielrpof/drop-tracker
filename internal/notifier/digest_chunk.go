@@ -45,6 +45,19 @@ const chunkOverheadReserve = 300
 // against -- discordDescriptionLimit minus chunkOverheadReserve.
 const chunkContentBudget = discordDescriptionLimit - chunkOverheadReserve
 
+// digestChunkSpacing paces consecutive chunk sends within one
+// SendDigestIfDue run (D-23) -- a digest-specific one-second constant, not
+// n.spacing/spacingWait, which are sized for sporadic real-time sends and
+// sit, by their own comment, at Discord's ceiling. A sustained multi-chunk
+// burst through one webhook is a different regime.
+const digestChunkSpacing = time.Second
+
+// digestChunkWait is the seam SendDigestIfDue's inter-chunk select waits
+// on, mirroring spacingWait's shape (notifier.go): a var, not time.After
+// directly, so a test can substitute an already-fired channel and turn an
+// elapsed-wall-clock assertion into a deterministic requested-duration one.
+var digestChunkWait = time.After
+
 // digestEntry is one rendered event line plus the id it came from -- the
 // pairing per-chunk acking needs (D-16), which digest_format.go's former
 // bare []string segments discarded.

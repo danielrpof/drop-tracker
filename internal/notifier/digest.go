@@ -17,9 +17,17 @@ import (
 // shared notifying lock (the same lock NotifyPending takes -- ADR-0002, no
 // second lock exists in this package), read settings fail-closed, decide
 // whether the current digest slot is due, partition the outbox into
-// sendable and suppressed rows, build one embed, re-check settings
-// immediately before the POST, send, and ack the sent+suppressed rows plus
-// both settings columns in one atomic statement (D-16).
+// sendable and suppressed rows, re-check settings once before the first
+// chunk (D-30), split into one or more window-headered chunks
+// (buildDigestChunks), and send/ack each chunk in order: every chunk but
+// the last acks only the ids it rendered (ackEventsOnly, D-14), the final
+// chunk's ack also carries the suppressed ids and both settings columns
+// (ackDigestBatch, D-15) -- the only write in a run that moves instance
+// state. A send failure or a cancelled context at a chunk boundary stops
+// the loop with neither settings column advanced, so the digest stays due
+// and the next check retries from whatever is still un-acked (D-11/D-12).
+// A single-chunk digest takes exactly this same path with one iteration,
+// which is Phase 22's regression-safety property (D-14).
 func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now time.Time) error {
 	if !n.notifying.CompareAndSwap(false, true) {
 		logger.Info("skipping digest send: already in progress")
@@ -98,16 +106,15 @@ func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now
 		return nil
 	}
 
-	// Interim single-chunk shim: plan 23-01 task 2 lands the chunker with no
-	// caller change yet -- task 3 replaces this whole block with the real
-	// per-chunk send/ack loop (D-14/D-17). Sending only chunks[0] here is
-	// deliberately incomplete and never reaches production between commits.
-	chunks := buildDigestChunks(sendable, cfg.DigestLastSentAt)
-	embed := discord.Embed{Description: chunks[0].description}
-
-	// D-17 step 5: re-read settings immediately before the POST -- a toggle
-	// landing between the outbox read and here must abort with no send and
-	// no write, exactly as NotifyPending's own mid-pass re-check (D-04/T-22-12).
+	// D-30: the settings re-check runs once, before the first chunk only --
+	// a deliberate divergence from Phase 21's per-send re-read rule. A
+	// multi-message digest is one logical delivery; aborting it halfway
+	// would produce the hybrid half-digest half-real-time output Phase 21's
+	// mutual-exclusion invariant exists to prevent, and the lock is held
+	// throughout (D-25). Re-reading here also refreshes cfg.DigestLastSentAt,
+	// so chunks are built from this post-recheck cfg (not the pre-recheck
+	// one above) -- the header's watermark and this abort-check read the
+	// settings row exactly once, together.
 	cfg, err = readSettings(ctx, n.settingsReader)
 	if err != nil {
 		logSettingsReadFailure(ctx, logger, err)
@@ -117,32 +124,70 @@ func (n *Notifier) SendDigestIfDue(ctx context.Context, logger *slog.Logger, now
 		return nil
 	}
 
-	if err := n.sender.Send(ctx, embed); err != nil {
-		logger.Error("digest send failed",
-			slog.Int("sendable_count", len(sendable)),
-			slog.String("error", err.Error()),
-		)
-		return nil
-	}
+	chunks := buildDigestChunks(sendable, cfg.DigestLastSentAt)
 
-	// sentIDs walks the full sendable slice regardless of what
-	// digest_format.go actually rendered into embed.Description -- a
-	// buildDigestEmbed truncation never leaves an event stuck pending, since
-	// every id here still acks once Send succeeds (closes T-22-15).
-	sentIDs := make([]int64, 0, len(sendable)+len(suppressedIDs))
-	for _, ev := range sendable {
-		sentIDs = append(sentIDs, ev.ID)
-	}
-	sentIDs = append(sentIDs, suppressedIDs...)
+	for i, chunk := range chunks {
+		if i > 0 {
+			// D-23/D-26: digest-specific pacing, deliberately not the
+			// real-time path's 400ms inter-send seam. ctx.Done() is observed
+			// at this chunk boundary, not mid-POST, so a forced drain stops
+			// cleanly between messages.
+			select {
+			case <-digestChunkWait(digestChunkSpacing):
+			case <-ctx.Done():
+				logger.Warn("digest chunk loop stopped at a chunk boundary: remainder stays pending, slot un-advanced",
+					slog.Int("chunk_index", i),
+					slog.Int("chunk_count", len(chunks)),
+				)
+				return nil
+			}
+		}
 
-	sentAt := now
-	if err := ackDigestBatch(ctx, n.q, sentIDs, slot, &sentAt); err != nil {
-		return fmt.Errorf("notifier: ack sent digest batch: %w", err)
+		embed := discord.Embed{Description: chunk.description}
+		if err := n.sender.Send(ctx, embed); err != nil {
+			// A send failure is fatal to this digest attempt, not the
+			// process: neither settings column advances (D-11), so the
+			// slot stays due and the next check retries from whatever is
+			// still un-acked (D-12) -- chunks 1..i-1 already acked below,
+			// this chunk and every chunk after it stay pending.
+			logger.Error("digest send failed",
+				slog.Int("chunk_index", i),
+				slog.Int("chunk_count", len(chunks)),
+				slog.Int("sendable_count", len(sendable)),
+				slog.String("error", err.Error()),
+			)
+			return nil
+		}
+
+		if i < len(chunks)-1 {
+			// D-14: every chunk but the last acks its own ids only, and
+			// touches no settings column -- each chunk now acks precisely
+			// what it rendered, replacing the pre-phase invariant that
+			// walked the full sendable slice regardless of what rendered.
+			if err := ackEventsOnly(ctx, n.q, chunk.ids); err != nil {
+				return fmt.Errorf("notifier: ack digest chunk: %w", err)
+			}
+			continue
+		}
+
+		// Final chunk: the only write in this phase that moves instance
+		// state (D-14). Suppressed ids ride this ack, never an earlier
+		// chunk's -- they are never "delivered", so they belong with the
+		// write that means "this digest completed" (D-15).
+		sentIDs := make([]int64, 0, len(chunk.ids)+len(suppressedIDs))
+		sentIDs = append(sentIDs, chunk.ids...)
+		sentIDs = append(sentIDs, suppressedIDs...)
+
+		sentAt := now
+		if err := ackDigestBatch(ctx, n.q, sentIDs, slot, &sentAt); err != nil {
+			return fmt.Errorf("notifier: ack sent digest batch: %w", err)
+		}
 	}
 
 	logger.Info("digest sent",
 		slog.Int("sent_count", len(sendable)),
 		slog.Int("suppressed_count", len(suppressedIDs)),
+		slog.Int("chunk_count", len(chunks)),
 		slog.Time("slot", slot),
 	)
 
@@ -167,4 +212,17 @@ func ackDigestBatch(ctx context.Context, q sqlc.Querier, ids []int64, slot time.
 		params.SentAt = pgtype.Timestamptz{Time: *sentAt, Valid: true}
 	}
 	return q.AckDigestBatch(opCtx, params)
+}
+
+// ackEventsOnly is D-14's narrow per-chunk ack (docs/adr/0003): marks ids
+// notified and touches no notification_settings column. Runs for every
+// delivered chunk except the last -- the final chunk's ack is
+// ackDigestBatch, the only write in this phase that moves instance state.
+// Same context-detach shape as ackDigestBatch, so a shutdown landing after
+// Discord's 2xx still acks this chunk instead of re-sending its content in
+// a later digest.
+func ackEventsOnly(ctx context.Context, q sqlc.Querier, ids []int64) error {
+	opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dbOpTimeout)
+	defer cancel()
+	return q.AckEventsOnly(opCtx, ids)
 }

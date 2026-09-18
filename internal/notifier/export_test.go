@@ -24,3 +24,15 @@ func SetSpacingWaitForTest(t *testing.T, fn func(time.Duration) <-chan time.Time
 	spacingWait = fn
 	t.Cleanup(func() { spacingWait = orig })
 }
+
+// SetDigestChunkWaitForTest swaps SendDigestIfDue's inter-chunk
+// digestChunkWait seam for fn for the duration of the calling test,
+// restoring the original via t.Cleanup -- same shape as
+// SetSpacingWaitForTest, applied to the digest-specific chunk-pacing seam
+// (D-23) instead of the real-time spacingWait one.
+func SetDigestChunkWaitForTest(t *testing.T, fn func(time.Duration) <-chan time.Time) {
+	t.Helper()
+	orig := digestChunkWait
+	digestChunkWait = fn
+	t.Cleanup(func() { digestChunkWait = orig })
+}
