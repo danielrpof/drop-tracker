@@ -7,9 +7,14 @@
 
 # Closed milestone, superseded by v1.1
 .planning/milestones/v1.0-phases/
-# Closed milestones, superseded by v1.3 (current)
+# Closed milestones, superseded by v1.3
 .planning/milestones/v1.1-phases/
 .planning/milestones/v1.2-phases/
+# Closed milestones, shipped and archived (v1.3-v1.5)
+.planning/milestones/v1.3-phases/
+.planning/milestones/v1.3-research/
+.planning/milestones/v1.4-phases/
+.planning/milestones/v1.5-phases/
 # Generated knowledge-graph artifacts -- indexing these makes the graph describe itself
 .planning/graphs/
 # One-off quick-task dirs, accumulating indefinitely
