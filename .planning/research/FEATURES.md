@@ -1,147 +1,176 @@
 # Feature Research
 
-**Domain:** Digest/batch notification mode for a single-operator self-hosted release tracker (drop-tracker v1.5)
-**Researched:** 2026-09-11
-**Confidence:** MEDIUM (cross-checked against multiple independent digest-system vendors/guides; no single canonical spec exists for this feature class, and the closest sibling OSS domain — Sonarr/Radarr — has no first-party implementation to benchmark against directly)
-
-## Scope Note
-
-This is subsequent-milestone research scoped to one feature area, not a full domain survey. drop-tracker already has: real-time per-event Discord notifications, a Postgres `events` table with 90-day soft-delete retention (`created_at`-based, dedup keys/deluxe-baselines preserved unfiltered), a watchlist, `robfig/cron` scheduling, and a gated `GET /status` operator panel. Findings below assume that substrate and do not re-litigate stack/architecture choices already locked in PROJECT.md.
+**Domain:** Watchlist organization for a self-hosted single-operator release tracker (v1.6) — tags, notes, search/sort/filter, bulk edit, bulk import review
+**Researched:** 2026-09-22
+**Confidence:** MEDIUM (websearch-sourced, cross-checked across 2+ independent sources per claim per `classify-confidence --verified`; no official docs/Context7 coverage exists for this UX-pattern question — it's a design-convention survey, not an API-fact lookup)
 
 ## Feature Landscape
 
 ### Table Stakes (Users Expect These)
 
-Features an operator turning on "digest mode" would assume exist. Missing these makes the toggle feel half-built.
+Features an operator managing a 50+ artist watchlist assumes exist once tags/notes/bulk-add ship at all. Missing these makes the new surface feel half-built rather than absent.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| On/off toggle, persisted server-side (Postgres, not env var) | Milestone spec explicitly requires SPA-configurable, no-redeploy setting — matches how every commercial digest feature (SuprSend, Novu, NotificationAPI) exposes it as a live preference, not a build-time flag | LOW | One settings row/table; already decided in PROJECT.md scope — reinforced, not new research |
-| Fixed wall-clock cadence (daily / weekly), not a rolling window | Every scheduled-summary product (Sonarr/Radarr third-party digest add-ons, RSS-to-email tools like Digest/Mailbrew, generic digest vendors) uses "fires at a fixed time" for day/week-granularity digests. Rolling/event-driven windows (start on first event, collect for N minutes) are the *other* pattern in the literature, but only ever seen at minute/hour granularity for "batch comments together" use cases — never for daily/weekly cadences. Daily-or-weekly is squarely fixed-schedule territory | LOW–MEDIUM | Pick one fixed time-of-day (e.g. configurable hour, default reasonable UTC hour) for daily; one day-of-week + hour for weekly. `robfig/cron` already expresses this natively as a cron expression — no new scheduling primitive needed |
-| Skip-send on zero events (no empty digest) | Universal, unquestioned convention across every source found (Knock's alert-digest template, generic alert-digest guidance, and a concrete reference implementation's `if events: send_digest()` gate). No vendor treats "send an empty digest" as a real option | LOW | A `COUNT(*)` guard before posting to Discord; cheapest correctness win in the whole feature |
-| Chronological ordering within the digest as the baseline | The one consistent finding across RSS-digest and alert-digest sources: absent a stronger signal, order by time (`created_at`), preserving insertion order. This is the "safe default" every source falls back to when no fancier grouping is implemented | LOW | `ORDER BY created_at` on the query already used for `GET /events`/retention filtering — no new index needed beyond what retention already relies on |
-| Digest reflects all three existing event types together in one message | Milestone spec explicitly requires new-release, guest-feature, and deluxe-change events to batch into the *same* scheduled message, not three separate digests | LOW–MEDIUM | The `events` table already carries a type discriminator (used today to render distinct Discord embeds per type in real-time mode); digest mode reuses the same read path, just batches the write |
-| Default stays real-time/off | Matches today's behavior; also matches the general digest-vendor pattern of "opt-in batching, not opt-in real-time" — batching is the deviation from default, not the other way around | LOW | Already locked in PROJECT.md scope |
+| Case/whitespace-insensitive tag matching | Every tag system researched (Gmail, GitHub labels) treats `"Hip-Hop"`, `" hip-hop "`, and `"hip-hop"` as the same tag at the storage/comparison layer, even where display casing varies. Users expect autocomplete to catch near-duplicates, not create four variants of one tag. | LOW | Normalize to a canonical key (trim + collapse internal whitespace + lowercase) for storage/uniqueness/comparison; keep first-used casing (or lowercase-only) for display. GitHub's own label-matching bugs (case-sensitive raw comparison) are a documented anti-pattern to avoid. |
+| Tag rename affects all tagged artists atomically | Gmail's label rename is a single global edit reflected everywhere the label appears — users expect the same: renaming a tag once updates every artist carrying it, not a per-artist re-tag. | LOW-MEDIUM | Natural fit for a normalized many-to-many `tags` + `artist_tags` join table; rename is an UPDATE on the `tags` row, not N row edits. |
+| Tag delete removes the tag from all artists, artists survive | Deleting a label/tag in every system researched (Gmail, GitHub) removes the *label*, never the underlying item. | LOW | Cascading delete on the join rows only; watchlist entries are untouched. |
+| Empty states for every new surface | Every list/filter UI researched (bookmark managers, label systems) has a defined "nothing here yet" state distinct from "no results for this filter" — conflating the two reads as a bug. | LOW | Needs at least: no tags exist yet (Watchlist/autocomplete), an artist has no tags, an artist has no note, a tag/mute/release-type filter matches zero artists, History has no events for the selected tag. |
+| Deterministic sort order (tie-breaking) | Users researched via SQL `ORDER BY` convention docs expect that re-sorting or re-filtering an unchanged list never silently reshuffles rows with equal primary-sort values — that reads as broken pagination/rendering, not "expected ties." | LOW | Every sort mode needs a stable secondary key (see UX Pattern Findings below). |
+| Bulk destructive action requires an explicit, count-stated confirmation | Universal across the bulk-action UX guides researched (SaaS destructive-action patterns, eBay/HashiCorp/Basis design-system bulk-edit patterns): a bulk remove must show the affected count in the confirmation itself ("Remove 12 artists from watchlist?"), not a generic "Are you sure?". | LOW | Matches PROJECT.md's already-stated "confirmed bulk remove." |
+| Paste-list bulk add never silently drops or silently adds anything | *arr-family tools (Lidarr/Sonarr, the closest domain analog — self-hosted media watchlist bulk-add) and Letterboxd's importer both stage matches for review before committing; nothing is added to the watchlist until the user confirms the reviewed batch. Already locked in PROJECT.md ("nothing added until confirmed") — research confirms this is the domain-standard behavior, not a gold-plated addition. | MEDIUM | The review screen itself (best match + alternates + skip/exclude per row) is the feature, not a side detail. |
 
 ### Differentiators (Competitive Advantage)
 
-Not required to ship a working toggle, but meaningfully better than the bare minimum — and cheap relative to the existing codebase's design bar (e.g. Phase 13's fail-closed artist-art matching, Phase 15's dual-purpose coverage tool).
+Not required by domain convention, but meaningfully raise usability for a single-operator instance managing a non-trivial watchlist. These are where v1.6 earns the "manageable at 50+ artists" goal PROJECT.md states.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Group-by-artist (or group-by-event-type) within the digest body, chronological *within* each group | The more sophisticated digest tools (email-digest best-practice guidance, cross-source RSS mergers) move past flat chronological lists toward "clear hierarchy" — grouping reduces scanning effort in a message that could contain a week's worth of releases across many watched artists. Sonarr/Radarr's own third-party digest add-ons (Bettarr-Notifications) exist specifically because flat unstructured batches feel worse than grouped ones | LOW–MEDIUM | Pure presentation-layer change over the same query — group in Go before building the Discord payload, no schema change |
-| A visible "since [last digest timestamp]" header/footer in the digest message | No vendor explicitly documents this, but it directly solves the ambiguity every source flags around mode-switching and window boundaries — telling the operator exactly what the digest covers builds trust that nothing was silently dropped or double-counted | LOW | Requires storing `last_digest_sent_at` (see Dependencies) — already needed for the query itself, so surfacing it in the message body is nearly free |
-| Discord embed chunking for large digests | Discord hard-caps a single message at 6000 total embed characters and 10 embeds per message (existing real-time notifier already respects Discord's per-embed field limits per the stack decisions). A watchlist with many artists + a weekly cadence could plausibly accumulate more events than one message can hold | MEDIUM | Not optional once volume is realistic — split into multiple sequential webhook POSTs if the batch exceeds Discord's limits. This is the one piece of real new complexity in the feature; flag for phase-level research/design (rate-limit-aware multi-message send, ordering preserved across the split) |
+| Tag-based filtering reused identically across Watchlist and History | Most competitor tag systems (Gmail, GitHub) let you filter by label in one place (inbox, issue list) but rarely carry the same tag taxonomy into a second, differently-shaped view. Drop-tracker's History-filterable-by-tag plus Watchlist-filterable-by-tag sharing one tag vocabulary is a genuine differentiator for a personal tool. | LOW (once tags backend exists) | Reuses the accessible combobox already built in Phase 11.1 (`history.tsx`) rather than a new control. |
+| Match-confidence-driven review screen, not a flat "did we find it" list | The Lidarr/Sonarr pattern (MusicBrainz-ID-backed exact match ranked above fuzzy text match) is more rigorous than most bulk importers researched (bookmark dedup tools, for instance, still show ~17-34% silent duplication rates from naive raw-string matching). Applying tiered confidence (exact ID > exact name > fuzzy > not found) to the paste-a-list review screen directly avoids that failure class. | MEDIUM | internal/musicbrainz and internal/deezer search clients already exist (Phase 03) — this is UI/aggregation work on top of an existing capability, not a new external integration. |
+| Tags on Discord notification surfaces | No competitor researched (music trackers, RSS readers) surfaces user-defined tags inside the *notification* itself — tags are typically a browse/filter-only construct. Putting them on real-time embeds and digest lines is a drop-tracker-specific differentiator that closes the loop between organization and the app's actual output channel. | LOW-MEDIUM | Read-only rendering concern — digest grouping explicitly stays by event type per PROJECT.md, so this is additive text, not a new grouping dimension. |
 
 ### Anti-Features (Commonly Requested, Often Problematic)
 
-Explicitly already fenced off by the milestone's own "Out of scope this cycle" list — corroborated here by what the wider ecosystem treats as scope creep for a v1 digest feature.
-
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|------------------|-------------|
-| Per-event-type digest overrides (e.g. "batch releases but keep guest-features real-time") | Commercial digest platforms (per-category digest frequency in a preference center) support this because they serve many users with different tolerances | Single-operator instance = one taste, not many; the milestone's own scoping already rejected this (Out of scope). Preference-center-style per-category logic also multiplies the window/watermark bookkeeping this research flags as the trickiest part of even the single-toggle version | One instance-wide toggle + cadence, as scoped |
-| Rolling/event-driven window ("batch for N minutes after first event") instead of fixed daily/weekly schedule | Seems more "responsive" than a fixed clock time | Wrong granularity — rolling windows are documented for minute/hour-scale grouping (e.g. Slack-notification-style debouncing), not day/week digests; adds a stateful "is a window currently open" tracking problem the fixed-schedule model avoids entirely | Fixed wall-clock cron schedule, as scoped |
-| Multi-channel digest sinks (RSS/webhook/email) | "Since we're batching anyway, why not offer other delivery channels" | Explicitly parked (Option A) in the milestone scope; orthogonal to the batching logic itself — conflating them risks scope creep into the digest phase | Discord-only for this milestone; multi-channel is a separable future milestone |
-| Send an empty "no news this week" digest | Feels reassuring ("the bot is alive") | Contradicts the universal skip-send convention found across every source; also duplicates what `/status`'s existing per-source last-run summary (shipped v1.4) already tells the operator — an empty digest would be redundant liveness signaling wearing a notification's clothes | Rely on the existing `/status` panel for "is this thing still running"; digest stays strictly content-gated |
-| Retroactively re-including events that already fired as real-time notifications before a mid-window toggle to digest mode | Feels like "don't lose anything" | Would duplicate notifications the operator already saw — no source condones this; the one clear signal found is that digest-frequency settings are read "at batch-open time," i.e. prospectively | Toggle takes effect for the *next* window only; the query building each digest should key off `last_digest_sent_at` (see Dependencies), and toggling from real-time→digest should set that watermark to "now" at toggle time so nothing already-notified reappears |
+| Hierarchical tags / nested folders (à la old-school bookmark folder trees) | Feels like better organization at first glance; Spotify users have long requested folders for the same reason. | Every flat-tag system researched (Gmail, GitHub) deliberately avoids hierarchy — nesting adds a second data model (parent/child), ambiguous multi-parent cases, and a rename/move UX cost, for a personal 50-100-artist list where flat tags plus filter already solve findability. Spotify's own unresolved multi-year folder request thread is cited by researchers as evidence hierarchy is expensive to do well, not that it's missing by oversight. | Flat free-form multi-tags (already the v1.6 design) — multiple tags per artist already gives most of the practical benefit of folders (an artist can be in "reggaeton" and "new-2026" simultaneously, which a strict folder tree can't do without duplication). |
+| Fuzzy/semantic duplicate detection on bulk-add ("AI similarity matching") | Bookmark-manager research shows this is a real pain point (17-34% silent duplicate rates) and vendors increasingly market simhash/AI dedup as the fix. | Overkill for this domain: artists are already keyed by stable external IDs (MusicBrainz MBID / Deezer artist ID) once matched, so "is this a duplicate" is an exact-ID comparison against the existing watchlist, not a fuzzy content-similarity problem. Building semantic dedup here solves a harder version of a problem the ID match already solves exactly. | Exact-ID collision check against the current watchlist at review-screen time (flag "already watched", don't re-add) — see UX Pattern Findings below. |
+| Silent auto-merge on tag rename collision | Feels convenient — "why ask, just merge them." | A silent merge is a data-loss-adjacent action (two previously-distinct groupings collapse into one with no way to tell which artists came from which tag afterward) — every bulk-destructive-action guide researched insists on an explicit confirmation whenever an action is irreversible-in-effect, even if not "destructive" in the delete sense. | Detect the collision, show a confirmation naming both tags and the resulting merged artist count, require explicit confirm (see UX Pattern Findings below) — cheap to implement, avoids a surprise. |
+| Undo for bulk *remove from watchlist* | Undo is the modern default for bulk actions per the SaaS/eBay/HashiCorp bulk-action guides researched, and it's tempting to apply it uniformly. | Removing a watchlist entry likely cascades or orphans per-artist history/detection state (dedup keys, deluxe-change baselines) that a UI-layer "undo" can't cheaply restore without re-adding and re-seeding — the same class of problem the app's `EVENT_RETENTION_DAYS` soft-delete design already had to solve deliberately (Phase 10). A UI toast-undo would either lie about full restoration or require its own state-preservation design. | Confirm-with-count modal instead (already the v1.6 design decision) — matches the "explicit confirm for high-consequence irreversible actions" branch of the researched guidance, not the "offer undo" branch reserved for cheap-to-reverse actions. |
+
+## UX Pattern Findings (direct answers to the research question)
+
+**Tag normalization (case, whitespace, max length/count):**
+Storage/comparison layer should be case-insensitive and whitespace-normalized (trim + collapse internal runs to a single space) — this is the convention in both systems researched (Gmail merge-by-name, GitHub label-matching bug reports that exist precisely because raw casing wasn't normalized). Cap per-tag length modestly (researched implementations range ~24-100 chars; something in the 30-40 char range is generous for a short label like "reggaeton" or "deluxe-watch" without inviting note-length text). Cap tag count per artist at a small number (researched examples split between ~5 and ~50 depending on whether tags are a primary or secondary UI element — for a *secondary* organizational aid on an artist card, a low cap, e.g. 10-15, keeps the card readable; there is no single universal number, so treat this as a product choice, not a researched constant).
+
+**Rename-merge collisions:**
+When renaming tag A to a name that normalizes to an existing tag B, the domain-standard behavior (Gmail explicitly supports "merge to an existing label" as the resolution path, rather than erroring or silently creating a duplicate) is to detect the collision pre-commit and offer an explicit merge: show both tags' names and the resulting merged artist count, require confirmation, then union the artist memberships into one tag row and delete the renamed-from tag. Do not silently auto-merge (see Anti-Features) and do not block the rename with a bare "name taken" error — that's worse UX than the tool being renamed from already offers.
+
+**Empty states:**
+Treat "no tags exist in the system yet" (autocomplete has nothing to suggest, first-run state) as distinct from "this artist has no tags" (normal steady-state) and distinct from "this filter/search matched zero artists" (needs a "clear filter" affordance, not just blank space) — all three are different empty states in every list/filter UI researched and conflating them (e.g., showing the same blank card for "no tags anywhere" and "filtered to zero") reads as a bug to users. Same three-way split applies to History filtered by tag.
+
+**Bulk-import line parsing (commas vs newlines, duplicates, already-watched, "Artist - extra" noise):**
+- **Delimiter:** newline-per-entry is the domain-standard shape for a "paste a list" box (this matches how *arr-family import-list tools and CSV/bookmark bulk importers researched all expect one item per line); treat commas as noise/part of the name rather than a second delimiter, since artist names themselves can legitimately contain commas in edge cases (featuring credits, "The Weeknd, Pt. 2"-style entries) — splitting on commas risks mid-name breaks that splitting on newlines doesn't.
+- **Duplicates within the pasted batch:** dedupe case-insensitively before searching (searching the same string twice wastes the per-name rate-limited lookup budget for no benefit) and show the deduped count to the user.
+- **Already-watched artists:** flag rather than silently drop — bookmark-import research is explicit that *silent* dedup/skip is what causes trust problems (users can't tell if their paste "worked"); the review screen should mark a matched artist as "already on your watchlist" and let the user see and explicitly exclude it, matching the "nothing added until confirmed" design already locked for this milestone. Matching should be by the stable external ID once the search resolves a candidate, not by fuzzy name string, since ID-based comparison is exact where the domain already has one (see Anti-Features: no need for fuzzy/semantic dedup here).
+- **"Artist - extra" noise:** don't auto-strip suffixes/noise algorithmically before searching (risks stripping something that was actually part of the name); instead surface each raw pasted line, run it through the same per-name search the existing search-proxy already does, and let the confidence-ranked match results absorb the noise naturally (a search for "Bad Bunny - Topic" will usually still surface Bad Bunny as the top/best match via the underlying MusicBrainz/Deezer search relevance ranking) — treat any line that fails to produce a confident match as a "not found, edit or skip" row rather than trying to out-guess arbitrary paste noise with regex heuristics.
+
+**Review-screen confidence signals:**
+Tiered confidence, ranked (based on the Lidarr/Sonarr and Letterboxd import patterns researched, both of which rank exact-ID matches above text-based best-guess matches):
+1. **High** — exact/near-exact name match against the search API's top result (already the existing search-proxy's own ranking signal from Phase 03/12's popularity-ranking work) → pre-select as the default, still visible and changeable.
+2. **Medium** — a plausible but not exact match (partial string match, or multiple close candidates) → show the top candidate plus a visible list of alternates, require the user to actively confirm rather than defaulting to auto-accept.
+3. **Not found** — search returned nothing usable → flag the row distinctly (not blank/absent), offer manual re-search or skip.
+Never auto-commit a Medium or Not-found row; only High-confidence rows are reasonable to pre-check for a "confirm all" convenience action, and even then the user must hit one final confirm for the whole batch (matches "nothing added until confirmed").
+
+**Bulk action undo vs confirm:**
+Split by reversibility/consequence, per the SaaS/eBay/HashiCorp bulk-action guidance researched: reversible, low-consequence bulk edits (add/remove tags, set release-type/mute preferences) can apply immediately with a lightweight success indication (toast), since re-editing is cheap; the bulk *remove from watchlist* action — which interacts with existing detection state the app already treats carefully (dedup keys, deluxe baselines, retention filtering) — should use an explicit, count-stated confirmation modal rather than an apply-then-offer-undo pattern, because a UI-level "undo" can't cheaply/correctly restore whatever cascade a real remove triggers. This mirrors the anti-feature note above.
+
+**Sort ties:**
+Every sort mode needs a defined, stable secondary key so re-renders/re-filters never visibly reorder equal-valued rows: name sort → name then artist ID; date-added sort → date-added timestamp then artist ID; latest-release sort → release date then artist ID. (No single "correct" secondary key exists in the literature — this is the SQL/UX convention of "always fully order, never leave ties to incidental row order," confirmed by the ORDER BY research above, applied here as a concrete recommendation.)
+
+**Latest-release sort with no events:**
+Postgres natively supports `NULLS LAST`/`NULLS FIRST` and the researched UX convention (missing/unknown values trail known values, e.g., "products with prices before unknown-price products") favors always placing artists with zero detected events at the end of the list regardless of ascending/descending direction — i.e., don't let `NULLS FIRST` surface never-released artists at the top on a descending sort, which would look like they have the *newest* release. Recommend an explicit `NULLS LAST` in both directions for this sort mode rather than relying on Postgres's per-direction default (`NULLS LAST` on ASC, `NULLS FIRST` on DESC), since the per-direction default is exactly the case that would surprise a user on descending sort.
 
 ## Feature Dependencies
 
 ```
-[Instance-wide digest toggle + cadence setting] (Postgres, SPA-editable)
-    └──requires──> [Settings persistence layer distinct from existing env-var config]
-                       (new: no existing Postgres-backed, live-editable setting exists today —
-                        everything else in the app is env-var/compile-time per PROJECT.md)
+Tags backend (tags table + artist_tags join, normalized-key uniqueness)
+    ├──requires──> none new (additive schema only)
+    ├──enables──> Tag autocomplete on Watchlist add/edit
+    ├──enables──> Global tag rename/delete
+    ├──enables──> Watchlist filter by tag
+    ├──enables──> History filter by tag  ──reuses──> existing accessible combobox (Phase 11.1, history.tsx)
+    ├──enables──> Tags on Discord real-time embeds
+    └──enables──> Tags on digest lines  ──constrained by──> digest grouping stays by event type (PROJECT.md)
 
-[Scheduled digest send] (robfig/cron, fixed wall-clock)
-    └──requires──> [last_digest_sent_at watermark]
-                       └──requires──> [events table already has created_at + soft-delete filtering]
-                                          (Phase 10 retention machinery — reused, not rebuilt)
-    └──requires──> [Digest toggle is ON at cron-fire time] (read fresh each fire, not cached)
+Notes field (per-artist plain text, length-capped)
+    └──requires──> none new (single column on existing watchlist row)
 
-[Skip-send on empty window] ──requires──> [last_digest_sent_at watermark]
-    (same watermark powers both "what's in this digest" and "was it empty")
+Watchlist search/sort/filter
+    ├──requires──> Tags backend (for the tag filter facet)
+    └──requires──> existing release-type filter / muted-event-type columns (already in internal/watchlist, Phase 02)
 
-[Discord embed chunking] ──enhances──> [Scheduled digest send]
-    (only triggers once accumulated-event count crosses Discord's per-message embed/char limits)
+Multi-select bulk edit (tags, prefs, remove)
+    ├──requires──> Tags backend (for bulk tag add/remove)
+    ├──requires──> existing per-artist preference mutation endpoints (Phase 02) extended to batch
+    └──requires──> new multi-select UI affordance on Watchlist (not present today)
 
-[Real-time notification path] ──conflicts──> [Scheduled digest send]
-    (mutually exclusive at any given moment — the toggle selects exactly one active path;
-     both paths must read the same toggle state to avoid double-notifying)
+Paste-a-list bulk add + review screen
+    ├──requires──> existing search-proxy (internal/musicbrainz, internal/deezer clients — Phase 03)
+    ├──requires──> existing per-request rate limiters (Phase 03/11) — "no new background API polling" constraint means each pasted name's lookup rides the same interactive-search rate budget, not a new poller
+    ├──requires──> exact-ID collision check against current watchlist (already-watched detection)
+    └──enables──> nothing added to internal/watchlist until user confirms the reviewed batch
 ```
 
 ### Dependency Notes
 
-- **Digest toggle requires a new settings persistence layer:** every existing piece of drop-tracker config is env-var-only (per CLAUDE.md/PROJECT.md constraints); this is explicitly called out in the milestone goal as new ("changeable without a redeploy, unlike the env-var-only config used elsewhere"). This is new schema/plumbing, not a reuse of an existing pattern — flag for phase-level design.
-- **Scheduled send requires a `last_digest_sent_at` watermark:** this is the load-bearing piece of state for three separate behaviors — defining the query window (`WHERE created_at > last_digest_sent_at`), deciding skip-vs-send (row count from that same query), and correctly handling a mid-cycle toggle (set the watermark to "now" the moment digest mode is switched on, so already-real-time-notified events never reappear). One column, three jobs — get its update timing right and most of the feature's correctness follows.
-- **Real-time conflicts with scheduled send:** the two paths must never both fire for the same event. Concretely, this likely means the existing real-time notifier call becomes conditional on the toggle's current state (checked per poll cycle, not cached at boot) — the toggle needs to be read live, since it's now a runtime Postgres value rather than a boot-time env var.
-- **Discord embed chunking only matters at scale:** with a modest watchlist and daily cadence this may never trigger; with a large watchlist and weekly cadence it's likely to. Worth a complexity flag for phase research rather than building it defensively on day one — but the query/grouping logic should be shaped so chunking can be added without a rework (e.g. build a list of embed objects up front, chunk at send time).
+- **Tags backend is the single shared dependency** for five of the seven v1.6 target features (autocomplete, rename/delete, Watchlist filter, History filter, Discord display). It should land first/early in the phase sequence — every other tag-touching feature is blocked on it.
+- **History filter by tag reuses, not replaces**, the accessible combobox already built and validated in Phase 11.1 (Windows Chromium legibility fix) — no new filter-control component should be built from scratch.
+- **Paste-a-list bulk add has no new external-API surface** — it is UI/orchestration on top of the existing Phase 03 search-proxy and Phase 03/11 rate limiters, which is what keeps it compatible with the "no new background API polling" v1.6 constraint. The per-name search must stay synchronous/foreground (user is watching the review screen build), not a background poller job.
+- **Multi-select bulk edit conflicts with nothing** existing but is the one genuinely new UI mechanism (row selection state, action bar) — every other v1.6 feature extends an existing surface (Watchlist card, History filter, Discord embed) rather than introducing a new interaction pattern.
+- **Tags on Discord surfaces depend on the tags backend existing with real data** — sequencing this after tags are usable in the UI (so there's something meaningful to test against) rather than in parallel is lower-risk.
 
 ## MVP Definition
 
-### Launch With (v1.5, this milestone)
+### Launch With (v1.6)
 
-- [ ] Instance-wide digest toggle (off/daily/weekly) — Postgres-persisted, SPA-editable — essential per milestone goal
-- [ ] Fixed wall-clock cron schedule for daily and weekly cadences — matches the milestone's stated cadence granularity and every relevant precedent found
-- [ ] `last_digest_sent_at` watermark, updated at send time (or at toggle-on time) — the one piece of state everything else depends on
-- [ ] Skip-send when the watermark-to-now window has zero events — universal convention, cheap, prevents empty-digest noise
-- [ ] All three event types (release/guest-feature/deluxe-change) combined into one digest message, chronologically ordered — core of the milestone goal
-- [ ] Toggle applies prospectively — flipping to digest mode sets/resets the watermark so nothing already real-time-notified is repeated
+All seven target features are already locked as in-scope in PROJECT.md; nothing here is negotiable MVP scoping in the traditional sense. Sequencing priority based on the dependency graph above:
 
-### Add After Validation (v1.5.x or a fast-follow)
+- [ ] Tags backend (schema + normalize/dedupe/rename-merge logic) — blocks 5 of 7 downstream features
+- [ ] Tag autocomplete + global rename/delete UI
+- [ ] Per-artist notes (length-capped, Watchlist-only) — no dependency, can land independently/in parallel
+- [ ] Watchlist search/sort/filter (name search, sort ties, tag/mute/release-type filter)
+- [ ] History filter by tag (reuse existing combobox)
+- [ ] Tags on Discord real-time embeds and digest lines
+- [ ] Multi-select bulk edit (tags, prefs, confirmed remove)
+- [ ] Paste-a-list bulk add + review screen (confidence-tiered matches, already-watched flagging, nothing committed until confirmed)
 
-- [ ] Group-by-artist (or by event-type) presentation within the digest body — pure formatting improvement once the base send path works
-- [ ] "Since [timestamp]" header/footer in the digest for operator trust/debuggability
-- [ ] Discord multi-message chunking for digests that exceed embed limits — build once real usage shows whether this is ever actually hit
+### Add After Validation (v1.x)
 
-### Future Consideration (v2+, or a separate milestone)
+Not part of this research's scope to invent — PROJECT.md's Out of Scope section already covers longer-horizon items (producer tracking, upcoming-release calendar per the `2026-09-08` note's Option D). Nothing surfaced in this research suggests deferring any of the seven locked features further; the open question is sequencing, not scope.
 
-- [ ] Per-event-type digest overrides — explicitly out of scope this cycle; would need the per-category preference-center pattern this research flags as meaningfully more complex
-- [ ] Multi-channel digest delivery (RSS/email/webhook) — parked Option A, orthogonal to the batching engine itself
-- [ ] Configurable/rolling digest windows — no clear precedent at daily/weekly granularity; only relevant if the product ever wants sub-hour batching for a different use case
+### Future Consideration (v2+)
 
-## Feature Prioritization Matrix
+- Hierarchical/nested tag groups — explicitly an anti-feature per research above; flat tags already cover the practical need.
+- Semantic/fuzzy dedup on bulk-add — explicitly an anti-feature; exact-ID collision check is sufficient given the domain already has stable external IDs.
+- Cross-device undo history for bulk actions — not requested in PROJECT.md and the researched guidance places watchlist-remove in the "confirm, don't undo" bucket anyway.
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|----------------------|----------|
-| Digest toggle + cadence, Postgres-persisted, SPA-editable | HIGH | MEDIUM (new settings-persistence pattern for this codebase) | P1 |
-| Fixed wall-clock cron schedule (daily/weekly) | HIGH | LOW (robfig/cron already in stack) | P1 |
-| `last_digest_sent_at` watermark + skip-on-empty | HIGH | LOW | P1 |
-| Combined multi-event-type digest, chronological | HIGH | LOW–MEDIUM (reuses existing events query/retention path) | P1 |
-| Real-time/digest mutual-exclusion at send time | HIGH (correctness-critical — this is the difference between "digest mode" and "digest mode plus duplicate real-time pings") | MEDIUM | P1 |
-| Group-by-artist/event-type presentation | MEDIUM | LOW | P2 |
-| "Since [timestamp]" digest header | LOW–MEDIUM | LOW | P2 |
-| Discord multi-message chunking | MEDIUM (only matters at scale) | MEDIUM | P2 |
-| Per-event-type digest overrides | LOW (single-operator instance) | HIGH | P3 (deferred) |
-| Multi-channel digest sinks | LOW this cycle | HIGH | P3 (deferred) |
+## Competitor Feature Analysis
 
-**Priority key:**
-- P1: Must have for the milestone to deliver its stated goal
-- P2: Should have, straightforward fast-follow once P1 lands
-- P3: Explicitly deferred per milestone scope
-
-## Comparable-Product Feature Analysis
-
-No canonical single competitor exists for "self-hosted music-release Discord tracker with a digest toggle" — the closest sibling domain (media-release *arr stack) and the general digest-vendor space were both surveyed instead.
-
-| Feature | Sonarr/Radarr (`*arr` ecosystem) | Commercial digest platforms (SuprSend/Novu/NotificationAPI) | drop-tracker's approach |
-|---------|-----------------------------------|----------------------------------------------------------------|--------------------------|
-| Native digest/batch mode | None — real-time-only by design; digesting only exists via third-party middleware sitting between the app and Discord | Core product feature, often per-category and multi-window | First-party, instance-wide (not per-category — single-operator doesn't need it) |
-| Window model | N/A (no native digest) | Both fixed-schedule and rolling/event-driven, chosen per use case | Fixed wall-clock only (daily/weekly) — matches the requested cadence granularity |
-| Empty-window behavior | N/A | Skip-send (universal convention) | Skip-send |
-| Event grouping in a batch | Ad-hoc, tool-dependent (Bettarr-Notifications etc.) | Chronological baseline; hierarchy/grouping in more mature tools | Chronological at launch; grouping as a fast-follow |
+| Feature | Gmail Labels | Lidarr/Sonarr (closest domain analog) | Our Approach |
+|---------|--------------|-----------------------------------------|--------------|
+| Tag/label rename | In-place rename, merges if target name exists | N/A (no tagging) | Same merge-on-collision behavior, with explicit confirm rather than silent merge |
+| Bulk import matching | N/A | MusicBrainz-ID match preferred over text match; falls back to artist/album text matching | Same tiered approach: ID/exact match (High) → fuzzy text match (Medium, shows alternates) → not found |
+| Filter by tag across multiple views | Labels filter Inbox only (single view) | N/A | Differentiator: same tag vocabulary filters both Watchlist and History |
+| Duplicate detection on import | N/A | Reads existing library, matches by ID where present | Exact-ID collision check against current watchlist, not fuzzy similarity |
 
 ## Sources
 
-- SuprSend — "How Notification Batching and Digests Actually Work" (https://www.suprsend.com/post/notification-batching-and-digest) — fixed-schedule vs rolling-window distinction, batch-on-read/batch-on-write — MEDIUM confidence (cross-checked)
-- Novu — "Best Practices – How to Not Over Notify Your Users" (https://novu.co/blog/digest-notifications-best-practices-example/) — per-category digest frequency, batch-open-time preference reads — MEDIUM confidence
-- NotificationAPI — "Batching & Digest" docs (https://www.notificationapi.com/docs/features/digest) — window/schedule mechanics — MEDIUM confidence
-- Knock — "Build alert digest notifications" template library (https://knock.app/template-library/workflows/alert-digest) — skip-send-on-empty convention — MEDIUM confidence
-- OneUptime — "How to Build a Notification Digest System with Redis" (https://oneuptime.com/blog/post/2026-03-31-redis-notification-digest-system/view) — concrete reference implementation: chronological ordering, `if events: send()` gate, schema shape for a Postgres-backed equivalent — MEDIUM confidence
-- Readless / Digest / Mailbrew coverage of RSS-to-email digest tools (https://www.readless.app/blog/best-email-digest-services-2026, https://usedigest.com/features/rss-to-email-digest/) — chronological default + hierarchy/grouping in mature tools, cross-source dedup merging — MEDIUM confidence
-- Sonarr/Radarr Discord notification ecosystem survey (GitHub: NiNiyas/Bettarr-Notifications, samwiseg0/better-discord-notifications; hotio.dev Arr Discord Notifier; notifiarr.wiki) — confirms no native digest mode in the closest sibling OSS domain, digesting is third-party middleware only — MEDIUM confidence
-- General digest-vendor guidance on mode-switching/preference-read timing (Novu best-practices post; no single authoritative source addresses drop-tracker's exact mid-cycle real-time→digest toggle scenario) — LOW confidence, treated as directional only, not prescriptive
+- [Required-label matching is case-sensitive against raw GitHub label names — GitHub Issue #70](https://github.com/StGerman/crewd/issues/70) — MEDIUM
+- [How to Keep Your Inbox (Super) Tidy With Gmail Labels — Drag Blog](https://www.dragapp.com/blog/gmail-labels-everything/) — MEDIUM
+- [Users Gmail Labels — GAM-team/GAM Wiki](https://github.com/GAM-team/GAM/wiki/Users-Gmail-Labels) — MEDIUM
+- [How to clean up your bookmarks: duplicates, dead links — Stashr](https://stashr.me/blog/clean-up-bookmarks) — MEDIUM (duplicate-rate figures corroborated across multiple bookmark-tool sources in the same search pass)
+- [Import Bookmarks — Bookmarkjar Documentation](https://docs.bookmarkjar.com/bookmarks/import) — MEDIUM
+- [Bookmark managers with duplicate resolver — Bookmark OS](https://bookmarkos.com/bookmark-manager-finder/Duplicate%20resolver) — MEDIUM
+- [muspy.com](https://muspy.com/) and [Muspy documentation — Read the Docs](https://muspy.readthedocs.io/en/latest/doc/muspy.html) — MEDIUM (confirms Muspy has no tag/watchlist-organization layer; drop-tracker's v1.6 scope has no direct precedent in this specific competitor)
+- [SaaS Destructive Actions & Confirmation UX Patterns (2026)](https://www.saasui.design/blog/saas-destructive-actions-confirmation-ux-patterns) — MEDIUM
+- [Bulk action UX: 8 design guidelines with examples for SaaS — Eleken](https://www.eleken.co/blog-posts/bulk-actions-ux) — MEDIUM
+- [Bulk Edit: Design | Patterns — eBay Playbook](https://playbook.ebay.com/design-system/patterns/bulk-edit) — MEDIUM
+- [Table multi-select — Helios Design System (HashiCorp)](https://helios.hashicorp.design/patterns/table-multi-select) — MEDIUM
+- [Bulk Editing — Basis Design System](https://design.basis.com/patterns/bulk-editing) — MEDIUM
+- [A UX guide to destructive actions — Medium/Bootcamp](https://medium.com/design-bootcamp/a-ux-guide-to-destructive-actions-their-use-cases-and-best-practices-f1d8a9478d03) — MEDIUM
+- [Ark UI — Tags Input component docs](https://ark-ui.com/docs/components/tags-input) — MEDIUM
+- [Chakra UI — Tags Input component docs](https://chakra-ui.com/docs/components/tags-input) — MEDIUM
+- [How ORDER BY and NULL Work Together in SQL — LearnSQL.com](https://learnsql.com/blog/how-to-order-rows-with-nulls/) — MEDIUM
+- [How to Sort SQL Results With NULL Values at the End — Baeldung](https://www.baeldung.com/sql/sort-ascending-null-values-last) — MEDIUM
+- [Placement of NULL values for ORDER BY with nullable columns — sqlfordevs.com](https://sqlfordevs.com/order-by-with-null) — MEDIUM
+- [Importing data — Letterboxd](https://letterboxd.com/about/importing-data/) — MEDIUM
+- [Lidarr Importing an Existing Library — Servarr Wiki](https://wiki.servarr.com/lidarr/importing-existing-library) — MEDIUM
+- Internal: `.planning/PROJECT.md` (v1.6 target features, existing Validated requirements for release-type filters/muted event types/search-proxy) — HIGH (primary source)
+- Internal: `.planning/notes/2026-09-08-feature-module-ideas-post-v1.3.md` (Option E framing, "no new background API polling" constraint) — HIGH (primary source)
+- Internal: `internal/watchlist/service.go`, `web/app/routes/history.tsx` (confirmed existing filter/preference plumbing to build on) — HIGH (codebase read)
 
 ---
-*Feature research for: digest/batch notification mode, drop-tracker v1.5*
-*Researched: 2026-09-11*
+*Feature research for: drop-tracker v1.6 Watchlist Organization*
+*Researched: 2026-09-22*

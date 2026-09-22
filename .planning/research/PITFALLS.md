@@ -1,233 +1,329 @@
-# Pitfalls Research
+# Pitfalls Research: v1.6 Watchlist Organization
 
-**Domain:** Scheduled digest/batch notifications, added onto an existing real-time per-event Discord notification pipeline (drop-tracker v1.5)
-**Researched:** 2026-09-11
-**Confidence:** MEDIUM (general digest/cron/Discord findings cross-checked across multiple sources; drop-tracker-specific findings are HIGH — verified directly against this repo's schema and code)
-
-## Codebase Grounding (read this before the pitfalls below)
-
-The existing real-time notifier is **already an outbox/queue pattern**, not a fire-on-insert push:
-
-- `events.notified_at TIMESTAMPTZ` (nullable) is the queue marker. `ListUnnotified` (`queries/events.sql`) is `SELECT * FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC`.
-- `MarkNotified` is `UPDATE events SET notified_at = now() WHERE id = $1 AND notified_at IS NULL` — a per-row atomic claim, called only after a confirmed Discord send (`internal/notifier/notifier.go`, D-06/D-07/D-10).
-- `Notifier.NotifyPending` is invoked once at the end of **every** poll cycle (`internal/poller/poller.go:514`), for both the MusicBrainz and Deezer cycles independently, guarded by a single shared `notifying atomic.Bool` CAS flag so overlapping cycles never double-drain.
-- `events_unnotified_idx` is a partial index on `notified_at IS NULL`, sized for "usually near-empty."
-
-This matters enormously for digest design: **the queue already exists.** Digest mode is not "build a new buffer," it's "change who drains `notified_at IS NULL` rows, how often, and how many messages the drain produces." Most of the pitfalls below follow directly from that reframing — the dangerous move is building a *second*, parallel queueing mechanism (an in-memory buffer, a new table, a second timestamp column) instead of extending the one that's already race-tested and restart-safe.
-
----
+**Domain:** Adding tags/notes/search/sort/filter/bulk-ops to an existing Go+chi+sqlc+Postgres+React watchlist app with a Discord notifier
+**Researched:** 2026-09-22
+**Confidence:** HIGH (all findings grounded in direct reads of this repo's code, not general web research — this is an integration-pitfalls review, not an ecosystem survey)
 
 ## Critical Pitfalls
 
-### Pitfall 1: Real-time drain stays wired in, digest mode just adds a second consumer on top
+### Pitfall 1: Real-time Discord embeds have no markdown escaping — tags would be the first injectable field
 
 **What goes wrong:**
-`poller.go` calls `p.notifier.NotifyPending(...)` unconditionally at the end of every poll cycle today. If digest mode is implemented as a new, separate scheduled job that also drains `notified_at IS NULL` rows, but the existing per-poll-cycle call to `NotifyPending` is left untouched, every event gets posted twice: once immediately (real-time path, still wired) and once again in the next digest batch — except `MarkNotified`'s `AND notified_at IS NULL` guard means the real-time path wins the race almost every time, so digest mode silently does nothing while looking "toggled on." Either failure mode (double-post, or digest mode that's a no-op) is easy to ship because both code paths compile and pass tests that only exercise one mode at a time.
+`internal/notifier/format.go` (the real-time embed path used by `formatNewRelease`/`formatGuestFeature`/`formatDeluxeChange`) never calls any markdown-escaping function. It truncates `ev.Title`/`ev.ArtistName` with `truncateRunes` and puts them straight into `discord.Embed` fields. Markdown escaping (`escapeMarkdown`/`markdownEscaper` in `internal/notifier/digest_format.go`) exists **only** on the digest path, added in Phase 22/23 specifically because community-editable MusicBrainz/Deezer text could "terminate or retarget a masked link" (D-21/T-22-07). If a developer follows the nearest precedent when wiring "tags on real-time embeds" — copying `format.go`'s pattern (`appendField(embed.Fields, "Tags", tagString)`) rather than `digest_format.go`'s pattern — user-typed, autocomplete-suggested-but-freely-editable tag text reaches Discord unescaped. A tag like `] (https://evil.example` or a tag containing backticks/asterisks can break embed field rendering or, worse, retarget a masked link if tags are ever rendered inside one.
 
 **Why it happens:**
-The toggle is a config value, not a structural change to the call graph. It's tempting to gate the *content* of what a drain sends (batch vs. individual) while forgetting to gate *whether the per-poll-cycle drain runs at all*.
+Two call sites for "the same kind of text" (community/user text → Discord) with two different escaping postures already coexist in this codebase, and nothing enforces which one a new call site should follow. Tags are new, fully user-authored free text — a materially higher-trust-risk input than MusicBrainz/Deezer titles, since the *user themselves* controls every character with no upstream moderation at all.
 
 **How to avoid:**
-Make the digest toggle a single decision point that both `poller.go`'s per-cycle call site and the new scheduled digest job read from the same source: when digest mode is on, `NotifyPending`'s per-cycle invocation becomes a no-op (or is skipped entirely) and only the digest cron job drains `notified_at IS NULL`; when digest mode is off, the digest cron job's own tick is a no-op and the existing per-cycle drain resumes. One `Sink`-shaped seam deciding "who currently owns draining the outbox" is safer than two independent boolean checks that can drift out of sync.
+- Route every tag string that reaches a Discord payload (real-time embed field AND digest line) through `escapeMarkdown` (or a shared helper promoted out of `digest_format.go` into a location both `format.go` and `digest_format.go` import) before it is written into any `discord.Embed` field or digest line.
+- Add a table-driven test mirroring `format_test.go`'s style asserting a tag containing every `markdownEscaper` metacharacter (`` \*_~`|>#[]() ``) renders escaped in the real-time embed, matching the existing digest-path test coverage.
+- Treat this as an opportunity to close the pre-existing gap on `ev.Title`/`ev.ArtistName` in `format.go` too (they are already unescaped today) — not required for v1.6 scope, but flag it since the same phase is already touching this file.
 
-**Warning signs:** A test that toggles digest mode on, inserts an event, runs both the poll cycle and the digest tick, and asserts Discord received exactly one message — if that test doesn't exist, this bug is very likely live.
+**Warning signs:**
+- A new `formatEmbed`/`appendField` call for tags with no `escapeMarkdown` in the diff.
+- Manual Discord UAT where a tag like `**PRIORITY**` renders bold instead of literal.
 
-**Phase to address:** The phase that wires the digest scheduler into the existing poll-cycle/notifier seam (not the phase that only builds the DB-persisted toggle and SPA control).
+**Phase to address:**
+Phase implementing "tags on Discord real-time embeds and digest lines" — this is a hard blocker for that phase's own UAT, not a follow-up.
 
 ---
 
-### Pitfall 2: Operator's "9am" isn't the container's "9am" — timezone and Alpine tzdata
+### Pitfall 2: Digest chunker's pinned chunk-count fixtures will silently drift once tags lengthen every line
 
 **What goes wrong:**
-The Docker image is a multi-stage build on `alpine` (per this project's Dockerfile/stack decisions). Alpine's minimal base does **not** ship the IANA timezone database — Go's `time.LoadLocation("America/New_York")` (or whatever zone the operator picks in the SPA) will fail at runtime with `unknown time zone` unless `tzdata` is installed in the final stage, *or* Go's embeddable `time/tzdata` package is blank-imported so the zoneinfo is baked into the binary itself. Separately, `robfig/cron` defaults to the **host's local timezone** unless `cron.WithLocation(...)` is passed explicitly — in a container that's almost always UTC, not the operator's timezone, so a schedule entered as "fire at 9am" silently fires at 9am UTC instead.
+`internal/notifier/digest_test.go` pins `chunkForcingEventCount = 75` and `capForcingEventCount = 600` as fixture sizes "empirically confirmed... to split into exactly 3 chunks" and "22 uncapped chunks" respectively, given the *current* per-line rune cost from `digestLine`/`lineLabel` (title capped at 100 runes + artist capped at 60 runes + fixed markdown wrapper). `chunkContentBudget` is a hard 3,796-rune ceiling (`discordDescriptionLimit` 4096 minus `chunkOverheadReserve` 300). If digest lines grow to include a tag suffix (e.g. ` [tag1, tag2]`), every line's rune count increases, which shifts the exact number of lines that fit `chunkContentBudget` — meaning 75 events might now split into 4 chunks instead of 3, and 600 events might now cross `maxDigestChunks` (20) well before all 600 are considered. These two constants are comments-pinned, not precondition-asserted (already flagged as known tech debt at v1.5 close) — a test using them will either fail confusingly (wrong chunk count) or, worse, keep passing against a re-tuned magic number that nobody re-derives against the real budget math.
 
 **Why it happens:**
-This class of bug is invisible in local dev (a developer's own machine has full tzdata and a "real" local timezone that happens to match their expectations) and only surfaces in the actual deployed container, which is a different environment than where it was written and tested.
+The fixture sizes were reverse-engineered against a fixed line-rendering function; any future change to that function (which digest-tag-display is) invalidates them without any compiler or lint signal, because the numbers are free-floating integers in a test file, not derived from `chunkContentBudget` or `digestLine`'s actual output.
 
 **How to avoid:**
-1. Store the operator's chosen IANA zone name (e.g. `"America/Chicago"`) in Postgres alongside the digest config, not a UTC offset — offsets don't carry DST information.
-2. Blank-import `time/tzdata` in `main.go` (`_ "time/tzdata"`) so the zoneinfo database is compiled into the binary and independent of the base image — cheaper and more reliable than relying on an Alpine package staying installed across image rebuilds.
-3. Pass `cron.WithLocation(loc)` explicitly when constructing the digest cron entry, using the operator's stored zone, not the process default.
-4. Never store or compute the digest fire time in UTC and then "convert for display only" — compute the next fire time using `time.Date(..., loc)` in the operator's zone so DST arithmetic is correct by construction.
+- Before adding tag rendering to `digestLine`, add a precondition assertion at the top of the affected tests (or a small helper) that computes the actual chunk count for `chunkForcingEventCount`/`capForcingEventCount` synthetic events and fails loudly with a clear message if it no longer matches the hardcoded expectation — turning silent drift into an explicit, actionable test failure that names the new right-hand-side number.
+- Decide up front whether tags append to `lineLabel`'s output (raising `digestArtistLimit`/`digestTitleLimit`-style per-line cost) or are excluded from digest lines and only shown on real-time embeds — the milestone spec says both, so budget the worst case (an artist with many tags) explicitly, the same way `digestArtistLimit`/`digestTitleLimit` already cap other fields to keep a single line bounded.
+- Add a cap on the number of tags (or total tag-text runes) rendered per digest line, mirroring the existing `digestTitleLimit`/`digestArtistLimit` pattern, so one heavily-tagged artist cannot blow a single line past `chunkContentBudget` and trigger the `oversizedLineNote` truncation fallback on an otherwise-ordinary release.
+- Re-run `digest_chunk_test.go`'s property tests (the "three invariant property tests over a synthetic 700-event batch") after the change — they test structural invariants, not fixed counts, and are the correct regression net; the two named constants are the fragile part.
 
-**Warning signs:** Any code path that treats the digest time as a bare `HH:MM` string without an accompanying zone; any `time.Now()` call in the digest scheduler with no explicit `.In(loc)`.
+**Warning signs:**
+- `TestSendDigestIfDue_MultiChunk*` tests failing with an unexpected chunk count after adding tag rendering.
+- `TestSendDigestIfDue_Cap*` tests failing with the cap triggering at a different point than before.
 
-**Phase to address:** The phase that builds the digest scheduler itself — this must be settled before any cron-registration code is written, and needs a Dockerfile check (or CI smoke test) that the built image can actually `time.LoadLocation` a real zone name.
+**Phase to address:**
+Phase implementing "tags on Discord real-time embeds and digest lines" — the same phase that touches `digestLine` must re-derive or defensively assert these two constants.
 
 ---
 
-### Pitfall 3: DST transitions skip or double-fire the digest
+### Pitfall 3: Bulk add's 100-line paste cannot run as one synchronous HTTP request — 15s server WriteTimeout vs. 1 req/sec MusicBrainz limit
 
 **What goes wrong:**
-`robfig/cron` (confirmed on the maintained v3 line, which this project already depends on) has documented, still-open gaps around spring-forward and fall-back: a job scheduled inside the skipped "spring forward" hour (e.g. 2:30am when clocks jump from 2:00 to 3:00) fires immediately when the clock jumps rather than being silently lost, but the fall-back case — where the local hour repeats — has ambiguous, under-documented behavior on whether the job fires once or twice. A digest scheduled for a fixed local wall-clock time (e.g. "9:00am daily") will hit this twice a year in any timezone that observes DST.
+`cmd/server/main.go` sets `writeTimeout = 15 * time.Second` on the `http.Server` (alongside a 15s `ReadTimeout`), and `MUSICBRAINZ_RATE_LIMIT_PER_SEC` defaults to `1` (`internal/config/config.go`). A "review screen" backed by a single backend endpoint that loops over N pasted artist names, calling the MusicBrainz search client once per name to get "best match + alternates," takes roughly N seconds at N=100+ just from the shared `rate.Limiter` wait — 6-7x past the server's own `WriteTimeout`. Go's `net/http` server silently truncates/aborts a response once `WriteTimeout` fires; the client (and the passphrase-gated SPA sitting on top of it) would see a broken connection partway through, with no clean "still working" signal and no partial-results contract, on every paste over roughly 15 names.
 
 **Why it happens:**
-Cron libraries reason in wall-clock time; DST transitions are precisely the two days a year wall-clock time is not a monotonic, one-to-one mapping onto real time. This is a known, structural limitation of wall-clock cron scheduling, not a bug specific to this project.
+Every existing MusicBrainz-touching endpoint in this codebase (`GET /search`) is a single fast lookup, so the 15s `WriteTimeout` has never before collided with the 1 req/sec limiter's cumulative wait. Paste-a-list is the first feature whose natural implementation is "many sequential rate-limited external calls behind one user action."
 
 **How to avoid:**
-- Pick a fire time unlikely to fall in a transition window where possible (DST transitions in the US happen at 2am local, not 9am, so a mid-morning/evening digest time mostly sidesteps the ambiguous-hour case — but don't assume this holds for every timezone an operator might pick).
-- Make the digest job **idempotent on the send side**, not just the schedule side: the window-selection query (see Pitfall 4) should derive its event set from `notified_at IS NULL`, not from "did cron tick." A double-fire on a DST fall-back day then finds nothing new to send on the second tick (empty digest → suppressed, see Pitfall 7) rather than sending duplicate content.
-- Log every digest cron fire (scheduled time, actual fire time, event count) so a DST-week anomaly is visible in `/status` or logs rather than silently causing a missed or duplicate operator-facing message.
+- Do not build this as one backend request that blocks until every name is resolved. Two viable shapes, both consistent with "single Go binary, no new background polling" (PROJECT.md's explicit v1.6 non-goal):
+  - **Client-orchestrated:** the SPA calls the existing (or a near-identical) per-name search endpoint once per pasted line, sequentially or with bounded concurrency, rendering each row's match as it resolves — the *client*, not the server, absorbs the 1-2 minutes for a 100-line paste, and each individual HTTP request stays well under 15s.
+  - **Server-side async job:** a POST kicks off a background resolve loop (in-process, keyed by a job id) and the SPA polls a status endpoint — more machinery, and closer to introducing "background work" the milestone goal says isn't needed; prefer the client-orchestrated shape unless a UX reason forces otherwise.
+- Either way, add an explicit per-name rate-limit-respecting delay budget in the UI (a visible "resolving 34/100…" progress state) so users are not staring at a spinner for 100+ seconds with no feedback — this is also a UX requirement, not just a technical one.
+- If a server-side loop is used for any part of this, wrap it in its own generous `context.WithTimeout` independent of the request's `r.Context()` lifetime expectations, and document why `writeTimeout` doesn't apply (streaming/chunked response, or a job-based design) rather than silently exceeding it.
 
-**Warning signs:** No log line distinguishing "cron ticked, N events found" from "cron ticked, 0 events found" — without that, a DST-week skip/double-fire looks identical to "just a quiet day" in the logs.
+**Warning signs:**
+- A `POST /watchlist/bulk-add/resolve`-shaped handler with a `for _, name := range names { mbClient.SearchArtists(...) }` loop and no chunking/pagination in the request/response contract.
+- Manual UAT with a real 50+ line paste hanging or erroring around the 15s mark.
 
-**Phase to address:** Same phase as Pitfall 2 (scheduler construction) — add a test that advances a fake clock across both DST boundaries and asserts the digest fires exactly once per calendar day either side of the transition.
+**Phase to address:**
+The phase implementing paste-a-list bulk add — this is an architecture decision that must be locked at plan time, not discovered during implementation.
 
 ---
 
-### Pitfall 4: Window-boundary events are neither lost nor double-sent, but land in a non-obvious cycle
+### Pitfall 4: Bulk add/remove endpoints need the CSRF header and session-renewal contract wired identically to every other write route
 
 **What goes wrong:**
-If the digest job selects events by a time-range query (`created_at BETWEEN window_start AND window_end`), an event whose `created_at` lands within milliseconds of the boundary can end up in either window depending on exact commit timing versus query-snapshot timing — not "double-sent" (Postgres snapshot isolation prevents that), but attributed to a different day's digest than an operator watching a clock would expect. Worse, if the window boundaries are computed independently each run (e.g. "now minus 24h") rather than anchored to the last successful send, a delayed or skipped cron tick (Pitfall 3, Pitfall 5) silently shifts or narrows the window, and events can fall into the **gap** between two windows and never get selected by either.
+`internal/authgate.RequireCSRFHeader` requires `X-Requested-With: drop-tracker` on every non-GET request, matched against `web/app/lib/api.ts`'s `apiFetch` helper, and `Authenticate` re-issues a sliding session cookie past the halfway mark of `sessionWindow` (30 days) on every gate-passing response. New bulk endpoints (`POST /watchlist/bulk`, `POST /watchlist/bulk-add`, etc.) must go through the same `pr.Use(gate.Authenticate)` / `pr.Use(gate.RequireCSRFHeader)` protected group as every existing write route, and any client-side bulk-add orchestration (Pitfall 3) that fires many sequential requests must use the same `apiFetch` wrapper — a hand-rolled `fetch()` call for the bulk-add loop (e.g. to add custom per-name progress tracking) is the likely place a developer forgets the CSRF header and gets a silent-looking wall of 403s when the instance is gated (`INSTANCE_PASSPHRASE` set).
 
 **Why it happens:**
-Time-range windowing assumes cron fires exactly on schedule every time. Combined with Pitfall 5 (restarts) and Pitfall 3 (DST), that assumption doesn't hold.
+Bulk endpoints are new call shapes (multiple round trips per user action, or a bulk payload structurally different from the single-entity CRUD the CSRF/session code was proven against) — exactly the kind of "structurally different enough to feel like it needs its own client code" feature that tempts bypassing the shared `apiFetch` helper.
 
 **How to avoid:**
-Don't window by time range at all — window by **outbox state**, matching the existing real-time pattern. The digest query should be `SELECT * FROM events WHERE notified_at IS NULL ORDER BY created_at ASC, id ASC` (the exact `ListUnnotified` query that already exists), with no time-range predicate. "The digest window" becomes "everything that accumulated since the last successful digest send," which is self-correcting: a late, skipped, or double-fired cron tick changes *when* the digest goes out, never *whether* an event gets included exactly once. This also means an event detected in the last second before the digest job's query runs is safely included (it's just an unclaimed row), and an event detected one second after is safely deferred to the next cycle — no boundary ambiguity, no lost row.
+- Route every new write call — both the per-name resolve calls in bulk-add and the actual bulk-edit/bulk-remove/bulk-add-confirm POST — through the existing `apiFetch` in `web/app/lib/api.ts`, not a parallel fetch path.
+- Register every new bulk route inside the existing protected chi `Group`, never as a new top-level route (mirrors the `Authenticate`/`RequireCSRFHeader` registration discipline already documented in `gate.go`).
+- Since a 100-name resolve loop can span minutes, verify the session's sliding-renewal window comfortably covers a single bulk-add session (30 days trivially does; flag this only if a shorter session lifetime is ever introduced).
 
-**Warning signs:** Any digest query with a `created_at >= $1 AND created_at < $2` predicate instead of `notified_at IS NULL` — that's the tell that windowing is being done by wall-clock time instead of by outbox state.
+**Warning signs:**
+- New fetch/XHR calls in the bulk-add review-screen component that don't import `apiFetch`.
+- 403 `{"error":"missing required header"}` responses appearing only from bulk-flow network calls during gated-instance UAT.
 
-**Phase to address:** The phase that writes the digest event-selection query — should reuse/extend `ListUnnotified`, not introduce a parallel time-ranged query.
+**Phase to address:**
+Any phase adding a new write endpoint for bulk edit or bulk add — verify against `internal/authgate`'s existing test patterns (`gate_test.go`) rather than assuming the middleware "just applies."
 
 ---
 
-### Pitfall 5: Process restart near the fire time silently skips that cycle (schedule, not data)
+### Pitfall 5: Where tags/notes are stored decides whether History tag-filtering survives a removed artist — get the FK wrong and bulk remove silently breaks it
 
 **What goes wrong:**
-`robfig/cron`'s schedule lives entirely in process memory — it computes each entry's next fire time from `Now()` at `cron.Start()`, with no persisted "last fired at" or "missed run" catch-up. If the container restarts (a deploy — this app restarts on every merge-to-main release per its existing CI/CD pipeline) in the minute the digest was due to fire, that fire is simply gone: on restart, cron recomputes the *next* scheduled time from the new `Now()`, which for a daily digest is tomorrow, and for a weekly digest is up to six days later.
+This schema already has two tables with very different lifetimes: `artists` is master data (`internal/db/migrations/000002_watchlist.up.sql`'s own header: "identity keyed on MusicBrainz's mbid, independent of whether the artist is currently on anyone's watchlist"), and `watchlist` is the *membership* row, hard-deleted on remove (`Service.Remove`, `internal/watchlist/service.go:389-407`: "no status column, no soft-delete timestamp... the row is gone"). `events` references `artist_id`, not `watchlist_id`, specifically so event history survives watchlist removal (`ON DELETE CASCADE` runs `artists → watchlist` and `artists → events`, never `watchlist → events`). The milestone requires "History feed filterable by tag" — but History is explicitly about *past events*, which by design outlive watchlist membership. If tags are modeled as `watchlist_id`-scoped (the seemingly obvious place, since tags are described as a watchlist-entry feature), then `DELETE FROM watchlist` (confirmed-bulk-remove, or any single remove) cascades tags away with it, and every historical event for that artist becomes permanently untaggable/unfilterable in History from that point forward — even though the events themselves are untouched and still visible.
 
 **Why it happens:**
-This is a direct consequence of using an in-process scheduler with no persistence — which is the correct, already-validated choice for this project's poll cycles (ADR-0001 made the same call for poll-run history: single-instance, restart-reset-by-design is acceptable there). But a digest's failure mode is more visible to the operator than a poll-run history entry: "I configured a weekly digest and didn't get one this week" is a much louder signal than "the ring buffer reset."
+"Tags per watchlist entry" reads naturally as "tag belongs to the watchlist row," but the feature list explicitly wants tags to reach a second, independent-lifetime surface (History) that this codebase already deliberately decoupled from watchlist membership via the `artists`/`events` FK design (documented rationale in the `000002` migration header and `Service.Remove`'s comment).
 
 **How to avoid:**
-- This is *not* a data-loss risk, thanks to Pitfall 4's design: skipped events stay `notified_at IS NULL` and simply roll into the next successful cycle. Make sure this stays true — do not let any digest-adjacent code mark events notified before a confirmed Discord send.
-- Store `last_digest_sent_at` in Postgres (not memory) so that on boot, the scheduler can detect "the last successful send was more than one full cadence period ago" and log a visible warning (or optionally fire an immediate catch-up send) rather than silently waiting for the next natural cron tick.
-- Surface `last_digest_sent_at` in `/status` (this project already has a "System" observability surface from v1.4 — extending it, rather than inventing a new diagnostic path, is the lower-risk move) so a missed cycle is operator-visible instead of only discoverable by an empty Discord channel.
+- Model the tag-assignment join table (and any `artist_tags`/`tag_assignments`-shaped table) as `artist_id`-scoped (`REFERENCES artists(id)`), not `watchlist_id`-scoped, so tags persist for History filtering regardless of current watchlist membership — matching the existing `events.artist_id` precedent exactly.
+- Decide explicitly (and document as a decision, since it affects bulk-remove's confirmation copy) whether "confirmed bulk remove" also strips tags from the artist (i.e., does removal delete the `artist_tags` rows, or only the `watchlist` row?) — if tags are meant to survive for History filtering, the remove path must NOT cascade through `artist_id`-scoped tag rows, meaning tags need their own explicit lifecycle decision independent of `ON DELETE CASCADE artists → watchlist`.
+- Keep per-artist **notes** scoped to `watchlist_id` (per the milestone's own spec: "edited and shown on the Watchlist card only," i.e., not a History concern) — notes disappearing on remove is correct and matches existing hard-delete semantics; don't conflate the two features' storage design just because they're built in the same phase.
+- Write the analogous test to `TestService_Remove_LeavesArtistRowIntact`/`TestService_Remove_ThenReAddSucceeds` for tags: "remove watchlist entry, assert artist's tags (for History) still queryable" and "remove watchlist entry, assert notes are gone."
 
-**Warning signs:** No persisted "last sent" timestamp anywhere outside cron's in-memory state; a digest feature with no `/status`-visible field showing when it last actually ran.
+**Warning signs:**
+- A migration that adds `watchlist_id BIGINT REFERENCES watchlist(id) ON DELETE CASCADE` to a tags/tag-assignments table.
+- History tag-filter UI returning empty results for events belonging to a since-removed artist, discovered only in UAT.
 
-**Phase to address:** Scheduler-construction phase for the persisted cursor; the observability-surfacing part can ride along with whatever phase touches the SPA digest config screen, since that's already the natural place an operator checks "is this working."
+**Phase to address:**
+The phase that designs the tags data model — this is a schema decision that's expensive to reverse once bulk remove ships against it (a migration + backfill, not a one-line fix).
 
 ---
 
-### Pitfall 6: Toggling digest → real-time mid-window orphans the queued events
+### Pitfall 6: Re-adding a previously-removed artist silently skips seed-mode suppression — recent backlog can fire immediately instead of seeding quietly
 
 **What goes wrong:**
-Say digest mode is on, three events have accumulated (`notified_at IS NULL`, waiting for Friday's digest), and the operator switches the toggle to real-time on Wednesday. If the per-poll-cycle `NotifyPending` call is simply re-enabled going forward, it will pick up those three already-queued events on the very next poll cycle and post them individually — which may be exactly right (nothing is lost, they just arrive as three separate real-time messages instead of one digest) or may be jarring if the operator's mental model was "those are gone, digest mode ate them." Conversely, if the implementation instead moves a "digest queue" into some other bucket when digest mode is on and doesn't reconcile it on toggle-off, those events never get sent at all — a genuine drop.
+Confirmed via `internal/detection/detector.go`'s `isSeedMode`: seed mode is `!HasAnyEvent(artist_id, source)` — purely "does this artist+source have zero rows in `events`, ever." Because `Service.Remove` only deletes the `watchlist` row and the `artists` row (plus its `events` rows) survive untouched, re-adding a previously-removed artist (Pitfall 5's re-add path, or the "paste-a-list" bulk-add matching against an existing MusicBrainz id) reuses the same `artist_id` and its pre-existing `events` rows — so `isSeedMode` returns `false` on the very next poll cycle, even though from the *user's* perspective this is a brand-new watch. Per `notifyGate.notifiedAt` (`internal/detection/detector.go:129-135`), non-seed-mode + release within the age cutoff means the event is queued for **real, immediate** Discord delivery — not silently seeded. Concretely: user removes Artist X, Artist X drops an EP two weeks later, user re-adds Artist X a month after that (well within typical `maxAgeDays` cutoffs) — the next poll cycle detects that EP as a brand-new external_id (nothing in `events` for it yet) and fires a live Discord notification for a month-old release the user has no context for, rather than treating it as backlog to seed quietly the way a genuinely brand-new artist's history would be.
 
 **Why it happens:**
-This is the direct consequence of *not* following Pitfall 1's guidance (single shared outbox, single active consumer). If the digest feature is built with its own queue separate from `notified_at IS NULL`, toggling modes mid-window becomes a data-migration problem instead of a no-op.
+Seed mode's implicit "zero rows = first time" definition (a deliberate, documented v1 design choice — D-14) was correct for "artist never watched before," but bulk remove/re-add is a genuinely new user workflow this milestone introduces that breaks that assumption: an artist can now legitimately re-enter "first cycle since (re-)watching" state while `events` already has rows for it.
 
 **How to avoid:**
-Keep exactly one outbox (`notified_at IS NULL`) and exactly one active consumer determined by the current mode at drain time, decided fresh on every drain attempt (poll-cycle tick or digest cron tick) rather than cached at toggle time. With that design, toggling digest → real-time mid-window has an automatic, correct, and easily-explained behavior: whatever's still unclaimed gets swept up by the next real-time poll cycle and sent individually, with no special-case flush code needed. Document this behavior explicitly in the SPA copy near the toggle ("switching to real-time will immediately send any events that built up while digest mode was on") so it's a stated contract, not an accidental side effect an operator discovers by surprise.
+- This is very likely acceptable/out-of-scope behavior to explicitly document rather than fix (re-deriving seed-mode-on-re-add would need a new signal — e.g., a `watchlist.created_at`-relative cutoff, or tracking a `first_seen_at` per (artist, watchlist-membership) pair — real scope creep for a v1.6 whose goal is explicitly "no new background API polling," i.e. no detection-engine changes).
+- At minimum: surface this as a known-and-accepted behavior in the bulk-remove confirmation UI copy or in this milestone's PROJECT.md context notes (mirroring how the existing MusicBrainz TLS/`-race` limitations are documented as accepted, not silently left for someone to rediscover via a debug report) — "removing and re-adding an artist may trigger notifications for releases missed while off your watchlist" is a one-sentence warning that prevents a support/confusion cycle.
+- Do **not** attempt to fix this by having bulk remove `DELETE FROM artists` (cascading to `events`) instead of only `watchlist` — that would resurrect the exact problem `Service.Remove`'s own doc comment says the design deliberately avoids (destroying detection state), and would also destroy the History-survives-removal property Pitfall 5 depends on.
 
-**Warning signs:** Any new column/table (`digest_queue`, `pending_digest_events`, a second `*_at` timestamp) introduced specifically for digest mode — that's a sign a second, parallel outbox is being built instead of reusing the one that exists.
+**Warning signs:**
+- A UAT report of "I removed and re-added an artist and got notified about an old release out of nowhere."
+- Confirmed-bulk-remove's UI copy or the paste-a-list "artist already on watchlist, re-add?" review-screen path saying nothing about this.
 
-**Phase to address:** Same phase as Pitfall 1 — this is really one design decision (single outbox, mode-selected consumer) with two observable consequences.
+**Phase to address:**
+The phase implementing confirmed bulk remove (and separately, the paste-a-list review screen's "this artist was previously removed" case, if such matching is in scope) — document as a known limitation, don't silently ship it undocumented.
 
 ---
 
-### Pitfall 7: Discord embed/message limits silently truncate or drop events in a busy digest
+### Pitfall 7: Tag rename/dedup needs explicit case-folding and Unicode-normalization rules, or autocomplete + global rename silently fork the same tag
 
 **What goes wrong:**
-A Discord embed is capped at 25 fields, 6000 total characters across all embeds in one message, and a single message can carry at most 10 embeds; per-webhook send rate is roughly 5 requests per 2 seconds. A digest that naively tries to pack every event from a busy day/week into one embed's fields will either get rejected outright by Discord's API once a limit is crossed, or — worse, if the code truncates the field list to "the first 25" without any further handling — silently drops the rest with no operator-visible signal and no corresponding `MarkNotified` skipped, meaning those events are *not* marked notified and will confusingly reappear in the *next* digest (partially mitigating data loss, but producing a duplicate-looking entry days later).
+"Free-form multi-tags... autocomplete from existing tags... global tag rename/delete" implies tags are compared for equality/uniqueness somewhere (at minimum, autocomplete suggests existing tags; a global rename presumably means "rename this tag everywhere it's used," which requires identifying all rows that share "the same" tag). Without an explicit case-folding rule, a user typing `Hip-Hop` and later `hip-hop` produces two visually-identical but distinct tag values if uniqueness is a naive `=` comparison — autocomplete then either shows both as separate suggestions (confusing) or silently prefers one (surprising). Unicode adds a second axis: combining-vs-precomposed forms of the same visible string (e.g., `é` as U+00E9 vs. `e`+U+0301) are byte-distinct but visually and semantically identical, and would independently fork a tag with no visible difference to the user at all.
 
 **Why it happens:**
-The existing real-time notifier only ever formats one event per embed, so there's no existing code path in this codebase that has ever had to chunk N events across multiple embeds/messages — this is genuinely new surface area, not an extension of a pattern that's already been battle-tested here.
+Free-form text fields default to "store exactly what was typed, compare with `=`" unless a normalization step is deliberately inserted — and this codebase has no existing precedent for free-form user-authored *identity* fields (artist names/notes are free text but are never deduplicated/compared for identity; only MusicBrainz ids are).
 
 **How to avoid:**
-- Chunk events into multiple embeds (up to 25 fields each) and multiple messages (up to 10 embeds each) as needed, rather than assuming one message suffices.
-- Only call `MarkNotified` for events actually included in a message that received a confirmed 2xx from Discord — matching the existing real-time contract of "mark after confirmed send," applied per-chunk rather than per-event-in-a-loop.
-- Respect the existing 400ms inter-send spacing constant (`defaultSpacing` in `internal/notifier/notifier.go`, already tuned to Discord's 5-req/2s ceiling) between chunked digest messages, the same way the real-time path already does between individual sends — a digest firing 5 chunked messages back-to-back with no spacing can trip the same rate limit the real-time path was built to avoid.
-- For a single-operator, modest-watchlist project, this is a low-probability-but-not-impossible edge case (a very active week across many watched artists) — it doesn't need to be over-engineered, but it must degrade gracefully (multiple messages) rather than silently (dropped fields) when it does happen.
+- Pick one explicit case-folding rule for tag *identity* (e.g., store the user's original casing for display, but enforce uniqueness and do autocomplete matching against a `citext` column or a generated lowercase column with a `UNIQUE` constraint) — Postgres's `citext` extension or a plain `LOWER(name)` unique index are both simple, proven options; pick one and document it in the migration's header comment (this repo's migration-comment convention, per every existing `.up.sql` file).
+- Normalize to NFC (`golang.org/x/text/unicode/norm`) before the case-fold, at the point tags are created/renamed — do this once, server-side, not per-comparison, so stored data is already canonical and every future read is a trivial `=`.
+- For sort/display ordering (not identity), reuse the collation pattern already proven in this codebase: `internal/notifier/digest_format.go` already imports `golang.org/x/text/collate` and builds a `collate.New(language.Und, collate.IgnoreCase)` per call (never package-level, since `collate.Collator` isn't concurrency-safe) — the same library is the natural fit for locale-aware, case-insensitive tag-list sorting in the Watchlist UI's tag filter/autocomplete, keeping the two features on the same normalization primitive rather than inventing a second one.
+- Global rename should be a single `UPDATE` against the canonical tag row (if tags are a first-class `tags` table with a join table) rather than a fan-out `UPDATE` per assignment row referencing the old string value — this also makes rename atomic and trivially avoids the "renamed to a value that already exists as a different tag" merge case, which needs its own explicit decision (reject vs. merge assignments).
 
-**Warning signs:** A digest formatter that builds one `discord.Embed` and appends fields in an unbounded loop with no length/count check before sending.
+**Warning signs:**
+- A tags table with a plain `TEXT UNIQUE` column and no case-insensitive index.
+- Autocomplete implemented as a client-side `.filter(t => t.startsWith(query))` with no normalization, producing visually duplicate suggestions in manual testing.
 
-**Phase to address:** The phase that implements digest message formatting/sending — should extend `internal/discord`'s existing embed-building code and `internal/notifier`'s spacing constant rather than hand-rolling a new send path.
+**Phase to address:**
+The phase that designs and implements the tags data model — the case-folding/normalization rule is a schema-and-query decision, not a UI nicety to patch in later.
+
+---
+
+### Pitfall 8: "Sort by latest release" is an easy N+1 (or a full-table-scan aggregate) bolted onto a query that today does zero joins into `events`
+
+**What goes wrong:**
+`ListWatchlist` (`queries/watchlist.sql`) is a plain two-table join (`watchlist` + `artists`) with no reference to `events` at all — "latest release" for an artist doesn't exist anywhere in the watchlist query today. The naive implementation path is: fetch the watchlist list, then for each artist, issue a separate `SELECT MAX(created_at) FROM events WHERE artist_id = $1` (or reuse the release-date field) — a textbook N+1 that's invisible at the 5-10 artist scale used in dev/tests but directly costs one extra round trip per artist at the "50+ artist watchlist" scale this milestone's own goal names as the target.
+
+**Why it happens:**
+The existing codebase's query-per-artist habits (search proxy does one round trip per source, not per artist) don't have a "fetch related data for N rows" precedent to imitate, and hand-writing a per-row loop in Go is the path of least resistance when a developer is focused on getting sorting to "work" first.
+
+**How to avoid:**
+- Compute latest-release-per-artist as a single query: either a `LEFT JOIN LATERAL (SELECT created_at FROM events WHERE events.artist_id = a.id ORDER BY created_at DESC LIMIT 1) e ON true`, or precompute it via a `GROUP BY artist_id` subquery/CTE joined once — either shape is one round trip regardless of watchlist size, matching this codebase's existing single-round-trip query style (`ListWatchlist`, `AdvanceGroupTrackCountBaseline`'s CTE, etc.).
+- Add `events_artist_source_idx` isn't quite the right index for this (it's `(artist_id, source)`); a sort-by-latest-release query benefits from `(artist_id, created_at DESC)` — check `EXPLAIN ANALYZE` on this query once written, and add a migration for a supporting index if the planner isn't already using `events_artist_source_idx` efficiently for it.
+- Decide whether "latest release" should respect `EVENT_RETENTION_DAYS` (Pitfall 9) — almost certainly yes, so a retention-aged-out release doesn't appear as "latest" in the sort while being invisible everywhere else in the UI, which would look like a bug (Watchlist says "latest: Jan 2025" but History shows nothing that recent).
+
+**Warning signs:**
+- A Go-side `for _, entry := range watchlist { latest := s.q.GetLatestEventForArtist(ctx, entry.ArtistID) }` loop.
+- Watchlist page load time scaling visibly with watchlist size once past ~30-50 artists.
+
+**Phase to address:**
+The phase implementing Watchlist sort — write the single-query version from the start; this is cheap to do right and expensive to retrofit once N+1 code and its tests exist.
+
+---
+
+### Pitfall 9: `EVENT_RETENTION_DAYS` and the new History tag filter must compose, not diverge — two independent filters on the same query is where the seam usually leaks
+
+**What goes wrong:**
+History's retention filtering already lives as its own deliberately-scoped concern: `internal/httpserver/events.go`'s `ListEvents`/`Service.List` applies the `EVENT_RETENTION_DAYS` window (hiding aged-out rows from `GET /events`/History), while the codebase's own test suite (`events_test.go`) explicitly guards against a "consistency pass" that accidentally *adds* the retention predicate to detection-state queries (`ListExternalIDs`, `HasAnyEvent`) that must never have it — i.e., this codebase already has a documented history (Phase 10) of retention filtering nearly leaking into the wrong query. Adding a tag filter to History introduces a second predicate on the same `GET /events` path; if it's implemented as a second, independently-constructed query (rather than composed into the same retention-aware query/Service.List call), it's easy to either (a) apply the tag filter to a query that bypasses retention (showing tag-filtered aged-out rows the un-tag-filtered view correctly hides — an inconsistency a user would notice immediately when a tag filter shows "more history" than no filter does) or (b) apply retention twice/inconsistently across the two filter dimensions.
+
+**Why it happens:**
+Retention filtering and the new tag filter are naturally implemented by different people/PRs at different times touching the same handler; the existing regression tests (`TestRetention_DetectionStateQueriesStayUnfiltered` et al.) guard the boundary that already exists, but nothing yet guards the *new* boundary a tag-filtered History query introduces.
+
+**How to avoid:**
+- Add the tag filter as another `WHERE` clause/parameter inside the same retention-aware query (or the same `Service.List` composition point), never as a separate code path that reconstructs its own `events` query from scratch.
+- Write the analogous regression test to the existing retention suite: seed an aged-out (>retention window) tagged event and a within-window tagged event, filter History by that tag, and assert only the within-window one is visible — mirroring `TestRetention_...`'s existing pattern exactly (`events_test.go` is already the right file and already has the pinned aged-row fixture helpers to reuse).
+- If tags are `artist_id`-scoped per Pitfall 5, the tag-filter join is `events.artist_id = artist_tags.artist_id AND artist_tags.tag_id = $N` — composed with the existing retention predicate in one query, not two round trips.
+
+**Warning signs:**
+- A tag-filtered History view showing rows the unfiltered view hides (or vice versa) for the same time range, caught only by careful UAT rather than a test.
+- Two separate SQL query functions in `queries/events.sql` for "list events" and "list events by tag" that duplicate the retention `WHERE` clause instead of sharing it.
+
+**Phase to address:**
+The phase implementing "History feed filterable by tag."
+
+---
+
+### Pitfall 10: A migration adding `NOT NULL` tag/note columns without a default trips `cmd/migration-check`'s unsafe-forward guard — and a same-release tag-column rename/type-narrow trips the backward-incompatible guard
+
+**What goes wrong:**
+`cmd/migration-check` (documented in `internal/db/migrations/README.md`) hard-fails CI on two finding classes: `ADD COLUMN ... NOT NULL` with no `DEFAULT` in the same clause (unsafe-forward), and any `DROP`/`RENAME`/type-narrowing `ALTER COLUMN` against an *existing* column in the same release the code stops relying on the old shape (backward-incompatible, cross-referenced against the N-1 release's `queries/*.sql`). A tags/notes migration is mostly pure-additive (new tables — generally safe), but two shapes commonly appear in a real implementation and would trip the guard: (a) a `notes` column added as `TEXT NOT NULL DEFAULT ''` is fine, but a well-intentioned `CHECK (length(notes) <= 500)` constraint added to an *existing* column in a later cleanup migration is a backward-incompatible finding if the N-1 binary's queries still write to that column unconstrained; (b) if the tags feature is prototyped first as a `TEXT[]` column directly on `watchlist` (simpler than a join table) and then migrated to a proper `tags`/`artist_tags` join-table design within the same release cycle, the column-drop half of that migration is a same-release expand+contract violation — the README's own worked example (`000006`/`000007` add+backfill, contract "not yet done") is the pattern to follow: ship the join-table addition and backfill in one release, defer dropping the interim `TEXT[]` column to a later release once the join-table release is no longer N-1.
+
+**Why it happens:**
+Tags/notes length caps ("length-capped" per the milestone's own spec) are exactly the kind of constraint that gets added as a `CHECK` on an existing column in a "let's tighten this up" follow-up commit — a natural sequence that happens to collide with the N-1 rollback-safety rule this repo enforces automatically.
+
+**How to avoid:**
+- Set any length cap as a `CHECK` constraint in the *same* migration that first creates the column (not retrofitted onto an already-shipped column) — this sidesteps the backward-incompatible classification entirely, since there's no "old, less-constrained shape" a rollback binary could have depended on.
+- If a `TEXT[]` tags column is ever considered as a stepping stone before a proper `tags` table (for a fast MVP), treat that as a real design decision requiring the same expand/backfill/contract discipline the README documents, not a "we'll clean it up later in the same release" shortcut — the `cmd/migration-check` cross-reference will catch a same-release drop of a still-queried column regardless of intent, and the annotation escape hatch (`migration-check:allow-destructive`) requires a real, already-shipped `expand-shipped-in` release tag, which won't exist yet for a same-milestone prototype-then-replace sequence.
+- Read the checklist in `internal/db/migrations/README.md` before writing the tags/notes migration — it's short and this milestone's migrations are exactly the kind of new-domain-table work it was written for.
+
+**Warning signs:**
+- CI's `migration-check` job going red on a tags/notes migration PR with an "unsafe-forward" or "backward-incompatible" finding.
+- A local `git log` showing a `TEXT[]` tags column added and then dropped within the same milestone's commit range.
+
+**Phase to address:**
+The phase that designs the tags/notes schema — get the join-table shape and constraint placement right in the first migration, since this repo's CI is specifically built to make a wrong second attempt expensive (an N-1 boot failure or a red `migration-check`), not merely inconvenient.
 
 ---
 
 ## Technical Debt Patterns
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|-----------------|-----------------|
-| Separate in-memory buffer for "events pending digest," built alongside the existing `notified_at`-based outbox | Feels like a clean, isolated feature module | Reintroduces the exact restart-data-loss risk the DB-backed outbox already solved; requires new reconciliation logic for mode toggles (Pitfall 6) | Never — reuse `notified_at IS NULL` |
-| Fixed UTC-offset digest time instead of an IANA zone name | Simpler config, no tzdata dependency | Breaks twice a year at DST transitions with no natural fix | Never, once an operator-facing "pick your local time" control exists |
-| Digest window computed as `now() - 24h` / `now() - 7d` instead of outbox-state-based | Simple, intuitive-sounding query | Boundary/gap bugs under any schedule drift (restart, DST, late cron tick) | Only acceptable for a throwaway prototype/demo, never for the shipped feature |
-| Single unbounded embed with all events appended as fields, no chunking | Fastest to implement, works fine at current watchlist scale | Silent drop or hard API rejection the first time a digest crosses 25 events | Acceptable temporarily behind an explicit `TODO` + a hard cap that logs a warning, not acceptable as the final shipped behavior |
-| Reading the digest on/off + cadence config once at process boot instead of per-tick | Simpler code, no need for a config-watch mechanism | Contradicts the milestone's explicit goal ("changeable without a redeploy") — a toggle flip in the SPA would silently do nothing until the next restart | Never, given the stated requirement |
+|----------|-------------------|----------------|-----------------|
+| Store tags as a `TEXT[]` column directly on `watchlist` instead of a `tags`/`artist_tags` join table | Faster to ship, no join table, no rename plumbing | Global rename becomes an `UPDATE ... SET tags = array_replace(...)` across every row (no single source of truth for a tag's canonical spelling), autocomplete has no dedicated lookup table to query distinctly, and it collides with Pitfall 5 (tags need to be `artist_id`-scoped, and `watchlist`-column storage makes that harder to retrofit) | Never for this feature set — global rename and cross-artist autocomplete are explicit v1.6 requirements that a plain array column actively works against |
+| Skip case-folding on tag identity for v1 ("we'll clean it up if it becomes a problem") | One less migration decision, ships faster | Every existing tag becomes a silent duplicate-fork risk the moment two users (or one user on two sessions) type the same tag with different casing; retrofitting normalization later requires a data migration to merge already-diverged tag rows, which is much more invasive than deciding the rule up front | Only if tags are scoped to a single operator who is warned and disciplined about consistent casing — risky for a "portfolio piece meant to look production-grade" project |
+| Implement bulk-add's per-name resolve loop as one blocking backend request "for now, optimize later" | Simplest possible backend code, no new async/polling machinery | Directly collides with the 15s `writeTimeout` (Pitfall 3) — this isn't a performance nicety to defer, it's a correctness bug that manifests on any paste over ~15 names | Never — this must be decided architecturally before the first line of the endpoint is written |
+| Leave real-time embed markdown-escaping as-is ("digest already handles it, real-time predates tags, low risk") | Zero extra code in the phase that's already touching a lot of surface area | Ships a known Discord-formatting-injection vector into a *new, explicitly user-facing* feature (tags), on the exact code path the milestone's own spec calls out for Discord display | Never for tags; the pre-existing `ev.Title`/`ev.ArtistName` gap in `format.go` is lower-priority tech debt (MusicBrainz/Deezer text, not free-typed by the app's own user) and can be deferred separately |
 
 ## Integration Gotchas
 
 | Integration | Common Mistake | Correct Approach |
-|--------------|------------------|--------------------|
-| Discord webhooks (digest message) | Packing unlimited events into one embed's fields | Chunk at 25 fields/embed, 10 embeds/message, 6000 total chars/message; send multiple messages if needed |
-| Discord webhooks (digest message) | Firing several chunked messages back-to-back with no spacing | Reuse the existing 400ms inter-send spacing (`defaultSpacing`) between chunks, same as real-time sends |
-| Discord webhooks (digest message) | Treating a 429 on a digest send the same as a single dropped event | A 429 mid-digest should retry the whole failed chunk (or back off and retry the batch), not silently mark some events notified and lose others — keep the per-chunk "mark only on confirmed send" discipline |
-| `robfig/cron` (already a project dependency) | Constructing the digest cron entry with the library's default (host-local) timezone | Pass `cron.WithLocation(operatorZone)` explicitly, sourced from the Postgres-persisted config, not process default |
-| `robfig/cron` (already a project dependency) | Registering the cron schedule once at boot and expecting a Postgres config change to take effect | Support re-registering the cron entry (remove + re-add, or use a dynamically-computed `Schedule`) when the operator changes cadence/time via the SPA, without requiring a restart |
-| Postgres-persisted config (new for this milestone — everything else in the app is env-var-only per CLAUDE.md) | Treating this like the rest of the app's env-var config (read once, cached forever) | This is intentionally a runtime-mutable exception to the "env vars only" convention — design the read path (cache invalidation or per-tick read) accordingly, and call this out explicitly since it's a deliberate deviation from an established project convention |
+|-------------|----------------|-------------------|
+| MusicBrainz search (paste-a-list bulk add) | Treat the existing `GET /search` endpoint/rate limiter as capable of absorbing N sequential calls inside one HTTP request | Client-orchestrated sequential/bounded-concurrency calls to the existing per-name search endpoint, each request independently under the 15s `writeTimeout`, with visible per-name progress in the UI |
+| Discord webhook (tags on embeds/digest lines) | Copy `format.go`'s no-escaping pattern for a new user-authored field | Route tags through the same `escapeMarkdown` used by `digest_format.go`, on both the real-time and digest paths |
+| Postgres schema (tags/notes tables) | Add a `CHECK` length constraint onto an already-shipped column in a follow-up migration | Bake the length cap into the same migration that creates the column; treat any later tightening as a full expand/backfill/contract cycle |
+| `golang-migrate`-embedded migrations + `cmd/migration-check` | Assume "it's just a new table, additive, no risk" without running the README's pre-merge checklist | Read `internal/db/migrations/README.md` before writing the tags/notes migration; run `cmd/migration-check` locally (`make sqlc-check`-adjacent target, or via CI on a scratch branch) before opening the PR |
 
 ## Performance Traps
 
 | Trap | Symptoms | Prevention | When It Breaks |
-|------|-----------|-------------|-----------------|
-| Unbounded digest event count read into memory in one query | Fine at current single-operator watchlist scale | `ListUnnotified` already has no `LIMIT`; acceptable given this project's scale, but worth a sanity cap (e.g. log a warning past a few hundred pending events) so a stuck/misconfigured digest doesn't silently build an unbounded backlog | Not a near-term concern for this project's single-operator, modest-watchlist scope — flag only, don't build infrastructure for it |
-| Digest formatter re-fetching artist/cover-art data per event synchronously before sending | Slow digest send on a busy day, blocking the cron goroutine | Reuse whatever display-field caching the existing per-event notifier already does; the events table already stores denormalized display fields (title, artist_name, cover_art_url) precisely so this isn't needed | Only relevant if a future digest redesign starts re-querying MusicBrainz/Deezer at send time, which nothing here requires |
+|------|----------|------------|----------------|
+| Per-artist N+1 for "latest release" sort | Watchlist page load time grows linearly with watchlist size | Single `LEFT JOIN LATERAL` or `GROUP BY` query, matching this codebase's existing one-round-trip query style | Noticeable past ~30-50 artists; the milestone's own goal names "50+ artist watchlist" as the target scale |
+| Tag-filter autocomplete querying all tag-assignment rows client-side | Autocomplete input lag grows with total tag-assignment count, not distinct-tag count | A dedicated `tags` table queried for distinct tag names (with an index), never a client-side filter over every assignment row | Once total tag assignments exceed a few hundred across a 50+ artist watchlist with multiple tags each |
+| Bulk-add per-name resolve loop with no client-side batching/backoff visibility | UI appears frozen for 60-100+ seconds on a large paste with no incremental feedback | Bounded-concurrency or strictly sequential client-orchestrated calls with a live progress indicator (Pitfall 3) | Any paste over roughly 15-20 names given the 1 req/sec MusicBrainz limiter |
+
+## Security Mistakes
+
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Unescaped tag text reaching a Discord embed field or digest line | Markdown injection: a tag can retarget a masked link's URL, forge bold/heading formatting, or otherwise misrepresent a notification's content in a channel other users trust | Route every tag string through `escapeMarkdown` on both notifier paths (Pitfall 1) |
+| New bulk-edit/bulk-remove/bulk-add-confirm endpoints registered outside the existing protected chi `Group`, or client code bypassing `apiFetch` | On a gated instance, a mis-registered route either skips authentication entirely (data exposure) or breaks CSRF protection (state-changing request forgeable cross-site) | Register every new write route inside the existing `pr.Use(gate.Authenticate)`/`pr.Use(gate.RequireCSRFHeader)` group; route every new client call through `apiFetch` (Pitfall 4) |
+| Tag/note free text rendered into the SPA via anything other than a plain JSX text node | Frontend XSS — this codebase's existing discipline (`CONCERNS.md`: "no `dangerouslySetInnerHTML` anywhere") must extend to two brand-new free-text surfaces | Render tags and notes as plain JSX text exactly like existing event titles/artist names; do not introduce any HTML-rendering path for user-typed content |
 
 ## UX Pitfalls
 
 | Pitfall | User Impact | Better Approach |
 |---------|-------------|-------------------|
-| No indication of "last digest sent" anywhere in the SPA | Operator can't tell whether digest mode is actually working or silently stuck (Pitfall 5) | Surface `last_digest_sent_at` and next-scheduled-fire time in the System view alongside the digest toggle |
-| Empty digest sent when zero events accumulated | A blank/near-empty Discord message every day erodes trust in the feature and trains the operator to ignore it | Suppress the send entirely when the outbox is empty at fire time; log the no-op tick instead |
-| Toggling digest → real-time with no explanation of what happens to queued events | Operator surprised by a burst of "old" individual messages, or worse, silently loses them if Pitfall 6 wasn't handled correctly | State the flush behavior explicitly in the SPA UI copy near the toggle (see Pitfall 6) |
-| Digest time picker that accepts a bare `HH:MM` with no timezone selector | Operator has no way to correctly express intent; falls back to server default (likely UTC), producing the exact bug in Pitfall 2 | Timezone selector (or auto-detected browser timezone as the default, explicitly confirmed/overridable) alongside the time picker |
+| Stale multi-select state surviving a bulk operation | After a bulk tag-add/remove/mute-set/remove completes, the selection checkboxes still show the just-processed (and, for bulk-remove, now-deleted) rows as selected; a second accidental action (e.g. hitting "bulk remove" again) targets stale/gone ids | Clear the selection set immediately after any bulk action's confirmed success (and on any error that leaves the operation's outcome ambiguous, since a partial-failure state — see below — makes "which rows are still valid to re-select" genuinely unclear); re-derive selection validity from the freshly re-fetched watchlist rather than trusting the pre-action id list |
+| No partial-failure contract for bulk edit | If a bulk tag-add spans 20 selected artists and row 14 fails (e.g. a concurrent delete of that watchlist entry), a naive implementation either aborts with no indication of which of the first 13 already succeeded, or silently continues and reports blanket "success" | Mirror this codebase's existing partial-failure precedent (`GET /search`'s D-03 contract: "a source failing never fails the whole request") — return a per-id result list (succeeded/failed/reason) from bulk endpoints, and render it distinctly in the UI rather than one boolean toast |
+| Paste-a-list review screen auto-adding on a "good enough" match | A pasted list with ambiguous names (e.g. an artist with several same-named entries disambiguated only by country/genre) silently picks the wrong candidate, and the user doesn't notice until a wrong artist's releases start appearing | The milestone's own spec already requires "nothing added until confirmed" — enforce this at the API layer too (a separate resolve/confirm step, not a single add-with-best-guess call), and default an ambiguous name's review-row selection to "no selection" rather than pre-picking the top search result, so silence never means acceptance |
+| Bulk-remove confirmation copy with no mention of the re-add/seed-mode surprise (Pitfall 6) | A user re-adding a removed artist gets an unexplained Discord notification for an old release days or weeks later, with no context connecting it back to the removal | Add a short, factual line to the bulk-remove confirmation and/or the paste-a-list re-add case: releases missed while off the watchlist may notify once re-added |
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Digest toggle wired end-to-end:** Verify the *existing* per-poll-cycle `NotifyPending` call is actually gated off when digest mode is on — not just that a new digest job exists alongside it (Pitfall 1).
-- [ ] **Timezone correctness:** Verify the built container image (Alpine-based) can actually `time.LoadLocation` a real IANA zone name, not just that the code compiles locally where tzdata is already present (Pitfall 2).
-- [ ] **DST coverage:** Verify a test exists that advances a fake clock across both a spring-forward and a fall-back boundary and asserts exactly one digest fires per calendar day (Pitfall 3).
-- [ ] **Restart resilience:** Verify killing the process a few seconds before a scheduled digest fire, then restarting, still results in that day's events reaching Discord on the next tick — not silently lost (Pitfall 4, Pitfall 5).
-- [ ] **Toggle-mid-window behavior:** Verify switching digest → real-time with events already queued either flushes them via the next real-time poll cycle or explicitly documents/tests the chosen behavior — not left unspecified (Pitfall 6).
-- [ ] **Discord limit handling:** Verify a digest with more events than fit in one embed/message actually sends multiple chunked messages instead of erroring or truncating silently (Pitfall 7).
-- [ ] **Cadence change without redeploy:** Verify changing the digest time/cadence via the SPA takes effect on the *next* scheduled fire without a container restart — this is an explicit milestone goal, easy to accidentally regress to "read config at boot only."
+- [ ] **Tags on Discord:** Often missing markdown escaping on the real-time embed path specifically (digest path already has it) — verify with a tag containing `*_~`` `|>#[]()` renders literally in a real Discord message, not just in a unit test.
+- [ ] **Global tag rename:** Often missing a defined behavior for "rename to a name that already exists as another tag" — verify the UI/API explicitly rejects, merges, or otherwise handles this rather than producing a silent constraint-violation 500.
+- [ ] **Watchlist sort by latest release:** Often missing retention-window awareness — verify an artist whose only release is older than `EVENT_RETENTION_DAYS` sorts consistently with what History shows for it (not "latest: <aged-out date>" while History shows nothing).
+- [ ] **History filter by tag:** Often missing a test proving it composes with (not bypasses) `EVENT_RETENTION_DAYS` — verify with a seeded aged-out tagged event and a within-window tagged event, per Pitfall 9.
+- [ ] **Bulk remove:** Often missing an explicit test proving tags survive when scoped to `artist_id` and notes are correctly gone (mirroring `TestService_Remove_LeavesArtistRowIntact`) — verify both halves, not just one.
+- [ ] **Paste-a-list bulk add:** Often missing a hard verification that the 15s `writeTimeout` is never hit by the chosen implementation shape — verify with a real 50-100 line paste against a rate-limited (not `rate.Inf`) MusicBrainz client, not just a mocked instant-response test.
+- [ ] **Frontend coverage gate (70%):** Often missing coverage on the review-screen's partial-failure and re-selection-after-bulk-op states specifically (the "unhappy path" branches), even when the happy path is well-tested — verify the coverage report, not just that tests exist.
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
-|---------|-----------------|-------------------|
-| Double-send from an un-gated real-time drain running alongside digest mode (Pitfall 1) | LOW | Since `MarkNotified` is idempotent per-row, no DB cleanup is needed; fix the gating logic and ship — no data corruption occurred, only duplicate Discord messages |
-| Wrong timezone causing digests to fire at an unexpected hour (Pitfall 2) | LOW | Backfill `time/tzdata` import / operator zone config, redeploy; no data lost since events remain queued via `notified_at IS NULL` regardless of when the digest fires |
-| A missed digest cycle from a restart or DST edge case (Pitfall 4, Pitfall 5) | LOW | No recovery action needed if outbox-state windowing (Pitfall 4) was followed — the missed cycle's events are still `notified_at IS NULL` and go out on the next successful tick automatically |
-| Orphaned queued events after a mode toggle, if a separate digest-only queue was built instead of reusing `notified_at` (Pitfall 6) | MEDIUM | Requires a one-off manual query/backfill to reconcile the separate queue's state back into `notified_at`, plus a follow-up fix to collapse to a single outbox going forward |
-| Silently dropped events from an un-chunked oversized digest embed (Pitfall 7) | MEDIUM | If `MarkNotified` was (incorrectly) called before confirming the send succeeded, affected events must be identified and manually reset (`notified_at = NULL`) to re-queue them; if the "mark only on confirmed send" discipline was followed correctly, no recovery is needed — they simply remain queued |
+|---------|----------------|-----------------|
+| Tags stored `watchlist_id`-scoped, discovered after ship | HIGH | New migration: `artist_tags` (or equivalent) table keyed on `artist_id`; backfill by joining current `watchlist_id`-scoped rows through `watchlist.artist_id`; ship as its own expand+backfill release per the README's pattern; drop the old table only once that release is no longer N-1 |
+| Chunk-count fixture drift discovered via a red CI run after tags land in digest lines | LOW | Re-derive `chunkForcingEventCount`/`capForcingEventCount` empirically against the new `digestLine` output (same whitebox-probe method the existing comment describes), update the two constants and their comments in one PR |
+| Unescaped tags shipped to real-time embeds, discovered post-release | MEDIUM | Add `escapeMarkdown` to `format.go`'s tag-rendering call site; no data migration needed (formatting is computed at send time from live tag data, not stored pre-rendered) — but any already-sent malformed Discord messages in a live channel cannot be retroactively fixed, only prevented going forward |
+| Bulk-add implemented as one blocking request, timing out in production | MEDIUM | Refactor to client-orchestrated sequential calls against the existing per-name search endpoint; no schema change needed since "nothing added until confirmed" means no partial-add data exists to reconcile |
 
 ## Pitfall-to-Phase Mapping
 
 | Pitfall | Prevention Phase | Verification |
-|---------|--------------------|-----------------|
-| Un-gated real-time drain running alongside digest mode (1) | Scheduler/outbox-integration phase | Test: toggle digest on, insert event, run both a poll cycle and a digest tick, assert exactly one Discord send |
-| Timezone / Alpine tzdata (2) | Scheduler-construction phase | CI or image-smoke-test step that `time.LoadLocation`s a real zone inside the built container; `cron.WithLocation` unit test |
-| DST transitions (3) | Scheduler-construction phase | Fake-clock test crossing both DST boundaries, asserting exactly one fire per day |
-| Window-boundary ambiguity (4) | Event-selection query phase | Test asserting an event inserted mid-drain is included exactly once across two consecutive digest ticks, never zero or twice |
-| Restart near fire time (5) | Scheduler-construction phase + System-view extension | Kill/restart test around a scheduled fire time; `/status` shows `last_digest_sent_at` |
-| Toggle mid-window orphaning events (6) | Same phase as (1) | Test: queue events under digest mode, toggle to real-time, assert they're sent on the next poll cycle |
-| Discord embed/message limits (7) | Digest message-formatting phase | Test with an event count exceeding 25, asserting multiple embeds/messages sent and all events end up `notified_at IS NOT NULL` |
-| Cadence change requires restart (Technical Debt row) | Postgres-config-read phase | Test: change cadence via API/SPA path, assert next fire uses new cadence with no process restart |
+|---------|-------------------|----------------|
+| 1. Unescaped tags on real-time Discord embeds | Phase: tags on Discord embeds/digest lines | Table-driven test asserting a metacharacter-laden tag renders escaped on both the real-time and digest paths |
+| 2. Digest chunker fixture drift | Phase: tags on Discord embeds/digest lines | `TestSendDigestIfDue_MultiChunk*`/`*Cap*` still pass, or fixture constants are explicitly re-derived and documented |
+| 3. Bulk-add 15s WriteTimeout collision | Phase: paste-a-list bulk add | Manual UAT with a real 50-100 line paste against a genuinely rate-limited MusicBrainz client (not `rate.Inf`), confirming no request exceeds `writeTimeout` |
+| 4. CSRF/session contract on new bulk endpoints | Phase: multi-select bulk edit; Phase: paste-a-list bulk add | New endpoints registered in the existing protected `Group`; new client calls route through `apiFetch`; gated-instance UAT shows no unexpected 403s |
+| 5. Tag storage scope (artist_id vs watchlist_id) | Phase: tags data model / free-form multi-tags | Test proving tags survive `Service.Remove` when scoped to `artist_id`, mirroring `TestService_Remove_LeavesArtistRowIntact` |
+| 6. Re-add bypassing seed mode | Phase: multi-select bulk edit (confirmed bulk remove) | Documented as an accepted limitation in bulk-remove confirmation copy; no code fix required unless scope changes |
+| 7. Tag case-folding/Unicode normalization | Phase: tags data model / free-form multi-tags | Migration uses a case-insensitive uniqueness mechanism (`citext` or `LOWER()` index); NFC-normalize before storing |
+| 8. Sort-by-latest-release N+1 | Phase: Watchlist search/sort/filter | `EXPLAIN ANALYZE` on the chosen query shows one round trip regardless of watchlist size; no per-artist Go-side loop in the diff |
+| 9. Retention/tag-filter composition on History | Phase: History filter by tag | New test mirroring `TestRetention_...`'s pattern, seeding an aged-out tagged event and a within-window tagged event |
+| 10. Migration-check guard on tags/notes DDL | Phase: tags data model / free-form multi-tags | `cmd/migration-check` (CI job `migration-check`) passes green on the first attempt, without needing a `migration-check:allow-destructive` annotation |
 
 ## Sources
 
-- `internal/db/migrations/000003_events.up.sql`, `queries/events.sql`, `internal/notifier/notifier.go`, `internal/poller/poller.go` (this repository) — existing outbox/queue design (`notified_at`, `ListUnnotified`, `MarkNotified`, per-poll-cycle `NotifyPending` call site, 400ms spacing constant) — confidence HIGH (primary source, read directly)
-- `.planning/PROJECT.md` (this repository) — milestone goal (Postgres-persisted, no-redeploy-required toggle), Alpine-based Dockerfile decision, single-instance/restart-on-deploy deployment model — confidence HIGH
-- [github.com/robfig/cron](https://github.com/robfig/cron), [Enhancement: UTC · Issue #180](https://github.com/robfig/cron/issues/180), [Set Timezone for Scheduler · Issue #132](https://github.com/robfig/cron/issues/132), [pkg.go.dev/github.com/robfig/cron/v3](https://pkg.go.dev/github.com/robfig/cron/v3) — DST spring-forward/fall-back behavior, default-to-host-timezone behavior, `cron.WithLocation` — confidence MEDIUM (project's own dependency's issue tracker, cross-checked across multiple pages)
-- [docs.discord.com/developers/topics/rate-limits](https://docs.discord.com/developers/topics/rate-limits), [Discord Embed Limits Cheat Sheet](https://discord-webhook.com/en/blog/discord-webhook-embed-limits/), [discord.com/safety/using-webhooks-and-embeds](https://discord.com/safety/using-webhooks-and-embeds) — 25 fields/embed, 6000 chars/message, 10 embeds/message, ~5 requests/2s per webhook, global 50 req/s — confidence MEDIUM (official Discord docs plus independent corroborating sources)
-- [Wawandco: Go's Locations & Alpine Docker image](https://wawand.co/blog/posts/go-time-default-locations/), [A story about Go, Docker and time zones](https://lalatron.hashnode.dev/a-story-about-go-docker-and-time-zones) — Alpine missing tzdata, `time.LoadLocation` failure mode, `time/tzdata` blank-import fix — confidence MEDIUM (independent, corroborating sources; well-known Go/Alpine interaction)
-- [Knock: Building a batched notification engine](https://knock.app/blog/building-a-batched-notification-engine), [SuprSend: How Notification Batching and Digests Actually Work](https://www.suprsend.com/post/notification-batching-and-digest), [techinterview.org: Digest Scheduler Low-Level Design](https://www.techinterview.org/post/3233470550/lld-digest-scheduler/) — outbox-state vs. time-range windowing, idempotency-key dedup pattern, empty-digest suppression — confidence MEDIUM (industry vendor engineering blogs, corroborating on the same core patterns)
-- Kubernetes CronJob `startingDeadlineSeconds` / missed-schedule documentation (general cron catch-up pattern references) — confidence MEDIUM, used only as a general illustration of the "missed schedule window" problem class, not as a direct implementation recommendation for this project (robfig/cron has no equivalent option; the outbox-state approach in Pitfall 4 is the recommended substitute)
+- `C:\CodeProjects\drop-tracker\internal\notifier\format.go` — real-time embed formatting, confirmed no markdown escaping (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\internal\notifier\digest_format.go`, `digest_chunk.go` — digest markdown escaping, chunk budget math, pinned fixture constants (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\internal\notifier\digest_test.go` — `chunkForcingEventCount`/`capForcingEventCount` fixture definitions and their own "empirically confirmed" comments (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\internal\authgate\gate.go` — CSRF header contract, session renewal, route registration discipline (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\internal\db\migrations\000002_watchlist.up.sql`, `000003_events.up.sql` — `artists`/`watchlist`/`events` FK/cascade design and its documented rationale (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\internal\watchlist\service.go` (`Service.Remove`) plus `service_test.go` (`TestService_Remove_LeavesArtistRowIntact`, `TestService_Remove_ThenReAddSucceeds`) — confirmed hard-delete-watchlist-only-not-artist behavior (confidence: HIGH, direct read + test names)
+- `C:\CodeProjects\drop-tracker\internal\detection\detector.go` (`isSeedMode`, `notifyGate`) — confirmed per-`(artist_id, source)` implicit seed-mode definition (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\queries\watchlist.sql`, `queries\events.sql` — existing query shapes (no N+1 precedent, no tag/latest-release query yet) (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\cmd\server\main.go` (`writeTimeout`, `readTimeout` constants), `internal\config\config.go` (`MusicBrainzRateLimitPerSec` default `1`) — confirmed the exact numbers behind the bulk-add timeout collision (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\internal\db\migrations\README.md` — N-1 rollback-safety rules, `cmd/migration-check` enforcement scope, expand/backfill/contract worked example (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\internal\httpserver\events.go`, `events_test.go` — retention filtering scope and its existing regression-test discipline (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\.planning\codebase\CONCERNS.md` — existing known tech debt/fragile areas informing which patterns to reuse vs. avoid (confidence: HIGH, direct read)
+- `C:\CodeProjects\drop-tracker\.planning\PROJECT.md` — v1.6 milestone scope, target features, "no new background API polling" constraint (confidence: HIGH, direct read)
 
 ---
-*Pitfalls research for: digest/batch notification mode, drop-tracker v1.5*
-*Researched: 2026-09-11*
+*Pitfalls research for: drop-tracker v1.6 Watchlist Organization*
+*Researched: 2026-09-22*
