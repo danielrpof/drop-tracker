@@ -81,12 +81,40 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| TAG-01 | Phase 24 | Pending |
+| TAG-02 | Phase 24 | Pending |
+| TAG-03 | Phase 24 | Pending |
+| TAG-04 | Phase 24 | Pending |
+| TAG-05 | Phase 24 | Pending |
+| TAG-06 | Phase 24 | Pending |
+| TAG-07 | Phase 24 | Pending |
+| NOTE-01 | Phase 24 | Pending |
+| WLVW-01 | Phase 25 | Pending |
+| WLVW-02 | Phase 25 | Pending |
+| WLVW-03 | Phase 25 | Pending |
+| WLVW-04 | Phase 25 | Pending |
+| WLVW-05 | Phase 25 | Pending |
+| WLVW-06 | Phase 25 | Pending |
+| HIST-02 | Phase 25 | Pending |
+| BULK-01 | Phase 26 | Pending |
+| BULK-02 | Phase 26 | Pending |
+| BULK-03 | Phase 26 | Pending |
+| BULK-04 | Phase 26 | Pending |
+| BULK-05 | Phase 26 | Pending |
+| IMPT-01 | Phase 27 | Pending |
+| IMPT-02 | Phase 27 | Pending |
+| IMPT-03 | Phase 27 | Pending |
+| IMPT-04 | Phase 27 | Pending |
+| IMPT-05 | Phase 27 | Pending |
+| NTFY-05 | Phase 28 | Pending |
+| NTFY-06 | Phase 28 | Pending |
+| NTFY-07 | Phase 28 | Pending |
 
 **Coverage:**
 - v1.6 requirements: 28 total
-- Mapped to phases: 0
-- Unmapped: 28 ⚠️
+- Mapped to phases: 28
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-22*
-*Last updated: 2026-09-22 after initial definition*
+*Last updated: 2026-09-22 after v1.6 roadmap creation (Phases 24-28)*
