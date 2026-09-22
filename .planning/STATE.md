@@ -1,19 +1,16 @@
 ---
-gsd_state_version: 1.0
-milestone: v1.5
-status: "v1.5 shipped — PR #6"
-stopped_at: Phase 23 complete — all phases complete
-last_updated: "2026-09-18T18:01:45.200Z"
-last_activity: 2026-09-18
-state_head: 63df9f525c6b6ea727259b45b017572428051e39
-milestone_name: Digest Notifications (Phases 20-23) — SHIPPED 2026-09-18
-current_phase: 23
+gsd_state_version: "1.0"
+milestone: v1.6
+milestone_name: Watchlist Organization
+status: planning
+last_updated: "2026-09-22T22:20:59.781Z"
+last_activity: 2026-09-22
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 15
-  completed_plans: 15
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -27,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-09-18)
 
 ## Current Position
 
-Phase: Milestone v1.5 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: v1.5 shipped — PR #6
-Last activity: 2026-09-18
+Status: Defining requirements
+Last activity: 2026-09-22 — Milestone v1.6 started
 
 ## Performance Metrics
 

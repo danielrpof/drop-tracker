@@ -8,6 +8,21 @@ A Go-based release tracker for hip-hop, reggaeton, and R&B: users maintain a wat
 
 A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice (lint, test, security scan, SBOM, versioned image publish, and eventually automated deploy).
 
+## Current Milestone: v1.6 Watchlist Organization
+
+**Goal:** Keep a 50+ artist watchlist manageable — label, annotate, find, bulk-change, and bulk-add artists — with no new background API polling.
+
+**Target features:**
+- Free-form multi-tags per artist (autocomplete from existing tags) plus global tag rename/delete
+- Per-artist plain-text notes (length-capped), edited and shown on the Watchlist card only
+- Watchlist name search, sort (name / date added / latest release), and filter (tag / muted event types / non-default release-type filters)
+- History feed filterable by tag
+- Artist tags displayed on real-time Discord embeds and digest lines (digest grouping stays by event type)
+- Multi-select bulk edit: add/remove tags, set release-type/mute preferences, remove from watchlist (confirmed)
+- Paste-a-list bulk add with a review screen — per-name rate-limited search, best match + alternates, nothing added until confirmed
+
+**Source:** Option E of `.planning/notes/2026-09-08-feature-module-ideas-post-v1.3.md` (Options B and C shipped as v1.5 and v1.4).
+
 ## Current State
 
 **Shipped:** v1.5 Digest Notifications (2026-09-18)
@@ -114,6 +129,13 @@ v1.5 changed how the app talks, not what it detects. An instance-wide, Postgres-
 
 ### Active
 
+- [ ] Artist tags — free-form multi-tags per watchlist entry, autocomplete, global rename/delete (v1.6)
+- [ ] Artist notes — plain-text, length-capped, Watchlist-only (v1.6)
+- [ ] Watchlist search/sort/filter — name search; sort by name, date added, latest release; filter by tag, mutes, non-default release types (v1.6)
+- [ ] History filter by tag (v1.6)
+- [ ] Tags shown on Discord real-time embeds and digest lines (v1.6)
+- [ ] Multi-select bulk edit — tags, preferences, confirmed bulk remove (v1.6)
+- [ ] Paste-a-list bulk add with review-and-confirm screen (v1.6)
 - [ ] VPS SSH-based deploy step, automated on merge to main, with `/health`-gated auto-rollback, plus its provisioning runbook, SSH host-key pinning, `production` environment secrets, and serialized deploys (DPLY-01…08) — **deferred**, blocked on a provisioned VPS + domain; Phase 17 discuss context archived under `v1.3-phases/17-*`
 
 ### Out of Scope
@@ -228,4 +250,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-18 — after v1.5 milestone close*
+*Last updated: 2026-09-22 — v1.6 Watchlist Organization milestone started*
