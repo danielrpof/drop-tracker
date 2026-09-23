@@ -128,11 +128,6 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
       })
   }
 
-  const namesOnArtist = new Set<string>([
-    ...entry.tags.map((t) => t.name),
-    ...pending.map((p) => p.name),
-  ])
-
   return (
     <div ref={containerRef} className="mt-1 flex flex-wrap items-center gap-2">
       {entry.tags.map((tag, index) => (
@@ -188,7 +183,8 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
         <TagCombobox
           entry={entry}
           vocabulary={actions.vocabulary}
-          namesOnArtist={namesOnArtist}
+          onArtist={entry.tags}
+          pendingNames={pending.map((p) => p.name)}
           onCommit={handleCommit}
           onClose={() => setEditorOpen(false)}
         />

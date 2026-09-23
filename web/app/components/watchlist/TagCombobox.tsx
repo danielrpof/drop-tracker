@@ -11,55 +11,65 @@ import {
   ComboboxList,
 } from "~/components/ui/combobox"
 import type { TagRef, WatchlistEntry } from "~/lib/api"
+import { buildTagSuggestions, type TagSuggestion } from "~/lib/tags"
 
 export interface TagComboboxProps {
   entry: WatchlistEntry
   vocabulary: TagRef[] | null
-  namesOnArtist: Set<string>
+  onArtist: TagRef[]
+  pendingNames: string[]
   onCommit: (name: string) => void
   onClose: () => void
 }
 
-type ComboItem =
-  | { kind: "create"; name: string }
-  | { kind: "existing"; tag: TagRef }
-
-function itemLabel(item: ComboItem): string {
+function itemLabel(item: TagSuggestion): string {
   return item.kind === "create" ? item.name : item.tag.name
 }
 
-// TagCombobox is the "+ tag" editor (TAG-01, D-02): a single-value,
-// creatable base-ui Combobox. This task builds items with a plain
-// contains-match; plan 24-05 Task 2's buildTagSuggestions replaces this with
-// the deterministic pinning/already-on/empty rules (D-13, D-30, D-31).
+// DISMISS_REASONS is the base-ui close reasons that mean "the user wants
+// the editor gone" (Esc, an outside click, focus leaving). base-ui also
+// closes its popup with reason "none" when Enter is pressed and nothing is
+// selectable (e.g. the already-on state) -- that must NOT close the whole
+// "+ tag" editor, only leave the input as-is (UI-SPEC "Enter does
+// nothing").
+const DISMISS_REASONS = new Set([
+  "escape-key",
+  "outside-press",
+  "focus-out",
+  "input-blur",
+])
+
+// TagCombobox is the "+ tag" editor (TAG-01, D-02, D-15): a single-value,
+// creatable base-ui Combobox. Suggestion ordering, pinning, and the
+// already-on/empty-vocabulary states all come from the pure
+// buildTagSuggestions helper (D-13, D-30, D-31) -- this component only
+// renders what it returns.
 export function TagCombobox({
   entry,
   vocabulary,
-  namesOnArtist,
+  onArtist,
+  pendingNames,
   onCommit,
   onClose,
 }: TagComboboxProps) {
   const [query, setQuery] = useState("")
+  const [popupOpen, setPopupOpen] = useState(true)
 
-  const trimmed = query.trim()
-  const lowerQuery = trimmed.toLowerCase()
-  const candidates = (vocabulary ?? []).filter(
-    (tag) =>
-      !namesOnArtist.has(tag.name) &&
-      tag.name.toLowerCase().includes(lowerQuery)
-  )
-  const items: ComboItem[] = [
-    ...(trimmed ? [{ kind: "create", name: trimmed } as const] : []),
-    ...candidates.map((tag) => ({ kind: "existing", tag }) as const),
-  ]
+  const suggestions = buildTagSuggestions({
+    query,
+    vocabulary,
+    onArtist,
+    pendingNames,
+  })
+  const items = suggestions.state === "items" ? suggestions.items : []
 
-  function commit(item: ComboItem) {
+  function commit(item: TagSuggestion) {
     onCommit(itemLabel(item))
     setQuery("")
   }
 
   return (
-    <Combobox<ComboItem>
+    <Combobox<TagSuggestion>
       items={items}
       value={null}
       onValueChange={(item) => {
@@ -69,9 +79,16 @@ export function TagCombobox({
       onInputValueChange={setQuery}
       itemToStringLabel={itemLabel}
       autoHighlight
-      defaultOpen
-      onOpenChange={(open) => {
-        if (!open) onClose()
+      open={popupOpen}
+      onOpenChange={(open, details) => {
+        if (open) {
+          setPopupOpen(true)
+          return
+        }
+        if (DISMISS_REASONS.has(details.reason)) {
+          setPopupOpen(false)
+          onClose()
+        }
       }}
     >
       <ComboboxInput
@@ -100,7 +117,11 @@ export function TagCombobox({
             </ComboboxItem>
           ))}
         </ComboboxList>
-        <ComboboxEmpty>Type a name to create a tag</ComboboxEmpty>
+        <ComboboxEmpty>
+          {suggestions.state === "already-on"
+            ? `“${suggestions.name}” is already on this artist`
+            : "Type a name to create a tag"}
+        </ComboboxEmpty>
       </ComboboxContent>
     </Combobox>
   )
