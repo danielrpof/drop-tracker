@@ -28,7 +28,7 @@ func (q *Queries) CountWatchlist(ctx context.Context) (int64, error) {
 const createWatchlistEntry = `-- name: CreateWatchlistEntry :one
 INSERT INTO watchlist (artist_id, release_types, muted_event_types)
 VALUES ($1, $2, $3)
-RETURNING id, artist_id, release_types, muted_event_types, created_at, updated_at
+RETURNING id, artist_id, release_types, muted_event_types, created_at, updated_at, note
 `
 
 type CreateWatchlistEntryParams struct {
@@ -47,6 +47,7 @@ func (q *Queries) CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistE
 		&i.MutedEventTypes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Note,
 	)
 	return i, err
 }

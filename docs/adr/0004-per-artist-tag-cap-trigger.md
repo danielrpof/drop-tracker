@@ -60,3 +60,6 @@ trigger, and no code path inserts `artist_tags` rows any other way.
   tag (no error), and a merge on a 10-tag artist that carries only the source.
 - The trigger's `$$` body passes `cmd/migration-check`, because `internal/sqlscan`
   handles dollar-quoted bodies (`lex_test.go`).
+- The existence check runs again after the artist lock, so two concurrent
+  attaches of the same tag to a 9-tag artist both succeed instead of the
+  second racing into a spurious cap violation.

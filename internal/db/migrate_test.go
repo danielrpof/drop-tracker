@@ -210,11 +210,11 @@ func TestRunMigrations_AppliesFromScratch(t *testing.T) {
 	if err := sqlDB.QueryRowContext(ctx, "SELECT version, dirty FROM migrate_scratch.schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	// Phase 22 added migration 000009_digest_last_slot_at, so "from
-	// scratch" now lands on version 9, not 8 (Phase 20's
-	// notification_settings value, before this column existed).
-	if version != 9 || dirty {
-		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (9, false)", version, dirty)
+	// Phase 24 added migration 000010_tags_and_notes, so "from scratch" now
+	// lands on version 10, not 9 (Phase 22's digest_last_slot_at value,
+	// before this migration existed).
+	if version != 10 || dirty {
+		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (10, false)", version, dirty)
 	}
 
 	// Isolation assertion 1: the migrations really landed in the scratch

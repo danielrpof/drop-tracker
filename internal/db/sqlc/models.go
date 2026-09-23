@@ -20,6 +20,11 @@ type Artist struct {
 	ArtMatchAttemptedAt pgtype.Timestamptz `json:"art_match_attempted_at"`
 }
 
+type ArtistTag struct {
+	ArtistID int64 `json:"artist_id"`
+	TagID    int64 `json:"tag_id"`
+}
+
 type Event struct {
 	ID                 int64              `json:"id"`
 	ArtistID           int64              `json:"artist_id"`
@@ -48,6 +53,12 @@ type NotificationSetting struct {
 	DigestLastSlotAt pgtype.Timestamptz `json:"digest_last_slot_at"`
 }
 
+type Tag struct {
+	ID        int64              `json:"id"`
+	Name      string             `json:"name"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Watchlist struct {
 	ID              int64              `json:"id"`
 	ArtistID        int64              `json:"artist_id"`
@@ -55,4 +66,5 @@ type Watchlist struct {
 	MutedEventTypes []string           `json:"muted_event_types"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Note            *string            `json:"note"`
 }
