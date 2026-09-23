@@ -22,14 +22,18 @@ const entry: WatchlistEntry = {
   note: null,
 }
 
-function renderCombobox(vocabulary: TagRef[] | null = null) {
+function renderCombobox(
+  vocabulary: TagRef[] | null = null,
+  overrides: { onArtist?: TagRef[]; pendingNames?: string[] } = {}
+) {
   const onCommit = vi.fn()
   const onClose = vi.fn()
   render(
     <TagCombobox
       entry={entry}
       vocabulary={vocabulary}
-      namesOnArtist={new Set()}
+      onArtist={overrides.onArtist ?? []}
+      pendingNames={overrides.pendingNames ?? []}
       onCommit={onCommit}
       onClose={onClose}
     />
@@ -56,5 +60,48 @@ describe("TagCombobox", () => {
     await userEvent.click(await screen.findByText("reggaeton"))
 
     expect(onCommit).toHaveBeenCalledWith("reggaeton")
+  })
+
+  it("pins an exact match and suppresses Create, so Enter attaches the existing tag under its stored casing (TAG-03)", async () => {
+    const vocabulary: TagRef[] = [
+      { id: 1, name: "reggaeton" },
+      { id: 2, name: "reggae" },
+    ]
+    const { onCommit } = renderCombobox(vocabulary)
+
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "Reggaeton {Enter}")
+
+    expect(onCommit).toHaveBeenCalledWith("reggaeton")
+    expect(screen.queryByText(/Create/)).toBeNull()
+  })
+
+  it("shows the non-selectable already-on line and does nothing on Enter when the query matches a tag already on the artist", async () => {
+    const onArtist: TagRef[] = [{ id: 1, name: "latin" }]
+    const { onCommit } = renderCombobox([{ id: 1, name: "latin" }], {
+      onArtist,
+    })
+
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "latin{Enter}")
+
+    // base-ui's ComboboxEmpty appends an invisible word-joiner to force
+    // screen-reader re-announcement, so match by prefix, not exact text.
+    expect(
+      await screen.findByText(/^“latin” is already on this artist/)
+    ).toBeInTheDocument()
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  it("shows 'Type a name to create a tag' for an empty, loaded vocabulary with no query", () => {
+    renderCombobox([])
+
+    expect(screen.getByText(/^Type a name to create a tag/)).toBeInTheDocument()
+  })
+
+  it("shows 'Type a name to create a tag' before the vocabulary has loaded, with no query", () => {
+    renderCombobox(null)
+
+    expect(screen.getByText(/^Type a name to create a tag/)).toBeInTheDocument()
   })
 })
