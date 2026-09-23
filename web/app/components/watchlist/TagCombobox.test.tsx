@@ -104,4 +104,76 @@ describe("TagCombobox", () => {
 
     expect(screen.getByText(/^Type a name to create a tag/)).toBeInTheDocument()
   })
+
+  it("shows the muted 25/32 counter at 25 characters and switches to text-foreground at 32", async () => {
+    renderCombobox()
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+
+    await userEvent.type(input, "a".repeat(25))
+    expect(screen.getByText("25/32")).toHaveClass("text-muted-foreground")
+
+    await userEvent.type(input, "a".repeat(7))
+    expect(screen.getByText("32/32")).toHaveClass("text-foreground")
+  })
+
+  it("does not show a counter below 25 characters", async () => {
+    renderCombobox()
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+
+    await userEvent.type(input, "a".repeat(24))
+
+    expect(screen.queryByText("24/32")).toBeNull()
+  })
+
+  it("announces the 25 and 32 threshold crossings exactly once each, and nothing on other keystrokes", async () => {
+    renderCombobox()
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    const liveRegion = document.querySelector('[aria-live="polite"]')
+
+    await userEvent.type(input, "a".repeat(24))
+    expect(liveRegion).toHaveTextContent("")
+
+    await userEvent.type(input, "a")
+    expect(liveRegion).toHaveTextContent("7 characters left.")
+
+    await userEvent.type(input, "a".repeat(6))
+    expect(liveRegion).toHaveTextContent("7 characters left.")
+
+    await userEvent.type(input, "a")
+    expect(liveRegion).toHaveTextContent(
+      "Tag name limit reached — 32 characters."
+    )
+  })
+
+  it("calls onClose('escape') and closes the popup when Esc is pressed", async () => {
+    const { onClose } = renderCombobox()
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+
+    await userEvent.click(input)
+    await userEvent.keyboard("{Escape}")
+
+    expect(onClose).toHaveBeenCalledWith("escape")
+  })
+
+  it("calls onClose('blur') when focus leaves the combobox via an outside click", async () => {
+    const { onClose } = renderCombobox()
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+
+    await userEvent.click(input)
+    await userEvent.click(document.body)
+
+    expect(onClose).toHaveBeenCalledWith("blur")
+  })
+
+  it("does not call onClose when Enter is pressed with nothing selectable (already-on state)", async () => {
+    const onArtist: TagRef[] = [{ id: 1, name: "latin" }]
+    const { onClose } = renderCombobox([{ id: 1, name: "latin" }], {
+      onArtist,
+    })
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+
+    await userEvent.type(input, "latin{Enter}")
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
 })

@@ -4,16 +4,28 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
-import { detachTag, type TagRef, type WatchlistEntry } from "~/lib/api"
+import {
+  ApiError,
+  attachTag,
+  detachTag,
+  type TagRef,
+  type WatchlistEntry,
+} from "~/lib/api"
 
 import { TagChips, type TagActions } from "./TagChips"
 
-// D-06 / TEST-02: bare vi.mock at the top of the file, no factory, no
-// passthrough -- no real apiFetch can ever reach the runtime's own fetch.
-vi.mock("~/lib/api")
+// Partial mock keeps the real ApiError class intact -- a bare
+// vi.mock("~/lib/api") automock would erase it, silently breaking the
+// 409/400 toast-mapping branches' instanceof checks.
+vi.mock("~/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/lib/api")>()),
+  attachTag: vi.fn(),
+  detachTag: vi.fn(),
+}))
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const mockDetachTag = vi.mocked(detachTag)
+const mockAttachTag = vi.mocked(attachTag)
 
 const entry: WatchlistEntry = {
   id: 42,
@@ -168,13 +180,13 @@ function tagRefs(names: string[]): TagRef[] {
   return names.map((name, i) => ({ id: i + 1, name }))
 }
 
-describe("TagChips — focus, announcements, and long-name handling", () => {
-  function chipRemoveButton(name: string, artist = "Drake") {
-    return screen.getByRole("button", {
-      name: `Remove tag ${name} from ${artist}`,
-    })
-  }
+function chipRemoveButton(name: string, artist = "Drake") {
+  return screen.getByRole("button", {
+    name: `Remove tag ${name} from ${artist}`,
+  })
+}
 
+describe("TagChips — focus, announcements, and long-name handling", () => {
   it("moves focus to the new first chip's × when the first of three chips is removed", async () => {
     mockDetachTag.mockResolvedValueOnce(undefined)
     const onAnnounce = vi.fn()
@@ -278,5 +290,200 @@ describe("TagChips — focus, announcements, and long-name handling", () => {
     expect(container).not.toBeNull()
     expect(container.className).toContain("flex-wrap")
     expect(container.className).not.toMatch(/overflow-hidden|max-h-|line-clamp/)
+  })
+
+  it("focuses '+ tag' when the only chip is removed", async () => {
+    mockDetachTag.mockResolvedValueOnce(undefined)
+    render(
+      <Harness
+        initialEntry={{ ...entry, tags: tagRefs(["only"]) }}
+        onAnnounce={vi.fn()}
+      />
+    )
+
+    await userEvent.click(chipRemoveButton("only"))
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toHaveFocus()
+    )
+  })
+})
+
+async function openEditor(artist = "Drake") {
+  await userEvent.click(
+    screen.getByRole("button", { name: `Add tag to ${artist}` })
+  )
+  return screen.findByRole("combobox", { name: `Add tag to ${artist}` })
+}
+
+describe("TagChips — cap hint, refusal toasts, and close focus", () => {
+  it("shows 'max 10 tags' (not a button) at 10 tags, with no '+ tag'; removing a chip restores it", async () => {
+    mockDetachTag.mockResolvedValueOnce(undefined)
+    const tenTags = tagRefs(Array.from({ length: 10 }, (_, i) => `tag${i}`))
+    render(
+      <Harness
+        initialEntry={{ ...entry, tags: tenTags }}
+        onAnnounce={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("max 10 tags")).toBeInTheDocument()
+    expect(screen.getByText("max 10 tags").tagName).toBe("SPAN")
+    expect(
+      screen.queryByRole("button", { name: "Add tag to Drake" })
+    ).toBeNull()
+
+    await userEvent.click(chipRemoveButton("tag0"))
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toBeInTheDocument()
+    )
+    expect(screen.queryByText("max 10 tags")).toBeNull()
+  })
+
+  it("a pick that brings a 9-tag artist to 10 closes the editor, focuses the new chip's ×, and announces the max-reached variant", async () => {
+    mockAttachTag.mockResolvedValueOnce({ id: 99, name: "drill" })
+    const onAnnounce = vi.fn()
+    const nineTags = tagRefs(Array.from({ length: 9 }, (_, i) => `tag${i}`))
+    render(
+      <Harness
+        initialEntry={{ ...entry, tags: nineTags }}
+        onAnnounce={onAnnounce}
+      />
+    )
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill{Enter}")
+
+    await waitFor(() => expect(chipRemoveButton("drill")).toHaveFocus())
+    expect(
+      screen.queryByRole("combobox", { name: "Add tag to Drake" })
+    ).toBeNull()
+    expect(onAnnounce).toHaveBeenCalledWith(
+      "Added “drill” to Drake. Max 10 tags reached."
+    )
+  })
+
+  it("a failed 10th attach restores '+ tag' and focuses it", async () => {
+    mockAttachTag.mockRejectedValueOnce(new Error("network down"))
+    const nineTags = tagRefs(Array.from({ length: 9 }, (_, i) => `tag${i}`))
+    render(
+      <Harness
+        initialEntry={{ ...entry, tags: nineTags }}
+        onAnnounce={vi.fn()}
+      />
+    )
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill{Enter}")
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toHaveFocus()
+    )
+  })
+
+  it("a successful pick under 10 tags leaves focus in the cleared input and announces the plain message", async () => {
+    mockAttachTag.mockResolvedValueOnce({ id: 5, name: "drill" })
+    const { announce } = renderChips()
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill{Enter}")
+
+    await waitFor(() =>
+      expect(announce).toHaveBeenCalledWith("Added “drill” to Drake.")
+    )
+    expect(input).toHaveFocus()
+    expect(input).toHaveValue("")
+  })
+
+  it("maps a 409 refusal to the cap toast", async () => {
+    mockAttachTag.mockRejectedValueOnce(
+      new ApiError(409, "artist already has the maximum of 10 tags")
+    )
+    renderChips()
+    const { toast } = await import("sonner")
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill{Enter}")
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Drake already has 10 tags — remove one first."
+      )
+    )
+  })
+
+  it("maps the exact 400 length message to the length toast", async () => {
+    mockAttachTag.mockRejectedValueOnce(
+      new ApiError(400, "tag name must be at most 32 characters")
+    )
+    renderChips()
+    const { toast } = await import("sonner")
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill{Enter}")
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Tags can be at most 32 characters."
+      )
+    )
+  })
+
+  it("maps any other failure to the generic toast", async () => {
+    mockAttachTag.mockRejectedValueOnce(new Error("network down"))
+    renderChips()
+    const { toast } = await import("sonner")
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill{Enter}")
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't add “drill” to Drake — try again."
+      )
+    )
+  })
+
+  it("Esc closes the editor in one press and focuses '+ tag', without attaching the typed text", async () => {
+    renderChips()
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill")
+    await userEvent.keyboard("{Escape}")
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toHaveFocus()
+    )
+    expect(mockAttachTag).not.toHaveBeenCalled()
+  })
+
+  it("blur closes the editor without pulling focus back, and does not attach the typed text", async () => {
+    render(
+      <div>
+        <Harness initialEntry={entry} onAnnounce={vi.fn()} />
+        <button>elsewhere</button>
+      </div>
+    )
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill")
+    await userEvent.click(screen.getByText("elsewhere"))
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("combobox", { name: "Add tag to Drake" })
+      ).toBeNull()
+    )
+    expect(screen.getByText("elsewhere")).toHaveFocus()
+    expect(mockAttachTag).not.toHaveBeenCalled()
   })
 })

@@ -253,6 +253,31 @@ describe("Watchlist route", () => {
     expect(mockAttachTag).toHaveBeenCalledWith(42, "drill")
     await screen.findAllByText("drill")
   })
+
+  it("a pick that brings the artist to 10 tags shows the 'max 10 tags' hint through the real route wiring (D-14)", async () => {
+    const nineTags = Array.from({ length: 9 }, (_, i) => ({
+      id: i + 1,
+      name: `tag${i}`,
+    }))
+    mockListWatchlist.mockResolvedValue([{ ...entry, tags: nineTags }])
+    mockListTags.mockResolvedValue([])
+    mockAttachTag.mockResolvedValue({ id: 99, name: "drill" })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "drill{Enter}")
+
+    await screen.findByText("max 10 tags")
+    expect(
+      screen.queryByRole("button", { name: "Add tag to Drake" })
+    ).toBeNull()
+  })
 })
 
 describe("Watchlist route under the passphrase gate (GATE-05 / UI-SPEC E6)", () => {
