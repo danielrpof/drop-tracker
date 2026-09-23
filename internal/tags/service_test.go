@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/danielrpof/drop-tracker/internal/tags"
@@ -218,5 +219,126 @@ func TestService_Detach_UnknownEntryReturnsErrEntryNotFound(t *testing.T) {
 
 	if err := svc.Detach(ctx, 987654321, 1); !errors.Is(err, tags.ErrEntryNotFound) {
 		t.Fatalf("Detach on unknown entry: err = %v, want ErrEntryNotFound", err)
+	}
+}
+
+// --- Task 1: List (GET /tags) ---
+
+func TestService_List_EmptyVocabularyReturnsNonNilEmptySlice(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	summaries, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if summaries == nil {
+		t.Fatal("List returned nil, want a non-nil empty slice")
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("List length = %d, want 0", len(summaries))
+	}
+}
+
+// TestService_List_CarrierCountsIncludeZeroAndRemoved proves D-11 (watched
+// carriers only), D-12 (a zero-link tag still surfaces), and D-13 (a tag
+// whose only link belongs to a removed artist still surfaces, uncounted).
+func TestService_List_CarrierCountsIncludeZeroAndRemoved(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	watched1, _ := seedEntry(t, ctx, pool, "list-watched-1")
+	watched2, _ := seedEntry(t, ctx, pool, "list-watched-2")
+	removedEntry, _ := seedEntry(t, ctx, pool, "list-removed")
+
+	if _, err := pool.Exec(ctx, "INSERT INTO tags (name) VALUES ($1)", "Drill"); err != nil {
+		t.Fatalf("seed zero-link tag: %v", err)
+	}
+
+	if _, err := svc.Attach(ctx, watched1, "reggaeton"); err != nil {
+		t.Fatalf("attach reggaeton to watched1: %v", err)
+	}
+	if _, err := svc.Attach(ctx, watched2, "reggaeton"); err != nil {
+		t.Fatalf("attach reggaeton to watched2: %v", err)
+	}
+	if _, err := svc.Attach(ctx, watched1, "latin"); err != nil {
+		t.Fatalf("attach latin to watched1: %v", err)
+	}
+	if _, err := svc.Attach(ctx, removedEntry, "latin"); err != nil {
+		t.Fatalf("attach latin to removedEntry: %v", err)
+	}
+
+	// Remove the watchlist row only -- artist_tags keys on artists.id
+	// (TAG-07) and is untouched, so "latin" still carries a link to this
+	// artist, just no longer a watched one.
+	if _, err := pool.Exec(ctx, "DELETE FROM watchlist WHERE id = $1", removedEntry); err != nil {
+		t.Fatalf("remove watchlist entry: %v", err)
+	}
+
+	summaries, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	byName := make(map[string]tags.Summary, len(summaries))
+	for _, s := range summaries {
+		byName[s.Name] = s
+	}
+
+	drill, ok := byName["Drill"]
+	if !ok {
+		t.Fatal("Drill missing from List (D-12: a zero-link tag must still surface)")
+	}
+	if drill.CarrierCount != 0 {
+		t.Fatalf("Drill carrier_count = %d, want 0", drill.CarrierCount)
+	}
+
+	reggaeton, ok := byName["reggaeton"]
+	if !ok {
+		t.Fatal("reggaeton missing from List")
+	}
+	if reggaeton.CarrierCount != 2 {
+		t.Fatalf("reggaeton carrier_count = %d, want 2", reggaeton.CarrierCount)
+	}
+
+	latin, ok := byName["latin"]
+	if !ok {
+		t.Fatal("latin missing from List (D-13: a tag only a removed artist carries must still surface)")
+	}
+	if latin.CarrierCount != 1 {
+		t.Fatalf("latin carrier_count = %d, want 1 (removed artist not counted, D-11)", latin.CarrierCount)
+	}
+}
+
+// TestService_List_OrderedByLowerNameThenID proves TAG-05's ordering: sorted
+// by lower(name), not raw byte order (which would put uppercase-first names
+// ahead of every lowercase name for the wrong reason).
+func TestService_List_OrderedByLowerNameThenID(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "order-seed")
+
+	for _, name := range []string{"Zouk", "reggaeton", "latin", "Drill", "apache"} {
+		if _, err := svc.Attach(ctx, entryID, name); err != nil {
+			t.Fatalf("attach %q: %v", name, err)
+		}
+	}
+
+	summaries, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	got := make([]string, len(summaries))
+	for i, s := range summaries {
+		got[i] = s.Name
+	}
+	want := []string{"apache", "Drill", "latin", "reggaeton", "Zouk"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("List order = %v, want %v", got, want)
 	}
 }

@@ -192,6 +192,13 @@ type Querier interface {
 	// map[string]struct{} from this result and skips any externally-fetched
 	// id already present.
 	ListExternalIDs(ctx context.Context, arg ListExternalIDsParams) ([]string, error)
+	// Watched-only carrier count (D-11): count(w.id) counts a row only when the
+	// LEFT JOIN watchlist actually matched, so a tag whose only links belong to
+	// removed artists (or no links at all) still surfaces with count 0 (D-12,
+	// D-13) instead of being dropped by an inner join. Ordered by lower(name)
+	// then id: tags_name_lower_idx makes lower(name) unique, so this is a
+	// total, repeatable order (TAG-05).
+	ListTags(ctx context.Context) ([]ListTagsRow, error)
 	// D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
 	// created_at ASC, id ASC for a deterministic total order (a plain
 	// created_at ordering alone is not unique -- a seed cycle's rows share one

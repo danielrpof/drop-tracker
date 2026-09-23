@@ -47,6 +47,14 @@ type AttachResult struct {
 	Created bool
 }
 
+// Summary is the vocabulary-list shape of a tag: its identity plus how many
+// currently-watched artists carry it (D-11).
+type Summary struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	CarrierCount int64  `json:"carrier_count"`
+}
+
 // DB is the seam Service needs beyond sqlc's DBTX: a transaction starter.
 // *pgxpool.Pool satisfies it.
 type DB interface {
@@ -125,6 +133,21 @@ func (s *Service) Detach(ctx context.Context, entryID, tagID int64) error {
 		return fmt.Errorf("detach tag: %w", err)
 	}
 	return nil
+}
+
+// List returns the whole tag vocabulary ordered by lower(name) then id
+// (TAG-05), with watched-only carrier counts (D-11) -- including tags with
+// zero links (D-12) and tags only removed artists carry (D-13). Never nil.
+func (s *Service) List(ctx context.Context) ([]Summary, error) {
+	rows, err := s.q.ListTags(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list tags: %w", err)
+	}
+	summaries := make([]Summary, 0, len(rows))
+	for _, row := range rows {
+		summaries = append(summaries, Summary{ID: row.ID, Name: row.Name, CarrierCount: row.CarrierCount})
+	}
+	return summaries, nil
 }
 
 // mapTagError translates a Postgres constraint violation into a typed

@@ -84,3 +84,44 @@ func (q *Queries) GetWatchlistArtistID(ctx context.Context, id int64) (int64, er
 	err := row.Scan(&artist_id)
 	return artist_id, err
 }
+
+const listTags = `-- name: ListTags :many
+SELECT t.id, t.name, count(w.id)::bigint AS carrier_count
+FROM tags t
+LEFT JOIN artist_tags link ON link.tag_id = t.id
+LEFT JOIN watchlist w ON w.artist_id = link.artist_id
+GROUP BY t.id, t.name
+ORDER BY lower(t.name), t.id
+`
+
+type ListTagsRow struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	CarrierCount int64  `json:"carrier_count"`
+}
+
+// Watched-only carrier count (D-11): count(w.id) counts a row only when the
+// LEFT JOIN watchlist actually matched, so a tag whose only links belong to
+// removed artists (or no links at all) still surfaces with count 0 (D-12,
+// D-13) instead of being dropped by an inner join. Ordered by lower(name)
+// then id: tags_name_lower_idx makes lower(name) unique, so this is a
+// total, repeatable order (TAG-05).
+func (q *Queries) ListTags(ctx context.Context) ([]ListTagsRow, error) {
+	rows, err := q.db.Query(ctx, listTags)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTagsRow
+	for rows.Next() {
+		var i ListTagsRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.CarrierCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

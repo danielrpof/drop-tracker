@@ -284,6 +284,10 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	// T-24-04).
 	r.Post("/watchlist/{id}/tags", s.handleAttachTag)
 	r.Delete("/watchlist/{id}/tags/{tag_id}", s.handleDetachTag)
+	// Tag vocabulary (TAG-05, TAG-06, D-22) -- global list/rename/merge/delete,
+	// same registration point so every route inherits gate.Authenticate +
+	// gate.RequireCSRFHeader.
+	r.Get("/tags", s.handleListTags)
 }
 
 // securityResponseHeaders sets response headers that apply to every route in

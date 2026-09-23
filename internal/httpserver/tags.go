@@ -26,6 +26,7 @@ const maxTagBodyBytes = 4096
 type TagStore interface {
 	Attach(ctx context.Context, entryID int64, name string) (tags.AttachResult, error)
 	Detach(ctx context.Context, entryID, tagID int64) error
+	List(ctx context.Context) ([]tags.Summary, error)
 }
 
 // WithTags supplies the tags domain dependency backing POST
@@ -151,6 +152,31 @@ func (s *Server) handleDetachTag(w http.ResponseWriter, r *http.Request) {
 
 	// 204 carries no payload -- no Content-Type, no encoder call.
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleListTags implements GET /tags (TAG-05, D-11, D-13, D-30): the whole
+// vocabulary with watched-only carrier counts, in the stable lower(name)
+// order the DB query already guarantees. Also the autocomplete source
+// (D-30) and Manage tags' list (D-22).
+func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
+	if s.tags == nil {
+		writeError(w, http.StatusServiceUnavailable, "tags not available")
+		return
+	}
+
+	summaries, err := s.tags.List(r.Context())
+	if err != nil {
+		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if summaries == nil {
+		summaries = []tags.Summary{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(summaries)
 }
 
 // tagNameErrorMessage maps a tags name-validation sentinel to its fixed,

@@ -24,3 +24,17 @@ ON CONFLICT (artist_id, tag_id) DO NOTHING;
 -- Any affected count is success (D-21): 0 rows means the link was already
 -- gone, which is not an error for an idempotent detach.
 DELETE FROM artist_tags WHERE artist_id = $1 AND tag_id = $2;
+
+-- name: ListTags :many
+-- Watched-only carrier count (D-11): count(w.id) counts a row only when the
+-- LEFT JOIN watchlist actually matched, so a tag whose only links belong to
+-- removed artists (or no links at all) still surfaces with count 0 (D-12,
+-- D-13) instead of being dropped by an inner join. Ordered by lower(name)
+-- then id: tags_name_lower_idx makes lower(name) unique, so this is a
+-- total, repeatable order (TAG-05).
+SELECT t.id, t.name, count(w.id)::bigint AS carrier_count
+FROM tags t
+LEFT JOIN artist_tags link ON link.tag_id = t.id
+LEFT JOIN watchlist w ON w.artist_id = link.artist_id
+GROUP BY t.id, t.name
+ORDER BY lower(t.name), t.id;

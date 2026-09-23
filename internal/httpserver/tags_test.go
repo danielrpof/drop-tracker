@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -122,6 +123,127 @@ func TestTags_AttachEndToEnd(t *testing.T) {
 	}
 }
 
+// --- Task 1: GET /tags (vocabulary list) ---
+
+// tagSummaryWire is the JSON shape of a single GET /tags entry.
+type tagSummaryWire struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	CarrierCount int64  `json:"carrier_count"`
+}
+
+// TestTags_ListEndToEnd is the tracer for the vocabulary routes: an empty
+// isolated schema proves GET /tags answers a literal "[]" (never null,
+// never omitted), then a seeded vocabulary proves watched-only carrier
+// counts (D-11), a zero-link tag surfacing (D-12), and a removed-artist-only
+// link still surfacing uncounted (D-13), all in the DB's lower(name) order.
+func TestTags_ListEndToEnd(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_http_list_test")
+	ctx := context.Background()
+
+	watchlistSvc := watchlist.NewService(sqlc.New(pool))
+	tagsSvc := tags.NewService(pool)
+	srv := httpserver.New(pool, watchlistSvc, stubEventsStore{}, nil, discardLogger(), httpserver.WithTags(tagsSvc))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	emptyResp, err := http.Get(ts.URL + "/tags")
+	if err != nil {
+		t.Fatalf("GET /tags (empty vocabulary): %v", err)
+	}
+	emptyBody, err := io.ReadAll(emptyResp.Body)
+	_ = emptyResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read empty body: %v", err)
+	}
+	if emptyResp.StatusCode != http.StatusOK {
+		t.Fatalf("empty status = %d, want 200", emptyResp.StatusCode)
+	}
+	if got := strings.TrimSpace(string(emptyBody)); got != "[]" {
+		t.Fatalf("empty vocabulary body = %q, want %q", got, "[]")
+	}
+
+	watched1, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-list-1", Name: "List Artist 1"})
+	if err != nil {
+		t.Fatalf("seed watched1: %v", err)
+	}
+	watched2, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-list-2", Name: "List Artist 2"})
+	if err != nil {
+		t.Fatalf("seed watched2: %v", err)
+	}
+	removed, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-list-removed", Name: "List Removed Artist"})
+	if err != nil {
+		t.Fatalf("seed removed: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, "INSERT INTO tags (name) VALUES ($1)", "Drill"); err != nil {
+		t.Fatalf("seed zero-link tag: %v", err)
+	}
+	if _, err := tagsSvc.Attach(ctx, watched1.ID, "reggaeton"); err != nil {
+		t.Fatalf("attach reggaeton to watched1: %v", err)
+	}
+	if _, err := tagsSvc.Attach(ctx, watched2.ID, "reggaeton"); err != nil {
+		t.Fatalf("attach reggaeton to watched2: %v", err)
+	}
+	if _, err := tagsSvc.Attach(ctx, watched1.ID, "latin"); err != nil {
+		t.Fatalf("attach latin to watched1: %v", err)
+	}
+	if _, err := tagsSvc.Attach(ctx, removed.ID, "latin"); err != nil {
+		t.Fatalf("attach latin to removed: %v", err)
+	}
+	if err := watchlistSvc.Remove(ctx, removed.ID); err != nil {
+		t.Fatalf("remove watchlist entry: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/tags")
+	if err != nil {
+		t.Fatalf("GET /tags: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var got []tagSummaryWire
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+
+	byName := make(map[string]tagSummaryWire, len(got))
+	names := make([]string, len(got))
+	for i, s := range got {
+		byName[s.Name] = s
+		names[i] = s.Name
+	}
+
+	wantOrder := []string{"Drill", "latin", "reggaeton"}
+	if !reflect.DeepEqual(names, wantOrder) {
+		t.Fatalf("tag order = %v, want %v", names, wantOrder)
+	}
+	if got := byName["Drill"].CarrierCount; got != 0 {
+		t.Fatalf("Drill carrier_count = %d, want 0", got)
+	}
+	if got := byName["latin"].CarrierCount; got != 1 {
+		t.Fatalf("latin carrier_count = %d, want 1", got)
+	}
+	if got := byName["reggaeton"].CarrierCount; got != 2 {
+		t.Fatalf("reggaeton carrier_count = %d, want 2", got)
+	}
+}
+
+func TestTags_List_ServiceUnavailableWhenStoreOmitted(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{omitTags: true})
+
+	resp, err := http.Get(ts.URL + "/tags")
+	if err != nil {
+		t.Fatalf("GET /tags: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+}
+
 // --- Task 3: error mapping, concurrency, gate/CSRF ---
 
 // fakeTagStore is a file-local double for httpserver.TagStore, mirroring
@@ -131,6 +253,7 @@ func TestTags_AttachEndToEnd(t *testing.T) {
 type fakeTagStore struct {
 	attachFunc  func(ctx context.Context, entryID int64, name string) (tags.AttachResult, error)
 	detachFunc  func(ctx context.Context, entryID, tagID int64) error
+	listFunc    func(ctx context.Context) ([]tags.Summary, error)
 	attachCalls *int32
 	detachCalls *int32
 }
@@ -153,6 +276,13 @@ func (f fakeTagStore) Detach(ctx context.Context, entryID, tagID int64) error {
 		return f.detachFunc(ctx, entryID, tagID)
 	}
 	return nil
+}
+
+func (f fakeTagStore) List(ctx context.Context) ([]tags.Summary, error) {
+	if f.listFunc != nil {
+		return f.listFunc(ctx)
+	}
+	return []tags.Summary{}, nil
 }
 
 var _ httpserver.TagStore = fakeTagStore{}
