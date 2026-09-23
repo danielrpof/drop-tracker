@@ -14,7 +14,7 @@
 - [ ] **TAG-04**: Tags are capped at 32 characters and 10 per artist, enforced by both API and DB, with a clear error
 - [ ] **TAG-05**: User can rename a tag globally; renaming onto an existing tag asks to confirm a merge
 - [ ] **TAG-06**: User can delete a tag globally, with a confirmation stating how many artists carry it
-- [ ] **TAG-07**: Tags belong to the artist (not the watchlist entry), so they survive removal and reappear on re-add
+- [x] **TAG-07**: Tags belong to the artist (not the watchlist entry), so they survive removal and reappear on re-add
 
 ### Notes
 
@@ -87,7 +87,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TAG-04 | Phase 24 | Pending |
 | TAG-05 | Phase 24 | Pending |
 | TAG-06 | Phase 24 | Pending |
-| TAG-07 | Phase 24 | Pending |
+| TAG-07 | Phase 24 | Complete |
 | NOTE-01 | Phase 24 | Pending |
 | WLVW-01 | Phase 25 | Pending |
 | WLVW-02 | Phase 25 | Pending |
