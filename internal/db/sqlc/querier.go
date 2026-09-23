@@ -61,11 +61,19 @@ type Querier interface {
 	// (D-21 idempotent attach). The artist_tags_cap_trigger (migration 000010)
 	// enforces the 10-tag cap; this statement never counts anything itself.
 	AttachTag(ctx context.Context, arg AttachTagParams) (int64, error)
+	// Watched carriers across one or more tags, each artist counted once even
+	// when it carries more than one of the given tags (union count, D-19/SC3).
+	CountCarriersForTags(ctx context.Context, tagIds []int64) (int64, error)
 	// Backs GET /status watchlist_size (STAT-01). A count(*), not len(ListWatchlist)
 	// in Go -- ListWatchlist JOINs artists and returns every row's full projection,
 	// so counting its result would pull every row just to discard it.
 	CountWatchlist(ctx context.Context) (int64, error)
 	CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error)
+	// Both CTEs read the same pre-statement snapshot (Postgres WITH semantics):
+	// counted's SELECT never sees deleted's cascade removal of artist_tags, so
+	// the reported count is exactly the watched-carrier count the delete
+	// removed (TAG-06). Zero rows means the tag did not exist.
+	DeleteTagCountingCarriers(ctx context.Context, tagID int64) (DeleteTagCountingCarriersRow, error)
 	// :execrows returns the affected row count in one round trip, which is what
 	// lets the service distinguish "deleted" from "there was nothing to delete"
 	// without a preceding existence SELECT. A check-then-delete pair would open
@@ -83,6 +91,9 @@ type Querier interface {
 	// first-entered casing (TAG-03). Conflict target is the tags_name_lower_idx
 	// expression index from migration 000010.
 	GetOrCreateTag(ctx context.Context, name string) (GetOrCreateTagRow, error)
+	// Used only *after* a tags_name_lower_idx violation, to identify the
+	// collider (D-22) -- never a pre-check.
+	GetTagByName(ctx context.Context, lower string) (GetTagByNameRow, error)
 	// Resolves the artist a watchlist entry belongs to, so attach/detach can
 	// address artist_tags (which keys on artists.id, TAG-07) through the same
 	// entry id every other watchlist route uses (D-20).
@@ -237,6 +248,11 @@ type Querier interface {
 	// fields to write), but the attempt itself still needs to be recorded so
 	// the read query's cooldown predicate above has something to check.
 	RecordArtMatchAttempt(ctx context.Context, mbid string) error
+	// A plain rename by id. A collision is never checked here -- it surfaces as
+	// a tags_name_lower_idx unique violation, which Service.Rename maps to
+	// *CollisionError (D-09, D-22). A case-only rename of the same row cannot
+	// conflict with its own index entry.
+	RenameTag(ctx context.Context, arg RenameTagParams) (RenameTagRow, error)
 	// Full-object PUT semantics (no partial-update ambiguity to resolve), and the
 	// fixed id = 1 predicate is what makes replaying the same body a no-op.
 	// Phase 22 (D-14): digest_last_slot_at re-anchors to the caller-computed slot

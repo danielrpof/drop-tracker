@@ -27,6 +27,8 @@ type TagStore interface {
 	Attach(ctx context.Context, entryID int64, name string) (tags.AttachResult, error)
 	Detach(ctx context.Context, entryID, tagID int64) error
 	List(ctx context.Context) ([]tags.Summary, error)
+	Rename(ctx context.Context, id int64, name string) (tags.Tag, error)
+	Delete(ctx context.Context, id int64) (int64, error)
 }
 
 // WithTags supplies the tags domain dependency backing POST
@@ -39,11 +41,12 @@ func WithTags(store TagStore) Option {
 	}
 }
 
-// parseTagID reads and validates the {tag_id} path segment the same way
-// parseWatchlistID validates {id} -- tags.id is BIGSERIAL, so 0 and
-// negatives are never valid.
-func parseTagID(r *http.Request) (int64, error) {
-	raw := chi.URLParam(r, "tag_id")
+// parseTagID reads and validates a tag-id path segment named param the same
+// way parseWatchlistID validates {id} -- tags.id is BIGSERIAL, so 0 and
+// negatives are never valid. param is "tag_id" on the watchlist-scoped
+// attach/detach routes and "id" on the /tags/{id} vocabulary routes.
+func parseTagID(r *http.Request, param string) (int64, error) {
+	raw := chi.URLParam(r, param)
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id < 1 {
 		return 0, fmt.Errorf("invalid tag id: %q", raw)
@@ -133,7 +136,7 @@ func (s *Server) handleDetachTag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid watchlist id")
 		return
 	}
-	tagID, err := parseTagID(r)
+	tagID, err := parseTagID(r, "tag_id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid tag id")
 		return
@@ -177,6 +180,114 @@ func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(summaries)
+}
+
+// renameTagRequest is the request DTO for PATCH /tags/{id}.
+type renameTagRequest struct {
+	Name string `json:"name"`
+}
+
+// tagCollisionResponse is the 409 body for a rename whose normalized name
+// collides with a different existing tag (D-22): everything the merge
+// confirm dialog needs, verbatim (24-UI-SPEC.md Copywriting).
+type tagCollisionResponse struct {
+	Error                  string   `json:"error"`
+	Target                 tags.Tag `json:"target"`
+	CarrierCountAfterMerge int64    `json:"carrier_count_after_merge"`
+}
+
+// deleteTagResponse is the 200 body for DELETE /tags/{id} (TAG-06): the
+// watched-carrier count the delete removed, for the confirmation toast.
+type deleteTagResponse struct {
+	CarrierCount int64 `json:"carrier_count"`
+}
+
+// handleRenameTag implements PATCH /tags/{id} (TAG-05, D-09, D-22, D-23).
+// The client-facing normalization check is a fail-fast convenience -- the
+// service re-validates non-bypassably, same as attach.
+func (s *Server) handleRenameTag(w http.ResponseWriter, r *http.Request) {
+	if s.tags == nil {
+		writeError(w, http.StatusServiceUnavailable, "tags not available")
+		return
+	}
+
+	id, err := parseTagID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid tag id")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxTagBodyBytes)
+	var req renameTagRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if _, err := tags.NormalizeName(req.Name); err != nil {
+		writeError(w, http.StatusBadRequest, tagNameErrorMessage(err))
+		return
+	}
+
+	renamed, err := s.tags.Rename(r.Context(), id, req.Name)
+	var collision *tags.CollisionError
+	switch {
+	case errors.As(err, &collision):
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(tagCollisionResponse{
+			Error:                  "tag name already exists",
+			Target:                 collision.Target,
+			CarrierCountAfterMerge: collision.CarrierCountAfterMerge,
+		})
+		return
+	case errors.Is(err, tags.ErrTagNotFound):
+		writeError(w, http.StatusNotFound, "tag not found")
+		return
+	case errors.Is(err, tags.ErrNameRequired), errors.Is(err, tags.ErrNameTooLong), errors.Is(err, tags.ErrNameInvalid):
+		writeError(w, http.StatusBadRequest, tagNameErrorMessage(err))
+		return
+	case err != nil:
+		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(tagResponse{ID: renamed.ID, Name: renamed.Name})
+}
+
+// handleDeleteTag implements DELETE /tags/{id} (TAG-06, D-11, SC4): removes
+// the tag from every artist (including removed ones) and reports the
+// watched-carrier count. Unlike detach, a missing tag id is a genuine 404 --
+// deleting a tag that never existed is not an idempotent no-op.
+func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
+	if s.tags == nil {
+		writeError(w, http.StatusServiceUnavailable, "tags not available")
+		return
+	}
+
+	id, err := parseTagID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid tag id")
+		return
+	}
+
+	count, err := s.tags.Delete(r.Context(), id)
+	switch {
+	case errors.Is(err, tags.ErrTagNotFound):
+		writeError(w, http.StatusNotFound, "tag not found")
+		return
+	case err != nil:
+		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(deleteTagResponse{CarrierCount: count})
 }
 
 // tagNameErrorMessage maps a tags name-validation sentinel to its fixed,

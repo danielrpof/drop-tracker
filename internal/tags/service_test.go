@@ -342,3 +342,255 @@ func TestService_List_OrderedByLowerNameThenID(t *testing.T) {
 		t.Fatalf("List order = %v, want %v", got, want)
 	}
 }
+
+// --- Task 2: Rename (409 collision) and Delete ---
+
+func countArtistTagsByTagID(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tagID int64) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE tag_id = $1", tagID).Scan(&n); err != nil {
+		t.Fatalf("count artist_tags by tag id: %v", err)
+	}
+	return n
+}
+
+func TestService_Rename_AppliesEverywhere(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	e1, _ := seedEntry(t, ctx, pool, "rename-everywhere-1")
+	e2, _ := seedEntry(t, ctx, pool, "rename-everywhere-2")
+
+	r1, err := svc.Attach(ctx, e1, "hiphop")
+	if err != nil {
+		t.Fatalf("attach 1: %v", err)
+	}
+	if _, err := svc.Attach(ctx, e2, "hiphop"); err != nil {
+		t.Fatalf("attach 2: %v", err)
+	}
+
+	renamed, err := svc.Rename(ctx, r1.Tag.ID, "hip hop")
+	if err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if renamed.Name != "hip hop" {
+		t.Fatalf("renamed.Name = %q, want %q", renamed.Name, "hip hop")
+	}
+
+	if n := countTagsByLowerName(t, ctx, pool, "hip hop"); n != 1 {
+		t.Fatalf("tags rows named %q = %d, want 1", "hip hop", n)
+	}
+	if n := countArtistTagsByTagID(t, ctx, pool, r1.Tag.ID); n != 2 {
+		t.Fatalf("artist_tags rows for renamed tag = %d, want 2 (both carriers still linked)", n)
+	}
+}
+
+func TestService_Rename_CaseOnlySameTagIsPlainRename(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "rename-case-only")
+	result, err := svc.Attach(ctx, entryID, "Latin")
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+
+	renamed, err := svc.Rename(ctx, result.Tag.ID, "latin")
+	if err != nil {
+		t.Fatalf("case-only rename: %v", err)
+	}
+	if renamed.Name != "latin" {
+		t.Fatalf("renamed.Name = %q, want %q", renamed.Name, "latin")
+	}
+
+	renamedAgain, err := svc.Rename(ctx, result.Tag.ID, "latin")
+	if err != nil {
+		t.Fatalf("rename to own current name: %v", err)
+	}
+	if renamedAgain.Name != "latin" {
+		t.Fatalf("renamedAgain.Name = %q, want %q", renamedAgain.Name, "latin")
+	}
+}
+
+// TestService_Rename_CollisionReturnsCollisionErrorAndChangesNothing proves
+// D-09/D-22: a rename onto a different existing tag's normalized name
+// returns *CollisionError naming the target's stored casing and the
+// post-merge union count, and changes nothing about the source tag.
+func TestService_Rename_CollisionReturnsCollisionErrorAndChangesNothing(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	a, _ := seedEntry(t, ctx, pool, "collision-a")
+	b, _ := seedEntry(t, ctx, pool, "collision-b")
+	c, _ := seedEntry(t, ctx, pool, "collision-c")
+
+	trap, err := svc.Attach(ctx, a, "trap")
+	if err != nil {
+		t.Fatalf("attach trap to a: %v", err)
+	}
+	if _, err := svc.Attach(ctx, b, "trap"); err != nil {
+		t.Fatalf("attach trap to b: %v", err)
+	}
+	rap, err := svc.Attach(ctx, b, "rap")
+	if err != nil {
+		t.Fatalf("attach rap to b: %v", err)
+	}
+	if _, err := svc.Attach(ctx, c, "rap"); err != nil {
+		t.Fatalf("attach rap to c: %v", err)
+	}
+
+	_, err = svc.Rename(ctx, rap.Tag.ID, " TRAP ")
+	var collision *tags.CollisionError
+	if !errors.As(err, &collision) {
+		t.Fatalf("Rename: err = %v, want *tags.CollisionError", err)
+	}
+	if collision.Target.ID != trap.Tag.ID || collision.Target.Name != "trap" {
+		t.Fatalf("collision.Target = %+v, want {%d trap}", collision.Target, trap.Tag.ID)
+	}
+	if collision.CarrierCountAfterMerge != 3 {
+		t.Fatalf("collision.CarrierCountAfterMerge = %d, want 3 (a, b, c union)", collision.CarrierCountAfterMerge)
+	}
+
+	// Nothing about rap changed: name, id, and its two links are intact.
+	if n := countTagsByLowerName(t, ctx, pool, "rap"); n != 1 {
+		t.Fatalf("tags rows named %q after 409 = %d, want 1 (source untouched)", "rap", n)
+	}
+	if n := countArtistTagsByTagID(t, ctx, pool, rap.Tag.ID); n != 2 {
+		t.Fatalf("artist_tags rows for rap after 409 = %d, want 2 (b, c unchanged)", n)
+	}
+}
+
+func TestService_Rename_BlankNameReturnsErrNameRequired(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "rename-blank")
+	result, err := svc.Attach(ctx, entryID, "some-tag")
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+
+	if _, err := svc.Rename(ctx, result.Tag.ID, "   "); !errors.Is(err, tags.ErrNameRequired) {
+		t.Fatalf("Rename to blank: err = %v, want ErrNameRequired", err)
+	}
+}
+
+func TestService_Rename_TooLongNameReturnsErrNameTooLong(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "rename-too-long")
+	result, err := svc.Attach(ctx, entryID, "some-tag-2")
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+
+	longName := ""
+	for i := 0; i < 33; i++ {
+		longName += "a"
+	}
+	if _, err := svc.Rename(ctx, result.Tag.ID, longName); !errors.Is(err, tags.ErrNameTooLong) {
+		t.Fatalf("Rename to 33-rune name: err = %v, want ErrNameTooLong", err)
+	}
+}
+
+func TestService_Rename_MissingIDReturnsErrTagNotFound(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	if _, err := svc.Rename(ctx, 987654321, "whatever"); !errors.Is(err, tags.ErrTagNotFound) {
+		t.Fatalf("Rename on unknown id: err = %v, want ErrTagNotFound", err)
+	}
+}
+
+// TestService_Delete_RemovesEverywhereAndReturnsWatchedCount proves TAG-06,
+// D-11, SC4: the watched-carrier count is reported, every link is removed
+// (including the removed artist's), and the watchlist rows themselves are
+// untouched.
+func TestService_Delete_RemovesEverywhereAndReturnsWatchedCount(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	watched1, _ := seedEntry(t, ctx, pool, "delete-watched-1")
+	watched2, _ := seedEntry(t, ctx, pool, "delete-watched-2")
+	removedEntry, _ := seedEntry(t, ctx, pool, "delete-removed")
+
+	result, err := svc.Attach(ctx, watched1, "delete-me")
+	if err != nil {
+		t.Fatalf("attach to watched1: %v", err)
+	}
+	if _, err := svc.Attach(ctx, watched2, "delete-me"); err != nil {
+		t.Fatalf("attach to watched2: %v", err)
+	}
+	if _, err := svc.Attach(ctx, removedEntry, "delete-me"); err != nil {
+		t.Fatalf("attach to removedEntry: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, "DELETE FROM watchlist WHERE id = $1", removedEntry); err != nil {
+		t.Fatalf("remove watchlist entry: %v", err)
+	}
+
+	var beforeCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM watchlist WHERE id IN ($1, $2)", watched1, watched2).Scan(&beforeCount); err != nil {
+		t.Fatalf("count watchlist rows before delete: %v", err)
+	}
+
+	count, err := svc.Delete(ctx, result.Tag.ID)
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("Delete carrier count = %d, want 2 (removed artist not counted, D-11)", count)
+	}
+
+	if n := countArtistTagsByTagID(t, ctx, pool, result.Tag.ID); n != 0 {
+		t.Fatalf("artist_tags rows for deleted tag = %d, want 0 (all 3 links removed, including the removed artist's)", n)
+	}
+	if n := countTagsByLowerName(t, ctx, pool, "delete-me"); n != 0 {
+		t.Fatalf("tags rows named %q after delete = %d, want 0", "delete-me", n)
+	}
+
+	var afterCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM watchlist WHERE id IN ($1, $2)", watched1, watched2).Scan(&afterCount); err != nil {
+		t.Fatalf("count watchlist rows after delete: %v", err)
+	}
+	if afterCount != beforeCount {
+		t.Fatalf("watchlist row count changed: before=%d after=%d, want unchanged (SC4)", beforeCount, afterCount)
+	}
+}
+
+func TestService_Delete_UnknownIDReturnsErrTagNotFound(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	if _, err := svc.Delete(ctx, 987654321); !errors.Is(err, tags.ErrTagNotFound) {
+		t.Fatalf("Delete on unknown id: err = %v, want ErrTagNotFound", err)
+	}
+}
+
+func TestService_Delete_TwiceReturnsErrTagNotFoundSecondTime(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "delete-twice")
+	result, err := svc.Attach(ctx, entryID, "delete-twice-tag")
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+
+	if _, err := svc.Delete(ctx, result.Tag.ID); err != nil {
+		t.Fatalf("first Delete: %v", err)
+	}
+	if _, err := svc.Delete(ctx, result.Tag.ID); !errors.Is(err, tags.ErrTagNotFound) {
+		t.Fatalf("second Delete: err = %v, want ErrTagNotFound", err)
+	}
+}

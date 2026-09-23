@@ -30,6 +30,50 @@ func (q *Queries) AttachTag(ctx context.Context, arg AttachTagParams) (int64, er
 	return result.RowsAffected(), nil
 }
 
+const countCarriersForTags = `-- name: CountCarriersForTags :one
+SELECT count(DISTINCT w.artist_id)::bigint AS carrier_count
+FROM artist_tags link
+JOIN watchlist w ON w.artist_id = link.artist_id
+WHERE link.tag_id = ANY($1::bigint[])
+`
+
+// Watched carriers across one or more tags, each artist counted once even
+// when it carries more than one of the given tags (union count, D-19/SC3).
+func (q *Queries) CountCarriersForTags(ctx context.Context, tagIds []int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countCarriersForTags, tagIds)
+	var carrier_count int64
+	err := row.Scan(&carrier_count)
+	return carrier_count, err
+}
+
+const deleteTagCountingCarriers = `-- name: DeleteTagCountingCarriers :one
+WITH counted AS (
+    SELECT count(w.id)::bigint AS carrier_count
+    FROM artist_tags link
+    JOIN watchlist w ON w.artist_id = link.artist_id
+    WHERE link.tag_id = $1
+), deleted AS (
+    DELETE FROM tags WHERE id = $1 RETURNING id
+)
+SELECT deleted.id, counted.carrier_count FROM deleted, counted
+`
+
+type DeleteTagCountingCarriersRow struct {
+	ID           int64 `json:"id"`
+	CarrierCount int64 `json:"carrier_count"`
+}
+
+// Both CTEs read the same pre-statement snapshot (Postgres WITH semantics):
+// counted's SELECT never sees deleted's cascade removal of artist_tags, so
+// the reported count is exactly the watched-carrier count the delete
+// removed (TAG-06). Zero rows means the tag did not exist.
+func (q *Queries) DeleteTagCountingCarriers(ctx context.Context, tagID int64) (DeleteTagCountingCarriersRow, error) {
+	row := q.db.QueryRow(ctx, deleteTagCountingCarriers, tagID)
+	var i DeleteTagCountingCarriersRow
+	err := row.Scan(&i.ID, &i.CarrierCount)
+	return i, err
+}
+
 const detachTag = `-- name: DetachTag :execrows
 DELETE FROM artist_tags WHERE artist_id = $1 AND tag_id = $2
 `
@@ -67,6 +111,24 @@ type GetOrCreateTagRow struct {
 func (q *Queries) GetOrCreateTag(ctx context.Context, name string) (GetOrCreateTagRow, error) {
 	row := q.db.QueryRow(ctx, getOrCreateTag, name)
 	var i GetOrCreateTagRow
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
+const getTagByName = `-- name: GetTagByName :one
+SELECT id, name FROM tags WHERE lower(name) = lower($1)
+`
+
+type GetTagByNameRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// Used only *after* a tags_name_lower_idx violation, to identify the
+// collider (D-22) -- never a pre-check.
+func (q *Queries) GetTagByName(ctx context.Context, lower string) (GetTagByNameRow, error) {
+	row := q.db.QueryRow(ctx, getTagByName, lower)
+	var i GetTagByNameRow
 	err := row.Scan(&i.ID, &i.Name)
 	return i, err
 }
@@ -124,4 +186,29 @@ func (q *Queries) ListTags(ctx context.Context) ([]ListTagsRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const renameTag = `-- name: RenameTag :one
+UPDATE tags SET name = $2 WHERE id = $1 RETURNING id, name
+`
+
+type RenameTagParams struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type RenameTagRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// A plain rename by id. A collision is never checked here -- it surfaces as
+// a tags_name_lower_idx unique violation, which Service.Rename maps to
+// *CollisionError (D-09, D-22). A case-only rename of the same row cannot
+// conflict with its own index entry.
+func (q *Queries) RenameTag(ctx context.Context, arg RenameTagParams) (RenameTagRow, error) {
+	row := q.db.QueryRow(ctx, renameTag, arg.ID, arg.Name)
+	var i RenameTagRow
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
 }

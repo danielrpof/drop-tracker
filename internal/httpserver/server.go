@@ -288,6 +288,8 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	// same registration point so every route inherits gate.Authenticate +
 	// gate.RequireCSRFHeader.
 	r.Get("/tags", s.handleListTags)
+	r.Patch("/tags/{id}", s.handleRenameTag)
+	r.Delete("/tags/{id}", s.handleDeleteTag)
 }
 
 // securityResponseHeaders sets response headers that apply to every route in

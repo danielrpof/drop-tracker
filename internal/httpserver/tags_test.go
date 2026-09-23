@@ -244,6 +244,364 @@ func TestTags_List_ServiceUnavailableWhenStoreOmitted(t *testing.T) {
 	}
 }
 
+// --- Task 2: Rename (409 collision), Delete ---
+
+func TestTags_Rename_Success200(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameFunc: func(_ context.Context, id int64, name string) (tags.Tag, error) {
+		return tags.Tag{ID: id, Name: name}, nil
+	}}})
+
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/tags/7", strings.NewReader(`{"name":"hip hop"}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got tagWire
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != 7 || got.Name != "hip hop" {
+		t.Fatalf("body = %+v, want {7 hip hop}", got)
+	}
+}
+
+func TestTags_Rename_CollisionReturns409WithBody(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameFunc: func(context.Context, int64, string) (tags.Tag, error) {
+		return tags.Tag{}, &tags.CollisionError{Target: tags.Tag{ID: 3, Name: "trap"}, CarrierCountAfterMerge: 3}
+	}}})
+
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/tags/9", strings.NewReader(`{"name":"TRAP"}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	var got struct {
+		Error                  string  `json:"error"`
+		Target                 tagWire `json:"target"`
+		CarrierCountAfterMerge int64   `json:"carrier_count_after_merge"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Error != "tag name already exists" {
+		t.Fatalf("error = %q, want %q", got.Error, "tag name already exists")
+	}
+	if got.Target.ID != 3 || got.Target.Name != "trap" {
+		t.Fatalf("target = %+v, want {3 trap}", got.Target)
+	}
+	if got.CarrierCountAfterMerge != 3 {
+		t.Fatalf("carrier_count_after_merge = %d, want 3", got.CarrierCountAfterMerge)
+	}
+}
+
+func TestTags_Rename_NotFoundReturns404(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameFunc: func(context.Context, int64, string) (tags.Tag, error) {
+		return tags.Tag{}, tags.ErrTagNotFound
+	}}})
+
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/tags/999", strings.NewReader(`{"name":"whatever"}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestTags_Rename_BlankNameReturns400(t *testing.T) {
+	var calls int32
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameCalls: &calls}})
+
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/tags/1", strings.NewReader(`{"name":"   "}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("store.Rename called %d times, want 0 (fail-fast before the store call)", got)
+	}
+}
+
+func TestTags_Rename_TooLongNameReturns400(t *testing.T) {
+	var calls int32
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameCalls: &calls}})
+
+	body := `{"name":"` + strings.Repeat("a", 33) + `"}`
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/tags/1", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("store.Rename called %d times, want 0", got)
+	}
+}
+
+func TestTags_Rename_NonNumericIDReturns400(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{})
+
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/tags/abc", strings.NewReader(`{"name":"x"}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestTags_Rename_BadJSONReturns400(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{})
+
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/tags/1", strings.NewReader(`{"name":`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestTags_Delete_Success200WithCarrierCount(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{deleteFunc: func(context.Context, int64) (int64, error) {
+		return 2, nil
+	}}})
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/tags/5", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		CarrierCount int64 `json:"carrier_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.CarrierCount != 2 {
+		t.Fatalf("carrier_count = %d, want 2", got.CarrierCount)
+	}
+}
+
+func TestTags_Delete_NotFoundReturns404(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{deleteFunc: func(context.Context, int64) (int64, error) {
+		return 0, tags.ErrTagNotFound
+	}}})
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/tags/999", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestTags_Delete_NonNumericIDReturns400(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{})
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/tags/abc", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// TestTags_RenameEndToEnd_AppliesToWatchlist proves a real rename against
+// Postgres applies everywhere: PATCH /tags/{id} returns 200 and GET
+// /watchlist shows the new name on every carrier.
+func TestTags_RenameEndToEnd_AppliesToWatchlist(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_http_rename_test")
+	ctx := context.Background()
+
+	watchlistSvc := watchlist.NewService(sqlc.New(pool))
+	tagsSvc := tags.NewService(pool)
+	srv := httpserver.New(pool, watchlistSvc, stubEventsStore{}, nil, discardLogger(), httpserver.WithTags(tagsSvc))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	entry, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-rename", Name: "Rename Artist"})
+	if err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+	attached, err := tagsSvc.Attach(ctx, entry.ID, "hiphop")
+	if err != nil {
+		t.Fatalf("seed attach: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, fmt.Sprintf("%s/tags/%d", ts.URL, attached.Tag.ID), strings.NewReader(`{"name":"hip hop"}`))
+	if err != nil {
+		t.Fatalf("build PATCH: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want 200", resp.StatusCode)
+	}
+
+	listResp, err := http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET /watchlist: %v", err)
+	}
+	defer func() { _ = listResp.Body.Close() }()
+	var entries []watchlistTagsEntryBody
+	if err := json.NewDecoder(listResp.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode watchlist: %v", err)
+	}
+	var found *watchlistTagsEntryBody
+	for i := range entries {
+		if entries[i].ID == entry.ID {
+			found = &entries[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("entry missing from GET /watchlist")
+	}
+	if len(found.Tags) != 1 || found.Tags[0].Name != "hip hop" {
+		t.Fatalf("entry tags = %+v, want [{%d hip hop}]", found.Tags, attached.Tag.ID)
+	}
+}
+
+// TestTags_DeleteEndToEnd_LeavesWatchlistUntouched proves TAG-06/D-11/SC4
+// against real Postgres: DELETE reports the watched count and every
+// watchlist row's preferences and note stay byte-identical.
+func TestTags_DeleteEndToEnd_LeavesWatchlistUntouched(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_http_delete_test")
+	ctx := context.Background()
+
+	watchlistSvc := watchlist.NewService(sqlc.New(pool))
+	tagsSvc := tags.NewService(pool)
+	srv := httpserver.New(pool, watchlistSvc, stubEventsStore{}, nil, discardLogger(), httpserver.WithTags(tagsSvc))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	entry, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-delete", Name: "Delete Artist"})
+	if err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+	attached, err := tagsSvc.Attach(ctx, entry.ID, "delete-me-http")
+	if err != nil {
+		t.Fatalf("seed attach: %v", err)
+	}
+
+	var beforeReleaseTypes, beforeMutedTypes []string
+	var beforeNote *string
+	if err := pool.QueryRow(ctx, "SELECT release_types, muted_event_types, note FROM watchlist WHERE id = $1", entry.ID).
+		Scan(&beforeReleaseTypes, &beforeMutedTypes, &beforeNote); err != nil {
+		t.Fatalf("read watchlist row before delete: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/tags/%d", ts.URL, attached.Tag.ID), nil)
+	if err != nil {
+		t.Fatalf("build DELETE: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		CarrierCount int64 `json:"carrier_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.CarrierCount != 1 {
+		t.Fatalf("carrier_count = %d, want 1", got.CarrierCount)
+	}
+
+	var afterReleaseTypes, afterMutedTypes []string
+	var afterNote *string
+	if err := pool.QueryRow(ctx, "SELECT release_types, muted_event_types, note FROM watchlist WHERE id = $1", entry.ID).
+		Scan(&afterReleaseTypes, &afterMutedTypes, &afterNote); err != nil {
+		t.Fatalf("read watchlist row after delete: %v", err)
+	}
+	if !reflect.DeepEqual(beforeReleaseTypes, afterReleaseTypes) {
+		t.Fatalf("release_types changed: before=%v after=%v", beforeReleaseTypes, afterReleaseTypes)
+	}
+	if !reflect.DeepEqual(beforeMutedTypes, afterMutedTypes) {
+		t.Fatalf("muted_event_types changed: before=%v after=%v", beforeMutedTypes, afterMutedTypes)
+	}
+	if (beforeNote == nil) != (afterNote == nil) {
+		t.Fatalf("note nil-ness changed: before=%v after=%v", beforeNote, afterNote)
+	}
+}
+
 // --- Task 3: error mapping, concurrency, gate/CSRF ---
 
 // fakeTagStore is a file-local double for httpserver.TagStore, mirroring
@@ -254,8 +612,12 @@ type fakeTagStore struct {
 	attachFunc  func(ctx context.Context, entryID int64, name string) (tags.AttachResult, error)
 	detachFunc  func(ctx context.Context, entryID, tagID int64) error
 	listFunc    func(ctx context.Context) ([]tags.Summary, error)
+	renameFunc  func(ctx context.Context, id int64, name string) (tags.Tag, error)
+	deleteFunc  func(ctx context.Context, id int64) (int64, error)
 	attachCalls *int32
 	detachCalls *int32
+	renameCalls *int32
+	deleteCalls *int32
 }
 
 func (f fakeTagStore) Attach(ctx context.Context, entryID int64, name string) (tags.AttachResult, error) {
@@ -283,6 +645,26 @@ func (f fakeTagStore) List(ctx context.Context) ([]tags.Summary, error) {
 		return f.listFunc(ctx)
 	}
 	return []tags.Summary{}, nil
+}
+
+func (f fakeTagStore) Rename(ctx context.Context, id int64, name string) (tags.Tag, error) {
+	if f.renameCalls != nil {
+		atomic.AddInt32(f.renameCalls, 1)
+	}
+	if f.renameFunc != nil {
+		return f.renameFunc(ctx, id, name)
+	}
+	return tags.Tag{ID: id, Name: name}, nil
+}
+
+func (f fakeTagStore) Delete(ctx context.Context, id int64) (int64, error) {
+	if f.deleteCalls != nil {
+		atomic.AddInt32(f.deleteCalls, 1)
+	}
+	if f.deleteFunc != nil {
+		return f.deleteFunc(ctx, id)
+	}
+	return 0, nil
 }
 
 var _ httpserver.TagStore = fakeTagStore{}

@@ -20,8 +20,8 @@ var (
 	// ErrEntryNotFound is returned when the watchlist entry id does not
 	// exist (D-20).
 	ErrEntryNotFound = errors.New("watchlist entry not found")
-	// ErrTagNotFound is reserved for tag-id-addressed operations (rename,
-	// merge, delete) added in a later plan.
+	// ErrTagNotFound is returned by tag-id-addressed operations (rename,
+	// merge, delete) when the id does not exist.
 	ErrTagNotFound = errors.New("tag not found")
 	// ErrTagCapReached is returned when an attach would exceed
 	// MaxTagsPerArtist (TAG-04, ADR 0004).
@@ -53,6 +53,20 @@ type Summary struct {
 	ID           int64  `json:"id"`
 	Name         string `json:"name"`
 	CarrierCount int64  `json:"carrier_count"`
+}
+
+// CollisionError is returned by Rename when the normalized new name matches
+// a different, already-existing tag (D-22). Target carries the colliding
+// tag's own stored casing (D-23); CarrierCountAfterMerge is the watched
+// carrier union of both tags -- what a subsequent confirmed merge would
+// return.
+type CollisionError struct {
+	Target                 Tag
+	CarrierCountAfterMerge int64
+}
+
+func (e *CollisionError) Error() string {
+	return fmt.Sprintf("tag name already exists: %q (id %d)", e.Target.Name, e.Target.ID)
 }
 
 // DB is the seam Service needs beyond sqlc's DBTX: a transaction starter.
@@ -148,6 +162,75 @@ func (s *Service) List(ctx context.Context) ([]Summary, error) {
 		summaries = append(summaries, Summary{ID: row.ID, Name: row.Name, CarrierCount: row.CarrierCount})
 	}
 	return summaries, nil
+}
+
+// Rename normalizes the new name, then attempts RenameTag directly --
+// collision detection happens from the tags_name_lower_idx unique
+// violation, never a pre-check (D-09, D-22): RenameTag is always called
+// before any GetTagByName lookup. A case-only rename of the same row (or a
+// rename to its own current name) never collides, since a row's own index
+// entry cannot conflict with itself.
+func (s *Service) Rename(ctx context.Context, id int64, name string) (Tag, error) {
+	normalized, err := NormalizeName(name)
+	if err != nil {
+		return Tag{}, err
+	}
+
+	row, err := s.q.RenameTag(ctx, sqlc.RenameTagParams{ID: id, Name: normalized})
+	if err == nil {
+		return Tag{ID: row.ID, Name: row.Name}, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Tag{}, ErrTagNotFound
+	}
+
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgerrcode.UniqueViolation || pgErr.ConstraintName != "tags_name_lower_idx" {
+		return Tag{}, mapTagError(err)
+	}
+
+	target, terr := s.q.GetTagByName(ctx, normalized)
+	if terr != nil {
+		if !errors.Is(terr, pgx.ErrNoRows) {
+			return Tag{}, fmt.Errorf("resolve rename collision target: %w", terr)
+		}
+		// The colliding tag vanished between the two statements (a
+		// concurrent delete/merge) -- the name is free again, so retry the
+		// rename once rather than reporting a stale collision.
+		retryRow, retryErr := s.q.RenameTag(ctx, sqlc.RenameTagParams{ID: id, Name: normalized})
+		if retryErr != nil {
+			if errors.Is(retryErr, pgx.ErrNoRows) {
+				return Tag{}, ErrTagNotFound
+			}
+			return Tag{}, mapTagError(retryErr)
+		}
+		return Tag{ID: retryRow.ID, Name: retryRow.Name}, nil
+	}
+
+	count, cerr := s.q.CountCarriersForTags(ctx, []int64{id, target.ID})
+	if cerr != nil {
+		return Tag{}, fmt.Errorf("count carriers after rename collision: %w", cerr)
+	}
+
+	return Tag{}, &CollisionError{
+		Target:                 Tag{ID: target.ID, Name: target.Name},
+		CarrierCountAfterMerge: count,
+	}
+}
+
+// Delete removes a tag from the vocabulary everywhere, including links held
+// by removed artists (D-11 counts only watched carriers, but a delete still
+// removes every link, cascaded by artist_tags' FK). Returns the watched
+// carrier count it deleted from, for the confirmation toast (TAG-06).
+func (s *Service) Delete(ctx context.Context, id int64) (int64, error) {
+	row, err := s.q.DeleteTagCountingCarriers(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrTagNotFound
+		}
+		return 0, fmt.Errorf("delete tag: %w", err)
+	}
+	return row.CarrierCount, nil
 }
 
 // mapTagError translates a Postgres constraint violation into a typed
