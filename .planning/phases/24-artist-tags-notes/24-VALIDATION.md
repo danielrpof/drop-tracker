@@ -38,21 +38,31 @@ created: "2026-09-22"
 
 ## Per-Task Verification Map
 
-Seeded from 24-RESEARCH.md §Validation Architecture; the planner assigns task IDs.
+Seeded from 24-RESEARCH.md §Validation Architecture; task IDs assigned by the planner (2026-09-23). DB-backed Go
+commands need `TEST_DATABASE_URL` pointed at the `make db-up` fixture, or they skip — every plan's `<fails_when>` treats
+`--- SKIP` as a failure. Single-file Vitest runs pass `--coverage.enabled=false` because the 70% threshold applies to the whole suite.
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | TBD | TAG-01 | — | N/A | integration | `go test ./internal/tags/... -run TestService_Attach` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TAG-01 | XSS | tag text rendered as plain JSX | component | `corepack pnpm --dir web test -- TagChips` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TAG-02 | — | N/A | integration | `go test ./internal/tags/... -run TestService_Detach` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TAG-03 | — | N/A | integration | `go test ./internal/tags/... -run TestService_Identity` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TAG-04 | Tampering | DB refuses 11th tag / >32 chars when API bypassed | integration | `go test ./internal/httpserver/... -run TestTags_Attach_ConcurrentCapRace -count=25` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TAG-04 | — | N/A | integration | `go test ./internal/tags/... -run TestTrigger_SkipExisting` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TAG-05 | — | N/A | integration | `go test ./internal/tags/... -run 'TestService_Rename\|TestService_Merge_AtCap'` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TAG-06 | — | N/A | integration | `go test ./internal/tags/... -run TestService_Delete` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | TAG-07 | — | N/A | integration | `go test ./internal/watchlist/... -run TestService_Remove_LeavesArtistTagsIntact` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | NOTE-01 | XSS | note rendered as plain JSX | integration | `go test ./internal/watchlist/... -run TestService_Note` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | all routes | EoP / CSRF | 401 without session, 403 without CSRF header | integration | `go test ./internal/httpserver/... -run TestTags_` | ❌ W0 | ⬜ pending |
+| 24-01-T1 | 24-01 | 1 | TAG-04, TAG-03, NOTE-01 | T-24-01 | DB refuses 11th link / >32 chars / untrimmed / case+accent dup / blank note with no API | integration (schema) | `go test ./internal/db/ -run 'TestSchema_\|TestTrigger_'` | ❌ W0 (created in task) | ⬜ pending |
+| 24-01-T2 | 24-01 | 1 | TAG-01, TAG-03 | — | N/A | integration (HTTP e2e) + unit | `go test ./internal/httpserver/ -run TestTags_AttachEndToEnd`; `go test ./internal/tags/ -run TestNormalizeName` | ❌ W0 | ⬜ pending |
+| 24-01-T3 | 24-01 | 1 | TAG-02, TAG-04, TAG-07 | T-24-02, T-24-03, T-24-04 | concurrent cap race; 401 without session; 403 without CSRF header | integration | `go test ./internal/tags/ ./internal/httpserver/ ./internal/watchlist/ -run 'TestService_Attach\|TestService_Detach\|TestService_Identity\|TestTags_\|TestService_Remove_LeavesArtistTagsIntact\|TestZipTags'` | ❌ W0 | ⬜ pending |
+| 24-02-T1 | 24-02 | 2 | TAG-01 (vocabulary), TAG-06 | — | N/A | integration | `go test ./internal/tags/ ./internal/httpserver/ -run 'TestService_List\|TestTags_ListEndToEnd'` | ❌ W0 | ⬜ pending |
+| 24-02-T2 | 24-02 | 2 | TAG-05, TAG-06 | T-24-12 | 409 collision changes nothing | integration | `go test ./internal/tags/ ./internal/httpserver/ -run 'TestService_Rename\|TestService_Delete\|TestTags_Rename\|TestTags_Delete'` | ❌ W0 | ⬜ pending |
+| 24-02-T3 | 24-02 | 2 | TAG-05 | T-24-10, T-24-11, T-24-14 | merge never inserts; vocabulary routes gated | integration | `go test ./internal/tags/ ./internal/httpserver/ -run 'TestService_Merge\|TestTags_Merge\|TestTags_Vocabulary_'` | ❌ W0 | ⬜ pending |
+| 24-03-T1 | 24-03 | 3 | NOTE-01 | T-24-18, T-24-19, T-24-20 | note route gated; note text never logged | integration | `go test ./internal/watchlist/ ./internal/httpserver/ -run 'TestNormalizeNote\|TestService_Note\|TestWatchlist_Note'` | ❌ W0 | ⬜ pending |
+| 24-03-T2 | 24-03 | 3 | NOTE-01, TAG-07 | T-24-22 | PATCH cannot set a note | integration | `go test ./internal/watchlist/ ./internal/httpserver/ -run 'TestService_Add_\|TestService_ProjectionParity\|TestWatchlist_Patch_RejectsNoteKey'` | ❌ W0 | ⬜ pending |
+| 24-04-T1 | 24-04 | 2 | TAG-02, TAG-01 | T-24-24, T-24-25 | tag text rendered as plain JSX; CSRF header on DELETE | component | `corepack pnpm --dir web exec vitest run app/components/watchlist/TagChips.test.tsx app/lib/api.test.ts --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-04-T2 | 24-04 | 2 | TAG-02 | — | N/A | component | `corepack pnpm --dir web exec vitest run app/components/watchlist/TagChips.test.tsx app/routes/watchlist.test.tsx --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-05-T1 | 24-05 | 3 | TAG-01 | T-24-28, T-24-29 | CSRF header on attach; vendoring leaves package.json unchanged | component | `corepack pnpm --dir web exec vitest run app/components/watchlist/TagCombobox.test.tsx app/routes/watchlist.test.tsx --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-05-T2 | 24-05 | 3 | TAG-03 | — | N/A | unit | `corepack pnpm --dir web exec vitest run app/lib/tags.test.ts --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-05-T3 | 24-05 | 3 | TAG-04 | — | N/A | component | `corepack pnpm --dir web exec vitest run app/components/watchlist/TagChips.test.tsx app/components/watchlist/TagCombobox.test.tsx --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-06-T1 | 24-06 | 4 | TAG-06 | T-24-32 | CSRF header on delete | component | `corepack pnpm --dir web exec vitest run app/components/common/ConfirmDialog.test.tsx app/components/watchlist/ManageTagsDialog.test.tsx --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-06-T2 | 24-06 | 4 | TAG-05 | — | N/A | component | `corepack pnpm --dir web exec vitest run app/components/watchlist/ManageTagsDialog.test.tsx app/lib/api.test.ts --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-06-T3 | 24-06 | 4 | TAG-05 | T-24-33 | merge only after confirmation | component | `corepack pnpm --dir web exec vitest run app/components/watchlist/ManageTagsDialog.test.tsx --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-07-T1 | 24-07 | 5 | NOTE-01 | T-24-37, T-24-38 | note rendered as plain JSX; CSRF header on PUT | component | `corepack pnpm --dir web exec vitest run app/components/watchlist/ArtistNote.test.tsx app/lib/api.test.ts --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-07-T2 | 24-07 | 5 | NOTE-01 | — | N/A | component | `corepack pnpm --dir web exec vitest run app/components/watchlist/ArtistNote.test.tsx app/routes/watchlist.test.tsx --coverage.enabled=false` | ❌ W0 | ⬜ pending |
+| 24-07-T3 | 24-07 | 5 | all | T-24-39, T-24-40 | blast radius unchanged; embedded bundle rebuilt | full gate | `make test && make coverage-gate && make sqlc-check && corepack pnpm --dir web test` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -60,9 +70,12 @@ Seeded from 24-RESEARCH.md §Validation Architecture; the planner assigns task I
 
 ## Wave 0 Requirements
 
-- [ ] `internal/tags/service_test.go` — TAG-01…07 service behavior, ADR 0004 tests 2 and 3
-- [ ] `internal/httpserver/tags_test.go` — HTTP mapping (400/404/409), auth/CSRF inheritance, ADR 0004 test 1 (concurrent cap race)
-- [ ] `web/app/components/watchlist/TagChips.test.tsx`, `ArtistNote.test.tsx`, `ManageTagsDialog.test.tsx`, `web/app/components/common/ConfirmDialog.test.tsx`
+- [ ] `internal/db/tags_schema_test.go` — DB-only invariants, ADR 0004 test 2, collation check (24-01-T1)
+- [ ] `internal/tags/service_test.go` — TAG-01…07 service behavior, ADR 0004 test 3 (24-01-T3, 24-02)
+- [ ] `internal/httpserver/tags_test.go` — HTTP mapping (400/404/409), auth/CSRF inheritance, ADR 0004 test 1 (concurrent cap race) (24-01, 24-02)
+- [ ] `web/app/components/watchlist/TagChips.test.tsx`, `TagCombobox.test.tsx`, `ArtistNote.test.tsx`, `ManageTagsDialog.test.tsx`, `web/app/components/common/ConfirmDialog.test.tsx`, `web/app/lib/tags.test.ts`
+
+Each is created by the task that first needs it (tests-first inside the task), so no separate Wave 0 plan exists.
 
 *No framework installs needed.*
 
@@ -73,7 +86,7 @@ Seeded from 24-RESEARCH.md §Validation Architecture; the planner assigns task I
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
 | Chip/× contrast and 24px hit areas | TAG-01/02 | Needs a rendered browser | Measure per 24-UI-SPEC Checker Sign-Off [R8] |
-| Postgres collation folds `Ó`→`ó` | TAG-03 | Environment property (research A1) | `SHOW lc_collate; SHOW lc_ctype;` against dev and CI Postgres |
+| Postgres collation folds `Ó`→`ó` | TAG-03 | Now automated in 24-01-T1 (`TestSchema_TagNameUniqueLower` reports `datcollate` on failure); Postgres 16 removed `SHOW lc_collate` | `SELECT datcollate FROM pg_database WHERE datname = current_database()` if the test fails |
 | Long-text/narrow-viewport layouts | TAG-01, TAG-05 | Visual (UI-SPEC 🧪 backstops) | 32-char tag at 375px; 30+ vocabulary popup; two 32-char names in merge confirm |
 
 ---

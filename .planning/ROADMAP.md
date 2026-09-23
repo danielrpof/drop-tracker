@@ -112,13 +112,23 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The user can delete a tag globally after a confirmation stating how many artists carry it. The tag disappears from every artist, and the artists themselves stay on the watchlist untouched.
   5. The user can add, edit, and clear a plain-text note of up to 500 characters on an artist, and it shows on that artist's Watchlist card after a reload.
 
-**Plans**: TBD
+**Plans:** 7 plans
+
+Plans:
+- [ ] 24-01-PLAN.md — Migration 000010 (tags, artist_tags, cap trigger, watchlist.note) and attach/detach through the API, enforced by the DB (wave 1)
+- [ ] 24-02-PLAN.md — Tag vocabulary API: GET /tags with watched-only counts, rename with 409 collision, merge, delete (wave 2)
+- [ ] 24-03-PLAN.md — Notes API: PUT /watchlist/{id}/note, POST note for Undo, shared tags+note projection on POST/PATCH (wave 3)
+- [ ] 24-04-PLAN.md — Card chips: tags render under the artist name and × removes one (wave 2)
+- [ ] 24-05-PLAN.md — Card "+ tag" autocomplete: create or pick, caps, lazy vocabulary (wave 3)
+- [ ] 24-06-PLAN.md — Manage tags dialog: rename, confirmed merge, delete, reusable ConfirmDialog (wave 4)
+- [ ] 24-07-PLAN.md — Card note display/editor, Undo restores the note, embedded bundle + full gate (wave 5)
+
 **UI hint**: yes
 
 **Notes for the phase planner**
 
 - **Run `/gsd-ui-phase 24` first.** This phase introduces the chip combobox, the notes editor, and a tag-management surface.
-- *Schema.* One additive migration; the next free number is `000010`. `tags(id, name, created_at)` with `CREATE UNIQUE INDEX ... ON tags (lower(name))` (not `citext`) and an inline `CHECK (char_length(name) BETWEEN 1 AND 32)`. `artist_tags(artist_id → artists ON DELETE CASCADE, tag_id → tags ON DELETE CASCADE, PRIMARY KEY (artist_id, tag_id))`, plus an index on `tag_id`. `watchlist.notes TEXT NULL CHECK (char_length(notes) <= 500)`. **Every cap goes in this migration.** A `CHECK` added later to a shipped column is a backward-incompatible finding (PITFALLS #10). Read `internal/db/migrations/README.md` first. `make sqlc-check` has no CI counterpart, so regenerate and commit locally.
+- *Schema.* One additive migration; the next free number is `000010`. `tags(id, name, created_at)` with `CREATE UNIQUE INDEX ... ON tags (lower(name))` (not `citext`) and an inline `CHECK (char_length(name) BETWEEN 1 AND 32)`. `artist_tags(artist_id → artists ON DELETE CASCADE, tag_id → tags ON DELETE CASCADE, PRIMARY KEY (artist_id, tag_id))`, plus an index on `tag_id`. `watchlist.note TEXT NULL CHECK (char_length(note) <= 500)` (singular; see 24-CONTEXT D-28 for the added `btrim` checks). **Every cap goes in this migration.** A `CHECK` added later to a shipped column is a backward-incompatible finding (PITFALLS #10). Read `internal/db/migrations/README.md` first. `make sqlc-check` has no CI counterpart, so regenerate and commit locally.
 - *Per-artist cap at the DB layer.* A `CHECK` can't count rows, so TAG-04's "enforced by DB" for 10-per-artist needs a trigger or a guarded insert that locks the artist row. It must hold under concurrent attaches and under Phase 26's set-based bulk attach. Pick the mechanism in discuss. If it is a trigger, first confirm that `cmd/migration-check`'s tokenizer (`internal/sqlscan`) accepts a dollar-quoted function body cleanly.
 - *Identity.* Normalize in Go (trim, collapse internal whitespace, NFC via `golang.org/x/text/unicode/norm`, already a direct dependency), then compare through `lower(name)` in SQL so Go and the DB agree on identity (PITFALLS #7). Get-or-create is one atomic statement (`INSERT ... ON CONFLICT (lower(name)) DO NOTHING RETURNING id`, then a fallback `SELECT`), never check-then-insert. A rename that differs only in casing normalizes to the same tag and must be a plain rename, not a merge prompt.
 - *Rename-merge.* The API has to detect the collision before committing, for example a 409 carrying the target tag and the merged artist count, then an explicit merge confirmation. The exact shape is the planner's call. A merge unions memberships and deletes the source tag. It can never push an artist over the 10-tag cap, because an artist carrying both tags collapses to one.
@@ -152,7 +162,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 - *Client-side only.* REQUIREMENTS.md Out of Scope rules out server-side paging and sorting. Name sort should be locale-aware and case-insensitive (`Intl.Collator`), mirroring the digest's collated sort. Every sort mode tie-breaks on a stable key such as the artist id.
 - *"Non-default release-type filters"* means `release_types` differs from the default, which is the full set `album, single, ep, deluxe` (`internal/watchlist/service.go:37`, migration 000002).
 - *History by tag.* Add a third `sqlc.narg('tag_id')` `EXISTS` predicate over `artist_tags` inside the existing `ListEvents` **and** `HasOlderEvents` queries, never as a separate query (PITFALLS #9). Parse `tag_id` with the existing `parseOptionalPositiveInt64`. Add a retention regression test in the `TestRetention_*` style: seed an aged-out tagged event and an in-window tagged event, filter by the tag, and assert only the in-window one is returned.
-- *Components.* Reuse the hand-rolled accessible combobox pattern in `web/app/components/history/HistoryFilters.tsx` (Phase 11.1, `aria-activedescendant`) for tag pickers instead of building another. Keep three empty states distinct: no tags exist yet, the filter matched nothing, and no History events for this tag.
+- *Components.* Reuse the hand-rolled accessible combobox pattern in `web/app/components/history/HistoryFilters.tsx` (Phase 11.1, `aria-activedescendant`) for tag pickers instead of building another. **Decide in discuss:** Phase 24 vendors base-ui's `Combobox` (`web/app/components/ui/combobox`) for the card tag input, so the app will have two combobox implementations. Pick one for the filter pickers on purpose. base-ui's `multiple` mode fits a multi-tag filter. Keep three empty states distinct: no tags exist yet, the filter matched nothing, and no History events for this tag.
 
 ### Phase 26: Bulk Edit & Remove
 
