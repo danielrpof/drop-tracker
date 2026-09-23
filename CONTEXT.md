@@ -50,4 +50,28 @@ _Avoid_: catch-up window, retry window
 
 **Watched artist**:
 The watchlist artist an event was detected for. On a guest feature this differs from the **credited artist** (the release's primary artist, whose release the watched artist appears on).
-_Avoid_: featured artist (ambiguous — say watched or credited)
+_Avoid_: featured artist (ambiguous — say watched or credited); "watched artist" to mean "currently on the watchlist" (say **carrier** for tag counts)
+
+**Tag**:
+A user-authored label on an artist. There is one tag per name regardless of casing or stray whitespace (`Reggaeton ` and `reggaeton` are the same tag), and it keeps the casing it was first entered with.
+_Avoid_: label, category, genre
+
+**Tag vocabulary**:
+Every tag that currently exists, including tags no carrier has. Autocomplete and tag management show the same set, and a tag leaves it only when it is explicitly deleted or merged away.
+_Avoid_: tag list, tag library
+
+**Tag link**:
+The fact that one artist has one tag. It belongs to the artist, not the watchlist entry, so it survives removing the artist from the watchlist and reappears if the artist is added back.
+_Avoid_: tagging, assignment
+
+**Carrier**:
+An artist on the watchlist that has a tag link to a given tag. Removed artists keep their tag links but are not carriers, and tag counts only ever count carriers.
+_Avoid_: watched artist (that term is event-scoped)
+
+**Merge**:
+What a rename becomes when the new name already belongs to a different tag: the renamed tag's links move to the existing tag, which keeps its own stored name, and the renamed tag is deleted. It happens only after the user confirms it.
+_Avoid_: combine, dedupe
+
+**Note**:
+The single plain-text annotation on a watchlist entry. It goes away when the artist is removed from the watchlist, and the remove toast's Undo restores it.
+_Avoid_: notes (there is only one), comment, memo

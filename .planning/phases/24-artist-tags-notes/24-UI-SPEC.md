@@ -550,7 +550,7 @@ Applicable state considerations resolved: **54 applicable — 47 explicit, 6 bac
 | empty | E6 rename | ✅ covered | Save disabled while the trimmed name is empty or identical (casing included) to the current name |
 | empty | E7 ConfirmDialog | ✅ covered | Has no data of its own — the caller supplies names and count; the n = 0 delete variant has dedicated copy |
 | loading | E1 chip row, E3 note | ✅ covered | Tags and note arrive in the `GET /watchlist` enrichment and render under the route's existing skeletons; no per-row load. An optimistic chip's × is disabled until its request settles |
-| loading | E2 combobox | ⚠ unresolved — planner must treat as assumption | The spec does not say where the autocomplete vocabulary is loaded. Assumption: fetched once at Watchlist mount into route state (shared with Manage tags updates); if not yet loaded or the fetch failed when "+ tag" opens, the list shows only the `Create “{q}”` option and attach still works |
+| loading | E2 combobox | ✅ covered | Resolved by CONTEXT D-30: the vocabulary is fetched on first use (first "+ tag" open or Manage tags open), not at Watchlist mount. It is kept in route state and updated on create, rename, merge, and delete. Until it loads, or if the fetch failed, the list shows only the `Create “{q}”` option and attach still works |
 | loading | E4 editor, E6 rename, E7 confirm | ✅ covered | In flight: `Saving…` / `Merging…` / `Deleting…` at fixed width, input `readOnly`, Cancel/Esc inert (E4) or both confirm buttons disabled (E7) |
 | loading | E5 Manage tags | ✅ covered | Re-fetches on every open; 3 `Skeleton` rows (`h-10`) in the list region |
 | error | E1 / E2 attach and remove | ✅ covered | Optimistic rollback + `toast.error` (generic, cap, and length backstop copy); a failed remove restores the chip in place |
@@ -601,13 +601,19 @@ Not owned by this UI-SPEC. It is recorded so the `api.ts` types start from somet
 
 ```ts
 tags: { id: number; name: string }[]   // sorted by name; [] when none (never null)
-notes: string | null                   // null = no note
+note: string | null                    // null = no note (singular, CONTEXT D-28)
 ```
 
-The Manage tags list needs `{ id, name, artist_count }[]` (watched-only count, D-11), and the
-rename-collision response needs the target tag and its post-merge count (D-09). The exact routes
-and status codes are the planner's call (CONTEXT, Claude's Discretion). Every call goes through
-`apiFetch`, whose 401 interceptor already covers them.
+`GET /tags` returns `{ id, name, carrier_count }[]` (carriers only, D-11). The rename-collision
+409 carries `{ target: { id, name }, carrier_count_after_merge }`, and the merge call names its
+target by id. Routes and status codes are fixed in CONTEXT D-20…D-27. The note saves through
+`PUT /watchlist/{id}/note`, not PATCH. Every call goes through `apiFetch`, whose 401 interceptor
+already covers them.
+
+**Optimistic chip state (CONTEXT D-24, amends D-03):** chip add/remove uses functional route-level
+updaters, and pending chips are held in a per-row pending set keyed by a temporary id. A rollback
+removes only its own item, and a `refresh()` never wipes a pending chip. The client's exact-match
+pinning applies `.normalize("NFC")` before lower-casing (D-31).
 
 ---
 
