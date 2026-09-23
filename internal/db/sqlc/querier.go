@@ -57,6 +57,10 @@ type Querier interface {
 	// new_release row's own track_count that the removed write query mutated,
 	// so this statement reads exactly the value the old pair wrote.
 	AdvanceGroupTrackCountBaseline(ctx context.Context, arg AdvanceGroupTrackCountBaselineParams) ([]*int32, error)
+	// Rows affected: 1 = new link, 0 = the artist already carried this tag
+	// (D-21 idempotent attach). The artist_tags_cap_trigger (migration 000010)
+	// enforces the 10-tag cap; this statement never counts anything itself.
+	AttachTag(ctx context.Context, arg AttachTagParams) (int64, error)
 	// Backs GET /status watchlist_size (STAT-01). A count(*), not len(ListWatchlist)
 	// in Go -- ListWatchlist JOINs artists and returns every row's full projection,
 	// so counting its result would pull every row just to discard it.
@@ -70,7 +74,19 @@ type Querier interface {
 	// row-level lock on this single statement is what makes the split
 	// deterministic under concurrency (T-02-15).
 	DeleteWatchlistEntry(ctx context.Context, id int64) (int64, error)
+	// Any affected count is success (D-21): 0 rows means the link was already
+	// gone, which is not an error for an idempotent detach.
+	DetachTag(ctx context.Context, arg DetachTagParams) (int64, error)
 	GetNotificationSettings(ctx context.Context) (NotificationSetting, error)
+	// One statement, no fallback SELECT (D-29): the no-op DO UPDATE is what
+	// makes RETURNING yield the existing row on a collision, preserving the
+	// first-entered casing (TAG-03). Conflict target is the tags_name_lower_idx
+	// expression index from migration 000010.
+	GetOrCreateTag(ctx context.Context, name string) (GetOrCreateTagRow, error)
+	// Resolves the artist a watchlist entry belongs to, so attach/detach can
+	// address artist_tags (which keys on artists.id, TAG-07) through the same
+	// entry id every other watchlist route uses (D-20).
+	GetWatchlistArtistID(ctx context.Context, id int64) (int64, error)
 	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
 	// existing event rows for this artist+source means seed mode.
 	HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool, error)
@@ -189,6 +205,14 @@ type Querier interface {
 	// so the artist id is a required, not cosmetic, ORDER BY tiebreak: without
 	// it, two equally-named artists would come back in whatever order the
 	// planner happens to choose, which is non-deterministic across runs.
+	//
+	// tag_ids/tag_names (D-26, D-30, single query): two parallel ARRAY(...)
+	// subqueries, never json_agg (sqlc-dev/sqlc#3438 emits interface{} under
+	// pgx/v5). ARRAY(subquery) is already {} for no rows, not NULL, so no
+	// COALESCE is needed. Both subqueries share FROM/JOIN/WHERE/ORDER BY byte
+	// for byte, differing only in the aggregated column -- watchlist.zipTags
+	// pairs them index-for-index, and a future edit to one without the other
+	// would silently mispair ids with names (24-RESEARCH.md Pitfall 4).
 	ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 	// Precondition: only ever called after discord.Client.Send has confirmed a
 	// 204 for this row (D-09) -- never before. The AND notified_at IS NULL

@@ -74,7 +74,15 @@ func (q *Queries) DeleteWatchlistEntry(ctx context.Context, id int64) (int64, er
 const listWatchlist = `-- name: ListWatchlist :many
 SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
        a.disambiguation, a.image_url,
-       w.release_types, w.muted_event_types, w.created_at, w.updated_at
+       w.release_types, w.muted_event_types, w.note, w.created_at, w.updated_at,
+       ARRAY(
+         SELECT t.id FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::bigint[] AS tag_ids,
+       ARRAY(
+         SELECT t.name FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::text[] AS tag_names
 FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
 ORDER BY a.name ASC, a.id ASC
@@ -90,8 +98,11 @@ type ListWatchlistRow struct {
 	ImageUrl        *string            `json:"image_url"`
 	ReleaseTypes    []string           `json:"release_types"`
 	MutedEventTypes []string           `json:"muted_event_types"`
+	Note            *string            `json:"note"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	TagIds          []int64            `json:"tag_ids"`
+	TagNames        []string           `json:"tag_names"`
 }
 
 // Both watchlist and artists have a column named id -- every selected
@@ -101,6 +112,14 @@ type ListWatchlistRow struct {
 // so the artist id is a required, not cosmetic, ORDER BY tiebreak: without
 // it, two equally-named artists would come back in whatever order the
 // planner happens to choose, which is non-deterministic across runs.
+//
+// tag_ids/tag_names (D-26, D-30, single query): two parallel ARRAY(...)
+// subqueries, never json_agg (sqlc-dev/sqlc#3438 emits interface{} under
+// pgx/v5). ARRAY(subquery) is already {} for no rows, not NULL, so no
+// COALESCE is needed. Both subqueries share FROM/JOIN/WHERE/ORDER BY byte
+// for byte, differing only in the aggregated column -- watchlist.zipTags
+// pairs them index-for-index, and a future edit to one without the other
+// would silently mispair ids with names (24-RESEARCH.md Pitfall 4).
 func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error) {
 	rows, err := q.db.Query(ctx, listWatchlist)
 	if err != nil {
@@ -120,8 +139,11 @@ func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 			&i.ImageUrl,
 			&i.ReleaseTypes,
 			&i.MutedEventTypes,
+			&i.Note,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TagIds,
+			&i.TagNames,
 		); err != nil {
 			return nil, err
 		}

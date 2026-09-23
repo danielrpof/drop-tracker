@@ -42,6 +42,7 @@ type Server struct {
 	appVersion       string
 	pollInterval     time.Duration
 	settingsStore    SettingsStore
+	tags             TagStore
 }
 
 // serverConfig collects the optional settings New applies before building
@@ -58,6 +59,7 @@ type serverConfig struct {
 	appVersion        string
 	pollInterval      time.Duration
 	settingsStore     SettingsStore
+	tags              TagStore
 }
 
 // Option customises New, mirroring internal/poller's and internal/notifier's
@@ -175,6 +177,7 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	s.appVersion = cfg.appVersion
 	s.pollInterval = cfg.pollInterval
 	s.settingsStore = cfg.settingsStore
+	s.tags = cfg.tags
 
 	r := chi.NewRouter()
 
@@ -275,6 +278,10 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	// and no path allowlist -- structural gating, not a code-path decision.
 	r.Get("/settings/notifications", s.handleGetSettings)
 	r.Put("/settings/notifications", s.handleUpdateSettings)
+	// Tag attach (TAG-01, D-20) -- registered here, not in a separate
+	// function, so it inherits gate.Authenticate + gate.RequireCSRFHeader
+	// exactly like every other data route (T-24-03, T-24-04).
+	r.Post("/watchlist/{id}/tags", s.handleAttachTag)
 }
 
 // securityResponseHeaders sets response headers that apply to every route in

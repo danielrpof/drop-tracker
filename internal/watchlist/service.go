@@ -57,6 +57,14 @@ var (
 	ErrNoPreferencesSupplied = errors.New("no preferences supplied")
 )
 
+// TagRef is the tag shape embedded in Entry.Tags -- kept in this package
+// (not imported from internal/tags) so watchlist never depends on tags
+// (24-RESEARCH.md Architectural Responsibility Map).
+type TagRef struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 // Entry is the API-facing joined artist + watchlist row.
 type Entry struct {
 	ID              int64     `json:"id"`
@@ -68,6 +76,8 @@ type Entry struct {
 	ImageURL        *string   `json:"image_url"`
 	ReleaseTypes    []string  `json:"release_types"`
 	MutedEventTypes []string  `json:"muted_event_types"`
+	Tags            []TagRef  `json:"tags"`
+	Note            *string   `json:"note"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -291,6 +301,10 @@ func (s *Service) List(ctx context.Context) ([]Entry, error) {
 
 	entries := make([]Entry, 0, len(rows))
 	for _, row := range rows {
+		tags, err := zipTags(row.TagIds, row.TagNames)
+		if err != nil {
+			return nil, fmt.Errorf("list watchlist: %w", err)
+		}
 		entries = append(entries, Entry{
 			ID:              row.ID,
 			ArtistID:        row.ArtistID,
@@ -301,11 +315,31 @@ func (s *Service) List(ctx context.Context) ([]Entry, error) {
 			ImageURL:        row.ImageUrl,
 			ReleaseTypes:    row.ReleaseTypes,
 			MutedEventTypes: row.MutedEventTypes,
+			Tags:            tags,
+			Note:            row.Note,
 			CreatedAt:       row.CreatedAt.Time,
 			UpdatedAt:       row.UpdatedAt.Time,
 		})
 	}
 	return entries, nil
+}
+
+// zipTags pairs ListWatchlist's two parallel array_agg-free ARRAY(...)
+// projections index-for-index into TagRef (D-26, 24-RESEARCH.md Pattern 5).
+// Both projections share the same FROM/JOIN/WHERE/ORDER BY, so their
+// lengths always match in practice -- the length check below turns any
+// future drift between the two subqueries into a loud error instead of a
+// silently mispaired {id, name} (Pitfall 4). Always returns a non-nil
+// slice, even for zero tags, so the JSON encoding is never null (D-26).
+func zipTags(ids []int64, names []string) ([]TagRef, error) {
+	if len(ids) != len(names) {
+		return nil, fmt.Errorf("tag_ids/tag_names length mismatch: %d ids, %d names", len(ids), len(names))
+	}
+	out := make([]TagRef, 0, len(ids))
+	for i, id := range ids {
+		out = append(out, TagRef{ID: id, Name: names[i]})
+	}
+	return out, nil
 }
 
 // UpdatePreferences applies a partial update to one or both preference axes
@@ -381,8 +415,12 @@ func (s *Service) UpdatePreferences(ctx context.Context, id int64, p Preferences
 		ImageURL:        updated.ImageUrl,
 		ReleaseTypes:    updated.ReleaseTypes,
 		MutedEventTypes: updated.MutedEventTypes,
-		CreatedAt:       updated.CreatedAt.Time,
-		UpdatedAt:       updated.UpdatedAt.Time,
+		// UpdateWatchlistPreferences does not (yet) project tags/note through
+		// the shared enrichment (D-26 moves this route onto it in plan 24-03)
+		// -- Tags is the non-nil-slice guarantee only, never a real read here.
+		Tags:      []TagRef{},
+		CreatedAt: updated.CreatedAt.Time,
+		UpdatedAt: updated.UpdatedAt.Time,
 	}, nil
 }
 
@@ -443,7 +481,10 @@ func normalizeSet(values []string, allowed []string, invalidErr error) ([]string
 }
 
 // toEntry joins an artist row and its watchlist row into the API-facing
-// Entry shape.
+// Entry shape. A freshly created entry has no tags yet -- Tags is the
+// non-nil-slice guarantee (D-26), never a real read; Note carries whatever
+// CreateWatchlistEntry stored (nil unless plan 24-03's Undo path sets it,
+// D-27).
 func toEntry(artist sqlc.Artist, w sqlc.Watchlist) Entry {
 	return Entry{
 		ID:              w.ID,
@@ -455,6 +496,8 @@ func toEntry(artist sqlc.Artist, w sqlc.Watchlist) Entry {
 		ImageURL:        artist.ImageUrl,
 		ReleaseTypes:    w.ReleaseTypes,
 		MutedEventTypes: w.MutedEventTypes,
+		Tags:            []TagRef{},
+		Note:            w.Note,
 		CreatedAt:       w.CreatedAt.Time,
 		UpdatedAt:       w.UpdatedAt.Time,
 	}

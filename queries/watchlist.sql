@@ -11,9 +11,25 @@ RETURNING *;
 -- so the artist id is a required, not cosmetic, ORDER BY tiebreak: without
 -- it, two equally-named artists would come back in whatever order the
 -- planner happens to choose, which is non-deterministic across runs.
+--
+-- tag_ids/tag_names (D-26, D-30, single query): two parallel ARRAY(...)
+-- subqueries, never json_agg (sqlc-dev/sqlc#3438 emits interface{} under
+-- pgx/v5). ARRAY(subquery) is already {} for no rows, not NULL, so no
+-- COALESCE is needed. Both subqueries share FROM/JOIN/WHERE/ORDER BY byte
+-- for byte, differing only in the aggregated column -- watchlist.zipTags
+-- pairs them index-for-index, and a future edit to one without the other
+-- would silently mispair ids with names (24-RESEARCH.md Pitfall 4).
 SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
        a.disambiguation, a.image_url,
-       w.release_types, w.muted_event_types, w.created_at, w.updated_at
+       w.release_types, w.muted_event_types, w.note, w.created_at, w.updated_at,
+       ARRAY(
+         SELECT t.id FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::bigint[] AS tag_ids,
+       ARRAY(
+         SELECT t.name FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::text[] AS tag_names
 FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
 ORDER BY a.name ASC, a.id ASC;

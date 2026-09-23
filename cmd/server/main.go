@@ -33,6 +33,7 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/poller"
 	"github.com/danielrpof/drop-tracker/internal/pollruns"
 	"github.com/danielrpof/drop-tracker/internal/settings"
+	"github.com/danielrpof/drop-tracker/internal/tags"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
@@ -307,6 +308,9 @@ func run(ctx context.Context) error {
 			PollInterval: cfg.PollInterval,
 		}),
 		httpserver.WithSettings(settingsStore),
+		// tags.NewService(pool) backs POST /watchlist/{id}/tags (TAG-01);
+		// without this option every tag route answers 503.
+		httpserver.WithTags(tags.NewService(pool)),
 	)
 	// Close stops the gate's per-IP limiter-map sweeper goroutine (plan 14-02);
 	// a no-op when the gate is disabled. Deferred here so it runs on every
