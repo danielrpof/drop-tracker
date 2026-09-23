@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useId, useRef, useState } from "react"
 
 import { Plus } from "lucide-react"
 
@@ -11,7 +11,15 @@ import {
   ComboboxList,
 } from "~/components/ui/combobox"
 import type { TagRef, WatchlistEntry } from "~/lib/api"
-import { buildTagSuggestions, type TagSuggestion } from "~/lib/tags"
+import {
+  buildTagSuggestions,
+  MAX_TAG_LENGTH,
+  type TagSuggestion,
+} from "~/lib/tags"
+
+// COUNTER_THRESHOLD is where the "{n}/32" counter and its screen-reader
+// crossing announcement first appear (D-15).
+const COUNTER_THRESHOLD = 25
 
 export interface TagComboboxProps {
   entry: WatchlistEntry
@@ -19,7 +27,9 @@ export interface TagComboboxProps {
   onArtist: TagRef[]
   pendingNames: string[]
   onCommit: (name: string) => void
-  onClose: () => void
+  // "escape" returns focus to "+ tag" (UI-SPEC focus table row a);
+  // "blur" leaves focus wherever the user already moved it.
+  onClose: (reason: "escape" | "blur") => void
 }
 
 function itemLabel(item: TagSuggestion): string {
@@ -54,6 +64,13 @@ export function TagCombobox({
 }: TagComboboxProps) {
   const [query, setQuery] = useState("")
   const [popupOpen, setPopupOpen] = useState(true)
+  const [liveMessage, setLiveMessage] = useState("")
+  const counterId = useId()
+  // base-ui echoes the just-picked item's label back through
+  // onInputValueChange right after a commit (its own "fill" behavior) --
+  // one tick after we've already cleared the input. Suppress exactly that
+  // echo so the cleared input actually stays cleared.
+  const suppressEchoRef = useRef<string | null>(null)
 
   const suggestions = buildTagSuggestions({
     query,
@@ -64,8 +81,30 @@ export function TagCombobox({
   const items = suggestions.state === "items" ? suggestions.items : []
 
   function commit(item: TagSuggestion) {
-    onCommit(itemLabel(item))
+    const label = itemLabel(item)
+    onCommit(label)
+    suppressEchoRef.current = label
     setQuery("")
+  }
+
+  // handleInputValueChange announces the 25/32 threshold crossings exactly
+  // once each (D-15, UI-SPEC [R6]) -- query still holds the pre-change
+  // value here, so this compares old vs. new length synchronously.
+  function handleInputValueChange(value: string) {
+    if (suppressEchoRef.current !== null) {
+      const suppressed = suppressEchoRef.current
+      suppressEchoRef.current = null
+      if (value === suppressed) return
+    }
+    if (query.length < MAX_TAG_LENGTH && value.length >= MAX_TAG_LENGTH) {
+      setLiveMessage(`Tag name limit reached — ${MAX_TAG_LENGTH} characters.`)
+    } else if (
+      query.length < COUNTER_THRESHOLD &&
+      value.length >= COUNTER_THRESHOLD
+    ) {
+      setLiveMessage(`${MAX_TAG_LENGTH - COUNTER_THRESHOLD} characters left.`)
+    }
+    setQuery(value)
   }
 
   return (
@@ -76,7 +115,7 @@ export function TagCombobox({
         if (item) commit(item)
       }}
       inputValue={query}
-      onInputValueChange={setQuery}
+      onInputValueChange={handleInputValueChange}
       itemToStringLabel={itemLabel}
       autoHighlight
       open={popupOpen}
@@ -87,18 +126,36 @@ export function TagCombobox({
         }
         if (DISMISS_REASONS.has(details.reason)) {
           setPopupOpen(false)
-          onClose()
+          onClose(details.reason === "escape-key" ? "escape" : "blur")
         }
       }}
     >
-      <ComboboxInput
-        maxLength={32}
-        placeholder="Tag name"
-        aria-label={`Add tag to ${entry.name}`}
-        className="h-8 w-full max-w-60 text-label"
-        showTrigger={false}
-        autoFocus
-      />
+      <div className="flex items-center gap-1">
+        <ComboboxInput
+          maxLength={MAX_TAG_LENGTH}
+          placeholder="Tag name"
+          aria-label={`Add tag to ${entry.name}`}
+          aria-describedby={counterId}
+          className="h-8 w-full max-w-60 text-label"
+          showTrigger={false}
+          autoFocus
+        />
+        {query.length >= COUNTER_THRESHOLD && (
+          <span
+            id={counterId}
+            className={`text-label tabular-nums ${
+              query.length >= MAX_TAG_LENGTH
+                ? "text-foreground"
+                : "text-muted-foreground"
+            }`}
+          >
+            {query.length}/{MAX_TAG_LENGTH}
+          </span>
+        )}
+      </div>
+      <span aria-live="polite" className="sr-only">
+        {liveMessage}
+      </span>
       <ComboboxContent>
         <ComboboxList>
           {items.map((item) => (

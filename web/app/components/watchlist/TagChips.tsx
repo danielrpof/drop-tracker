@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Badge } from "~/components/ui/badge"
 import { Button } from "~/components/ui/button"
 import {
+  ApiError,
   attachTag,
   detachTag,
   type TagRef,
@@ -52,6 +53,16 @@ interface PendingTag {
   name: string
 }
 
+// FocusRequest is a single pending "move focus once the DOM catches up"
+// instruction (UI-SPEC focus table rows a/b), consumed by the two layout
+// effects below. "chip"/"grow" depend on entry.tags actually changing;
+// "add-button" depends on the trailing slot re-rendering as "+ tag".
+type FocusRequest =
+  | { kind: "chip"; index: number }
+  | { kind: "grow" }
+  | { kind: "add-button" }
+  | null
+
 // TagChips renders entry.tags as neutral Badge chips under the artist name
 // (D-01, D-04, UI-SPEC [R1]). A tag name is plain JSX text only -- never
 // raw HTML -- so an HTML-looking name renders literally (Phase 06 XSS
@@ -59,33 +70,49 @@ interface PendingTag {
 // trigger, never an empty gap (D-02).
 export function TagChips({ entry, actions, announce }: TagChipsProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  // Index (in the post-removal array) to focus once entry.tags actually
-  // shrinks -- set synchronously by handleRemove, consumed by the layout
-  // effect below, and cleared on a failed detach so a restore never pulls
-  // focus back (UI-SPEC focus table row b).
-  const pendingFocusIndexRef = useRef<number | null>(null)
+  const addButtonRef = useRef<HTMLButtonElement>(null)
+  const focusRequestRef = useRef<FocusRequest>(null)
   const prevTagCountRef = useRef(entry.tags.length)
   // Optimistic chips keyed by a temp id (D-24): survive a concurrent
   // refresh() because they live here, not in entry.tags.
   const [pending, setPending] = useState<PendingTag[]>([])
   const [editorOpen, setEditorOpen] = useState(false)
 
+  const count = entry.tags.length + pending.length
+  const atCap = count >= MAX_TAGS_PER_ARTIST
+
+  // Chip removal/grow focus: entry.tags is the source of truth for "which
+  // chip's × comes next" once the DOM has actually shrunk or grown to
+  // match (UI-SPEC focus table rows a/b).
   useLayoutEffect(() => {
-    const removed = entry.tags.length < prevTagCountRef.current
+    const changed = entry.tags.length !== prevTagCountRef.current
     prevTagCountRef.current = entry.tags.length
-    const target = pendingFocusIndexRef.current
-    pendingFocusIndexRef.current = null
-    if (!removed || target === null) return
+    const req = focusRequestRef.current
+    if (!changed || !req || req.kind === "add-button") return
+    focusRequestRef.current = null
+    const index = req.kind === "grow" ? entry.tags.length - 1 : req.index
     const buttons =
       containerRef.current?.querySelectorAll<HTMLButtonElement>("button")
-    buttons?.[target]?.focus()
+    buttons?.[index]?.focus()
   }, [entry.tags])
 
+  // "+ tag" focus: fires once the trailing slot actually re-renders as the
+  // button again -- after the editor closes (Esc) or a 10th-pick attach
+  // fails and the cap hint reverts (UI-SPEC focus table row a).
+  useLayoutEffect(() => {
+    const req = focusRequestRef.current
+    if (req?.kind !== "add-button" || !addButtonRef.current) return
+    focusRequestRef.current = null
+    addButtonRef.current.focus()
+  }, [pending, editorOpen, entry.tags])
+
   function handleRemove(tag: TagRef, index: number) {
-    const hadTen = entry.tags.length === 10
+    const hadTen = entry.tags.length === MAX_TAGS_PER_ARTIST
     const newLength = entry.tags.length - 1
-    pendingFocusIndexRef.current =
-      newLength === 0 ? null : Math.min(index, newLength - 1)
+    focusRequestRef.current =
+      newLength === 0
+        ? { kind: "add-button" }
+        : { kind: "chip", index: Math.min(index, newLength - 1) }
 
     actions.removeTag(entry.id, tag.id)
     announce(
@@ -95,7 +122,7 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
     )
 
     detachTag(entry.id, tag.id).catch(() => {
-      pendingFocusIndexRef.current = null
+      focusRequestRef.current = null
       actions.addTag(entry.id, tag, index)
       toast.error(
         `Couldn't remove “${tag.name}” from ${entry.name} — try again.`
@@ -108,23 +135,58 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
     setEditorOpen(true)
   }
 
+  // attachErrorMessage maps a rejected attach to its exact UI-SPEC Toasts
+  // copy: the 409/400 API backstops get their own message, anything else
+  // gets the generic one.
+  function attachErrorMessage(err: unknown, name: string): string {
+    if (err instanceof ApiError) {
+      if (err.status === 409) {
+        return `${entry.name} already has 10 tags — remove one first.`
+      }
+      if (
+        err.status === 400 &&
+        err.message === "tag name must be at most 32 characters"
+      ) {
+        return "Tags can be at most 32 characters."
+      }
+    }
+    return `Couldn't add “${name}” to ${entry.name} — try again.`
+  }
+
   // handleCommit is TagCombobox's onCommit (both a picked existing tag and
   // a typed new name land here -- the combobox already resolved which).
   // The pending chip shows the typed casing immediately; on success it is
   // replaced by the real chip carrying the server's stored casing (TAG-03).
+  // The pick that reaches the cap closes the editor immediately (the
+  // pending item already counts toward it) and focuses the new chip's ×
+  // once it lands, or "+ tag" again if the attach fails.
   function handleCommit(name: string) {
+    const reachesCap = count + 1 >= MAX_TAGS_PER_ARTIST
     const tempId = nextPendingId()
     setPending((p) => [...p, { tempId, name }])
+
+    if (reachesCap) {
+      setEditorOpen(false)
+      focusRequestRef.current = { kind: "grow" }
+    }
 
     attachTag(entry.id, name)
       .then((tag) => {
         setPending((p) => p.filter((item) => item.tempId !== tempId))
         actions.addTag(entry.id, tag)
         actions.rememberTag(tag)
+        announce(
+          reachesCap
+            ? `Added “${tag.name}” to ${entry.name}. Max 10 tags reached.`
+            : `Added “${tag.name}” to ${entry.name}.`
+        )
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         setPending((p) => p.filter((item) => item.tempId !== tempId))
-        toast.error(`Couldn't add “${name}” to ${entry.name} — try again.`)
+        if (reachesCap) {
+          focusRequestRef.current = { kind: "add-button" }
+        }
+        toast.error(attachErrorMessage(err, name))
       })
   }
 
@@ -186,10 +248,21 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
           onArtist={entry.tags}
           pendingNames={pending.map((p) => p.name)}
           onCommit={handleCommit}
-          onClose={() => setEditorOpen(false)}
+          onClose={(reason) => {
+            setEditorOpen(false)
+            // A blur-closed editor leaves focus wherever the user already
+            // moved it -- only Esc explicitly returns focus to "+ tag"
+            // (UI-SPEC focus table row a).
+            if (reason === "escape") {
+              focusRequestRef.current = { kind: "add-button" }
+            }
+          }}
         />
+      ) : atCap ? (
+        <span className="text-label text-muted-foreground">max 10 tags</span>
       ) : (
         <Button
+          ref={addButtonRef}
           variant="ghost"
           size="xs"
           className="h-6 text-label text-muted-foreground hover:text-foreground"
