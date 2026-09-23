@@ -2,6 +2,7 @@ import {
   act,
   render,
   screen,
+  waitFor,
   waitForElementToBeRemoved,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -11,7 +12,9 @@ import { describe, expect, it, vi } from "vitest"
 import App from "~/root"
 import { authStore } from "~/lib/authStore"
 import {
+  attachTag,
   detachTag,
+  listTags,
   listWatchlist,
   removeWatchlist,
   type WatchlistEntry,
@@ -27,6 +30,8 @@ vi.mock("~/lib/api")
 const mockListWatchlist = vi.mocked(listWatchlist)
 const mockRemoveWatchlist = vi.mocked(removeWatchlist)
 const mockDetachTag = vi.mocked(detachTag)
+const mockListTags = vi.mocked(listTags)
+const mockAttachTag = vi.mocked(attachTag)
 
 const entry: WatchlistEntry = {
   id: 42,
@@ -178,6 +183,75 @@ describe("Watchlist route", () => {
     expect(screen.getByText("latin")).toBeInTheDocument()
     expect(mockDetachTag).toHaveBeenCalledTimes(1)
     expect(mockDetachTag).toHaveBeenCalledWith(42, 1)
+  })
+
+  it("never calls listTags at mount, and calls it exactly once across two rows' '+ tag' opens", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([entry, second])
+    mockListTags.mockResolvedValue([])
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    expect(mockListTags).not.toHaveBeenCalled()
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(1))
+
+    // The open combobox's popup layer marks the rest of the page inert
+    // (base-ui's own background-isolation behavior) -- close it first so
+    // Rihanna's row is reachable again before opening its own editor.
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toBeInTheDocument()
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Rihanna" })
+    )
+    expect(mockListTags).toHaveBeenCalledTimes(1)
+  })
+
+  it("typing a name and pressing Enter attaches it and shows the server's resolved casing", async () => {
+    mockListWatchlist.mockResolvedValue([entry])
+    mockListTags.mockResolvedValue([])
+    mockAttachTag.mockResolvedValue({ id: 9, name: "reggaeton" })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "Reggaeton{Enter}")
+
+    expect(mockAttachTag).toHaveBeenCalledWith(42, "Reggaeton")
+    await screen.findByText("reggaeton")
+  })
+
+  it("still lets Enter attach via Create when listTags rejects", async () => {
+    mockListWatchlist.mockResolvedValue([entry])
+    mockListTags.mockRejectedValue(new Error("network down"))
+    mockAttachTag.mockResolvedValue({ id: 5, name: "drill" })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "drill{Enter}")
+
+    expect(mockAttachTag).toHaveBeenCalledWith(42, "drill")
+    await screen.findAllByText("drill")
   })
 })
 

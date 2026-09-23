@@ -14,6 +14,7 @@ import {
   type TagRef,
   type WatchlistEntry,
   addWatchlist,
+  listTags,
   listWatchlist,
   removeWatchlist,
 } from "~/lib/api"
@@ -38,6 +39,12 @@ export default function Watchlist() {
     null
   )
   const [statusMessage, setStatusMessage] = useState("")
+  // vocabulary loads lazily on first "+ tag" (or Manage tags) open, never
+  // at mount (D-30, Phase 25 SC5) -- the Watchlist route stays one request.
+  const [vocabulary, setVocabulary] = useState<TagRef[] | null>(null)
+  const [vocabularyStatus, setVocabularyStatus] = useState<
+    "idle" | "loading" | "loaded" | "error"
+  >("idle")
 
   const refresh = useCallback(() => {
     setError(false)
@@ -100,6 +107,28 @@ export default function Watchlist() {
               : r
           )
         : rows
+    )
+  }
+
+  // loadVocabulary fetches GET /tags only from "idle"/"error" (a failed
+  // load retries on the next open), so repeated "+ tag" opens across rows
+  // never refetch once it has loaded (D-30, T-24-30).
+  function loadVocabulary() {
+    if (vocabularyStatus !== "idle" && vocabularyStatus !== "error") return
+    setVocabularyStatus("loading")
+    listTags()
+      .then((summaries) => {
+        setVocabulary(summaries.map((s) => ({ id: s.id, name: s.name })))
+        setVocabularyStatus("loaded")
+      })
+      .catch(() => setVocabularyStatus("error"))
+  }
+
+  // rememberTag inserts a newly created tag into an already-loaded
+  // vocabulary, so other rows and Manage tags see it without a reload.
+  function rememberTag(tag: TagRef) {
+    setVocabulary((v) =>
+      v === null || v.some((t) => t.id === tag.id) ? v : [...v, tag]
     )
   }
 
@@ -252,7 +281,13 @@ export default function Watchlist() {
               entry={entry}
               onEntryChange={handleEntryChange}
               onRemove={handleRemove}
-              tagActions={{ addTag, removeTag }}
+              tagActions={{
+                addTag,
+                removeTag,
+                vocabulary,
+                loadVocabulary,
+                rememberTag,
+              }}
               announce={announce}
             />
           ))}

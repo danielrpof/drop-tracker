@@ -63,6 +63,15 @@ export interface TagRef {
   name: string
 }
 
+// TagSummary mirrors internal/tags.Summary's JSON shape -- one row of the
+// global tag vocabulary (GET /tags), carrying only its watched-artist count
+// (D-11).
+export interface TagSummary {
+  id: number
+  name: string
+  carrier_count: number
+}
+
 // WatchlistEntry mirrors internal/watchlist.Entry's JSON shape. GET
 // /watchlist returns a bare array of these -- no envelope.
 export interface WatchlistEntry {
@@ -331,6 +340,28 @@ export async function detachTag(entryId: number, tagId: number): Promise<void> {
   await apiFetch<void>(`/watchlist/${entryId}/tags/${tagId}`, {
     method: "DELETE",
   })
+}
+
+// attachTag creates-or-finds and links one tag to a watchlist entry
+// (TAG-01, D-20, D-29). Resolves the server's stored casing regardless of
+// whether the tag already existed (201) or was newly created (200) -- the
+// caller does not need to branch on status.
+export async function attachTag(
+  entryId: number,
+  name: string
+): Promise<TagRef> {
+  return apiFetch<TagRef>(`/watchlist/${entryId}/tags`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+}
+
+// listTags fetches the whole tag vocabulary (TAG-05, D-13, D-30) -- the
+// autocomplete source, loaded lazily on first "+ tag" or Manage tags open,
+// never at Watchlist mount.
+export async function listTags(): Promise<TagSummary[]> {
+  return apiFetch<TagSummary[]>("/tags")
 }
 
 // searchArtists fans out to every configured source (WLST-01, D-01, D-02,

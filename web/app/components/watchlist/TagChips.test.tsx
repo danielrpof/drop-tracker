@@ -34,6 +34,20 @@ const entry: WatchlistEntry = {
   note: null,
 }
 
+// baseTagActions stubs the vocabulary/loadVocabulary/rememberTag seam
+// TagChips also drives (D-30) -- these tests exercise the chip row itself,
+// not the "+ tag" combobox, so the stubs stay inert.
+function baseTagActions(): Pick<
+  TagActions,
+  "vocabulary" | "loadVocabulary" | "rememberTag"
+> {
+  return {
+    vocabulary: null,
+    loadVocabulary: vi.fn(),
+    rememberTag: vi.fn(),
+  }
+}
+
 function renderChips() {
   const addTag = vi.fn()
   const removeTag = vi.fn()
@@ -41,7 +55,7 @@ function renderChips() {
   render(
     <TagChips
       entry={entry}
-      actions={{ addTag, removeTag }}
+      actions={{ addTag, removeTag, ...baseTagActions() }}
       announce={announce}
     />
   )
@@ -57,16 +71,19 @@ describe("TagChips", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument()
   })
 
-  it("renders nothing when the entry has no tags", () => {
-    const { container } = render(
+  it("renders only the '+ tag' trigger when the entry has no tags -- no empty-row gap (D-02)", () => {
+    render(
       <TagChips
         entry={{ ...entry, tags: [] }}
-        actions={{ addTag: vi.fn(), removeTag: vi.fn() }}
+        actions={{ addTag: vi.fn(), removeTag: vi.fn(), ...baseTagActions() }}
         announce={vi.fn()}
       />
     )
 
-    expect(container).toBeEmptyDOMElement()
+    expect(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Remove tag/ })).toBeNull()
   })
 
   it("clicking a chip's label calls nothing", async () => {
@@ -141,6 +158,7 @@ function Harness({
           : e
       )
     },
+    ...baseTagActions(),
   }
 
   return <TagChips entry={entry} actions={actions} announce={onAnnounce} />

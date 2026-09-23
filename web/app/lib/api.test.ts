@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   ApiError,
+  attachTag,
   detachTag,
   listEvents,
+  listTags,
   removeWatchlist,
   type EventsPage,
+  type TagSummary,
 } from "~/lib/api"
 
 // This is the one file in the suite that stubs the runtime's own fetch --
@@ -83,6 +86,47 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     expect(new Headers(init.headers).get("X-Requested-With")).toBe(
       "drop-tracker"
     )
+  })
+
+  it("attachTag POSTs /watchlist/{entryId}/tags with the name body, the CSRF header, and resolves the server's tag", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 9, name: "reggaeton" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(attachTag(42, "Reggaeton")).resolves.toEqual({
+      id: 9,
+      name: "reggaeton",
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/42/tags")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({ name: "Reggaeton" })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("listTags GETs /tags and resolves the vocabulary array with no CSRF header", async () => {
+    const vocabulary: TagSummary[] = [
+      { id: 1, name: "latin", carrier_count: 3 },
+      { id: 2, name: "reggaeton", carrier_count: 12 },
+    ]
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(vocabulary), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(listTags()).resolves.toEqual(vocabulary)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/tags")
+    expect(init?.headers).toBeUndefined()
   })
 
   it("resolves an OK response to the parsed body", async () => {
