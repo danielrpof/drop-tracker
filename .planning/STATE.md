@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 24
 current_phase_name: Artist Tags & Notes
 status: executing
-stopped_at: Completed 24-01-PLAN.md
-last_updated: "2026-09-23T17:56:04.740Z"
+stopped_at: Completed 24-02-PLAN.md
+last_updated: "2026-09-23T18:15:35.190Z"
 last_activity: 2026-09-23
 last_activity_desc: Phase 24 execution started
-state_head: cbf07dcefddc7dca6a2e07aa218d8d919b797f35
+state_head: 072fb5175d65c575c188f01f92eb15f0f208526d
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 ## Current Position
 
 Phase: 24 (Artist Tags & Notes) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-09-23 — Phase 24 execution started
 
@@ -148,6 +148,7 @@ Last activity: 2026-09-23 — Phase 24 execution started
 | Phase 23 P03 | 9min | 3 tasks | 2 files |
 | Phase 23 P04 | 35min | 3 tasks | 5 files |
 | Phase 24 P01 | ~120min | 3 tasks | 23 files |
+| Phase 24 P02 | ~20min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -359,6 +360,8 @@ Recent decisions affecting current work:
 - [v1.6 Roadmap]: Phases 24-27 carry UI hints, so run `/gsd-ui-phase` before planning each. Phase 27 is also flagged to run `/gsd-sketch` first on its review screen (research flag). Phase 28 is backend-only.
 - [Phase 24]: 24-01: Detach and DetachTag SQL landed a commit earlier than Task 3's literal position (no behavior/scope change); TagStore's HTTP-facing Detach method and route are still Task 3's deliverable. — Writing the attach/detach SQL trio together in Task 2 was simpler than splitting DetachTag out
 - [Phase 24]: 24-01: Live database collation confirmed en_US.utf8, closing 24-RESEARCH.md Assumption A1 -- non-ASCII tag identity tests are real proof
+- [Phase 24]: 24-02: parseTagID generalized to take the path-param name (id vs tag_id) rather than a second near-duplicate parser
+- [Phase 24]: 24-02: each task's full query+service+handler+test work landed as one feat commit, matching 24-01's precedent -- workflow.tdd_mode is not enabled, so the plan-level RED/GREEN gate does not apply to this type: execute plan
 
 ### Pending Todos
 
@@ -446,8 +449,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-23T17:56:04.712Z
-Stopped at: Completed 24-01-PLAN.md
+Last session: 2026-09-23T18:15:35.164Z
+Stopped at: Completed 24-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

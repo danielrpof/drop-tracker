@@ -112,7 +112,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The user can delete a tag globally after a confirmation stating how many artists carry it. The tag disappears from every artist, and the artists themselves stay on the watchlist untouched.
   5. The user can add, edit, and clear a plain-text note of up to 500 characters on an artist, and it shows on that artist's Watchlist card after a reload.
 
-**Plans:** 1/7 plans executed
+**Plans:** 2/7 plans executed
 
 Plans:
 **Wave 1**
@@ -121,7 +121,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 24-02-PLAN.md — Tag vocabulary API: GET /tags with watched-only counts, rename with 409 collision, merge, delete (wave 2)
+- [x] 24-02-PLAN.md — Tag vocabulary API: GET /tags with watched-only counts, rename with 409 collision, merge, delete (wave 2)
 - [ ] 24-04-PLAN.md — Card chips: tags render under the artist name and × removes one (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -268,7 +268,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 24. Artist Tags & Notes | 1/7 | In Progress|  |
+| 24. Artist Tags & Notes | 2/7 | In Progress|  |
 | 25. Find & Filter — Watchlist and History | 0/? | Not started | - |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
