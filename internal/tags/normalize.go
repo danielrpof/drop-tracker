@@ -3,7 +3,14 @@
 // per-artist cap trigger (ADR 0004).
 package tags
 
-import "errors"
+import (
+	"errors"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
+)
 
 // MaxNameRunes is the tag name length cap (TAG-04), counted in Unicode code
 // points after NFC normalization -- matching Postgres char_length.
@@ -18,8 +25,25 @@ var (
 	ErrNameInvalid = errors.New("tag name contains invalid characters")
 )
 
-// NormalizeName is a placeholder -- RED phase, implemented in the GREEN
-// commit that follows.
+// NormalizeName applies NFC (so a decomposed and precomposed form of the
+// same tag are one identity), trims outer whitespace and collapses internal
+// runs to a single space, then validates: empty/blank is ErrNameRequired,
+// a control character other than whitespace is ErrNameInvalid, and more
+// than MaxNameRunes is ErrNameTooLong. Rune-counted after NFC, matching
+// Postgres char_length (TAG-04 encoding probe) -- never byte-counted, so a
+// multi-byte name is not rejected for its byte length.
 func NormalizeName(raw string) (string, error) {
-	return raw, nil
+	s := norm.NFC.String(raw)
+	s = strings.Join(strings.Fields(s), " ")
+
+	if s == "" {
+		return "", ErrNameRequired
+	}
+	if strings.ContainsFunc(s, unicode.IsControl) {
+		return "", ErrNameInvalid
+	}
+	if utf8.RuneCountInString(s) > MaxNameRunes {
+		return "", ErrNameTooLong
+	}
+	return s, nil
 }
