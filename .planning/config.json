@@ -8,7 +8,7 @@
   },
   "model_overrides": {
     "gsd-advisor-researcher": "claude-opus-5-5",
-    "gsd-plan-checker": "claude-opus-5-5",
+    "gsd-plan-checker": "haiku",
     "gsd-code-reviewer": "claude-opus-5-5",
     "gsd-security-auditor": "claude-opus-5-5",
     "gsd-debugger": "claude-opus-5-5",
