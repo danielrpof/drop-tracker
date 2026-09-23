@@ -1,7 +1,7 @@
 ---
 phase: "24"
 slug: artist-tags-notes
-status: draft
+status: approved
 shadcn_initialized: true
 preset: base-maia
 created: "2026-09-22"
@@ -533,6 +533,68 @@ No success toast for a single chip add/remove or a note save. The visible change
 
 ---
 
+## UI Considerations
+
+Shape-rooted state coverage, probed after checker approval against 7 surfaces: E1 chip row, E2 tag
+combobox, E3 note display, E4 note editor, E5 Manage tags dialog, E6 inline rename, E7 ConfirmDialog.
+Copy lives in the Copywriting Contract; this section covers state coverage and points at those rows.
+
+Applicable state considerations resolved: **54 applicable — 47 explicit, 6 backstop, 1 unresolved.**
+
+| Category | Element(s) | Status | Resolution / Reason |
+|----------|------------|--------|---------------------|
+| empty | E1 chip row | ✅ covered | Zero tags → the chip row holds only "+ tag"; no empty-row gap |
+| empty | E2 combobox | ✅ covered | Empty vocabulary + empty input → `Type a name to create a tag`; a typed name already on the artist → non-selectable `“{name}” is already on this artist` |
+| empty | E3 note / E4 editor | ✅ covered | No note → only "add note"; editor opens empty with placeholder; saving empty or whitespace-only text clears the note (`null`) |
+| empty | E5 Manage tags | ✅ covered | Empty vocabulary → `No tags yet` `EmptyState` inside the dialog; focus on the close button |
+| empty | E6 rename | ✅ covered | Save disabled while the trimmed name is empty or identical (casing included) to the current name |
+| empty | E7 ConfirmDialog | ✅ covered | Has no data of its own — the caller supplies names and count; the n = 0 delete variant has dedicated copy |
+| loading | E1 chip row, E3 note | ✅ covered | Tags and note arrive in the `GET /watchlist` enrichment and render under the route's existing skeletons; no per-row load. An optimistic chip's × is disabled until its request settles |
+| loading | E2 combobox | ⚠ unresolved — planner must treat as assumption | The spec does not say where the autocomplete vocabulary is loaded. Assumption: fetched once at Watchlist mount into route state (shared with Manage tags updates); if not yet loaded or the fetch failed when "+ tag" opens, the list shows only the `Create “{q}”` option and attach still works |
+| loading | E4 editor, E6 rename, E7 confirm | ✅ covered | In flight: `Saving…` / `Merging…` / `Deleting…` at fixed width, input `readOnly`, Cancel/Esc inert (E4) or both confirm buttons disabled (E7) |
+| loading | E5 Manage tags | ✅ covered | Re-fetches on every open; 3 `Skeleton` rows (`h-10`) in the list region |
+| error | E1 / E2 attach and remove | ✅ covered | Optimistic rollback + `toast.error` (generic, cap, and length backstop copy); a failed remove restores the chip in place |
+| error | E4 editor | ✅ covered | [R2] textarea stays open with text intact; inline `aria-live` destructive line; Save re-enables |
+| error | E3 note display | ✅ covered | No independent failure mode — a failed watchlist load uses the route's existing `Couldn't load your watchlist.` state |
+| error | E5 Manage tags | ✅ covered | `Couldn't load tags.` `EmptyState` + secondary `Retry` inside the dialog |
+| error | E6 rename | ✅ covered | Input stays open with its text; `Couldn't rename…` toast |
+| error | E7 ConfirmDialog | ✅ covered | Dialog closes, matching failure toast, focus returns per the focus table |
+| populated | E1, E3 | ✅ covered | 1–2 wrapped lines of `h-6` neutral chips + trailing "+ tag"; note clamped to 2 lines with pencil |
+| populated | E2 | ✅ covered | Exact match (or `Create “{q}”`) pinned first, then partial matches by name; `autoHighlight` so Enter commits what was typed |
+| populated | E5, E6, E7 | ✅ covered | Rows `{name} · {n} artist{s}` + Rename/Delete sorted by name; rename input with text selected; confirm with focus on Cancel |
+| partial | E1 chip row | ✅ covered | Pending optimistic chip shows typed casing, × disabled; on success the label switches to the server's stored casing (TAG-03) |
+| partial | E2 combobox | ✅ covered | Vocabulary minus tags already on this artist; case/whitespace-insensitive exact match pins the stored-casing tag and suppresses Create |
+| partial | E3 note | ✅ covered | A note that fits in 2 lines renders no more/less toggle (shown only when `scrollHeight > clientHeight`) |
+| partial | E4 editor | ✅ covered | Save disabled while the trimmed text equals the saved note |
+| partial | E5 Manage tags | ✅ covered | Zero-carrier tags render `· 0 artists`, never hidden or dimmed (D-12) |
+| partial | E6 rename | ✅ covered | Case-only change is a plain rename; a collision with a different tag opens the merge confirm (D-09) |
+| partial | E7 merge | ✅ covered | Post-merge count comes from the server's collision response; the client never computes it |
+| overflow | E1 chip row | ✅ covered | [R4] unbounded flex-wrap, worst case ≈ 312px at 10 tags; never `overflow-hidden`/`max-h`/`line-clamp` |
+| overflow | E3 / E4 note | ✅ covered | Display `line-clamp-2` + more/less; editor `max-h-40 overflow-y-auto` so a 500-character note scrolls inside the field |
+| overflow | E5 Manage tags | ✅ covered | [R7] `<ul>` scrolls within `max-h-[min(60vh,28rem)]`; dialog capped at viewport; in-dialog search deferred |
+| overflow | E6 rename | ✅ covered | `maxLength={32}`; long values scroll within the `h-8 flex-1` input |
+| overflow + long-text | E2 combobox popup | 🧪 backstop | Many suggestions scroll inside the popup's built-in bounded list; 32-character option text fits or wraps without clipping. Held-out visual test: 30+ vocabulary tags, and a 32-character name, in a narrow viewport |
+| overflow + long-text | E7 ConfirmDialog | 🧪 backstop | Two 32-character tag names in a merge title wrap within the dialog, never truncated. Held-out visual test at 375px width |
+| zero-one-many | E1 chip row | ✅ covered | 0 → "+ tag" only; 1–9 → chips + "+ tag"; 10 → `max 10 tags` hint (D-14), announced via the status region |
+| zero-one-many | E2 combobox | ✅ covered | Create row alone / pinned match / many partial matches sorted by name |
+| zero-one-many | E3 note | ✅ covered | Single scalar: `null` → "add note", text → clamped note |
+| zero-one-many | E5, E7 | ✅ covered | `artist{s}` pluralization in rows, confirms, and toasts; delete n = 0 variant |
+| zero-one-many | E6 rename | ✅ covered | Only one row in rename mode at a time; starting another cancels and discards the open one |
+| long-text | E1 chip | 🧪 backstop | A chip wider than its column truncates via `min-w-0 truncate`; full name via `title`, × `aria-label`, and focus-within un-truncate. Held-out visual test: a 32-character unbroken tag in a 375px card |
+| long-text | E3 / E4 note | ✅ covered | `whitespace-pre-line break-words`; `maxLength={500}` + always-visible counter; server backstop copy `Notes can be at most 500 characters.` |
+| long-text | E2 / E6 inputs | ✅ covered | `maxLength={32}` hard stop; counter from 25; announcements at 25 and 32 only |
+| long-text | E5 row name | 🧪 backstop | 32-character names truncate with `title`; the `· {n} artists` count stays `shrink-0 whitespace-nowrap`. Held-out visual test at 375px |
+
+<!-- Status vocabulary:
+     ✅ covered   → plain truth string lifted into must_haves.truths
+     🧪 backstop  → { statement, verification: backstop }; no evidence at verify → human_needed
+     ⚠ unresolved → explicit planner assumption -->
+
+Resolved under the workflow's `--auto` convention (element kinds authored from the spec prose;
+explicit where the spec already states the behavior, backstop where only a visual test can confirm).
+
+---
+
 ## Data Contract (informational — the planner confirms it against the real handlers)
 
 Not owned by this UI-SPEC. It is recorded so the `api.ts` types start from something concrete. `WatchlistEntry` (`web/app/lib/api.ts:61`) gains:
@@ -562,13 +624,13 @@ No third-party registries are declared. `web/components.json` has `registries: {
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
 
 **Verification items to carry into UAT / ui-review [R8]:**
 - [ ] **Chip contrast, measured in the running app:** chip text ≥ 4.5:1 and × glyph ≥ 3:1 against the chip fill `#27272a` on a `--card` (`#18181b`) row. Record the measured values.
@@ -577,4 +639,4 @@ No third-party registries are declared. `web/components.json` has `registries: {
 - [ ] Every chip ×, "+ tag", and pencil has a hit area of at least 24×24 CSS px, and the chip row stays `h-6` per line.
 - [ ] Nested-dialog behavior: Esc on the ConfirmDialog leaves the Manage tags dialog open, and focus returns per the focus table.
 
-**Approval:** pending
+**Approval:** approved 2026-09-22 — gsd-ui-checker, 7/7 PASS, no recommendations.
