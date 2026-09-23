@@ -13,7 +13,8 @@
     "gsd-security-auditor": "claude-opus-5-5",
     "gsd-debugger": "claude-opus-5-5",
     "gsd-code-fixer": "sonnet",
-    "gsd-nyquist-auditor": "sonnet"
+    "gsd-nyquist-auditor": "sonnet",
+    "gsd-ui-researcher": "opus"
   },
   "model_profile_overrides": {
     "claude": {
@@ -113,11 +114,5 @@
   "granularity": "standard",
   "graphify": {
     "enabled": true
-  },
-  "model_overrides": {
-    "gsd-ui-researcher": "opus"
-  },
-  "models": {
-    "discuss": "opus"
   }
 }
