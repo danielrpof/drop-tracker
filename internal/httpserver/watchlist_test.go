@@ -1777,3 +1777,179 @@ func TestWatchlist_Note_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
 		t.Fatalf("store.UpdateNote called %d times, want 0", got)
 	}
 }
+
+// --- Plan 24-03 Task 2: POST note + shared projection ---
+
+// fullEntryBody decodes every field TestWatchlist_Add_WithNoteEndToEnd and
+// TestWatchlist_Patch_ReturnsTagsAndNote assert on, including the D-26
+// tags/note enrichment.
+type fullEntryBody struct {
+	ID   int64              `json:"id"`
+	Tags []watchlist.TagRef `json:"tags"`
+	Note *string            `json:"note"`
+}
+
+// TestWatchlist_Add_WithNoteEndToEnd proves POST /watchlist accepts an
+// optional note and returns it through the shared projection, with tags as
+// a non-nil empty array for a freshly-added artist (D-26, D-27).
+func TestWatchlist_Add_WithNoteEndToEnd(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_http_test")
+
+	store := watchlist.NewService(sqlc.New(pool))
+	srv := httpserver.New(pool, store, stubEventsStore{}, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	body := `{"mbid":"` + testMBID(t) + `","name":"Add With Note HTTP Test","note":"x"}`
+	resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /watchlist: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+
+	var got fullEntryBody
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if got.Note == nil || *got.Note != "x" {
+		t.Fatalf("note = %v, want %q", got.Note, "x")
+	}
+	if got.Tags == nil || len(got.Tags) != 0 {
+		t.Fatalf("tags = %v, want a non-nil empty array", got.Tags)
+	}
+}
+
+// TestWatchlist_Add_WithTooLongNoteReturns400 proves the handler's fail-fast
+// note validation rejects an oversized note before the store is ever called
+// (D-27).
+func TestWatchlist_Add_WithTooLongNoteReturns400(t *testing.T) {
+	called := false
+	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
+		called = true
+		return watchlist.Entry{}, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	body := `{"mbid":"x","name":"y","note":"` + strings.Repeat("a", 501) + `"}`
+	resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /watchlist: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	var eb errorBody
+	if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if eb.Error != "note must be at most 500 characters" {
+		t.Fatalf("error = %q, want %q", eb.Error, "note must be at most 500 characters")
+	}
+	if called {
+		t.Fatal("addFunc was called for a body with an oversized note")
+	}
+}
+
+// TestWatchlist_Patch_RejectsNoteKey proves updateWatchlistRequest stays
+// preferences-only: a PATCH body carrying a note key is rejected by
+// DisallowUnknownFields the same way any other unknown key is (D-25).
+func TestWatchlist_Patch_RejectsNoteKey(t *testing.T) {
+	called := false
+	stub := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
+		called = true
+		return watchlist.Entry{}, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	const body = `{"release_types":["album"],"note":"x"}`
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/watchlist/1", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /watchlist/1: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	var eb errorBody
+	if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if eb.Error != "invalid request body" {
+		t.Fatalf("error = %q, want %q", eb.Error, "invalid request body")
+	}
+	if called {
+		t.Fatal("updateFunc was called for a body carrying a note key")
+	}
+}
+
+// TestWatchlist_Patch_ReturnsTagsAndNote proves PATCH /watchlist/{id}
+// answers through the same tags + note projection GET/POST/PUT-note use
+// (D-26), against real Postgres.
+func TestWatchlist_Patch_ReturnsTagsAndNote(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_http_test")
+	ctx := context.Background()
+
+	store := watchlist.NewService(sqlc.New(pool))
+	entry, err := store.Add(ctx, watchlist.AddParams{MBID: testMBID(t), Name: "Patch Projection HTTP Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, err := store.UpdateNote(ctx, entry.ID, ptr("patch note")); err != nil {
+		t.Fatalf("UpdateNote: %v", err)
+	}
+	var tagID int64
+	if err := pool.QueryRow(ctx, "INSERT INTO tags (name) VALUES ($1) RETURNING id", "patch-tag").Scan(&tagID); err != nil {
+		t.Fatalf("seed tag: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2)", entry.ArtistID, tagID); err != nil {
+		t.Fatalf("link tag: %v", err)
+	}
+
+	srv := httpserver.New(pool, store, stubEventsStore{}, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodPatch, fmt.Sprintf("%s/watchlist/%d", ts.URL, entry.ID), strings.NewReader(`{"release_types":["album"]}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var got fullEntryBody
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if got.Note == nil || *got.Note != "patch note" {
+		t.Fatalf("note = %v, want %q", got.Note, "patch note")
+	}
+	wantTags := []watchlist.TagRef{{ID: tagID, Name: "patch-tag"}}
+	if !reflect.DeepEqual(got.Tags, wantTags) {
+		t.Fatalf("tags = %+v, want %+v", got.Tags, wantTags)
+	}
+}
+
+// ptr mirrors internal/watchlist/service_test.go's helper of the same name
+// -- kept file-local since it is unexported and this is a different
+// package.
+func ptr(s string) *string { return &s }

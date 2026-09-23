@@ -1,6 +1,10 @@
 -- name: CreateWatchlistEntry :one
-INSERT INTO watchlist (artist_id, release_types, muted_event_types)
-VALUES ($1, $2, $3)
+-- note (D-27): stays positional -- sqlc rejects mixing $n with
+-- sqlc.arg/sqlc.narg in one query -- and stays nullable, so the generated
+-- Note param is a *string; nil is a plain add, a caller-supplied value is
+-- Undo restoring what D-10 would otherwise drop.
+INSERT INTO watchlist (artist_id, release_types, muted_event_types, note)
+VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: ListWatchlist :many

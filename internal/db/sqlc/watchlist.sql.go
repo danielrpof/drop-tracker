@@ -26,8 +26,8 @@ func (q *Queries) CountWatchlist(ctx context.Context) (int64, error) {
 }
 
 const createWatchlistEntry = `-- name: CreateWatchlistEntry :one
-INSERT INTO watchlist (artist_id, release_types, muted_event_types)
-VALUES ($1, $2, $3)
+INSERT INTO watchlist (artist_id, release_types, muted_event_types, note)
+VALUES ($1, $2, $3, $4)
 RETURNING id, artist_id, release_types, muted_event_types, created_at, updated_at, note
 `
 
@@ -35,10 +35,20 @@ type CreateWatchlistEntryParams struct {
 	ArtistID        int64    `json:"artist_id"`
 	ReleaseTypes    []string `json:"release_types"`
 	MutedEventTypes []string `json:"muted_event_types"`
+	Note            *string  `json:"note"`
 }
 
+// note (D-27): stays positional -- sqlc rejects mixing $n with
+// sqlc.arg/sqlc.narg in one query -- and stays nullable, so the generated
+// Note param is a *string; nil is a plain add, a caller-supplied value is
+// Undo restoring what D-10 would otherwise drop.
 func (q *Queries) CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error) {
-	row := q.db.QueryRow(ctx, createWatchlistEntry, arg.ArtistID, arg.ReleaseTypes, arg.MutedEventTypes)
+	row := q.db.QueryRow(ctx, createWatchlistEntry,
+		arg.ArtistID,
+		arg.ReleaseTypes,
+		arg.MutedEventTypes,
+		arg.Note,
+	)
 	var i Watchlist
 	err := row.Scan(
 		&i.ID,

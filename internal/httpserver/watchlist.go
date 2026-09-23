@@ -133,6 +133,11 @@ type addWatchlistRequest struct {
 	ImageURL        *string   `json:"image_url"`
 	ReleaseTypes    *[]string `json:"release_types"`
 	MutedEventTypes *[]string `json:"muted_event_types"`
+	// Note is optional (D-27): the SPA's remove-toast Undo re-adds it so a
+	// restored artist does not silently lose the note D-10 would otherwise
+	// drop. Subject to the same trim / empty-to-null / 500-rune rules as PUT
+	// /watchlist/{id}/note.
+	Note *string `json:"note"`
 }
 
 // handleAddWatchlist implements POST /watchlist (WLST-02): decode, reject
@@ -221,12 +226,26 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// D-27: fail-fast the same way PUT /watchlist/{id}/note's rules apply,
+	// before ever calling the store -- Service.Add's own NormalizeNote call
+	// is the non-bypassable backstop for any other caller of Add.
+	note, err := watchlist.NormalizeNote(req.Note)
+	switch {
+	case errors.Is(err, watchlist.ErrNoteTooLong):
+		writeError(w, http.StatusBadRequest, "note must be at most 500 characters")
+		return
+	case errors.Is(err, watchlist.ErrNoteInvalid):
+		writeError(w, http.StatusBadRequest, "note contains invalid characters")
+		return
+	}
+
 	params := watchlist.AddParams{
 		MBID:           mbid,
 		Name:           name,
 		DeezerID:       req.DeezerID,
 		Disambiguation: req.Disambiguation,
 		ImageURL:       req.ImageURL,
+		Note:           note,
 	}
 	if req.ReleaseTypes != nil {
 		params.ReleaseTypes = *req.ReleaseTypes
@@ -244,6 +263,12 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 		// These sentinels wrap only the offending value, which came from
 		// the client, so echoing err.Error() leaks nothing.
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	case errors.Is(err, watchlist.ErrNoteTooLong):
+		writeError(w, http.StatusBadRequest, "note must be at most 500 characters")
+		return
+	case errors.Is(err, watchlist.ErrNoteInvalid):
+		writeError(w, http.StatusBadRequest, "note contains invalid characters")
 		return
 	case err != nil:
 		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))

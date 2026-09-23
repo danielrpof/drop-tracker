@@ -71,6 +71,10 @@ type Querier interface {
 	// in Go -- ListWatchlist JOINs artists and returns every row's full projection,
 	// so counting its result would pull every row just to discard it.
 	CountWatchlist(ctx context.Context) (int64, error)
+	// note (D-27): stays positional -- sqlc rejects mixing $n with
+	// sqlc.arg/sqlc.narg in one query -- and stays nullable, so the generated
+	// Note param is a *string; nil is a plain add, a caller-supplied value is
+	// Undo restoring what D-10 would otherwise drop.
 	CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error)
 	// Removes the source's links for artists that already carry the target --
 	// these would otherwise become duplicate (artist_id, target) rows once

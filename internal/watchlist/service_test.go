@@ -2202,3 +2202,209 @@ func TestService_Note_TooLongReturnsErrNoteTooLong(t *testing.T) {
 		t.Fatalf("err = %v, want %v", err, watchlist.ErrNoteTooLong)
 	}
 }
+
+// --- Plan 24-03 Task 2: POST note + shared projection ---
+
+// TestService_Add_WithNoteReturnsNormalizedNote proves Add stores and
+// returns a trimmed note through the same projection every other route uses
+// (D-26, D-27).
+func TestService_Add_WithNoteReturnsNormalizedNote(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	mbid := testMBID(t)
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Add With Note Test", Note: ptr("  keep ")})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if entry.Note == nil || *entry.Note != "keep" {
+		t.Fatalf("Note = %v, want %q", entry.Note, "keep")
+	}
+}
+
+// TestService_Add_WithTooLongNoteLeavesNoArtistsRow proves a rejected note
+// leaves no artists row behind, mirroring the existing preference-validation
+// rule (D-05, D-08, D-11, D-27).
+func TestService_Add_WithTooLongNoteLeavesNoArtistsRow(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	mbid := testMBID(t)
+	tooLong := ptr(strings.Repeat("a", 501))
+	if _, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Too Long Note Test", Note: tooLong}); !errors.Is(err, watchlist.ErrNoteTooLong) {
+		t.Fatalf("err = %v, want %v", err, watchlist.ErrNoteTooLong)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artists WHERE mbid = $1", mbid).Scan(&count); err != nil {
+		t.Fatalf("count artists rows: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("artists row count = %d, want 0 (a rejected note must leave no artists row)", count)
+	}
+}
+
+// TestService_Add_ReAddReturnsSurvivingTags proves TAG-07/D-10/D-26: a
+// removed artist's tags survive on artists.id, and Add's response reflects
+// them through the shared projection with no note (a plain re-add).
+func TestService_Add_ReAddReturnsSurvivingTags(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	mbid := testMBID(t)
+	first, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "ReAdd Tags Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	var tagID int64
+	if err := pool.QueryRow(ctx, "INSERT INTO tags (name) VALUES ($1) RETURNING id", "surviving-tag").Scan(&tagID); err != nil {
+		t.Fatalf("seed tag: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2)", first.ArtistID, tagID); err != nil {
+		t.Fatalf("link tag: %v", err)
+	}
+
+	if err := svc.Remove(ctx, first.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	readded, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "ReAdd Tags Test"})
+	if err != nil {
+		t.Fatalf("re-Add: %v", err)
+	}
+	wantTags := []watchlist.TagRef{{ID: tagID, Name: "surviving-tag"}}
+	if !reflect.DeepEqual(readded.Tags, wantTags) {
+		t.Fatalf("re-added Tags = %+v, want %+v", readded.Tags, wantTags)
+	}
+	if readded.Note != nil {
+		t.Fatalf("re-added Note = %v, want nil (plain re-add)", readded.Note)
+	}
+}
+
+// TestService_Add_ReAddRestoresNote proves D-27: the Undo path (re-add with
+// the removed entry's note) restores it in the response.
+func TestService_Add_ReAddRestoresNote(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	mbid := testMBID(t)
+	first, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "ReAdd Note Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, err := svc.UpdateNote(ctx, first.ID, ptr("undo me")); err != nil {
+		t.Fatalf("UpdateNote: %v", err)
+	}
+	if err := svc.Remove(ctx, first.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	readded, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "ReAdd Note Test", Note: ptr("undo me")})
+	if err != nil {
+		t.Fatalf("re-Add (Undo): %v", err)
+	}
+	if readded.Note == nil || *readded.Note != "undo me" {
+		t.Fatalf("re-added Note = %v, want %q", readded.Note, "undo me")
+	}
+}
+
+// TestService_UpdatePreferences_ReturnsTagsAndNote proves D-26: the
+// preferences update route now answers through the same shared projection
+// GET/PUT-note/POST use, so tags and any existing note come back accurate
+// rather than the prior hand-built (always-empty) placeholder.
+func TestService_UpdatePreferences_ReturnsTagsAndNote(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	mbid := testMBID(t)
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Prefs Projection Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, err := svc.UpdateNote(ctx, entry.ID, ptr("existing note")); err != nil {
+		t.Fatalf("UpdateNote: %v", err)
+	}
+	var tagID int64
+	if err := pool.QueryRow(ctx, "INSERT INTO tags (name) VALUES ($1) RETURNING id", "prefs-tag").Scan(&tagID); err != nil {
+		t.Fatalf("seed tag: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2)", entry.ArtistID, tagID); err != nil {
+		t.Fatalf("link tag: %v", err)
+	}
+
+	updated, err := svc.UpdatePreferences(ctx, entry.ID, watchlist.PreferencesParams{ReleaseTypes: &[]string{"album"}})
+	if err != nil {
+		t.Fatalf("UpdatePreferences: %v", err)
+	}
+	if updated.Note == nil || *updated.Note != "existing note" {
+		t.Fatalf("Note = %v, want %q", updated.Note, "existing note")
+	}
+	wantTags := []watchlist.TagRef{{ID: tagID, Name: "prefs-tag"}}
+	if !reflect.DeepEqual(updated.Tags, wantTags) {
+		t.Fatalf("Tags = %+v, want %+v", updated.Tags, wantTags)
+	}
+}
+
+// TestService_ProjectionParity proves that Add, UpdatePreferences and
+// UpdateNote each return a value equal to the matching element of List --
+// D-26's "same projection everywhere" guarantee, checked directly rather
+// than by construction.
+func TestService_ProjectionParity(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	mbid := testMBID(t)
+	added, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Projection Parity Test", Note: ptr("first")})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	listAfterAdd, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List after Add: %v", err)
+	}
+	if entry := findEntry(listAfterAdd, added.ID); entry == nil || !reflect.DeepEqual(*entry, added) {
+		t.Fatalf("List entry after Add = %+v, want %+v", entry, added)
+	}
+
+	updated, err := svc.UpdatePreferences(ctx, added.ID, watchlist.PreferencesParams{ReleaseTypes: &[]string{"single"}})
+	if err != nil {
+		t.Fatalf("UpdatePreferences: %v", err)
+	}
+	listAfterPrefs, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List after UpdatePreferences: %v", err)
+	}
+	if entry := findEntry(listAfterPrefs, updated.ID); entry == nil || !reflect.DeepEqual(*entry, updated) {
+		t.Fatalf("List entry after UpdatePreferences = %+v, want %+v", entry, updated)
+	}
+
+	noted, err := svc.UpdateNote(ctx, added.ID, ptr("second"))
+	if err != nil {
+		t.Fatalf("UpdateNote: %v", err)
+	}
+	listAfterNote, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List after UpdateNote: %v", err)
+	}
+	if entry := findEntry(listAfterNote, noted.ID); entry == nil || !reflect.DeepEqual(*entry, noted) {
+		t.Fatalf("List entry after UpdateNote = %+v, want %+v", entry, noted)
+	}
+}
+
+// findEntry returns a pointer to the entry with the given id in entries, or
+// nil if absent.
+func findEntry(entries []watchlist.Entry, id int64) *watchlist.Entry {
+	for i := range entries {
+		if entries[i].ID == id {
+			return &entries[i]
+		}
+	}
+	return nil
+}

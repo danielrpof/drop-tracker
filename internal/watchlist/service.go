@@ -223,6 +223,14 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 		}
 	}
 
+	// D-27: normalize the optional note alongside the two preference axes,
+	// before any database call, so a rejected note leaves no artists row
+	// behind either -- the same rule the two axes above already follow.
+	note, err := NormalizeNote(p.Note)
+	if err != nil {
+		return Entry{}, err
+	}
+
 	// D-06: resolve artist art synchronously when the caller supplied none.
 	// Gated on s.matcher != nil so a Service built with NewService(q) (no
 	// options) never attempts a match. Art resolution can fail in any way
@@ -284,6 +292,7 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 		ArtistID:        artist.ID,
 		ReleaseTypes:    releaseTypes,
 		MutedEventTypes: mutedEventTypes,
+		Note:            note,
 	})
 	if err != nil {
 		// D-09: a duplicate add is never treated as an implicit preferences
@@ -303,7 +312,9 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 		return Entry{}, fmt.Errorf("create watchlist entry: %w", err)
 	}
 
-	return toEntry(artist, entry), nil
+	// D-26: the response comes from the same projection GET /watchlist uses,
+	// not a hand-built Entry -- tags/note are accurate on every route.
+	return s.get(ctx, entry.ID)
 }
 
 // List returns every watchlist entry, joined with its artist's master data,
@@ -472,23 +483,11 @@ func (s *Service) UpdatePreferences(ctx context.Context, id int64, p Preferences
 		return Entry{}, fmt.Errorf("update watchlist preferences: %w", err)
 	}
 
-	return Entry{
-		ID:              updated.ID,
-		ArtistID:        updated.ArtistID,
-		MBID:            updated.Mbid,
-		Name:            updated.Name,
-		DeezerID:        updated.DeezerID,
-		Disambiguation:  updated.Disambiguation,
-		ImageURL:        updated.ImageUrl,
-		ReleaseTypes:    updated.ReleaseTypes,
-		MutedEventTypes: updated.MutedEventTypes,
-		// UpdateWatchlistPreferences does not (yet) project tags/note through
-		// the shared enrichment (D-26 moves this route onto it in plan 24-03)
-		// -- Tags is the non-nil-slice guarantee only, never a real read here.
-		Tags:      []TagRef{},
-		CreatedAt: updated.CreatedAt.Time,
-		UpdatedAt: updated.UpdatedAt.Time,
-	}, nil
+	// D-26: re-read through the shared projection rather than hand-building
+	// the response, so tags/note are accurate here too. A concurrent delete
+	// landing between the UPDATE above and this read surfaces as the same
+	// honest ErrNotFound -- get's own pgx.ErrNoRows translation.
+	return s.get(ctx, updated.ID)
 }
 
 // Remove hard-deletes a watchlist entry by id (WLST-03, D-10): no status
@@ -577,27 +576,4 @@ func normalizeSet(values []string, allowed []string, invalidErr error) ([]string
 		}
 	}
 	return out, nil
-}
-
-// toEntry joins an artist row and its watchlist row into the API-facing
-// Entry shape. A freshly created entry has no tags yet -- Tags is the
-// non-nil-slice guarantee (D-26), never a real read; Note carries whatever
-// CreateWatchlistEntry stored (nil unless plan 24-03's Undo path sets it,
-// D-27).
-func toEntry(artist sqlc.Artist, w sqlc.Watchlist) Entry {
-	return Entry{
-		ID:              w.ID,
-		ArtistID:        artist.ID,
-		MBID:            artist.Mbid,
-		Name:            artist.Name,
-		DeezerID:        artist.DeezerID,
-		Disambiguation:  artist.Disambiguation,
-		ImageURL:        artist.ImageUrl,
-		ReleaseTypes:    w.ReleaseTypes,
-		MutedEventTypes: w.MutedEventTypes,
-		Tags:            []TagRef{},
-		Note:            w.Note,
-		CreatedAt:       w.CreatedAt.Time,
-		UpdatedAt:       w.UpdatedAt.Time,
-	}
 }
