@@ -11,6 +11,7 @@ import {
   ApiError,
   type SearchArtist,
   type SearchResponse,
+  type TagRef,
   type WatchlistEntry,
   addWatchlist,
   listWatchlist,
@@ -62,6 +63,48 @@ export default function Watchlist() {
       rows ? rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) : rows
     )
   }
+
+  // addTag/removeTag are the D-24 functional per-item updaters TagChips
+  // drives directly (not a whole-array snapshot): each only ever touches
+  // its own entry's tags array, so concurrent chip add/remove on one row
+  // can never clobber each other. addTag is a no-op when the tag is
+  // already present (idempotent attach, D-21) and inserts at a clamped
+  // index so a failed-remove rollback restores the chip's original
+  // position.
+  function addTag(entryId: number, tag: TagRef, index?: number) {
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) => {
+            if (r.id !== entryId || r.tags.some((t) => t.id === tag.id)) {
+              return r
+            }
+            const tags = [...r.tags]
+            const at =
+              index === undefined
+                ? tags.length
+                : Math.max(0, Math.min(index, tags.length))
+            tags.splice(at, 0, tag)
+            return { ...r, tags }
+          })
+        : rows
+    )
+  }
+
+  function removeTag(entryId: number, tagId: number) {
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) =>
+            r.id === entryId
+              ? { ...r, tags: r.tags.filter((t) => t.id !== tagId) }
+              : r
+          )
+        : rows
+    )
+  }
+
+  // announce is a no-op stub for Task 1 -- Task 2 wires this to a
+  // route-level role="status" region (UI-SPEC [R6]).
+  function announce(_message: string) {}
 
   // handleAddSearchResult wires SearchResultsColumns' "Add to Watchlist"
   // click into addWatchlist, sending neither preference axis so the API
@@ -202,6 +245,8 @@ export default function Watchlist() {
               entry={entry}
               onEntryChange={handleEntryChange}
               onRemove={handleRemove}
+              tagActions={{ addTag, removeTag }}
+              announce={announce}
             />
           ))}
         </ul>

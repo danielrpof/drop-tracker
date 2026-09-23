@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   ApiError,
+  detachTag,
   listEvents,
   removeWatchlist,
   type EventsPage,
@@ -69,6 +70,19 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
 
     await expect(removeWatchlist(42)).resolves.toBeUndefined()
+  })
+
+  it("detachTag DELETEs /watchlist/{entryId}/tags/{tagId} carrying the CSRF header and resolves on 204", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    await expect(detachTag(42, 7)).resolves.toBeUndefined()
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/42/tags/7")
+    expect(init.method).toBe("DELETE")
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
   })
 
   it("resolves an OK response to the parsed body", async () => {

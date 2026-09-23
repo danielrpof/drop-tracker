@@ -10,7 +10,12 @@ import { describe, expect, it, vi } from "vitest"
 
 import App from "~/root"
 import { authStore } from "~/lib/authStore"
-import { listWatchlist, removeWatchlist, type WatchlistEntry } from "~/lib/api"
+import {
+  detachTag,
+  listWatchlist,
+  removeWatchlist,
+  type WatchlistEntry,
+} from "~/lib/api"
 import { renderRoute } from "~/lib/test/routeStub"
 
 import Watchlist from "./watchlist"
@@ -21,6 +26,7 @@ vi.mock("~/lib/api")
 
 const mockListWatchlist = vi.mocked(listWatchlist)
 const mockRemoveWatchlist = vi.mocked(removeWatchlist)
+const mockDetachTag = vi.mocked(detachTag)
 
 const entry: WatchlistEntry = {
   id: 42,
@@ -34,6 +40,8 @@ const entry: WatchlistEntry = {
   muted_event_types: [],
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  tags: [],
+  note: null,
 }
 
 describe("Watchlist route", () => {
@@ -128,6 +136,35 @@ describe("Watchlist route", () => {
     await screen.findByText("Drake")
 
     expect(mockListWatchlist).toHaveBeenCalledTimes(2)
+  })
+
+  it("removes one tag chip and calls detachTag once when its × is clicked", async () => {
+    mockListWatchlist.mockResolvedValue([
+      {
+        ...entry,
+        tags: [
+          { id: 1, name: "reggaeton" },
+          { id: 2, name: "latin" },
+        ],
+      },
+    ])
+    mockDetachTag.mockResolvedValue(undefined)
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("reggaeton")
+    expect(screen.getByText("latin")).toBeInTheDocument()
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Remove tag reggaeton from Drake",
+      })
+    )
+
+    expect(screen.queryByText("reggaeton")).not.toBeInTheDocument()
+    expect(screen.getByText("latin")).toBeInTheDocument()
+    expect(mockDetachTag).toHaveBeenCalledTimes(1)
+    expect(mockDetachTag).toHaveBeenCalledWith(42, 1)
   })
 })
 

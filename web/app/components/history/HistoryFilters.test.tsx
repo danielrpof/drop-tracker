@@ -24,6 +24,8 @@ const artists: WatchlistEntry[] = [
     muted_event_types: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
+    tags: [],
+    note: null,
   },
   {
     id: 2,
@@ -37,6 +39,8 @@ const artists: WatchlistEntry[] = [
     muted_event_types: [],
     created_at: "2026-01-02T00:00:00Z",
     updated_at: "2026-01-02T00:00:00Z",
+    tags: [],
+    note: null,
   },
 ]
 

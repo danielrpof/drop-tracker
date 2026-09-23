@@ -56,6 +56,13 @@ export interface EventsPage {
   has_older_events: boolean
 }
 
+// TagRef mirrors internal/watchlist.TagRef's JSON shape -- one tag attached
+// to a WatchlistEntry.
+export interface TagRef {
+  id: number
+  name: string
+}
+
 // WatchlistEntry mirrors internal/watchlist.Entry's JSON shape. GET
 // /watchlist returns a bare array of these -- no envelope.
 export interface WatchlistEntry {
@@ -70,6 +77,11 @@ export interface WatchlistEntry {
   muted_event_types: string[]
   created_at: string
   updated_at: string
+  // tags/note mirror internal/watchlist.Entry.Tags/Entry.Note (24-01):
+  // tags is sorted by name and never null; note singular, never null
+  // (D-28), null meaning unset.
+  tags: TagRef[]
+  note: string | null
 }
 
 // SearchArtist mirrors internal/httpserver/search.go's SearchArtist.
@@ -310,6 +322,15 @@ export async function updateWatchlistPreferences(
 // carries no body -- apiFetch returns undefined for it.
 export async function removeWatchlist(id: number): Promise<void> {
   await apiFetch<void>(`/watchlist/${id}`, { method: "DELETE" })
+}
+
+// detachTag removes one tag from a watchlist entry (TAG-02, D-20, D-21).
+// Detach is idempotent server-side, so a link that's already gone still
+// resolves 204 through the same undefined-on-204 path.
+export async function detachTag(entryId: number, tagId: number): Promise<void> {
+  await apiFetch<void>(`/watchlist/${entryId}/tags/${tagId}`, {
+    method: "DELETE",
+  })
 }
 
 // searchArtists fans out to every configured source (WLST-01, D-01, D-02,
