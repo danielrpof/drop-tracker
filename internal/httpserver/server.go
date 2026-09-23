@@ -267,6 +267,9 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	r.Get("/watchlist", s.handleListWatchlist)
 	r.Patch("/watchlist/{id}", s.handleUpdateWatchlist)
 	r.Delete("/watchlist/{id}", s.handleRemoveWatchlist)
+	// The note has its own PUT (D-25): PATCH stays preferences-only so Phase
+	// 26's bulk preferences request, which mirrors it, can never set notes.
+	r.Put("/watchlist/{id}/note", s.handleUpdateNote)
 	r.Get("/events", s.handleListEvents)
 	// /status inherits gate.Authenticate + gate.RequireCSRFHeader + the
 	// X-Instance-Gated header on the gated path exactly as /events does; it is

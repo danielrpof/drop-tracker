@@ -34,6 +34,34 @@ FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
 ORDER BY a.name ASC, a.id ASC;
 
+-- name: GetWatchlistEntry :one
+-- Byte-for-byte ListWatchlist's select list and joins, narrowed to one row
+-- (D-26): the Go struct conversion in watchlist.Service.get only compiles
+-- while the two projections stay identical, which is what enforces the
+-- "same projection everywhere" guarantee at build time rather than by
+-- convention.
+SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
+       a.disambiguation, a.image_url,
+       w.release_types, w.muted_event_types, w.note, w.created_at, w.updated_at,
+       ARRAY(
+         SELECT t.id FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::bigint[] AS tag_ids,
+       ARRAY(
+         SELECT t.name FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::text[] AS tag_names
+FROM watchlist w
+JOIN artists a ON a.id = w.artist_id
+WHERE w.id = $1;
+
+-- name: UpdateWatchlistNote :execrows
+-- :execrows distinguishes "updated" from "no such id" without a preceding
+-- existence SELECT, mirroring DeleteWatchlistEntry's idiom. The response
+-- entry itself comes from a follow-up GetWatchlistEntry call
+-- (Service.UpdateNote), not from this statement's own return.
+UPDATE watchlist SET note = sqlc.narg('note'), updated_at = now() WHERE id = sqlc.arg('id');
+
 -- name: UpdateWatchlistPreferences :one
 -- The partial-update merge happens inside this statement, not in Go: each
 -- axis is resolved by a CASE whose ELSE names the column itself, so the

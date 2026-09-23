@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/danielrpof/drop-tracker/internal/artistart"
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
@@ -18,6 +20,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// MaxNoteRunes mirrors the watchlist_note_length CHECK (migration 000010,
+// D-25) -- the single Go-side source of truth for the note length cap.
+const MaxNoteRunes = 500
 
 // matchTimeout bounds the add-time artist-art match attempt Service.Add
 // makes when a caller supplies no ImageURL (D-06). This bound is
@@ -55,6 +61,13 @@ var (
 	// mistake, and reporting success for it would claim a change that never
 	// happened (WR-01, G-02-1).
 	ErrNoPreferencesSupplied = errors.New("no preferences supplied")
+	// ErrNoteTooLong is returned when a note exceeds MaxNoteRunes after
+	// trimming (D-25, NOTE-01).
+	ErrNoteTooLong = errors.New("note must be at most 500 characters")
+	// ErrNoteInvalid is returned when a note contains a character Postgres
+	// text cannot store (U+0000) -- Postgres itself would reject the write,
+	// so this is caught before ever reaching the database.
+	ErrNoteInvalid = errors.New("note contains invalid characters")
 )
 
 // TagRef is the tag shape embedded in Entry.Tags -- kept in this package
@@ -93,6 +106,10 @@ type AddParams struct {
 	ImageURL        *string
 	ReleaseTypes    []string
 	MutedEventTypes []string
+	// Note is optional (D-27): the remove toast's Undo re-adds it so a
+	// restored artist does not silently lose the note D-10 would otherwise
+	// drop. nil means no note, matching a plain add.
+	Note *string
 }
 
 // PreferencesParams carries a partial preferences update. A nil field means
@@ -111,6 +128,7 @@ type Store interface {
 	List(ctx context.Context) ([]Entry, error)
 	UpdatePreferences(ctx context.Context, id int64, p PreferencesParams) (Entry, error)
 	Remove(ctx context.Context, id int64) error
+	UpdateNote(ctx context.Context, id int64, note *string) (Entry, error)
 }
 
 // ArtistMatcher is the narrow seam Service depends on to resolve artist art
@@ -301,27 +319,76 @@ func (s *Service) List(ctx context.Context) ([]Entry, error) {
 
 	entries := make([]Entry, 0, len(rows))
 	for _, row := range rows {
-		tags, err := zipTags(row.TagIds, row.TagNames)
+		entry, err := entryFromRow(row)
 		if err != nil {
 			return nil, fmt.Errorf("list watchlist: %w", err)
 		}
-		entries = append(entries, Entry{
-			ID:              row.ID,
-			ArtistID:        row.ArtistID,
-			MBID:            row.Mbid,
-			Name:            row.Name,
-			DeezerID:        row.DeezerID,
-			Disambiguation:  row.Disambiguation,
-			ImageURL:        row.ImageUrl,
-			ReleaseTypes:    row.ReleaseTypes,
-			MutedEventTypes: row.MutedEventTypes,
-			Tags:            tags,
-			Note:            row.Note,
-			CreatedAt:       row.CreatedAt.Time,
-			UpdatedAt:       row.UpdatedAt.Time,
-		})
+		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+// entryFromRow maps a ListWatchlist row into the API-facing Entry shape --
+// shared by List and get (below) so both routes build the same value the
+// same way. Always returns a non-nil Tags slice (D-26).
+func entryFromRow(row sqlc.ListWatchlistRow) (Entry, error) {
+	tags, err := zipTags(row.TagIds, row.TagNames)
+	if err != nil {
+		return Entry{}, err
+	}
+	return Entry{
+		ID:              row.ID,
+		ArtistID:        row.ArtistID,
+		MBID:            row.Mbid,
+		Name:            row.Name,
+		DeezerID:        row.DeezerID,
+		Disambiguation:  row.Disambiguation,
+		ImageURL:        row.ImageUrl,
+		ReleaseTypes:    row.ReleaseTypes,
+		MutedEventTypes: row.MutedEventTypes,
+		Tags:            tags,
+		Note:            row.Note,
+		CreatedAt:       row.CreatedAt.Time,
+		UpdatedAt:       row.UpdatedAt.Time,
+	}, nil
+}
+
+// get reads one entry through the same projection List uses (D-26): the
+// sqlc.ListWatchlistRow(...) conversion below only compiles while
+// GetWatchlistEntry's select list stays identical to ListWatchlist's, which
+// is what enforces "same projection everywhere" at build time.
+func (s *Service) get(ctx context.Context, id int64) (Entry, error) {
+	row, err := s.q.GetWatchlistEntry(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Entry{}, ErrNotFound
+		}
+		return Entry{}, fmt.Errorf("get watchlist entry: %w", err)
+	}
+	return entryFromRow(sqlc.ListWatchlistRow(row))
+}
+
+// NormalizeNote applies D-25's trim / empty-to-null / length-cap rules
+// before any database write, shared by PUT /watchlist/{id}/note and POST
+// /watchlist's optional note (D-27). nil in means "no note supplied" and
+// stays nil; the DB layer applies the identical rules again via
+// watchlist_note_length/watchlist_note_not_blank as the non-bypassable
+// backstop (three-layer validation, Phase 02/20 pattern).
+func NormalizeNote(raw *string) (*string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	trimmed := strings.TrimSpace(*raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	if strings.ContainsRune(trimmed, 0) {
+		return nil, ErrNoteInvalid
+	}
+	if utf8.RuneCountInString(trimmed) > MaxNoteRunes {
+		return nil, ErrNoteTooLong
+	}
+	return &trimmed, nil
 }
 
 // zipTags pairs ListWatchlist's two parallel array_agg-free ARRAY(...)
@@ -442,6 +509,38 @@ func (s *Service) Remove(ctx context.Context, id int64) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// UpdateNote applies D-25's PUT /watchlist/{id}/note semantics: normalize
+// first (trim, empty-to-null, length cap) so a rejected note never touches
+// the database, then write and re-read through get so the response carries
+// the same tags + note projection every other route does (D-26). The
+// watchlist_note_length/watchlist_note_not_blank CHECKs are the
+// non-bypassable backstop for a caller other than this method (T-24-21).
+func (s *Service) UpdateNote(ctx context.Context, id int64, note *string) (Entry, error) {
+	normalized, err := NormalizeNote(note)
+	if err != nil {
+		return Entry{}, err
+	}
+
+	affected, err := s.q.UpdateWatchlistNote(ctx, sqlc.UpdateWatchlistNoteParams{ID: id, Note: normalized})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.CheckViolation {
+			switch pgErr.ConstraintName {
+			case "watchlist_note_length":
+				return Entry{}, ErrNoteTooLong
+			case "watchlist_note_not_blank":
+				return Entry{}, ErrNoteInvalid
+			}
+		}
+		return Entry{}, fmt.Errorf("update watchlist note: %w", err)
+	}
+	if affected == 0 {
+		return Entry{}, ErrNotFound
+	}
+
+	return s.get(ctx, id)
 }
 
 // normalizeSet validates values against allowed and returns a new slice

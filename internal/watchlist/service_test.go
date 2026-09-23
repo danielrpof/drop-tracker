@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -2075,5 +2076,129 @@ func TestService_Add_ArtistArt_ActivityGateReleasedEvenIfMatchPanics(t *testing.
 
 	if gate.Active() {
 		t.Fatal("gate.Active() == true after Match panicked, want false (ActivityGate registration must not leak)")
+	}
+}
+
+// --- Plan 24-03 Task 1: notes ---
+
+func ptr(s string) *string { return &s }
+
+// TestNormalizeNote pins D-25's pure normalization rules: nil stays nil,
+// leading/trailing whitespace (including a newline) trims, an all-whitespace
+// or empty string normalizes to nil, and internal line breaks are kept
+// (notes are prose, not a single-line field).
+func TestNormalizeNote(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      *string
+		want    *string
+		wantErr error
+	}{
+		{name: "nil stays nil", in: nil, want: nil},
+		{name: "trims surrounding whitespace and newline", in: ptr("  hi \n"), want: ptr("hi")},
+		{name: "all whitespace normalizes to nil", in: ptr("   "), want: nil},
+		{name: "empty string normalizes to nil", in: ptr(""), want: nil},
+		{name: "internal line breaks are kept", in: ptr("line one\nline two"), want: ptr("line one\nline two")},
+		{name: "exactly 500 multi-byte runes accepted", in: ptr(strings.Repeat("é", 500)), want: ptr(strings.Repeat("é", 500))},
+		{name: "501 multi-byte runes rejected", in: ptr(strings.Repeat("é", 501)), wantErr: watchlist.ErrNoteTooLong},
+		{name: "NUL byte rejected", in: ptr("bad\x00note"), wantErr: watchlist.ErrNoteInvalid},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := watchlist.NormalizeNote(tt.in)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if (got == nil) != (tt.want == nil) {
+				t.Fatalf("got = %v, want %v", got, tt.want)
+			}
+			if got != nil && *got != *tt.want {
+				t.Fatalf("got = %q, want %q", *got, *tt.want)
+			}
+		})
+	}
+}
+
+// TestService_Note_UpdateMissingReturnsErrNotFound pins the missing-id half
+// of Service.UpdateNote (D-25).
+func TestService_Note_UpdateMissingReturnsErrNotFound(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	if _, err := svc.UpdateNote(context.Background(), 9_999_999, ptr("hello")); !errors.Is(err, watchlist.ErrNotFound) {
+		t.Fatalf("err = %v, want %v", err, watchlist.ErrNotFound)
+	}
+}
+
+// TestService_Note_UpdateExistingReturnsEntryWithNoteAndTags proves
+// Service.UpdateNote writes the trimmed note and returns it through the same
+// projection List/get use, tags included (D-26).
+func TestService_Note_UpdateExistingReturnsEntryWithNoteAndTags(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	mbid := testMBID(t)
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Note Update Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	var tagID int64
+	if err := pool.QueryRow(ctx, "INSERT INTO tags (name) VALUES ($1) RETURNING id", "reggaeton").Scan(&tagID); err != nil {
+		t.Fatalf("seed tag: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2)", entry.ArtistID, tagID); err != nil {
+		t.Fatalf("link tag: %v", err)
+	}
+
+	updated, err := svc.UpdateNote(ctx, entry.ID, ptr("  crate digger "))
+	if err != nil {
+		t.Fatalf("UpdateNote: %v", err)
+	}
+	if updated.Note == nil || *updated.Note != "crate digger" {
+		t.Fatalf("Note = %v, want %q", updated.Note, "crate digger")
+	}
+	wantTags := []watchlist.TagRef{{ID: tagID, Name: "reggaeton"}}
+	if !reflect.DeepEqual(updated.Tags, wantTags) {
+		t.Fatalf("Tags = %+v, want %+v", updated.Tags, wantTags)
+	}
+
+	// Clearing with an all-whitespace note stores NULL (D-25, D-06).
+	cleared, err := svc.UpdateNote(ctx, entry.ID, ptr("   "))
+	if err != nil {
+		t.Fatalf("UpdateNote (clear): %v", err)
+	}
+	if cleared.Note != nil {
+		t.Fatalf("Note after clear = %v, want nil", cleared.Note)
+	}
+}
+
+// TestService_Note_TooLongReturnsErrNoteTooLong proves the CHECK-constraint
+// mapping fires even though NormalizeNote already rejects a too-long note --
+// this is the non-bypassable-backstop leg of the three-layer validation
+// (T-24-21), reached only if a caller other than UpdateNote's own
+// NormalizeNote call somehow got a too-long value past it.
+func TestService_Note_TooLongReturnsErrNoteTooLong(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	mbid := testMBID(t)
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Note Too Long Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	tooLong := ptr(strings.Repeat("a", 501))
+	if _, err := svc.UpdateNote(ctx, entry.ID, tooLong); !errors.Is(err, watchlist.ErrNoteTooLong) {
+		t.Fatalf("err = %v, want %v", err, watchlist.ErrNoteTooLong)
 	}
 }

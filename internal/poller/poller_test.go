@@ -236,6 +236,7 @@ type stubStore struct {
 	addCalls    int32
 	updateCalls int32
 	removeCalls int32
+	noteCalls   int32
 }
 
 func (s *stubStore) Add(ctx context.Context, p watchlist.AddParams) (watchlist.Entry, error) {
@@ -259,6 +260,11 @@ func (s *stubStore) UpdatePreferences(ctx context.Context, id int64, p watchlist
 func (s *stubStore) Remove(ctx context.Context, id int64) error {
 	atomic.AddInt32(&s.removeCalls, 1)
 	return nil
+}
+
+func (s *stubStore) UpdateNote(ctx context.Context, id int64, note *string) (watchlist.Entry, error) {
+	atomic.AddInt32(&s.noteCalls, 1)
+	return watchlist.Entry{}, nil
 }
 
 var _ watchlist.Store = (*stubStore)(nil)
@@ -502,7 +508,7 @@ func TestMusicBrainzCycle_CallsSourceOncePerEntry(t *testing.T) {
 		}
 	}
 
-	if atomic.LoadInt32(&store.addCalls) != 0 || atomic.LoadInt32(&store.updateCalls) != 0 || atomic.LoadInt32(&store.removeCalls) != 0 {
+	if atomic.LoadInt32(&store.addCalls) != 0 || atomic.LoadInt32(&store.updateCalls) != 0 || atomic.LoadInt32(&store.removeCalls) != 0 || atomic.LoadInt32(&store.noteCalls) != 0 {
 		t.Fatal("cycle must never write to the store (D-04)")
 	}
 }

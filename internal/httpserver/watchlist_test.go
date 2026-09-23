@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,10 +44,11 @@ func testMBID(t *testing.T) string {
 // error, so a bare stubStore{} is safe to pass into the health and server
 // tests that never touch watchlist routes.
 type stubStore struct {
-	addFunc    func(ctx context.Context, p watchlist.AddParams) (watchlist.Entry, error)
-	listFunc   func(ctx context.Context) ([]watchlist.Entry, error)
-	updateFunc func(ctx context.Context, id int64, p watchlist.PreferencesParams) (watchlist.Entry, error)
-	removeFunc func(ctx context.Context, id int64) error
+	addFunc        func(ctx context.Context, p watchlist.AddParams) (watchlist.Entry, error)
+	listFunc       func(ctx context.Context) ([]watchlist.Entry, error)
+	updateFunc     func(ctx context.Context, id int64, p watchlist.PreferencesParams) (watchlist.Entry, error)
+	removeFunc     func(ctx context.Context, id int64) error
+	updateNoteFunc func(ctx context.Context, id int64, note *string) (watchlist.Entry, error)
 }
 
 func (s stubStore) Add(ctx context.Context, p watchlist.AddParams) (watchlist.Entry, error) {
@@ -75,6 +77,13 @@ func (s stubStore) Remove(ctx context.Context, id int64) error {
 		return s.removeFunc(ctx, id)
 	}
 	return nil
+}
+
+func (s stubStore) UpdateNote(ctx context.Context, id int64, note *string) (watchlist.Entry, error) {
+	if s.updateNoteFunc != nil {
+		return s.updateNoteFunc(ctx, id, note)
+	}
+	return watchlist.Entry{}, nil
 }
 
 var _ watchlist.Store = stubStore{}
@@ -1554,5 +1563,217 @@ func TestWatchlist_Add_DoesNotLeakInternals(t *testing.T) {
 		if strings.Contains(raw, leak) {
 			t.Fatalf("response body leaked %q: %s", leak, raw)
 		}
+	}
+}
+
+// --- Plan 24-03 Task 1: PUT /watchlist/{id}/note ---
+
+// noteEntryBody extends watchlistEntryBody with the fields
+// TestWatchlist_NoteEndToEnd needs to assert on.
+type noteEntryBody struct {
+	ID   int64   `json:"id"`
+	Note *string `json:"note"`
+}
+
+// TestWatchlist_NoteEndToEnd proves PUT /watchlist/{id}/note end to end
+// against real Postgres (D-25, D-26, NOTE-01): trim + store, GET reflects
+// it, null/whitespace clears it, a missing/malformed body is 400, and a
+// missing id is 404.
+func TestWatchlist_NoteEndToEnd(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_http_test")
+	mbid := testMBID(t)
+	ctx := context.Background()
+
+	store := watchlist.NewService(sqlc.New(pool))
+	entry, err := store.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Note HTTP Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	srv := httpserver.New(pool, store, stubEventsStore{}, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	putNote := func(t *testing.T, body string) (*http.Response, []byte) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/watchlist/%d/note", ts.URL, entry.ID), strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("build PUT request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PUT note: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read response body: %v", err)
+		}
+		return resp, data
+	}
+
+	// PUT {"note":"  crate digger "} -> 200 with "note":"crate digger".
+	resp, data := putNote(t, `{"note":"  crate digger "}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body %s)", resp.StatusCode, http.StatusOK, data)
+	}
+	var got noteEntryBody
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if got.Note == nil || *got.Note != "crate digger" {
+		t.Fatalf("note = %v, want %q", got.Note, "crate digger")
+	}
+
+	// GET /watchlist shows it.
+	listResp, err := http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET /watchlist: %v", err)
+	}
+	var listed []noteEntryBody
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	_ = listResp.Body.Close()
+	var found bool
+	for _, e := range listed {
+		if e.ID == entry.ID {
+			found = true
+			if e.Note == nil || *e.Note != "crate digger" {
+				t.Fatalf("GET /watchlist note = %v, want %q", e.Note, "crate digger")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("GET /watchlist did not include the entry")
+	}
+
+	// PUT {"note":null} -> "note":null.
+	resp, data = putNote(t, `{"note":null}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body %s)", resp.StatusCode, http.StatusOK, data)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if got.Note != nil {
+		t.Fatalf("note after null = %v, want nil", got.Note)
+	}
+
+	// PUT {"note":"   "} -> "note":null.
+	resp, _ = putNote(t, `{"note":"crate digger again"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	resp, data = putNote(t, `{"note":"   "}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body %s)", resp.StatusCode, http.StatusOK, data)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if got.Note != nil {
+		t.Fatalf("note after whitespace-only = %v, want nil", got.Note)
+	}
+
+	// PUT {} -> 400 (note key absent).
+	resp, data = putNote(t, `{}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d (body %s)", resp.StatusCode, http.StatusBadRequest, data)
+	}
+
+	// PUT {"note":5} -> 400 (wrong JSON type).
+	resp, data = putNote(t, `{"note":5}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d (body %s)", resp.StatusCode, http.StatusBadRequest, data)
+	}
+
+	// PUT with 501 runes -> 400 "note must be at most 500 characters".
+	resp, data = putNote(t, `{"note":"`+strings.Repeat("a", 501)+`"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d (body %s)", resp.StatusCode, http.StatusBadRequest, data)
+	}
+	var eb errorBody
+	if err := json.Unmarshal(data, &eb); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if eb.Error != "note must be at most 500 characters" {
+		t.Fatalf("error = %q, want %q", eb.Error, "note must be at most 500 characters")
+	}
+
+	// PUT against a missing id -> 404.
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/watchlist/9999999/note", strings.NewReader(`{"note":"x"}`))
+	if err != nil {
+		t.Fatalf("build PUT request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	missingResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT missing id: %v", err)
+	}
+	defer func() { _ = missingResp.Body.Close() }()
+	if missingResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", missingResp.StatusCode, http.StatusNotFound)
+	}
+}
+
+// TestWatchlist_Note_Gated401NoCookie proves PUT /watchlist/{id}/note
+// answers 401 without a session on a gated server (T-24-18).
+func TestWatchlist_Note_Gated401NoCookie(t *testing.T) {
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger(),
+		httpserver.WithAuthGate(settingsTestPassphrase, false, nil))
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/watchlist/1/note", strings.NewReader(`{"note":"x"}`))
+	if err != nil {
+		t.Fatalf("build PUT request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /watchlist/1/note: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+// TestWatchlist_Note_GatedForbiddenWithoutCSRFHeader proves PUT
+// /watchlist/{id}/note answers 403 and reaches the store zero times without
+// X-Requested-With, even with a valid session cookie (T-24-19).
+func TestWatchlist_Note_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
+	var calls int32
+	stub := stubStore{updateNoteFunc: func(context.Context, int64, *string) (watchlist.Entry, error) {
+		atomic.AddInt32(&calls, 1)
+		return watchlist.Entry{}, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger(),
+		httpserver.WithAuthGate(settingsTestPassphrase, false, nil))
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	cookie := loginForSettings(t, ts)
+
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/watchlist/1/note", strings.NewReader(`{"note":"x"}`))
+	if err != nil {
+		t.Fatalf("build PUT request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	// Deliberately no X-Requested-With header.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /watchlist/1/note: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("store.UpdateNote called %d times, want 0", got)
 	}
 }

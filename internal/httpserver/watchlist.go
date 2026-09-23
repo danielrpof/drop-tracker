@@ -340,6 +340,68 @@ func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(entry)
 }
 
+// updateNoteRequest is the request DTO for PUT /watchlist/{id}/note. Note is
+// json.RawMessage, not *string, so the handler can distinguish an absent key
+// (len == 0, rejected) from an explicit JSON null (valid, clears the note)
+// before ever unmarshalling into a *string (D-25).
+type updateNoteRequest struct {
+	Note json.RawMessage `json:"note"`
+}
+
+// handleUpdateNote implements PUT /watchlist/{id}/note (D-25, NOTE-01):
+// trim, empty-to-null, and a 500-rune cap, applied by watchlist.NormalizeNote
+// before the store call so a rejected note never reaches the database. 200
+// on success with the full updated entry, on the same tags + note
+// projection every other route uses (D-26).
+func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
+	id, err := parseWatchlistID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid watchlist id")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxAddWatchlistBodyBytes)
+
+	var req updateNoteRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Note) == 0 {
+		writeError(w, http.StatusBadRequest, "note is required")
+		return
+	}
+
+	var note *string
+	if err := json.Unmarshal(req.Note, &note); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	entry, err := s.watchlist.UpdateNote(r.Context(), id, note)
+	switch {
+	case errors.Is(err, watchlist.ErrNoteTooLong):
+		writeError(w, http.StatusBadRequest, "note must be at most 500 characters")
+		return
+	case errors.Is(err, watchlist.ErrNoteInvalid):
+		writeError(w, http.StatusBadRequest, "note contains invalid characters")
+		return
+	case errors.Is(err, watchlist.ErrNotFound):
+		writeError(w, http.StatusNotFound, "watchlist entry not found")
+		return
+	case err != nil:
+		// Note text must never reach a log (T-24-20) -- err.Error() here is
+		// always a wrapped driver/query error, never the note itself.
+		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(entry)
+}
+
 // handleRemoveWatchlist implements DELETE /watchlist/{id} (WLST-03): a hard
 // delete (D-10) that responds 204 with no body on success, 404 when the id
 // does not exist (including a repeat delete of an id already removed), and

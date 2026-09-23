@@ -52,6 +52,9 @@ func (stubStore) UpdatePreferences(context.Context, int64, watchlist.Preferences
 	return watchlist.Entry{}, nil
 }
 func (stubStore) Remove(context.Context, int64) error { return nil }
+func (stubStore) UpdateNote(context.Context, int64, *string) (watchlist.Entry, error) {
+	return watchlist.Entry{}, nil
+}
 
 type stubEventsStore struct{}
 

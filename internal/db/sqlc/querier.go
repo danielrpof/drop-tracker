@@ -106,6 +106,12 @@ type Querier interface {
 	// address artist_tags (which keys on artists.id, TAG-07) through the same
 	// entry id every other watchlist route uses (D-20).
 	GetWatchlistArtistID(ctx context.Context, id int64) (int64, error)
+	// Byte-for-byte ListWatchlist's select list and joins, narrowed to one row
+	// (D-26): the Go struct conversion in watchlist.Service.get only compiles
+	// while the two projections stay identical, which is what enforces the
+	// "same projection everywhere" guarantee at build time rather than by
+	// convention.
+	GetWatchlistEntry(ctx context.Context, id int64) (GetWatchlistEntryRow, error)
 	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
 	// existing event rows for this artist+source means seed mode.
 	HasAnyEvent(ctx context.Context, arg HasAnyEventParams) (bool, error)
@@ -283,6 +289,11 @@ type Querier interface {
 	// list's right-hand side evaluates against the row as it was before this
 	// statement), which is exactly what the re-anchor decision needs.
 	UpdateNotificationSettings(ctx context.Context, arg UpdateNotificationSettingsParams) (NotificationSetting, error)
+	// :execrows distinguishes "updated" from "no such id" without a preceding
+	// existence SELECT, mirroring DeleteWatchlistEntry's idiom. The response
+	// entry itself comes from a follow-up GetWatchlistEntry call
+	// (Service.UpdateNote), not from this statement's own return.
+	UpdateWatchlistNote(ctx context.Context, arg UpdateWatchlistNoteParams) (int64, error)
 	// The partial-update merge happens inside this statement, not in Go: each
 	// axis is resolved by a CASE whose ELSE names the column itself, so the
 	// value carried forward for an untouched axis is read from the row version
