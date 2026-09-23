@@ -364,6 +364,17 @@ export async function listTags(): Promise<TagSummary[]> {
   return apiFetch<TagSummary[]>("/tags")
 }
 
+// deleteTag removes a tag from the vocabulary everywhere (TAG-06, D-17,
+// D-22). The response's carrier_count (watched artists only, D-11) is what
+// the Manage tags delete toast reports -- the client never computes it.
+export async function deleteTag(
+  id: number
+): Promise<{ carrier_count: number }> {
+  return apiFetch<{ carrier_count: number }>(`/tags/${id}`, {
+    method: "DELETE",
+  })
+}
+
 // searchArtists fans out to every configured source (WLST-01, D-01, D-02,
 // D-03): the response's sources map is returned as-is, one entry per
 // source, never merged. An optional signal lets a caller (SearchBox) cancel

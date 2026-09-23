@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   ApiError,
   attachTag,
+  deleteTag,
   detachTag,
   listEvents,
   listTags,
@@ -127,6 +128,24 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe("/tags")
     expect(init?.headers).toBeUndefined()
+  })
+
+  it("deleteTag DELETEs /tags/{id} carrying the CSRF header and resolves the watched carrier_count", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ carrier_count: 3 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(deleteTag(9)).resolves.toEqual({ carrier_count: 3 })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/tags/9")
+    expect(init.method).toBe("DELETE")
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
   })
 
   it("resolves an OK response to the parsed body", async () => {

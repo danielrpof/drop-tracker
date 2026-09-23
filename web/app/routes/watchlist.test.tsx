@@ -13,6 +13,7 @@ import App from "~/root"
 import { authStore } from "~/lib/authStore"
 import {
   attachTag,
+  deleteTag,
   detachTag,
   listTags,
   listWatchlist,
@@ -32,6 +33,7 @@ const mockRemoveWatchlist = vi.mocked(removeWatchlist)
 const mockDetachTag = vi.mocked(detachTag)
 const mockListTags = vi.mocked(listTags)
 const mockAttachTag = vi.mocked(attachTag)
+const mockDeleteTag = vi.mocked(deleteTag)
 
 const entry: WatchlistEntry = {
   id: 42,
@@ -277,6 +279,38 @@ describe("Watchlist route", () => {
     expect(
       screen.queryByRole("button", { name: "Add tag to Drake" })
     ).toBeNull()
+  })
+
+  it("opens Manage tags and deletes a tag carried by two entries, so both cards lose the chip with no extra listWatchlist call", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "reggaeton" }] },
+      { ...second, tags: [{ id: 1, name: "reggaeton" }] },
+    ])
+    mockListTags.mockResolvedValue([
+      { id: 1, name: "reggaeton", carrier_count: 2 },
+    ])
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 2 })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    expect(screen.getAllByText("reggaeton")).toHaveLength(2)
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Delete tag reggaeton" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+
+    await waitFor(() =>
+      expect(screen.queryAllByText("reggaeton")).toHaveLength(0)
+    )
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
   })
 })
 

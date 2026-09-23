@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react"
+import { Tags } from "lucide-react"
 import { toast } from "sonner"
 
 import { EmptyState } from "~/components/common/EmptyState"
 import { Button } from "~/components/ui/button"
 import { Skeleton } from "~/components/ui/skeleton"
+import { ManageTagsDialog } from "~/components/watchlist/ManageTagsDialog"
 import { SearchBox } from "~/components/watchlist/SearchBox"
 import { SearchResultsColumns } from "~/components/watchlist/SearchResultsColumns"
 import { WatchlistRow } from "~/components/watchlist/WatchlistRow"
@@ -12,6 +14,7 @@ import {
   type SearchArtist,
   type SearchResponse,
   type TagRef,
+  type TagSummary,
   type WatchlistEntry,
   addWatchlist,
   listTags,
@@ -45,6 +48,7 @@ export default function Watchlist() {
   const [vocabularyStatus, setVocabularyStatus] = useState<
     "idle" | "loading" | "loaded" | "error"
   >("idle")
+  const [manageTagsOpen, setManageTagsOpen] = useState(false)
 
   const refresh = useCallback(() => {
     setError(false)
@@ -108,6 +112,30 @@ export default function Watchlist() {
           )
         : rows
     )
+  }
+
+  // dropTagFromEntries removes one tag id from every entry's tags array
+  // (Manage tags delete, TAG-06, D-17) -- a functional updater in the same
+  // shape as addTag/removeTag, so it can never clobber a concurrent chip
+  // add/remove on an unrelated row.
+  function dropTagFromEntries(tagId: number) {
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) => ({
+            ...r,
+            tags: r.tags.filter((t) => t.id !== tagId),
+          }))
+        : rows
+    )
+  }
+
+  // handleTagsLoaded is ManageTagsDialog's onLoaded (D-30): it replaces the
+  // whole route vocabulary with what the dialog just fetched, so the "+
+  // tag" autocomplete on every row sees the same fresh vocabulary Manage
+  // tags just loaded, instead of leaving a possibly-stale one in place.
+  function handleTagsLoaded(tags: TagSummary[]) {
+    setVocabulary(tags.map((t) => ({ id: t.id, name: t.name })))
+    setVocabularyStatus("loaded")
   }
 
   // loadVocabulary fetches GET /tags only from "idle"/"error" (a failed
@@ -236,11 +264,26 @@ export default function Watchlist() {
 
   return (
     <div className="flex flex-col gap-6 p-8">
-      <h1 className="text-display font-semibold text-foreground">Watchlist</h1>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-display font-semibold text-foreground">
+          Watchlist
+        </h1>
+        <Button variant="secondary" onClick={() => setManageTagsOpen(true)}>
+          <Tags aria-hidden="true" />
+          Manage tags
+        </Button>
+      </div>
 
       <div role="status" aria-atomic="true" className="sr-only">
         {statusMessage}
       </div>
+
+      <ManageTagsDialog
+        open={manageTagsOpen}
+        onOpenChange={setManageTagsOpen}
+        onLoaded={handleTagsLoaded}
+        onDeleted={dropTagFromEntries}
+      />
 
       <div className="flex flex-col gap-6">
         <SearchBox onResults={setSearchResponse} />
