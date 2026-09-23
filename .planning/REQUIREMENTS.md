@@ -9,7 +9,7 @@
 ### Tags
 
 - [ ] **TAG-01**: User can add free-form tags to a watchlist artist, with autocomplete from existing tags; new tags are created on the fly
-- [ ] **TAG-02**: User can remove a tag from an artist
+- [x] **TAG-02**: User can remove a tag from an artist
 - [ ] **TAG-03**: Tags match case- and whitespace-insensitively (`Reggaeton ` = `reggaeton`), keeping the first-entered display casing
 - [ ] **TAG-04**: Tags are capped at 32 characters and 10 per artist, enforced by both API and DB, with a clear error
 - [ ] **TAG-05**: User can rename a tag globally; renaming onto an existing tag asks to confirm a merge
@@ -82,7 +82,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TAG-01 | Phase 24 | Pending |
-| TAG-02 | Phase 24 | Pending |
+| TAG-02 | Phase 24 | Complete |
 | TAG-03 | Phase 24 | Pending |
 | TAG-04 | Phase 24 | Pending |
 | TAG-05 | Phase 24 | Pending |
@@ -111,6 +111,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NTFY-07 | Phase 28 | Pending |
 
 **Coverage:**
+
 - v1.6 requirements: 28 total
 - Mapped to phases: 28
 - Unmapped: 0 ✓
