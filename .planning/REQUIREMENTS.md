@@ -8,10 +8,10 @@
 
 ### Tags
 
-- [ ] **TAG-01**: User can add free-form tags to a watchlist artist, with autocomplete from existing tags; new tags are created on the fly
+- [x] **TAG-01**: User can add free-form tags to a watchlist artist, with autocomplete from existing tags; new tags are created on the fly
 - [x] **TAG-02**: User can remove a tag from an artist
-- [ ] **TAG-03**: Tags match case- and whitespace-insensitively (`Reggaeton ` = `reggaeton`), keeping the first-entered display casing
-- [ ] **TAG-04**: Tags are capped at 32 characters and 10 per artist, enforced by both API and DB, with a clear error
+- [x] **TAG-03**: Tags match case- and whitespace-insensitively (`Reggaeton ` = `reggaeton`), keeping the first-entered display casing
+- [x] **TAG-04**: Tags are capped at 32 characters and 10 per artist, enforced by both API and DB, with a clear error
 - [ ] **TAG-05**: User can rename a tag globally; renaming onto an existing tag asks to confirm a merge
 - [ ] **TAG-06**: User can delete a tag globally, with a confirmation stating how many artists carry it
 - [x] **TAG-07**: Tags belong to the artist (not the watchlist entry), so they survive removal and reappear on re-add
@@ -81,10 +81,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TAG-01 | Phase 24 | Pending |
+| TAG-01 | Phase 24 | Complete |
 | TAG-02 | Phase 24 | Complete |
-| TAG-03 | Phase 24 | Pending |
-| TAG-04 | Phase 24 | Pending |
+| TAG-03 | Phase 24 | Complete |
+| TAG-04 | Phase 24 | Complete |
 | TAG-05 | Phase 24 | Pending |
 | TAG-06 | Phase 24 | Pending |
 | TAG-07 | Phase 24 | Complete |
