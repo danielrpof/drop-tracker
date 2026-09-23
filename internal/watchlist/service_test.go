@@ -1592,6 +1592,72 @@ func artistIDs(artists []sqlc.Artist) []int64 {
 	return ids
 }
 
+// TestService_Remove_LeavesArtistTagsIntact mirrors
+// TestService_Remove_LeavesArtistRowIntact for tag links (TAG-07, D-10):
+// removing a watchlist entry must never delete its artist_tags rows, and a
+// re-add must show the same tags via the shared List projection, in
+// lower(name) order. Tag links are seeded with raw SQL -- this package must
+// not import internal/tags.
+func TestService_Remove_LeavesArtistTagsIntact(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_tags_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	mbid := testMBID(t)
+	entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Tag Survival Test"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	var tagBanda, tagAfrobeat int64
+	if err := pool.QueryRow(ctx, "INSERT INTO tags (name) VALUES ($1) RETURNING id", "banda").Scan(&tagBanda); err != nil {
+		t.Fatalf("seed tag banda: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "INSERT INTO tags (name) VALUES ($1) RETURNING id", "afrobeat").Scan(&tagAfrobeat); err != nil {
+		t.Fatalf("seed tag afrobeat: %v", err)
+	}
+	for _, tagID := range []int64{tagBanda, tagAfrobeat} {
+		if _, err := pool.Exec(ctx, "INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2)", entry.ArtistID, tagID); err != nil {
+			t.Fatalf("link tag %d: %v", tagID, err)
+		}
+	}
+
+	if err := svc.Remove(ctx, entry.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	var linkCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", entry.ArtistID).Scan(&linkCount); err != nil {
+		t.Fatalf("count links after Remove: %v", err)
+	}
+	if linkCount != 2 {
+		t.Fatalf("artist_tags count after Remove = %d, want 2 (TAG-07: links survive)", linkCount)
+	}
+
+	readded, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Tag Survival Test"})
+	if err != nil {
+		t.Fatalf("re-Add: %v", err)
+	}
+
+	entries, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found *watchlist.Entry
+	for i := range entries {
+		if entries[i].ID == readded.ID {
+			found = &entries[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("re-added entry missing from List")
+	}
+	wantTags := []watchlist.TagRef{{ID: tagAfrobeat, Name: "afrobeat"}, {ID: tagBanda, Name: "banda"}}
+	if !reflect.DeepEqual(found.Tags, wantTags) {
+		t.Fatalf("re-added entry tags = %+v, want %+v (lower(name) order)", found.Tags, wantTags)
+	}
+}
+
 func TestRecordArtMatchAttempt_SetsTimestampLeavesImageUntouched(t *testing.T) {
 	pool := testutil.NewTestPool(t)
 	ctx := context.Background()
