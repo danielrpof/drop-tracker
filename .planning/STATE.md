@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 24
 current_phase_name: Artist Tags & Notes
 status: executing
-stopped_at: Completed 24-04-PLAN.md
-last_updated: "2026-09-23T21:56:19.600Z"
+stopped_at: Completed 24-03-PLAN.md
+last_updated: "2026-09-23T22:15:17.334Z"
 last_activity: 2026-09-23
 last_activity_desc: Phase 24 execution started
-state_head: 0593168424289ad4b729b8c44a0b9ae85200eceb
+state_head: d7cd69038eff1f29fdce1b8abe446bad6ebd1e81
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 ## Current Position
 
 Phase: 24 (Artist Tags & Notes) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-09-23 — Phase 24 execution started
 
@@ -150,6 +150,7 @@ Last activity: 2026-09-23 — Phase 24 execution started
 | Phase 24 P01 | ~120min | 3 tasks | 23 files |
 | Phase 24 P02 | ~20min | 3 tasks | 8 files |
 | Phase 24 P04 | ~20min | 2 tasks | 10 files |
+| Phase 24 P03 | ~50min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -364,6 +365,7 @@ Recent decisions affecting current work:
 - [Phase 24]: 24-02: parseTagID generalized to take the path-param name (id vs tag_id) rather than a second near-duplicate parser
 - [Phase 24]: 24-02: each task's full query+service+handler+test work landed as one feat commit, matching 24-01's precedent -- workflow.tdd_mode is not enabled, so the plan-level RED/GREEN gate does not apply to this type: execute plan
 - [Phase 24]: [Phase 24-04]: TagChips uses route-level functional addTag/removeTag updaters (D-24) instead of whole-array optimistic snapshots, so concurrent chip removals on one row never clobber each other; focus-within self-reference used for the chip's own size since group-focus-within cannot target its own declaring element.
+- [Phase 24]: 24-03: GetWatchlistEntry copies ListWatchlist's select list byte-for-byte; sqlc.ListWatchlistRow(row) struct conversion in Service.get enforces D-26 projection parity at compile time
 
 ### Pending Todos
 
@@ -451,8 +453,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-23T21:56:19.569Z
-Stopped at: Completed 24-04-PLAN.md
+Last session: 2026-09-23T22:15:17.301Z
+Stopped at: Completed 24-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
