@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 24
 current_phase_name: Artist Tags & Notes
 status: executing
-stopped_at: Phase 24 UI-SPEC approved
-last_updated: "2026-09-23T17:29:34.773Z"
+stopped_at: Completed 24-01-PLAN.md
+last_updated: "2026-09-23T17:56:04.740Z"
 last_activity: 2026-09-23
 last_activity_desc: Phase 24 execution started
-state_head: 1c3fdacf205f01a2adee8fec2d84a0d91760ff08
+state_head: cbf07dcefddc7dca6a2e07aa218d8d919b797f35
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 ## Current Position
 
 Phase: 24 (Artist Tags & Notes) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 24
+Plan: 2 of 7
+Status: Ready to execute
 Last activity: 2026-09-23 — Phase 24 execution started
 
 ## Performance Metrics
@@ -147,6 +147,7 @@ Last activity: 2026-09-23 — Phase 24 execution started
 | Phase 23 P02 | 5min | 2 tasks | 2 files |
 | Phase 23 P03 | 9min | 3 tasks | 2 files |
 | Phase 23 P04 | 35min | 3 tasks | 5 files |
+| Phase 24 P01 | ~120min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -356,6 +357,8 @@ Recent decisions affecting current work:
 - [v1.6 Roadmap]: Flagged for the Phase 27 planner: the confirm step has its own write-timeout trap, separate from the resolve step (already locked as client-orchestrated). `watchlist.Service.Add` runs an artist-art match bounded by an 8s `matchTimeout` when no image URL is supplied, so looping it inside one bulk-confirm request brings back the 15s `writeTimeout` collision. Carry search-result image URLs through and skip or defer matching for the rest; the art backfill sweep only runs at startup.
 - [v1.6 Roadmap]: Open decisions left for discuss-phase rather than silently resolved: (1) the DB-layer mechanism for the 10-tags-per-artist cap (a CHECK can't count rows, so a trigger or an artist-row-locked guarded insert, which must also hold for Phase 26's bulk attach); (2) note lifetime on remove (research puts notes on the `watchlist` row, so they vanish while tags survive); (3) TAG-06 count scope (watched artists only, or every artist carrying the tag); (4) latest release vs. the retention window, plus partial-date handling; (5) multi-tag filter AND vs. OR; (6) bulk partial-outcome semantics for reversible actions; (7) paste-a-list confidence-tier rules and maximum paste size; (8) Phase 28 tag-read failure posture (recommendation: send without tags and log a Warn).
 - [v1.6 Roadmap]: Phases 24-27 carry UI hints, so run `/gsd-ui-phase` before planning each. Phase 27 is also flagged to run `/gsd-sketch` first on its review screen (research flag). Phase 28 is backend-only.
+- [Phase 24]: 24-01: Detach and DetachTag SQL landed a commit earlier than Task 3's literal position (no behavior/scope change); TagStore's HTTP-facing Detach method and route are still Task 3's deliverable. — Writing the attach/detach SQL trio together in Task 2 was simpler than splitting DetachTag out
+- [Phase 24]: 24-01: Live database collation confirmed en_US.utf8, closing 24-RESEARCH.md Assumption A1 -- non-ASCII tag identity tests are real proof
 
 ### Pending Todos
 
@@ -443,9 +446,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-23T01:46:56.903Z
-Stopped at: Phase 24 UI-SPEC approved
-Resume file: .planning/phases/24-artist-tags-notes/24-UI-SPEC.md
+Last session: 2026-09-23T17:56:04.712Z
+Stopped at: Completed 24-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
