@@ -18,6 +18,7 @@ import {
   listTags,
   listWatchlist,
   removeWatchlist,
+  renameTag,
   type WatchlistEntry,
 } from "~/lib/api"
 import { renderRoute } from "~/lib/test/routeStub"
@@ -34,6 +35,7 @@ const mockDetachTag = vi.mocked(detachTag)
 const mockListTags = vi.mocked(listTags)
 const mockAttachTag = vi.mocked(attachTag)
 const mockDeleteTag = vi.mocked(deleteTag)
+const mockRenameTag = vi.mocked(renameTag)
 
 const entry: WatchlistEntry = {
   id: 42,
@@ -310,6 +312,38 @@ describe("Watchlist route", () => {
     await waitFor(() =>
       expect(screen.queryAllByText("reggaeton")).toHaveLength(0)
     )
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens Manage tags and renames a tag carried by two entries, so both cards show the new name with no extra listWatchlist call", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "Latin" }] },
+      { ...second, tags: [{ id: 1, name: "Latin" }] },
+    ])
+    mockListTags.mockResolvedValue([{ id: 1, name: "Latin", carrier_count: 2 }])
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "renamed",
+      tag: { id: 1, name: "latin" },
+    })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    expect(screen.getAllByText("Latin")).toHaveLength(2)
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag Latin" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for Latin" })
+    await userEvent.clear(input)
+    await userEvent.type(input, "latin{Enter}")
+
+    await waitFor(() => expect(screen.queryAllByText("Latin")).toHaveLength(0))
+    expect(screen.getAllByText("latin")).toHaveLength(3)
     expect(mockListWatchlist).toHaveBeenCalledTimes(1)
   })
 })

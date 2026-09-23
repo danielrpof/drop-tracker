@@ -8,6 +8,7 @@ import {
   listEvents,
   listTags,
   removeWatchlist,
+  renameTag,
   type EventsPage,
   type TagSummary,
 } from "~/lib/api"
@@ -68,6 +69,34 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     expect(err).toBeInstanceOf(ApiError)
     expect((err as ApiError).status).toBe(500)
     expect((err as ApiError).message).toBe("Internal Server Error")
+    expect((err as ApiError).body).toBeUndefined()
+  })
+
+  it("keeps the parsed JSON error body on ApiError.body for a non-2xx JSON response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: "tag name already in use",
+          target: { id: 9, name: "trap" },
+          carrier_count_after_merge: 7,
+        }),
+        { status: 409 }
+      )
+    )
+
+    const err = await listEvents().then(
+      () => {
+        throw new Error("expected listEvents() to reject")
+      },
+      (e: unknown) => e
+    )
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).body).toEqual({
+      error: "tag name already in use",
+      target: { id: 9, name: "trap" },
+      carrier_count_after_merge: 7,
+    })
   })
 
   it("resolves to undefined for a no-content response without attempting to parse a body", async () => {
@@ -146,6 +175,60 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     expect(new Headers(init.headers).get("X-Requested-With")).toBe(
       "drop-tracker"
     )
+  })
+
+  it("renameTag PATCHes /tags/{id} with the name body and CSRF header, resolving a plain rename as {kind: 'renamed', tag}", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 3, name: "latin" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(renameTag(3, "latin")).resolves.toEqual({
+      kind: "renamed",
+      tag: { id: 3, name: "latin" },
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/tags/3")
+    expect(init.method).toBe("PATCH")
+    expect(JSON.parse(init.body as string)).toEqual({ name: "latin" })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("renameTag maps a 409 collision body to {kind: 'collision', target, carrierCountAfterMerge}", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: "tag name already in use",
+          target: { id: 9, name: "trap" },
+          carrier_count_after_merge: 7,
+        }),
+        { status: 409 }
+      )
+    )
+
+    await expect(renameTag(5, "TRAP")).resolves.toEqual({
+      kind: "collision",
+      target: { id: 9, name: "trap" },
+      carrierCountAfterMerge: 7,
+    })
+  })
+
+  it("renameTag rethrows a non-collision failure", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "tag not found" }), {
+        status: 404,
+      })
+    )
+
+    await expect(renameTag(5, "latin")).rejects.toMatchObject({
+      status: 404,
+      message: "tag not found",
+    })
   })
 
   it("resolves an OK response to the parsed body", async () => {

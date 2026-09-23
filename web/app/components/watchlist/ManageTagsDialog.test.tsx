@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
-import { deleteTag, listTags, type TagSummary } from "~/lib/api"
+import { deleteTag, listTags, renameTag, type TagSummary } from "~/lib/api"
 
 import { ManageTagsDialog } from "./ManageTagsDialog"
 
@@ -10,25 +10,29 @@ vi.mock("~/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/api")>()),
   listTags: vi.fn(),
   deleteTag: vi.fn(),
+  renameTag: vi.fn(),
 }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const mockListTags = vi.mocked(listTags)
 const mockDeleteTag = vi.mocked(deleteTag)
+const mockRenameTag = vi.mocked(renameTag)
 
 function renderDialog() {
   const onOpenChange = vi.fn()
   const onLoaded = vi.fn()
   const onDeleted = vi.fn()
+  const onRenamed = vi.fn()
   render(
     <ManageTagsDialog
       open
       onOpenChange={onOpenChange}
       onLoaded={onLoaded}
       onDeleted={onDeleted}
+      onRenamed={onRenamed}
     />
   )
-  return { onOpenChange, onLoaded, onDeleted }
+  return { onOpenChange, onLoaded, onDeleted, onRenamed }
 }
 
 describe("ManageTagsDialog", () => {
@@ -135,5 +139,163 @@ describe("ManageTagsDialog", () => {
         "No artists on your watchlist carry this tag, and this can't be undone."
       )
     ).toBeInTheDocument()
+  })
+
+  it("opens rename mode with the current name selected, and disables Save for the same name (casing included) or blank", async () => {
+    mockListTags.mockResolvedValue([{ id: 3, name: "Latin", carrier_count: 4 }])
+
+    renderDialog()
+
+    await screen.findByText("Latin")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag Latin" })
+    )
+
+    const input = screen.getByRole("textbox", { name: "New name for Latin" })
+    expect(input).toHaveValue("Latin")
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await userEvent.clear(input)
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await userEvent.type(input, "Latin")
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await userEvent.type(input, "o")
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+  })
+
+  it("renames a tag on Enter: shows Saving..., toasts, updates the row, refocuses Rename, and calls onRenamed", async () => {
+    mockListTags.mockResolvedValue([{ id: 3, name: "Latin", carrier_count: 4 }])
+    let resolveRename!: (v: {
+      kind: "renamed"
+      tag: { id: number; name: string }
+    }) => void
+    mockRenameTag.mockReturnValueOnce(
+      new Promise((res) => {
+        resolveRename = res
+      })
+    )
+
+    const { onRenamed } = renderDialog()
+
+    await screen.findByText("Latin")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag Latin" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for Latin" })
+    await userEvent.clear(input)
+    await userEvent.type(input, "latin{Enter}")
+
+    await waitFor(() => expect(mockRenameTag).toHaveBeenCalledWith(3, "latin"))
+    expect(input).toHaveAttribute("readonly")
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled()
+
+    resolveRename({ kind: "renamed", tag: { id: 3, name: "latin" } })
+
+    await waitFor(() => expect(screen.getByText("latin")).toBeInTheDocument())
+    expect(screen.queryByText("Latin")).not.toBeInTheDocument()
+    expect(onRenamed).toHaveBeenCalledWith({ id: 3, name: "latin" })
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Rename tag latin" })
+      ).toHaveFocus()
+    )
+  })
+
+  it("starting a rename on another row cancels the first and discards its text", async () => {
+    mockListTags.mockResolvedValue([
+      { id: 1, name: "drill", carrier_count: 2 },
+      { id: 2, name: "trap", carrier_count: 5 },
+    ])
+
+    renderDialog()
+
+    await screen.findByText("drill")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag drill" })
+    )
+    const firstInput = screen.getByRole("textbox", {
+      name: "New name for drill",
+    })
+    await userEvent.clear(firstInput)
+    await userEvent.type(firstInput, "unsaved")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag trap" })
+    )
+
+    expect(
+      screen.queryByRole("textbox", { name: "New name for drill" })
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("drill")).toBeInTheDocument()
+    expect(
+      screen.getByRole("textbox", { name: "New name for trap" })
+    ).toBeInTheDocument()
+  })
+
+  it("Esc in the rename input cancels the rename, focuses that row's Rename, and leaves the dialog open", async () => {
+    mockListTags.mockResolvedValue([{ id: 1, name: "drill", carrier_count: 2 }])
+
+    renderDialog()
+
+    await screen.findByText("drill")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag drill" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for drill" })
+    await userEvent.type(input, "{Escape}")
+
+    expect(
+      screen.queryByRole("textbox", { name: "New name for drill" })
+    ).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Rename tag drill" })
+      ).toHaveFocus()
+    )
+    expect(screen.getByText("Manage tags")).toBeInTheDocument()
+    expect(mockRenameTag).not.toHaveBeenCalled()
+  })
+
+  it("keeps a rejected rename's input open with its text and toasts the failure", async () => {
+    mockListTags.mockResolvedValue([{ id: 1, name: "drill", carrier_count: 2 }])
+    mockRenameTag.mockRejectedValueOnce(new Error("network down"))
+
+    renderDialog()
+
+    await screen.findByText("drill")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag drill" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for drill" })
+    await userEvent.clear(input)
+    await userEvent.type(input, "trap{Enter}")
+
+    await waitFor(() => expect(mockRenameTag).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(
+        screen.getByRole("textbox", { name: "New name for drill" })
+      ).toHaveValue("trap")
+    )
+  })
+
+  it("shows the {n}/32 counter once the rename input reaches 25 characters", async () => {
+    mockListTags.mockResolvedValue([{ id: 1, name: "drill", carrier_count: 2 }])
+
+    renderDialog()
+
+    await screen.findByText("drill")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag drill" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for drill" })
+
+    expect(screen.queryByText("24/32")).not.toBeInTheDocument()
+
+    await userEvent.clear(input)
+    await userEvent.type(input, "a".repeat(25))
+
+    expect(screen.getByText("25/32")).toBeInTheDocument()
   })
 })
