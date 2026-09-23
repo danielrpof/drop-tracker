@@ -115,12 +115,26 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 **Plans:** 7 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 24-01-PLAN.md — Migration 000010 (tags, artist_tags, cap trigger, watchlist.note) and attach/detach through the API, enforced by the DB (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 24-02-PLAN.md — Tag vocabulary API: GET /tags with watched-only counts, rename with 409 collision, merge, delete (wave 2)
-- [ ] 24-03-PLAN.md — Notes API: PUT /watchlist/{id}/note, POST note for Undo, shared tags+note projection on POST/PATCH (wave 3)
 - [ ] 24-04-PLAN.md — Card chips: tags render under the artist name and × removes one (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 24-03-PLAN.md — Notes API: PUT /watchlist/{id}/note, POST note for Undo, shared tags+note projection on POST/PATCH (wave 3)
 - [ ] 24-05-PLAN.md — Card "+ tag" autocomplete: create or pick, caps, lazy vocabulary (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 24-06-PLAN.md — Manage tags dialog: rename, confirmed merge, delete, reusable ConfirmDialog (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 24-07-PLAN.md — Card note display/editor, Undo restores the note, embedded bundle + full gate (wave 5)
 
 **UI hint**: yes
