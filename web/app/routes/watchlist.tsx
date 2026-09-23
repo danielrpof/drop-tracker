@@ -37,6 +37,7 @@ export default function Watchlist() {
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(
     null
   )
+  const [statusMessage, setStatusMessage] = useState("")
 
   const refresh = useCallback(() => {
     setError(false)
@@ -102,9 +103,11 @@ export default function Watchlist() {
     )
   }
 
-  // announce is a no-op stub for Task 1 -- Task 2 wires this to a
-  // route-level role="status" region (UI-SPEC [R6]).
-  function announce(_message: string) {}
+  // announce feeds the single route-level status region below (UI-SPEC
+  // [R6]: one contextual, atomic message, never one live region per chip).
+  function announce(message: string) {
+    setStatusMessage(message)
+  }
 
   // handleAddSearchResult wires SearchResultsColumns' "Add to Watchlist"
   // click into addWatchlist, sending neither preference axis so the API
@@ -205,6 +208,10 @@ export default function Watchlist() {
   return (
     <div className="flex flex-col gap-6 p-8">
       <h1 className="text-display font-semibold text-foreground">Watchlist</h1>
+
+      <div role="status" aria-atomic="true" className="sr-only">
+        {statusMessage}
+      </div>
 
       <div className="flex flex-col gap-6">
         <SearchBox onResults={setSearchResponse} />

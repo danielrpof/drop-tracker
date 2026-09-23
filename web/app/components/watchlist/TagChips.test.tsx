@@ -158,6 +158,7 @@ describe("TagChips — focus, announcements, and long-name handling", () => {
   }
 
   it("moves focus to the new first chip's × when the first of three chips is removed", async () => {
+    mockDetachTag.mockResolvedValueOnce(undefined)
     const onAnnounce = vi.fn()
     render(
       <Harness
@@ -172,6 +173,7 @@ describe("TagChips — focus, announcements, and long-name handling", () => {
   })
 
   it("moves focus to the previous chip's × when the last of three chips is removed", async () => {
+    mockDetachTag.mockResolvedValueOnce(undefined)
     const onAnnounce = vi.fn()
     render(
       <Harness

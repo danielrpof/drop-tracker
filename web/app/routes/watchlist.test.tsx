@@ -116,6 +116,19 @@ describe("Watchlist route", () => {
     expect(screen.getByText("Search above to add one.")).toBeInTheDocument()
   })
 
+  it("mounts exactly one route-level status region, present before the watchlist even loads (UI-SPEC [R6])", async () => {
+    mockListWatchlist.mockResolvedValue([entry])
+
+    renderRoute(Watchlist, "/")
+
+    const regions = screen.getAllByRole("status")
+    expect(regions).toHaveLength(1)
+    expect(regions[0]).toHaveAttribute("aria-atomic", "true")
+
+    await screen.findByText("Drake")
+    expect(screen.getAllByRole("status")).toHaveLength(1)
+  })
+
   it("re-fetches the true server state when removeWatchlist fails, so the row reappears", async () => {
     mockListWatchlist.mockResolvedValueOnce([entry])
     mockRemoveWatchlist.mockRejectedValueOnce(new Error("network down"))
