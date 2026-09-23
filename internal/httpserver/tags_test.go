@@ -614,10 +614,12 @@ type fakeTagStore struct {
 	listFunc    func(ctx context.Context) ([]tags.Summary, error)
 	renameFunc  func(ctx context.Context, id int64, name string) (tags.Tag, error)
 	deleteFunc  func(ctx context.Context, id int64) (int64, error)
+	mergeFunc   func(ctx context.Context, sourceID, targetID int64) (tags.Summary, error)
 	attachCalls *int32
 	detachCalls *int32
 	renameCalls *int32
 	deleteCalls *int32
+	mergeCalls  *int32
 }
 
 func (f fakeTagStore) Attach(ctx context.Context, entryID int64, name string) (tags.AttachResult, error) {
@@ -665,6 +667,16 @@ func (f fakeTagStore) Delete(ctx context.Context, id int64) (int64, error) {
 		return f.deleteFunc(ctx, id)
 	}
 	return 0, nil
+}
+
+func (f fakeTagStore) Merge(ctx context.Context, sourceID, targetID int64) (tags.Summary, error) {
+	if f.mergeCalls != nil {
+		atomic.AddInt32(f.mergeCalls, 1)
+	}
+	if f.mergeFunc != nil {
+		return f.mergeFunc(ctx, sourceID, targetID)
+	}
+	return tags.Summary{ID: targetID, Name: "merged", CarrierCount: 0}, nil
 }
 
 var _ httpserver.TagStore = fakeTagStore{}
@@ -1043,5 +1055,282 @@ func TestTags_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&detachCalls); got != 0 {
 		t.Fatalf("store.Detach called %d times, want 0", got)
+	}
+}
+
+// --- 24-02 Task 3: Merge, and gate/CSRF coverage for all four vocabulary routes ---
+
+func TestTags_Merge_Success200(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{mergeFunc: func(_ context.Context, sourceID, targetID int64) (tags.Summary, error) {
+		return tags.Summary{ID: targetID, Name: "trap", CarrierCount: 3}, nil
+	}}})
+
+	resp, err := http.Post(ts.URL+"/tags/2/merge", "application/json", strings.NewReader(`{"into":1}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got tagSummaryWire
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != 1 || got.Name != "trap" || got.CarrierCount != 3 {
+		t.Fatalf("body = %+v, want {1 trap 3}", got)
+	}
+}
+
+func TestTags_Merge_SelfReturns400(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{mergeFunc: func(context.Context, int64, int64) (tags.Summary, error) {
+		return tags.Summary{}, tags.ErrMergeIntoSelf
+	}}})
+
+	resp, err := http.Post(ts.URL+"/tags/1/merge", "application/json", strings.NewReader(`{"into":1}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestTags_Merge_UnknownTargetReturns404(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{mergeFunc: func(context.Context, int64, int64) (tags.Summary, error) {
+		return tags.Summary{}, tags.ErrTagNotFound
+	}}})
+
+	resp, err := http.Post(ts.URL+"/tags/1/merge", "application/json", strings.NewReader(`{"into":999}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestTags_Merge_ZeroIntoReturns400(t *testing.T) {
+	var calls int32
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{mergeCalls: &calls}})
+
+	resp, err := http.Post(ts.URL+"/tags/1/merge", "application/json", strings.NewReader(`{"into":0}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("store.Merge called %d times, want 0", got)
+	}
+}
+
+func TestTags_Merge_MissingIntoKeyReturns400(t *testing.T) {
+	var calls int32
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{mergeCalls: &calls}})
+
+	resp, err := http.Post(ts.URL+"/tags/1/merge", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("store.Merge called %d times, want 0", got)
+	}
+}
+
+func TestTags_Merge_BadJSONReturns400(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{})
+
+	resp, err := http.Post(ts.URL+"/tags/1/merge", "application/json", strings.NewReader(`{"into":`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestTags_Merge_NonNumericIDReturns400(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{})
+
+	resp, err := http.Post(ts.URL+"/tags/abc/merge", "application/json", strings.NewReader(`{"into":1}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// TestTags_MergeEndToEnd proves a real merge against Postgres: the target's
+// carrier count unions both tags' watched artists, the source tag is gone,
+// and a 10-tag artist carrying only the source still merges (ADR test 3, at
+// the HTTP layer).
+func TestTags_MergeEndToEnd(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_http_merge_test")
+	ctx := context.Background()
+
+	watchlistSvc := watchlist.NewService(sqlc.New(pool))
+	tagsSvc := tags.NewService(pool)
+	srv := httpserver.New(pool, watchlistSvc, stubEventsStore{}, nil, discardLogger(), httpserver.WithTags(tagsSvc))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	a, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-merge-a", Name: "Merge A"})
+	if err != nil {
+		t.Fatalf("seed a: %v", err)
+	}
+	b, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-merge-b", Name: "Merge B"})
+	if err != nil {
+		t.Fatalf("seed b: %v", err)
+	}
+
+	trap, err := tagsSvc.Attach(ctx, a.ID, "http-trap")
+	if err != nil {
+		t.Fatalf("attach trap: %v", err)
+	}
+	rap, err := tagsSvc.Attach(ctx, b.ID, "http-rap")
+	if err != nil {
+		t.Fatalf("attach rap: %v", err)
+	}
+
+	resp, err := http.Post(fmt.Sprintf("%s/tags/%d/merge", ts.URL, rap.Tag.ID), "application/json", strings.NewReader(fmt.Sprintf(`{"into":%d}`, trap.Tag.ID)))
+	if err != nil {
+		t.Fatalf("POST merge: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got tagSummaryWire
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != trap.Tag.ID || got.Name != "http-trap" || got.CarrierCount != 2 {
+		t.Fatalf("merge summary = %+v, want {%d http-trap 2}", got, trap.Tag.ID)
+	}
+
+	listResp, err := http.Get(ts.URL + "/tags")
+	if err != nil {
+		t.Fatalf("GET /tags: %v", err)
+	}
+	defer func() { _ = listResp.Body.Close() }()
+	var vocab []tagSummaryWire
+	if err := json.NewDecoder(listResp.Body).Decode(&vocab); err != nil {
+		t.Fatalf("decode vocab: %v", err)
+	}
+	for _, s := range vocab {
+		if s.Name == "http-rap" {
+			t.Fatalf("http-rap still present in vocabulary after merge: %+v", s)
+		}
+	}
+}
+
+// TestTags_Vocabulary_Gated401NoCookie proves all four vocabulary routes
+// answer 401, not 403, without a session.
+func TestTags_Vocabulary_Gated401NoCookie(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{passphrase: settingsTestPassphrase})
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{"list", http.MethodGet, "/tags", ""},
+		{"rename", http.MethodPatch, "/tags/1", `{"name":"x"}`},
+		{"merge", http.MethodPost, "/tags/1/merge", `{"into":2}`},
+		{"delete", http.MethodDelete, "/tags/1", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var body io.Reader
+			if tc.body != "" {
+				body = strings.NewReader(tc.body)
+			}
+			req, err := http.NewRequest(tc.method, ts.URL+tc.path, body)
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("%s %s status = %d, want 401", tc.method, tc.path, resp.StatusCode)
+			}
+		})
+	}
+}
+
+// TestTags_Vocabulary_GatedForbiddenWithoutCSRFHeader proves the three
+// vocabulary write routes answer 403 and never reach the store without
+// X-Requested-With, even with a valid session cookie. GET /tags is a read
+// verb, so it is not part of this check (the CSRF-header requirement is a
+// no-op for it, mirroring TestTags_Gated401NoCookie's own /status
+// precedent).
+func TestTags_Vocabulary_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
+	var renameCalls, mergeCalls, deleteCalls int32
+	store := fakeTagStore{renameCalls: &renameCalls, mergeCalls: &mergeCalls, deleteCalls: &deleteCalls}
+	ts := newTagsServer(t, tagsServerOpts{passphrase: settingsTestPassphrase, store: store})
+	cookie := loginForSettings(t, ts)
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{"rename", http.MethodPatch, "/tags/1", `{"name":"x"}`},
+		{"merge", http.MethodPost, "/tags/1/merge", `{"into":2}`},
+		{"delete", http.MethodDelete, "/tags/1", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var body io.Reader
+			if tc.body != "" {
+				body = strings.NewReader(tc.body)
+			}
+			req, err := http.NewRequest(tc.method, ts.URL+tc.path, body)
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			req.AddCookie(cookie)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("%s %s status = %d, want 403", tc.method, tc.path, resp.StatusCode)
+			}
+		})
+	}
+
+	if got := atomic.LoadInt32(&renameCalls); got != 0 {
+		t.Fatalf("store.Rename called %d times, want 0", got)
+	}
+	if got := atomic.LoadInt32(&mergeCalls); got != 0 {
+		t.Fatalf("store.Merge called %d times, want 0", got)
+	}
+	if got := atomic.LoadInt32(&deleteCalls); got != 0 {
+		t.Fatalf("store.Delete called %d times, want 0", got)
 	}
 }

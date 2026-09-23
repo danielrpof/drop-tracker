@@ -29,6 +29,7 @@ type TagStore interface {
 	List(ctx context.Context) ([]tags.Summary, error)
 	Rename(ctx context.Context, id int64, name string) (tags.Tag, error)
 	Delete(ctx context.Context, id int64) (int64, error)
+	Merge(ctx context.Context, sourceID, targetID int64) (tags.Summary, error)
 }
 
 // WithTags supplies the tags domain dependency backing POST
@@ -288,6 +289,56 @@ func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(deleteTagResponse{CarrierCount: count})
+}
+
+// mergeTagRequest is the request DTO for POST /tags/{id}/merge.
+type mergeTagRequest struct {
+	Into int64 `json:"into"`
+}
+
+// handleMergeTag implements POST /tags/{id}/merge (TAG-05, D-19, D-22,
+// D-23): the confirmed-merge counterpart to a 409 rename collision. {id} is
+// the source tag; into is the target.
+func (s *Server) handleMergeTag(w http.ResponseWriter, r *http.Request) {
+	if s.tags == nil {
+		writeError(w, http.StatusServiceUnavailable, "tags not available")
+		return
+	}
+
+	id, err := parseTagID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid tag id")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxTagBodyBytes)
+	var req mergeTagRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Into < 1 {
+		writeError(w, http.StatusBadRequest, "invalid target tag id")
+		return
+	}
+
+	summary, err := s.tags.Merge(r.Context(), id, req.Into)
+	switch {
+	case errors.Is(err, tags.ErrMergeIntoSelf):
+		writeError(w, http.StatusBadRequest, "cannot merge a tag into itself")
+		return
+	case errors.Is(err, tags.ErrTagNotFound):
+		writeError(w, http.StatusNotFound, "tag not found")
+		return
+	case err != nil:
+		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(summary)
 }
 
 // tagNameErrorMessage maps a tags name-validation sentinel to its fixed,

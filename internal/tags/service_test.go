@@ -594,3 +594,255 @@ func TestService_Delete_TwiceReturnsErrTagNotFoundSecondTime(t *testing.T) {
 		t.Fatalf("second Delete: err = %v, want ErrTagNotFound", err)
 	}
 }
+
+// --- Task 3: Merge ---
+
+func TestService_Merge_UnionsMembershipsAndDeletesSource(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	a, _ := seedEntry(t, ctx, pool, "merge-union-a")
+	b, _ := seedEntry(t, ctx, pool, "merge-union-b")
+	c, _ := seedEntry(t, ctx, pool, "merge-union-c")
+
+	trap, err := svc.Attach(ctx, a, "trap")
+	if err != nil {
+		t.Fatalf("attach trap to a: %v", err)
+	}
+	if _, err := svc.Attach(ctx, b, "trap"); err != nil {
+		t.Fatalf("attach trap to b: %v", err)
+	}
+	rap, err := svc.Attach(ctx, b, "rap")
+	if err != nil {
+		t.Fatalf("attach rap to b: %v", err)
+	}
+	if _, err := svc.Attach(ctx, c, "rap"); err != nil {
+		t.Fatalf("attach rap to c: %v", err)
+	}
+
+	summary, err := svc.Merge(ctx, rap.Tag.ID, trap.Tag.ID)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if summary.ID != trap.Tag.ID || summary.Name != "trap" || summary.CarrierCount != 3 {
+		t.Fatalf("summary = %+v, want {%d trap 3}", summary, trap.Tag.ID)
+	}
+
+	if n := countTagsByLowerName(t, ctx, pool, "rap"); n != 0 {
+		t.Fatalf("rap tag rows after merge = %d, want 0 (source deleted)", n)
+	}
+	if n := countArtistTagsByTagID(t, ctx, pool, trap.Tag.ID); n != 3 {
+		t.Fatalf("trap link count after merge = %d, want 3 (a, b, c)", n)
+	}
+
+	// b carried both; after the merge it has exactly one link, to trap.
+	var bLinks int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags at JOIN watchlist w ON w.artist_id = at.artist_id WHERE w.id = $1", b).Scan(&bLinks); err != nil {
+		t.Fatalf("count b's links: %v", err)
+	}
+	if bLinks != 1 {
+		t.Fatalf("b's total link count after merge = %d, want 1 (duplicate collapsed)", bLinks)
+	}
+}
+
+// TestService_Merge_AtCap is ADR 0004 required test 3: a 10-tag artist that
+// carries the source but not the target still merges successfully and ends
+// with 10 links, one of them the target.
+func TestService_Merge_AtCap(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "merge-at-cap")
+
+	rap, err := svc.Attach(ctx, entryID, "at-cap-rap")
+	if err != nil {
+		t.Fatalf("attach rap: %v", err)
+	}
+	for i := 0; i < tags.MaxTagsPerArtist-1; i++ {
+		if _, err := svc.Attach(ctx, entryID, fmt.Sprintf("at-cap-filler-%02d", i)); err != nil {
+			t.Fatalf("seed filler %d: %v", i, err)
+		}
+	}
+	trapEntry, _ := seedEntry(t, ctx, pool, "merge-at-cap-target-seed")
+	trap, err := svc.Attach(ctx, trapEntry, "at-cap-trap")
+	if err != nil {
+		t.Fatalf("attach trap: %v", err)
+	}
+
+	summary, err := svc.Merge(ctx, rap.Tag.ID, trap.Tag.ID)
+	if err != nil {
+		t.Fatalf("Merge at cap: %v", err)
+	}
+	if summary.ID != trap.Tag.ID {
+		t.Fatalf("summary.ID = %d, want %d", summary.ID, trap.Tag.ID)
+	}
+
+	var linkCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags at JOIN watchlist w ON w.artist_id = at.artist_id WHERE w.id = $1", entryID).Scan(&linkCount); err != nil {
+		t.Fatalf("count links: %v", err)
+	}
+	if linkCount != tags.MaxTagsPerArtist {
+		t.Fatalf("link count = %d, want %d", linkCount, tags.MaxTagsPerArtist)
+	}
+	if n := countArtistTagsByTagID(t, ctx, pool, trap.Tag.ID); n < 1 {
+		t.Fatalf("trap link count = %d, want at least 1", n)
+	}
+}
+
+// TestService_Merge_AtCapBothSourceAndTarget covers the companion case: an
+// artist already carrying both tags loses one link on merge (10 -> 9).
+func TestService_Merge_AtCapBothSourceAndTarget(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "merge-at-cap-both")
+
+	rap, err := svc.Attach(ctx, entryID, "both-rap")
+	if err != nil {
+		t.Fatalf("attach rap: %v", err)
+	}
+	trap, err := svc.Attach(ctx, entryID, "both-trap")
+	if err != nil {
+		t.Fatalf("attach trap: %v", err)
+	}
+	for i := 0; i < tags.MaxTagsPerArtist-2; i++ {
+		if _, err := svc.Attach(ctx, entryID, fmt.Sprintf("both-filler-%02d", i)); err != nil {
+			t.Fatalf("seed filler %d: %v", i, err)
+		}
+	}
+
+	if _, err := svc.Merge(ctx, rap.Tag.ID, trap.Tag.ID); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	var linkCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags at JOIN watchlist w ON w.artist_id = at.artist_id WHERE w.id = $1", entryID).Scan(&linkCount); err != nil {
+		t.Fatalf("count links: %v", err)
+	}
+	if linkCount != tags.MaxTagsPerArtist-1 {
+		t.Fatalf("link count = %d, want %d", linkCount, tags.MaxTagsPerArtist-1)
+	}
+}
+
+func TestService_Merge_ZeroLinkSourceSucceeds(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "merge-zero-link")
+	target, err := svc.Attach(ctx, entryID, "zero-link-target")
+	if err != nil {
+		t.Fatalf("attach target: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO tags (name) VALUES ($1)", "zero-link-source"); err != nil {
+		t.Fatalf("seed zero-link source tag: %v", err)
+	}
+	var sourceID int64
+	if err := pool.QueryRow(ctx, "SELECT id FROM tags WHERE name = $1", "zero-link-source").Scan(&sourceID); err != nil {
+		t.Fatalf("read source id: %v", err)
+	}
+
+	summary, err := svc.Merge(ctx, sourceID, target.Tag.ID)
+	if err != nil {
+		t.Fatalf("Merge zero-link source: %v", err)
+	}
+	if summary.CarrierCount != 1 {
+		t.Fatalf("summary.CarrierCount = %d, want 1 (unchanged)", summary.CarrierCount)
+	}
+	if n := countTagsByLowerName(t, ctx, pool, "zero-link-source"); n != 0 {
+		t.Fatalf("source tag rows after merge = %d, want 0", n)
+	}
+}
+
+func TestService_Merge_IntoSelfReturnsErrMergeIntoSelf(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "merge-self")
+	result, err := svc.Attach(ctx, entryID, "self-tag")
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+
+	if _, err := svc.Merge(ctx, result.Tag.ID, result.Tag.ID); !errors.Is(err, tags.ErrMergeIntoSelf) {
+		t.Fatalf("Merge into self: err = %v, want ErrMergeIntoSelf", err)
+	}
+}
+
+func TestService_Merge_MissingSourceReturnsErrTagNotFound(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "merge-missing-source")
+	target, err := svc.Attach(ctx, entryID, "missing-source-target")
+	if err != nil {
+		t.Fatalf("attach target: %v", err)
+	}
+
+	if _, err := svc.Merge(ctx, 987654321, target.Tag.ID); !errors.Is(err, tags.ErrTagNotFound) {
+		t.Fatalf("Merge missing source: err = %v, want ErrTagNotFound", err)
+	}
+}
+
+func TestService_Merge_MissingTargetReturnsErrTagNotFound(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	entryID, _ := seedEntry(t, ctx, pool, "merge-missing-target")
+	source, err := svc.Attach(ctx, entryID, "missing-target-source")
+	if err != nil {
+		t.Fatalf("attach source: %v", err)
+	}
+
+	if _, err := svc.Merge(ctx, source.Tag.ID, 987654321); !errors.Is(err, tags.ErrTagNotFound) {
+		t.Fatalf("Merge missing target: err = %v, want ErrTagNotFound", err)
+	}
+}
+
+// TestService_Merge_MatchesPriorCollisionCount proves a 409 rename
+// collision's carrier_count_after_merge equals what a subsequent confirmed
+// Merge actually returns for the identical pair.
+func TestService_Merge_MatchesPriorCollisionCount(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	a, _ := seedEntry(t, ctx, pool, "merge-matches-a")
+	b, _ := seedEntry(t, ctx, pool, "merge-matches-b")
+	c, _ := seedEntry(t, ctx, pool, "merge-matches-c")
+
+	trap, err := svc.Attach(ctx, a, "matches-trap")
+	if err != nil {
+		t.Fatalf("attach trap to a: %v", err)
+	}
+	if _, err := svc.Attach(ctx, b, "matches-trap"); err != nil {
+		t.Fatalf("attach trap to b: %v", err)
+	}
+	rap, err := svc.Attach(ctx, b, "matches-rap")
+	if err != nil {
+		t.Fatalf("attach rap to b: %v", err)
+	}
+	if _, err := svc.Attach(ctx, c, "matches-rap"); err != nil {
+		t.Fatalf("attach rap to c: %v", err)
+	}
+
+	_, renameErr := svc.Rename(ctx, rap.Tag.ID, "matches-trap")
+	var collision *tags.CollisionError
+	if !errors.As(renameErr, &collision) {
+		t.Fatalf("Rename: err = %v, want *tags.CollisionError", renameErr)
+	}
+
+	summary, err := svc.Merge(ctx, rap.Tag.ID, trap.Tag.ID)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if summary.CarrierCount != collision.CarrierCountAfterMerge {
+		t.Fatalf("Merge carrier_count = %d, want %d (matching prior collision)", summary.CarrierCount, collision.CarrierCountAfterMerge)
+	}
+}

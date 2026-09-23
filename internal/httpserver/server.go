@@ -290,6 +290,7 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	r.Get("/tags", s.handleListTags)
 	r.Patch("/tags/{id}", s.handleRenameTag)
 	r.Delete("/tags/{id}", s.handleDeleteTag)
+	r.Post("/tags/{id}/merge", s.handleMergeTag)
 }
 
 // securityResponseHeaders sets response headers that apply to every route in

@@ -61,6 +61,9 @@ type Querier interface {
 	// (D-21 idempotent attach). The artist_tags_cap_trigger (migration 000010)
 	// enforces the 10-tag cap; this statement never counts anything itself.
 	AttachTag(ctx context.Context, arg AttachTagParams) (int64, error)
+	// Watched carriers of one tag (D-11), used to report the merge target's
+	// post-merge count.
+	CountCarriers(ctx context.Context, tagID int64) (int64, error)
 	// Watched carriers across one or more tags, each artist counted once even
 	// when it carries more than one of the given tags (union count, D-19/SC3).
 	CountCarriersForTags(ctx context.Context, tagIds []int64) (int64, error)
@@ -69,6 +72,11 @@ type Querier interface {
 	// so counting its result would pull every row just to discard it.
 	CountWatchlist(ctx context.Context) (int64, error)
 	CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error)
+	// Removes the source's links for artists that already carry the target --
+	// these would otherwise become duplicate (artist_id, target) rows once
+	// RepointSourceLinks runs.
+	DeleteDuplicateSourceLinks(ctx context.Context, arg DeleteDuplicateSourceLinksParams) (int64, error)
+	DeleteTag(ctx context.Context, id int64) (int64, error)
 	// Both CTEs read the same pre-statement snapshot (Postgres WITH semantics):
 	// counted's SELECT never sees deleted's cascade removal of artist_tags, so
 	// the reported count is exactly the watched-carrier count the delete
@@ -232,6 +240,13 @@ type Querier interface {
 	// pairs them index-for-index, and a future edit to one without the other
 	// would silently mispair ids with names (24-RESEARCH.md Pitfall 4).
 	ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
+	// Merge (D-19, ADR 0004): delete duplicate source links, repoint the rest,
+	// delete the source tag -- never insert, so a 10-tag artist merging in a
+	// tag it already carries never transiently holds 11 links.
+	// ORDER BY id FOR UPDATE takes both tag locks in id order so two concurrent
+	// merges sharing a tag cannot deadlock; the lock also parks a concurrent
+	// attach/rename of either tag until this transaction commits.
+	LockTagsForMerge(ctx context.Context, ids []int64) ([]LockTagsForMergeRow, error)
 	// Precondition: only ever called after discord.Client.Send has confirmed a
 	// 204 for this row (D-09) -- never before. The AND notified_at IS NULL
 	// predicate is load-bearing, not decorative: it makes the ack idempotent, so
@@ -253,6 +268,11 @@ type Querier interface {
 	// *CollisionError (D-09, D-22). A case-only rename of the same row cannot
 	// conflict with its own index entry.
 	RenameTag(ctx context.Context, arg RenameTagParams) (RenameTagRow, error)
+	// Rewrites the source's remaining links to the target via UPDATE, never
+	// INSERT (D-19) -- an UPDATE never fires the cap trigger's BEFORE INSERT
+	// check, which is why this is the only statement shape that cannot
+	// transiently exceed the cap.
+	RepointSourceLinks(ctx context.Context, arg RepointSourceLinksParams) (int64, error)
 	// Full-object PUT semantics (no partial-update ambiguity to resolve), and the
 	// fixed id = 1 predicate is what makes replaying the same body a no-op.
 	// Phase 22 (D-14): digest_last_slot_at re-anchors to the caller-computed slot

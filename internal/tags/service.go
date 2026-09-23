@@ -26,6 +26,9 @@ var (
 	// ErrTagCapReached is returned when an attach would exceed
 	// MaxTagsPerArtist (TAG-04, ADR 0004).
 	ErrTagCapReached = errors.New("artist already has the maximum of 10 tags")
+	// ErrMergeIntoSelf is returned when Merge's source and target ids are
+	// the same.
+	ErrMergeIntoSelf = errors.New("cannot merge a tag into itself")
 )
 
 // MaxTagsPerArtist mirrors the artist_tags_cap_trigger's cap (migration
@@ -231,6 +234,65 @@ func (s *Service) Delete(ctx context.Context, id int64) (int64, error) {
 		return 0, fmt.Errorf("delete tag: %w", err)
 	}
 	return row.CarrierCount, nil
+}
+
+// Merge unions sourceID's carriers into targetID, keeping the target's
+// stored casing (D-23). One transaction, statement order fixed by ADR 0004
+// / D-19: delete the source's duplicate links, UPDATE (never INSERT) the
+// rest onto the target, then delete the source tag -- an UPDATE never fires
+// the cap trigger's BEFORE INSERT check, so a 10-tag artist merging in a tag
+// it already carries never transiently holds 11 links.
+func (s *Service) Merge(ctx context.Context, sourceID, targetID int64) (Summary, error) {
+	if sourceID == targetID {
+		return Summary{}, ErrMergeIntoSelf
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return Summary{}, fmt.Errorf("begin merge tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	qtx := s.q.WithTx(tx)
+
+	locked, err := qtx.LockTagsForMerge(ctx, []int64{sourceID, targetID})
+	if err != nil {
+		return Summary{}, fmt.Errorf("lock merge tags: %w", err)
+	}
+	var target *sqlc.LockTagsForMergeRow
+	sourceFound := false
+	for i := range locked {
+		switch locked[i].ID {
+		case sourceID:
+			sourceFound = true
+		case targetID:
+			target = &locked[i]
+		}
+	}
+	if !sourceFound || target == nil {
+		return Summary{}, ErrTagNotFound
+	}
+
+	if _, err := qtx.DeleteDuplicateSourceLinks(ctx, sqlc.DeleteDuplicateSourceLinksParams{SourceID: sourceID, TargetID: targetID}); err != nil {
+		return Summary{}, fmt.Errorf("delete duplicate source links: %w", err)
+	}
+	if _, err := qtx.RepointSourceLinks(ctx, sqlc.RepointSourceLinksParams{SourceID: sourceID, TargetID: targetID}); err != nil {
+		return Summary{}, fmt.Errorf("repoint source links: %w", err)
+	}
+	if _, err := qtx.DeleteTag(ctx, sourceID); err != nil {
+		return Summary{}, fmt.Errorf("delete source tag: %w", err)
+	}
+
+	count, err := qtx.CountCarriers(ctx, targetID)
+	if err != nil {
+		return Summary{}, fmt.Errorf("count carriers after merge: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Summary{}, fmt.Errorf("commit merge tx: %w", err)
+	}
+
+	return Summary{ID: target.ID, Name: target.Name, CarrierCount: count}, nil
 }
 
 // mapTagError translates a Postgres constraint violation into a typed

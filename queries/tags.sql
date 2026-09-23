@@ -73,3 +73,42 @@ WITH counted AS (
     DELETE FROM tags WHERE id = $1 RETURNING id
 )
 SELECT deleted.id, counted.carrier_count FROM deleted, counted;
+
+-- Merge (D-19, ADR 0004): delete duplicate source links, repoint the rest,
+-- delete the source tag -- never insert, so a 10-tag artist merging in a
+-- tag it already carries never transiently holds 11 links.
+
+-- name: LockTagsForMerge :many
+-- ORDER BY id FOR UPDATE takes both tag locks in id order so two concurrent
+-- merges sharing a tag cannot deadlock; the lock also parks a concurrent
+-- attach/rename of either tag until this transaction commits.
+SELECT id, name FROM tags WHERE id = ANY(@ids::bigint[]) ORDER BY id FOR UPDATE;
+
+-- name: DeleteDuplicateSourceLinks :execrows
+-- Removes the source's links for artists that already carry the target --
+-- these would otherwise become duplicate (artist_id, target) rows once
+-- RepointSourceLinks runs.
+DELETE FROM artist_tags src
+WHERE src.tag_id = @source_id
+  AND EXISTS (
+    SELECT 1 FROM artist_tags dup
+    WHERE dup.artist_id = src.artist_id AND dup.tag_id = @target_id
+  );
+
+-- name: RepointSourceLinks :execrows
+-- Rewrites the source's remaining links to the target via UPDATE, never
+-- INSERT (D-19) -- an UPDATE never fires the cap trigger's BEFORE INSERT
+-- check, which is why this is the only statement shape that cannot
+-- transiently exceed the cap.
+UPDATE artist_tags SET tag_id = @target_id WHERE tag_id = @source_id;
+
+-- name: DeleteTag :execrows
+DELETE FROM tags WHERE id = $1;
+
+-- name: CountCarriers :one
+-- Watched carriers of one tag (D-11), used to report the merge target's
+-- post-merge count.
+SELECT count(w.id)::bigint AS carrier_count
+FROM artist_tags link
+JOIN watchlist w ON w.artist_id = link.artist_id
+WHERE link.tag_id = $1;

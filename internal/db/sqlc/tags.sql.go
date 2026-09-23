@@ -30,6 +30,22 @@ func (q *Queries) AttachTag(ctx context.Context, arg AttachTagParams) (int64, er
 	return result.RowsAffected(), nil
 }
 
+const countCarriers = `-- name: CountCarriers :one
+SELECT count(w.id)::bigint AS carrier_count
+FROM artist_tags link
+JOIN watchlist w ON w.artist_id = link.artist_id
+WHERE link.tag_id = $1
+`
+
+// Watched carriers of one tag (D-11), used to report the merge target's
+// post-merge count.
+func (q *Queries) CountCarriers(ctx context.Context, tagID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countCarriers, tagID)
+	var carrier_count int64
+	err := row.Scan(&carrier_count)
+	return carrier_count, err
+}
+
 const countCarriersForTags = `-- name: CountCarriersForTags :one
 SELECT count(DISTINCT w.artist_id)::bigint AS carrier_count
 FROM artist_tags link
@@ -44,6 +60,43 @@ func (q *Queries) CountCarriersForTags(ctx context.Context, tagIds []int64) (int
 	var carrier_count int64
 	err := row.Scan(&carrier_count)
 	return carrier_count, err
+}
+
+const deleteDuplicateSourceLinks = `-- name: DeleteDuplicateSourceLinks :execrows
+DELETE FROM artist_tags src
+WHERE src.tag_id = $1
+  AND EXISTS (
+    SELECT 1 FROM artist_tags dup
+    WHERE dup.artist_id = src.artist_id AND dup.tag_id = $2
+  )
+`
+
+type DeleteDuplicateSourceLinksParams struct {
+	SourceID int64 `json:"source_id"`
+	TargetID int64 `json:"target_id"`
+}
+
+// Removes the source's links for artists that already carry the target --
+// these would otherwise become duplicate (artist_id, target) rows once
+// RepointSourceLinks runs.
+func (q *Queries) DeleteDuplicateSourceLinks(ctx context.Context, arg DeleteDuplicateSourceLinksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDuplicateSourceLinks, arg.SourceID, arg.TargetID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteTag = `-- name: DeleteTag :execrows
+DELETE FROM tags WHERE id = $1
+`
+
+func (q *Queries) DeleteTag(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteTag, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteTagCountingCarriers = `-- name: DeleteTagCountingCarriers :one
@@ -188,6 +241,42 @@ func (q *Queries) ListTags(ctx context.Context) ([]ListTagsRow, error) {
 	return items, nil
 }
 
+const lockTagsForMerge = `-- name: LockTagsForMerge :many
+
+SELECT id, name FROM tags WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE
+`
+
+type LockTagsForMergeRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// Merge (D-19, ADR 0004): delete duplicate source links, repoint the rest,
+// delete the source tag -- never insert, so a 10-tag artist merging in a
+// tag it already carries never transiently holds 11 links.
+// ORDER BY id FOR UPDATE takes both tag locks in id order so two concurrent
+// merges sharing a tag cannot deadlock; the lock also parks a concurrent
+// attach/rename of either tag until this transaction commits.
+func (q *Queries) LockTagsForMerge(ctx context.Context, ids []int64) ([]LockTagsForMergeRow, error) {
+	rows, err := q.db.Query(ctx, lockTagsForMerge, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LockTagsForMergeRow
+	for rows.Next() {
+		var i LockTagsForMergeRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const renameTag = `-- name: RenameTag :one
 UPDATE tags SET name = $2 WHERE id = $1 RETURNING id, name
 `
@@ -211,4 +300,25 @@ func (q *Queries) RenameTag(ctx context.Context, arg RenameTagParams) (RenameTag
 	var i RenameTagRow
 	err := row.Scan(&i.ID, &i.Name)
 	return i, err
+}
+
+const repointSourceLinks = `-- name: RepointSourceLinks :execrows
+UPDATE artist_tags SET tag_id = $1 WHERE tag_id = $2
+`
+
+type RepointSourceLinksParams struct {
+	TargetID int64 `json:"target_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+// Rewrites the source's remaining links to the target via UPDATE, never
+// INSERT (D-19) -- an UPDATE never fires the cap trigger's BEFORE INSERT
+// check, which is why this is the only statement shape that cannot
+// transiently exceed the cap.
+func (q *Queries) RepointSourceLinks(ctx context.Context, arg RepointSourceLinksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, repointSourceLinks, arg.TargetID, arg.SourceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
