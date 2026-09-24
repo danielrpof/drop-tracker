@@ -7,11 +7,13 @@ import {
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createRoutesStub } from "react-router"
+import { toast } from "sonner"
 import { describe, expect, it, vi } from "vitest"
 
 import App from "~/root"
 import { authStore } from "~/lib/authStore"
 import {
+  addWatchlist,
   attachTag,
   deleteTag,
   detachTag,
@@ -29,8 +31,15 @@ import Watchlist from "./watchlist"
 // D-06 / TEST-02: bare vi.mock at the top of the file, no factory, no
 // passthrough -- no real apiFetch can ever reach the runtime's own fetch.
 vi.mock("~/lib/api")
+// renderRoute stubs Watchlist directly, so root.tsx's <Toaster/> is never
+// mounted -- a real sonner toast() call is already a silent no-op in these
+// tests. Mocking it just makes the Undo action's onClick reachable for the
+// plan 24-07 Task 2 Undo case below (D-27), with no behavior change for any
+// existing test in this file.
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const mockListWatchlist = vi.mocked(listWatchlist)
+const mockAddWatchlist = vi.mocked(addWatchlist)
 const mockRemoveWatchlist = vi.mocked(removeWatchlist)
 const mockDetachTag = vi.mocked(detachTag)
 const mockListTags = vi.mocked(listTags)
@@ -391,6 +400,58 @@ describe("Watchlist route", () => {
     await waitFor(() => expect(screen.queryAllByText("rap")).toHaveLength(0))
     expect(screen.getAllByText("trap")).toHaveLength(3)
     expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  // plan 24-07 Task 2: the remove toast's Undo restores the entry's note
+  // (D-27) -- Undo must never silently drop it.
+  function undoAction() {
+    const call = vi.mocked(toast.success).mock.calls[0] as [
+      string,
+      { action?: { onClick: () => void } },
+    ]
+    return call[1].action
+  }
+
+  it("Undo re-adds the artist with its note", async () => {
+    const withNote: WatchlistEntry = { ...entry, note: "crate digger" }
+    mockListWatchlist.mockResolvedValueOnce([withNote])
+    mockRemoveWatchlist.mockResolvedValueOnce(undefined)
+    mockAddWatchlist.mockResolvedValue(withNote)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Drake from watchlist" })
+    )
+    await waitFor(() => expect(mockRemoveWatchlist).toHaveBeenCalled())
+
+    undoAction()?.onClick()
+
+    await waitFor(() =>
+      expect(mockAddWatchlist).toHaveBeenCalledWith(
+        expect.objectContaining({ note: "crate digger" })
+      )
+    )
+  })
+
+  it("Undo for an entry with no note sends no note value", async () => {
+    mockListWatchlist.mockResolvedValueOnce([entry])
+    mockRemoveWatchlist.mockResolvedValueOnce(undefined)
+    mockAddWatchlist.mockResolvedValue(entry)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Drake from watchlist" })
+    )
+    await waitFor(() => expect(mockRemoveWatchlist).toHaveBeenCalled())
+
+    undoAction()?.onClick()
+
+    await waitFor(() => expect(mockAddWatchlist).toHaveBeenCalled())
+    expect(mockAddWatchlist.mock.calls[0][0].note).toBeUndefined()
   })
 })
 
