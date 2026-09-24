@@ -2,7 +2,13 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
-import { deleteTag, listTags, renameTag, type TagSummary } from "~/lib/api"
+import {
+  deleteTag,
+  listTags,
+  mergeTag,
+  renameTag,
+  type TagSummary,
+} from "~/lib/api"
 
 import { ManageTagsDialog } from "./ManageTagsDialog"
 
@@ -11,18 +17,21 @@ vi.mock("~/lib/api", async (importOriginal) => ({
   listTags: vi.fn(),
   deleteTag: vi.fn(),
   renameTag: vi.fn(),
+  mergeTag: vi.fn(),
 }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const mockListTags = vi.mocked(listTags)
 const mockDeleteTag = vi.mocked(deleteTag)
 const mockRenameTag = vi.mocked(renameTag)
+const mockMergeTag = vi.mocked(mergeTag)
 
 function renderDialog() {
   const onOpenChange = vi.fn()
   const onLoaded = vi.fn()
   const onDeleted = vi.fn()
   const onRenamed = vi.fn()
+  const onMerged = vi.fn()
   render(
     <ManageTagsDialog
       open
@@ -30,9 +39,10 @@ function renderDialog() {
       onLoaded={onLoaded}
       onDeleted={onDeleted}
       onRenamed={onRenamed}
+      onMerged={onMerged}
     />
   )
-  return { onOpenChange, onLoaded, onDeleted, onRenamed }
+  return { onOpenChange, onLoaded, onDeleted, onRenamed, onMerged }
 }
 
 describe("ManageTagsDialog", () => {
@@ -297,5 +307,144 @@ describe("ManageTagsDialog", () => {
     await userEvent.type(input, "a".repeat(25))
 
     expect(screen.getByText("25/32")).toBeInTheDocument()
+  })
+
+  async function openCollisionConfirm() {
+    mockListTags.mockResolvedValue([
+      { id: 5, name: "rap", carrier_count: 3 },
+      { id: 9, name: "trap", carrier_count: 4 },
+    ])
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: { id: 9, name: "trap" },
+      carrierCountAfterMerge: 7,
+    })
+
+    const result = renderDialog()
+
+    await screen.findByText("rap")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag rap" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for rap" })
+    await userEvent.clear(input)
+    await userEvent.type(input, "TRAP{Enter}")
+
+    await screen.findByText("Merge “rap” into “trap”?")
+    return { input, ...result }
+  }
+
+  it("a collision opens a merge ConfirmDialog naming both tags with focus on Cancel, without calling mergeTag", async () => {
+    await openCollisionConfirm()
+
+    expect(
+      screen.getByText(
+        "7 artists will carry “trap”, and “rap” will be deleted."
+      )
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus()
+    )
+    expect(mockMergeTag).not.toHaveBeenCalled()
+  })
+
+  it("Cancel on the merge confirm returns to the still-open rename input with its text intact and focuses Save", async () => {
+    const { input } = await openCollisionConfirm()
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(
+      screen.queryByText("Merge “rap” into “trap”?")
+    ).not.toBeInTheDocument()
+    expect(input).toHaveValue("TRAP")
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toHaveFocus()
+    )
+    expect(mockMergeTag).not.toHaveBeenCalled()
+  })
+
+  it("Esc on the merge confirm closes only it, leaving Manage tags open and the rename input intact", async () => {
+    const { input } = await openCollisionConfirm()
+
+    await userEvent.keyboard("{Escape}")
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Merge “rap” into “trap”?")
+      ).not.toBeInTheDocument()
+    )
+    expect(screen.getByText("Manage tags")).toBeInTheDocument()
+    expect(input).toHaveValue("TRAP")
+    expect(mockMergeTag).not.toHaveBeenCalled()
+  })
+
+  it("focus cannot tab out of the open merge ConfirmDialog", async () => {
+    await openCollisionConfirm()
+
+    const cancelButton = screen.getByRole("button", { name: "Cancel" })
+    const mergeButton = screen.getByRole("button", { name: "Merge tags" })
+    await waitFor(() => expect(cancelButton).toHaveFocus())
+
+    await userEvent.tab()
+    expect(mergeButton).toHaveFocus()
+
+    await userEvent.tab()
+    expect(cancelButton).toHaveFocus()
+  })
+
+  it("confirming the merge shows Merging..., disables both buttons, calls mergeTag by id, toasts, removes the source row, updates the target's count, and focuses the target's Rename", async () => {
+    const { onMerged } = await openCollisionConfirm()
+    let resolveMerge!: (v: {
+      id: number
+      name: string
+      carrier_count: number
+    }) => void
+    mockMergeTag.mockReturnValueOnce(
+      new Promise((res) => {
+        resolveMerge = res
+      })
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Merge tags" }))
+
+    await waitFor(() => expect(mockMergeTag).toHaveBeenCalledWith(5, 9))
+    expect(screen.getByRole("button", { name: "Merging…" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
+
+    resolveMerge({ id: 9, name: "trap", carrier_count: 7 })
+
+    await waitFor(() =>
+      expect(screen.queryByText("rap")).not.toBeInTheDocument()
+    )
+    expect(screen.getByText("trap")).toBeInTheDocument()
+    expect(screen.getByText("· 7 artists")).toBeInTheDocument()
+    expect(onMerged).toHaveBeenCalledWith(5, {
+      id: 9,
+      name: "trap",
+      carrier_count: 7,
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Rename tag trap" })
+      ).toHaveFocus()
+    )
+  })
+
+  it("a rejected merge closes the ConfirmDialog, toasts the failure, and re-fetches the list", async () => {
+    await openCollisionConfirm()
+    mockMergeTag.mockRejectedValueOnce(new Error("network down"))
+    mockListTags.mockResolvedValueOnce([
+      { id: 5, name: "rap", carrier_count: 3 },
+      { id: 9, name: "trap", carrier_count: 4 },
+    ])
+
+    await userEvent.click(screen.getByRole("button", { name: "Merge tags" }))
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Merge “rap” into “trap”?")
+      ).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(2))
   })
 })

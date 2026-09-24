@@ -17,6 +17,7 @@ import {
   detachTag,
   listTags,
   listWatchlist,
+  mergeTag,
   removeWatchlist,
   renameTag,
   type WatchlistEntry,
@@ -36,6 +37,7 @@ const mockListTags = vi.mocked(listTags)
 const mockAttachTag = vi.mocked(attachTag)
 const mockDeleteTag = vi.mocked(deleteTag)
 const mockRenameTag = vi.mocked(renameTag)
+const mockMergeTag = vi.mocked(mergeTag)
 
 const entry: WatchlistEntry = {
   id: 42,
@@ -344,6 +346,50 @@ describe("Watchlist route", () => {
 
     await waitFor(() => expect(screen.queryAllByText("Latin")).toHaveLength(0))
     expect(screen.getAllByText("latin")).toHaveLength(3)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens Manage tags, confirms a rename collision's merge, and every card carrying the source shows the target instead, with no extra listWatchlist call", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 5, name: "rap" }] },
+      { ...second, tags: [{ id: 5, name: "rap" }] },
+    ])
+    mockListTags.mockResolvedValue([
+      { id: 5, name: "rap", carrier_count: 2 },
+      { id: 9, name: "trap", carrier_count: 1 },
+    ])
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: { id: 9, name: "trap" },
+      carrierCountAfterMerge: 3,
+    })
+    mockMergeTag.mockResolvedValueOnce({
+      id: 9,
+      name: "trap",
+      carrier_count: 3,
+    })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    expect(screen.getAllByText("rap")).toHaveLength(2)
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag rap" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for rap" })
+    await userEvent.clear(input)
+    await userEvent.type(input, "trap{Enter}")
+
+    await screen.findByText("Merge “rap” into “trap”?")
+    await userEvent.click(screen.getByRole("button", { name: "Merge tags" }))
+
+    await waitFor(() => expect(screen.queryAllByText("rap")).toHaveLength(0))
+    expect(screen.getAllByText("trap")).toHaveLength(3)
     expect(mockListWatchlist).toHaveBeenCalledTimes(1)
   })
 })

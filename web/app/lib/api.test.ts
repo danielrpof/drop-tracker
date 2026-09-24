@@ -7,6 +7,7 @@ import {
   detachTag,
   listEvents,
   listTags,
+  mergeTag,
   removeWatchlist,
   renameTag,
   type EventsPage,
@@ -229,6 +230,29 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
       status: 404,
       message: "tag not found",
     })
+  })
+
+  it("mergeTag POSTs /tags/{id}/merge with {into} and the CSRF header, resolving the merge response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 9, name: "trap", carrier_count: 7 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(mergeTag(5, 9)).resolves.toEqual({
+      id: 9,
+      name: "trap",
+      carrier_count: 7,
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/tags/5/merge")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({ into: 9 })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
   })
 
   it("resolves an OK response to the parsed body", async () => {
