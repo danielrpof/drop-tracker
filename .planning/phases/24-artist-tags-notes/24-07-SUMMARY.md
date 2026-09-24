@@ -233,3 +233,10 @@ None - no external service configuration required.
 
 *Phase: 24-artist-tags-notes*
 *Completed: 2026-09-24*
+
+## Self-Check: PASSED
+
+- All 9 key files verified present on disk with `[ -f ]` (ArtistNote.tsx/.test.tsx, api.ts/.test.ts, WatchlistRow.tsx, watchlist.tsx/.test.tsx, internal/webassets/build/client/index.html, this SUMMARY).
+- All 5 commits (`290056e`, `0784437`, `a50c6c0`, `5636677`, `ae11af4`) verified present in `git log --oneline --all`.
+- Acceptance criteria re-run: Task 1's four grep checks, Task 2's nine grep checks plus the Undo `note` assertion, and Task 3's `make web` bundle-changed check, backend gate suite, and the two grep-based surface checks (blast-radius diff, `dangerouslySetInnerHTML`) -- all pass as documented above.
+- Plan-level `<verification>` re-run: Task 3's full verify block (build, `go vet`, `golangci-lint`, `go test ./...` + coverage-gate, `sqlc-check`, frontend prettier+test, blast-radius/dependency diffs) passes; the `<human-check>` is intentionally deferred to phase-level UAT per `human_verify_mode: end-of-phase`, not a self-check failure.

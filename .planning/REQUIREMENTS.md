@@ -18,7 +18,7 @@
 
 ### Notes
 
-- [ ] **NOTE-01**: User can add, edit, and clear a plain-text note (≤500 characters) on a watchlist artist, shown on its Watchlist card
+- [x] **NOTE-01**: User can add, edit, and clear a plain-text note (≤500 characters) on a watchlist artist, shown on its Watchlist card
 
 ### Watchlist View
 
@@ -88,7 +88,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TAG-05 | Phase 24 | Complete |
 | TAG-06 | Phase 24 | Complete |
 | TAG-07 | Phase 24 | Complete |
-| NOTE-01 | Phase 24 | Pending |
+| NOTE-01 | Phase 24 | Complete |
 | WLVW-01 | Phase 25 | Pending |
 | WLVW-02 | Phase 25 | Pending |
 | WLVW-03 | Phase 25 | Pending |
