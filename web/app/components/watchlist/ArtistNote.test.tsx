@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -312,13 +312,16 @@ describe("ArtistNote", () => {
     )
     const textarea = screen.getByRole("textbox", { name: "Note for Drake" })
 
-    await userEvent.type(textarea, "a".repeat(449))
+    // fireEvent.change (not userEvent.type's per-keystroke simulation) for
+    // the bulk jumps -- still exercises the real onChange handler, just
+    // without ~450 individually-timed key events.
+    fireEvent.change(textarea, { target: { value: "a".repeat(449) } })
     expect(screen.queryByText("50 characters left.")).toBeNull()
 
-    await userEvent.type(textarea, "a")
+    fireEvent.change(textarea, { target: { value: "a".repeat(450) } })
     await screen.findByText("50 characters left.")
 
-    await userEvent.type(textarea, "a".repeat(50))
+    fireEvent.change(textarea, { target: { value: "a".repeat(500) } })
     await screen.findByText("Note limit reached — 500 characters.")
   })
 

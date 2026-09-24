@@ -295,6 +295,7 @@ export default function Watchlist() {
             deezerId: entry.deezer_id ?? undefined,
             disambiguation: entry.disambiguation ?? undefined,
             imageUrl: entry.image_url ?? undefined,
+            note: entry.note ?? undefined,
           })
             .then(refresh)
             .catch(() => {
