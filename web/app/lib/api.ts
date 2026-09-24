@@ -185,14 +185,19 @@ export interface NotificationSettings {
 
 // ApiError carries the HTTP status and the server's fixed {"error": "..."}
 // message, so callers can branch on status (e.g. 409 vs 500) without
-// re-parsing the response body themselves.
+// re-parsing the response body themselves. body carries the full parsed
+// JSON of a non-2xx response when it was valid JSON (e.g. the rename 409's
+// {target, carrier_count_after_merge}) -- undefined when the body wasn't
+// JSON, so a caller narrows before reading fields off it.
 export class ApiError extends Error {
   status: number
+  body?: unknown
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body?: unknown) {
     super(message)
     this.name = "ApiError"
     this.status = status
+    this.body = body
   }
 }
 
@@ -245,16 +250,18 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     let message = res.statusText
+    let parsedBody: unknown
     try {
       const body = (await res.json()) as { error?: string }
+      parsedBody = body
       if (body.error) {
         message = body.error
       }
     } catch {
       // Body wasn't valid JSON (or was empty) -- fall back to statusText,
-      // set above.
+      // set above, and leave parsedBody undefined.
     }
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, message, parsedBody)
   }
 
   return (await res.json()) as T
@@ -373,6 +380,49 @@ export async function deleteTag(
   return apiFetch<{ carrier_count: number }>(`/tags/${id}`, {
     method: "DELETE",
   })
+}
+
+// RenameTagResult is renameTag's closed result: a plain rename (including a
+// case-only one) resolves "renamed"; a collision with a different tag
+// resolves "collision" with the server's target (in its stored casing,
+// D-23) and the post-merge union count -- never computed client-side.
+export type RenameTagResult =
+  | { kind: "renamed"; tag: TagRef }
+  | { kind: "collision"; target: TagRef; carrierCountAfterMerge: number }
+
+// renameTag applies a rename (TAG-05, D-09, D-22). The collision case is
+// detected purely from the server's 409 body (never a client pre-check,
+// D-22): only an ApiError with status 409 and a body carrying `target` is
+// mapped to the collision result -- any other rejection (404 tag gone, 500,
+// a non-JSON body) rethrows unchanged so the caller's generic failure path
+// handles it.
+export async function renameTag(
+  id: number,
+  name: string
+): Promise<RenameTagResult> {
+  try {
+    const tag = await apiFetch<TagRef>(`/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+    return { kind: "renamed", tag }
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409 && err.body) {
+      const body = err.body as {
+        target?: TagRef
+        carrier_count_after_merge?: number
+      }
+      if (body.target && typeof body.carrier_count_after_merge === "number") {
+        return {
+          kind: "collision",
+          target: body.target,
+          carrierCountAfterMerge: body.carrier_count_after_merge,
+        }
+      }
+    }
+    throw err
+  }
 }
 
 // searchArtists fans out to every configured source (WLST-01, D-01, D-02,

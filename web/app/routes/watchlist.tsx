@@ -129,6 +129,22 @@ export default function Watchlist() {
     )
   }
 
+  // renameTagInEntries applies a completed Manage tags rename to every
+  // card's chip with that id (TAG-05, D-17) -- same functional-updater
+  // shape as dropTagFromEntries, so it never clobbers a concurrent chip
+  // add/remove on an unrelated row.
+  function renameTagInEntries(tag: TagRef) {
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) => ({
+            ...r,
+            tags: r.tags.map((t) => (t.id === tag.id ? tag : t)),
+          }))
+        : rows
+    )
+    setVocabulary((v) => (v ? v.map((t) => (t.id === tag.id ? tag : t)) : v))
+  }
+
   // handleTagsLoaded is ManageTagsDialog's onLoaded (D-30): it replaces the
   // whole route vocabulary with what the dialog just fetched, so the "+
   // tag" autocomplete on every row sees the same fresh vocabulary Manage
@@ -283,6 +299,7 @@ export default function Watchlist() {
         onOpenChange={setManageTagsOpen}
         onLoaded={handleTagsLoaded}
         onDeleted={dropTagFromEntries}
+        onRenamed={renameTagInEntries}
       />
 
       <div className="flex flex-col gap-6">
