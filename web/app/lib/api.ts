@@ -425,6 +425,18 @@ export async function renameTag(
   }
 }
 
+// mergeTag confirms a rename collision (TAG-05, D-09, D-19, D-22): it merges
+// by id, never by name, so a target renamed since a prior 409 is still
+// merged correctly. Resolves the target's post-merge {id, name,
+// carrier_count} -- the count the Manage tags merge toast reports.
+export async function mergeTag(id: number, into: number): Promise<TagSummary> {
+  return apiFetch<TagSummary>(`/tags/${id}/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ into }),
+  })
+}
+
 // searchArtists fans out to every configured source (WLST-01, D-01, D-02,
 // D-03): the response's sources map is returned as-is, one entry per
 // source, never merged. An optional signal lets a caller (SearchBox) cancel

@@ -388,8 +388,11 @@ describe("ManageTagsDialog", () => {
     await userEvent.tab()
     expect(mergeButton).toHaveFocus()
 
+    // base-ui's focus trap wraps through an inert sentinel guard before
+    // landing back on Cancel -- wait for that redirect rather than
+    // asserting on the guard's transient intermediate focus.
     await userEvent.tab()
-    expect(cancelButton).toHaveFocus()
+    await waitFor(() => expect(cancelButton).toHaveFocus())
   })
 
   it("confirming the merge shows Merging..., disables both buttons, calls mergeTag by id, toasts, removes the source row, updates the target's count, and focuses the target's Rename", async () => {

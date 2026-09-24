@@ -145,6 +145,35 @@ export default function Watchlist() {
     setVocabulary((v) => (v ? v.map((t) => (t.id === tag.id ? tag : t)) : v))
   }
 
+  // mergeTagInEntries applies a confirmed Manage tags merge (TAG-05, D-17,
+  // D-19) to every card: an entry that already carries the target just
+  // drops the source (no duplicate chip), otherwise the source chip is
+  // replaced in place with the target -- same functional-updater shape as
+  // dropTagFromEntries/renameTagInEntries.
+  function mergeTagInEntries(sourceId: number, target: TagRef) {
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) => {
+            if (!r.tags.some((t) => t.id === sourceId)) return r
+            if (r.tags.some((t) => t.id === target.id)) {
+              return { ...r, tags: r.tags.filter((t) => t.id !== sourceId) }
+            }
+            return {
+              ...r,
+              tags: r.tags.map((t) => (t.id === sourceId ? target : t)),
+            }
+          })
+        : rows
+    )
+    setVocabulary((v) =>
+      v
+        ? v.some((t) => t.id === target.id)
+          ? v.filter((t) => t.id !== sourceId)
+          : v.map((t) => (t.id === sourceId ? target : t))
+        : v
+    )
+  }
+
   // handleTagsLoaded is ManageTagsDialog's onLoaded (D-30): it replaces the
   // whole route vocabulary with what the dialog just fetched, so the "+
   // tag" autocomplete on every row sees the same fresh vocabulary Manage
@@ -300,6 +329,7 @@ export default function Watchlist() {
         onLoaded={handleTagsLoaded}
         onDeleted={dropTagFromEntries}
         onRenamed={renameTagInEntries}
+        onMerged={mergeTagInEntries}
       />
 
       <div className="flex flex-col gap-6">

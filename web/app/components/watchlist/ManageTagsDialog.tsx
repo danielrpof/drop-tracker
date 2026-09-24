@@ -17,6 +17,7 @@ import { Skeleton } from "~/components/ui/skeleton"
 import {
   deleteTag,
   listTags,
+  mergeTag,
   renameTag,
   type TagRef,
   type TagSummary,
@@ -28,6 +29,17 @@ export interface ManageTagsDialogProps {
   onLoaded: (tags: TagSummary[]) => void
   onDeleted: (tagId: number) => void
   onRenamed: (tag: TagRef) => void
+  onMerged: (sourceId: number, target: TagSummary) => void
+}
+
+// CollisionTarget is set when renameTag resolves a collision (D-09): the
+// merge ConfirmDialog it drives never computes the post-merge count itself
+// -- carrierCountAfterMerge comes straight from the server's 409 body.
+interface CollisionTarget {
+  sourceId: number
+  sourceName: string
+  target: TagRef
+  carrierCountAfterMerge: number
 }
 
 type Status = "loading" | "loaded" | "error"
@@ -61,6 +73,7 @@ export function ManageTagsDialog({
   onLoaded,
   onDeleted,
   onRenamed,
+  onMerged,
 }: ManageTagsDialogProps) {
   const [status, setStatus] = useState<Status>("loading")
   const [tags, setTags] = useState<TagSummary[]>([])
@@ -68,10 +81,13 @@ export function ManageTagsDialog({
   const [renameTarget, setRenameTarget] = useState<TagSummary | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const [renamePending, setRenamePending] = useState(false)
+  const [collisionTarget, setCollisionTarget] =
+    useState<CollisionTarget | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const focusRequestRef = useRef<FocusRequest>(null)
   const cancelFocusIndexRef = useRef<number | null>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const renameSaveRef = useRef<HTMLButtonElement>(null)
 
   function load() {
     setStatus("loading")
@@ -158,14 +174,52 @@ export function ManageTagsDialog({
         onRenamed(result.tag)
         toast.success(`Renamed “${tag.name}” to “${result.tag.name}”.`)
       } else {
-        // Task 3 wires the merge ConfirmDialog for a collision; until then
-        // it is treated like any other rejection.
+        // A collision opens the merge ConfirmDialog (D-09); rename mode
+        // stays open with its typed text until the user confirms or
+        // cancels the merge. No merge request is ever sent without that
+        // confirmation.
         setRenamePending(false)
-        toast.error(`Couldn't rename “${tag.name}” — try again.`)
+        setCollisionTarget({
+          sourceId: tag.id,
+          sourceName: tag.name,
+          target: result.target,
+          carrierCountAfterMerge: result.carrierCountAfterMerge,
+        })
       }
     } catch {
       setRenamePending(false)
       toast.error(`Couldn't rename “${tag.name}” — try again.`)
+    }
+  }
+
+  async function handleConfirmMerge() {
+    if (!collisionTarget) return
+    const { sourceId, sourceName, target } = collisionTarget
+    try {
+      const merged = await mergeTag(sourceId, target.id)
+      setTags((prev) => {
+        const withoutSource = prev.filter((t) => t.id !== sourceId)
+        const updated = withoutSource.map((t) =>
+          t.id === target.id
+            ? { ...t, name: merged.name, carrier_count: merged.carrier_count }
+            : t
+        )
+        const sorted = sortTags(updated)
+        const newIndex = sorted.findIndex((t) => t.id === target.id)
+        focusRequestRef.current = { kind: "row", index: newIndex }
+        return sorted
+      })
+      setRenameTarget(null)
+      setRenameValue("")
+      onMerged(sourceId, merged)
+      toast.success(
+        `Merged “${sourceName}” into “${merged.name}” — ${merged.carrier_count} ${pluralize(merged.carrier_count)} now carry it.`
+      )
+    } catch {
+      toast.error(
+        `Couldn't merge “${sourceName}” into “${target.name}” — try again.`
+      )
+      load()
     }
   }
 
@@ -275,6 +329,7 @@ export function ManageTagsDialog({
                       Cancel
                     </Button>
                     <Button
+                      ref={renameSaveRef}
                       variant="default"
                       size="sm"
                       className="min-w-20"
@@ -346,6 +401,22 @@ export function ManageTagsDialog({
           pendingLabel="Deleting…"
           variant="destructive"
           onConfirm={handleConfirmDelete}
+        />
+      )}
+
+      {collisionTarget && (
+        <ConfirmDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setCollisionTarget(null)
+          }}
+          title={`Merge “${collisionTarget.sourceName}” into “${collisionTarget.target.name}”?`}
+          description={`${collisionTarget.carrierCountAfterMerge} ${pluralize(collisionTarget.carrierCountAfterMerge)} will carry “${collisionTarget.target.name}”, and “${collisionTarget.sourceName}” will be deleted.`}
+          actionLabel="Merge tags"
+          pendingLabel="Merging…"
+          variant="default"
+          onConfirm={handleConfirmMerge}
+          finalFocus={renameSaveRef}
         />
       )}
     </>
