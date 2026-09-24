@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 24
 current_phase_name: Artist Tags & Notes
 status: executing
-stopped_at: Completed 24-05-PLAN.md
-last_updated: "2026-09-23T23:00:36.443Z"
+stopped_at: Completed 24-06-PLAN.md
+last_updated: "2026-09-24T03:05:32.544Z"
 last_activity: 2026-09-23
 last_activity_desc: Phase 24 execution started
-state_head: 2cc256d5fc576eb95618bededd6bb059d08fa9fa
+state_head: 1cf774fc67cb731d7a4a274d2a2d5d20f146f5c1
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 ## Current Position
 
 Phase: 24 (Artist Tags & Notes) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-09-23 — Phase 24 execution started
 
@@ -152,6 +152,7 @@ Last activity: 2026-09-23 — Phase 24 execution started
 | Phase 24 P04 | ~20min | 2 tasks | 10 files |
 | Phase 24 P03 | ~50min | 2 tasks | 10 files |
 | Phase 24 P05 | ~75min | 3 tasks | 13 files |
+| Phase 24 P06 | ~55min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -368,6 +369,8 @@ Recent decisions affecting current work:
 - [Phase 24]: [Phase 24-04]: TagChips uses route-level functional addTag/removeTag updaters (D-24) instead of whole-array optimistic snapshots, so concurrent chip removals on one row never clobber each other; focus-within self-reference used for the chip's own size since group-focus-within cannot target its own declaring element.
 - [Phase 24]: 24-03: GetWatchlistEntry copies ListWatchlist's select list byte-for-byte; sqlc.ListWatchlistRow(row) struct conversion in Service.get enforces D-26 projection parity at compile time
 - [Phase 24]: [Phase 24-05]: base-ui Combobox needed two behavioral fixes -- filtering onOpenChange reason "none" so Enter-with-nothing-selectable never closes the whole editor, and suppressing a one-shot post-commit input-value echo so a cleared input stays cleared.
+- [Phase 24]: ApiError gained an optional body field carrying the parsed non-2xx JSON, so renameTag's 409-collision mapping (and any future structured-error consumer) shares the one ApiError shape apiFetch already throws everywhere.
+- [Phase 24]: renameTag's collision detection is purely server-driven (only a 409 body carrying target + carrier_count_after_merge maps to a collision result); mergeTagInEntries drops the source chip in place when a card already carries the target so a merge never produces a duplicate chip.
 
 ### Pending Todos
 
@@ -455,8 +458,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-23T23:00:36.410Z
-Stopped at: Completed 24-05-PLAN.md
+Last session: 2026-09-24T03:05:32.508Z
+Stopped at: Completed 24-06-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
