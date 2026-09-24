@@ -4,6 +4,7 @@ import { CoverArt } from "~/components/common/CoverArt"
 import { Button } from "~/components/ui/button"
 import type { WatchlistEntry } from "~/lib/api"
 
+import { ArtistNote } from "./ArtistNote"
 import { PreferenceToggles } from "./PreferenceToggles"
 import { TagChips, type TagActions } from "./TagChips"
 
@@ -49,6 +50,11 @@ export function WatchlistRow({
           </span>
         )}
         <TagChips entry={entry} actions={tagActions} announce={announce} />
+        <ArtistNote
+          entry={entry}
+          onEntryChange={onEntryChange}
+          announce={announce}
+        />
       </div>
 
       <PreferenceToggles entry={entry} onEntryChange={onEntryChange} />

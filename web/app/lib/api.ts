@@ -303,6 +303,7 @@ export async function addWatchlist(params: {
   deezerId?: string
   disambiguation?: string
   imageUrl?: string
+  note?: string
 }): Promise<WatchlistEntry> {
   return apiFetch<WatchlistEntry>("/watchlist", {
     method: "POST",
@@ -313,7 +314,24 @@ export async function addWatchlist(params: {
       deezer_id: params.deezerId,
       disambiguation: params.disambiguation,
       image_url: params.imageUrl,
+      note: params.note,
     }),
+  })
+}
+
+// updateNote saves, edits, or clears the note on a watchlist entry (NOTE-01,
+// D-06, D-25) through its own dedicated PUT endpoint -- never PATCH, since a
+// clear (null) is an explicit request the shared updateWatchlistPreferences
+// PATCH's "absent key means untouched" contract cannot express. The note key
+// is always sent, including null.
+export async function updateNote(
+  entryId: number,
+  note: string | null
+): Promise<WatchlistEntry> {
+  return apiFetch<WatchlistEntry>(`/watchlist/${entryId}/note`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
   })
 }
 

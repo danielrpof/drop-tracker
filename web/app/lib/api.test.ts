@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   ApiError,
+  addWatchlist,
   attachTag,
   deleteTag,
   detachTag,
@@ -10,6 +11,7 @@ import {
   mergeTag,
   removeWatchlist,
   renameTag,
+  updateNote,
   type EventsPage,
   type TagSummary,
 } from "~/lib/api"
@@ -253,6 +255,77 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     expect(new Headers(init.headers).get("X-Requested-With")).toBe(
       "drop-tracker"
     )
+  })
+
+  it("updateNote PUTs /watchlist/{entryId}/note with {note} and the CSRF header, resolving the updated entry", async () => {
+    const updatedEntry = {
+      id: 42,
+      artist_id: 7,
+      mbid: "mbid-drake",
+      name: "Drake",
+      deezer_id: null,
+      disambiguation: null,
+      image_url: null,
+      release_types: ["album"],
+      muted_event_types: [],
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      tags: [],
+      note: "crate digger",
+    }
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(updatedEntry), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(updateNote(42, "crate digger")).resolves.toEqual(updatedEntry)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/42/note")
+    expect(init.method).toBe("PUT")
+    expect(JSON.parse(init.body as string)).toEqual({ note: "crate digger" })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("updateNote always sends the note key, including an explicit null when clearing", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ note: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await updateNote(42, null)
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ note: null })
+  })
+
+  it("addWatchlist sends the optional note field when supplied, and omits the key entirely when undefined", async () => {
+    // A fresh Response per call -- a single Response body can only be read once.
+    fetchMock.mockImplementation(
+      () =>
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    )
+
+    await addWatchlist({ mbid: "m", name: "n", note: "crate digger" })
+    const bodyWithNote = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string
+    )
+    expect(bodyWithNote.note).toBe("crate digger")
+
+    await addWatchlist({ mbid: "m", name: "n" })
+    const bodyWithoutNote = JSON.parse(
+      (fetchMock.mock.calls[1][1] as RequestInit).body as string
+    )
+    expect("note" in bodyWithoutNote).toBe(false)
   })
 
   it("resolves an OK response to the parsed body", async () => {
