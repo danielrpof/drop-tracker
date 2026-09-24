@@ -37,8 +37,8 @@ function saveErrorMessage(err: unknown): string {
 // trigger when it doesn't, and an in-place editor that saves through the
 // dedicated PUT /watchlist/{id}/note endpoint -- never PATCH (D-25), since
 // clearing a note is an explicit request, not the "leave this axis
-// untouched" an absent PATCH key means. Note text is plain JSX text only
-// (T-24-37), never dangerouslySetInnerHTML.
+// untouched" an absent PATCH key means. Note text renders as a plain JSX
+// text node only (T-24-37) -- never raw HTML.
 export function ArtistNote({
   entry,
   onEntryChange,
