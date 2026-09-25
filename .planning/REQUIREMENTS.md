@@ -84,7 +84,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TAG-01 | Phase 24 | Gaps Found |
 | TAG-02 | Phase 24 | Gaps Found |
 | TAG-03 | Phase 24 | Gaps Found |
-| TAG-04 | Phase 24 | Pending |
+| TAG-04 | Phase 24 | Gaps Found |
 | TAG-05 | Phase 24 | Gaps Found |
 | TAG-06 | Phase 24 | Complete |
 | TAG-07 | Phase 24 | Gaps Found |
