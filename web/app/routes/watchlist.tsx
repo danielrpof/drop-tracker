@@ -114,10 +114,8 @@ export default function Watchlist() {
     )
   }
 
-  // dropTagFromEntries removes one tag id from every entry's tags array
-  // (Manage tags delete, TAG-06, D-17) -- a functional updater in the same
-  // shape as addTag/removeTag, so it can never clobber a concurrent chip
-  // add/remove on an unrelated row.
+  // dropTagFromEntries drops the tag from every card and from the
+  // autocomplete vocabulary (TAG-06, D-17).
   function dropTagFromEntries(tagId: number) {
     setEntries((rows) =>
       rows
@@ -127,6 +125,7 @@ export default function Watchlist() {
           }))
         : rows
     )
+    setVocabulary((v) => (v ? v.filter((t) => t.id !== tagId) : v))
   }
 
   // renameTagInEntries applies a completed Manage tags rename to every
