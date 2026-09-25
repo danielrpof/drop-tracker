@@ -153,6 +153,12 @@ None - no external service configuration required. The migration was applied to 
 - Gap 2 (deleted tag lingering in the "+ tag" autocomplete) remains open and is scoped to plan 24-09, not this plan.
 - 24-VERIFICATION.md's human-verification items (browser-only checks) remain open pending gap closure completion.
 
+## Self-Check: PASSED
+
+- All created/modified files confirmed present on disk (`000011_*.sql` pair, `tags_schema_test.go`, ADR 0004, this SUMMARY).
+- `git log --oneline --all --grep="24-08"` returns 5 commits (RED, GREEN, characterization, ADR/DoD, plan metadata).
+- Re-ran the plan-level `<verification>` block after the final commit: `cmd/migration-check` clean, `TestSchema|TestTrigger_|TestExpectedSchemaVersion|TestRunMigrations` pass, merge/attach regression suites pass, live `schema_migrations` reads `11|f`, and migration 000010 remains byte-identical to `447baa0`.
+
 ---
 *Phase: 24-artist-tags-notes*
 *Completed: 2026-09-24*
