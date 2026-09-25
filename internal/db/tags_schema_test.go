@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -394,3 +395,246 @@ func TestSchema_WatchlistDeleteKeepsTagLinks(t *testing.T) {
 	}
 }
 
+// TestSchema_TagCapTrigger_UpdatePaths pins the UPDATE-path guarantees 000011
+// must and must not disturb: merges still work, unchanged-artist updates are
+// free, below-cap moves succeed, and cap-breaking or duplicate moves are
+// refused (D-19, ADR 0004 amendment).
+func TestSchema_TagCapTrigger_UpdatePaths(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
+	ctx := context.Background()
+
+	t.Run("merge-shape", func(t *testing.T) {
+		artist := seedArtistNamed(t, ctx, pool, "merge-shape")
+		source := insertTag(t, ctx, pool, "merge-shape-source")
+		if err := linkTag(ctx, pool, artist, source); err != nil {
+			t.Fatalf("link source: %v", err)
+		}
+		for i := 0; i < 9; i++ {
+			tagID := insertTag(t, ctx, pool, fmt.Sprintf("merge-shape-filler-%02d", i))
+			if err := linkTag(ctx, pool, artist, tagID); err != nil {
+				t.Fatalf("seed filler %d: %v", i, err)
+			}
+		}
+		target := insertTag(t, ctx, pool, "merge-shape-target")
+
+		if _, err := pool.Exec(ctx, "UPDATE artist_tags SET tag_id = $1 WHERE tag_id = $2", target, source); err != nil {
+			t.Fatalf("merge-shape UPDATE SET tag_id: %v", err)
+		}
+
+		var count, hasTarget, hasSource int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", artist).Scan(&count); err != nil {
+			t.Fatalf("count links: %v", err)
+		}
+		if count != 10 {
+			t.Fatalf("artist_tags count = %d, want 10", count)
+		}
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1 AND tag_id = $2", artist, target).Scan(&hasTarget); err != nil {
+			t.Fatalf("count target link: %v", err)
+		}
+		if hasTarget != 1 {
+			t.Fatalf("target linked = %d, want 1", hasTarget)
+		}
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1 AND tag_id = $2", artist, source).Scan(&hasSource); err != nil {
+			t.Fatalf("count source link: %v", err)
+		}
+		if hasSource != 0 {
+			t.Fatalf("source linked = %d, want 0", hasSource)
+		}
+	})
+
+	t.Run("unchanged-artist", func(t *testing.T) {
+		artist := seedArtistNamed(t, ctx, pool, "unchanged")
+		for i := 0; i < 10; i++ {
+			tagID := insertTag(t, ctx, pool, fmt.Sprintf("unchanged-%02d", i))
+			if err := linkTag(ctx, pool, artist, tagID); err != nil {
+				t.Fatalf("seed link %d: %v", i, err)
+			}
+		}
+
+		tag, err := pool.Exec(ctx, "UPDATE artist_tags SET artist_id = artist_id WHERE artist_id = $1", artist)
+		if err != nil {
+			t.Fatalf("unchanged-artist UPDATE: %v", err)
+		}
+		if tag.RowsAffected() != 10 {
+			t.Fatalf("rows affected = %d, want 10", tag.RowsAffected())
+		}
+	})
+
+	t.Run("below-cap move", func(t *testing.T) {
+		source := seedArtistNamed(t, ctx, pool, "below-cap-source")
+		target := seedArtistNamed(t, ctx, pool, "below-cap-target")
+		moving := insertTag(t, ctx, pool, "below-cap-moving")
+		if err := linkTag(ctx, pool, source, moving); err != nil {
+			t.Fatalf("link moving tag: %v", err)
+		}
+		for i := 0; i < 9; i++ {
+			tagID := insertTag(t, ctx, pool, fmt.Sprintf("below-cap-filler-%02d", i))
+			if err := linkTag(ctx, pool, target, tagID); err != nil {
+				t.Fatalf("seed filler %d: %v", i, err)
+			}
+		}
+
+		if _, err := pool.Exec(ctx, "UPDATE artist_tags SET artist_id = $1 WHERE artist_id = $2 AND tag_id = $3", target, source, moving); err != nil {
+			t.Fatalf("below-cap move UPDATE: %v", err)
+		}
+
+		var count int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", target).Scan(&count); err != nil {
+			t.Fatalf("count target links: %v", err)
+		}
+		if count != 10 {
+			t.Fatalf("target artist_tags count = %d, want 10", count)
+		}
+	})
+
+	t.Run("two-row move", func(t *testing.T) {
+		source := seedArtistNamed(t, ctx, pool, "two-row-source")
+		target := seedArtistNamed(t, ctx, pool, "two-row-target")
+		moving1 := insertTag(t, ctx, pool, "two-row-moving-1")
+		moving2 := insertTag(t, ctx, pool, "two-row-moving-2")
+		if err := linkTag(ctx, pool, source, moving1); err != nil {
+			t.Fatalf("link moving1: %v", err)
+		}
+		if err := linkTag(ctx, pool, source, moving2); err != nil {
+			t.Fatalf("link moving2: %v", err)
+		}
+		for i := 0; i < 9; i++ {
+			tagID := insertTag(t, ctx, pool, fmt.Sprintf("two-row-filler-%02d", i))
+			if err := linkTag(ctx, pool, target, tagID); err != nil {
+				t.Fatalf("seed filler %d: %v", i, err)
+			}
+		}
+
+		_, err := pool.Exec(ctx, "UPDATE artist_tags SET artist_id = $1 WHERE artist_id = $2", target, source)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.ConstraintName != "artist_tags_max_per_artist" {
+			t.Fatalf("two-row move: got err %v, want artist_tags_max_per_artist", err)
+		}
+
+		var targetCount, sourceCount int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", target).Scan(&targetCount); err != nil {
+			t.Fatalf("count target links: %v", err)
+		}
+		if targetCount != 9 {
+			t.Fatalf("target artist_tags count = %d, want 9 (whole statement refused)", targetCount)
+		}
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", source).Scan(&sourceCount); err != nil {
+			t.Fatalf("count source links: %v", err)
+		}
+		if sourceCount != 2 {
+			t.Fatalf("source artist_tags count = %d, want 2 (whole statement refused)", sourceCount)
+		}
+	})
+
+	t.Run("duplicate move", func(t *testing.T) {
+		source := seedArtistNamed(t, ctx, pool, "dup-source")
+		target := seedArtistNamed(t, ctx, pool, "dup-target")
+		shared := insertTag(t, ctx, pool, "dup-shared")
+		if err := linkTag(ctx, pool, source, shared); err != nil {
+			t.Fatalf("link shared on source: %v", err)
+		}
+		if err := linkTag(ctx, pool, target, shared); err != nil {
+			t.Fatalf("link shared on target: %v", err)
+		}
+		for i := 0; i < 9; i++ {
+			tagID := insertTag(t, ctx, pool, fmt.Sprintf("dup-filler-%02d", i))
+			if err := linkTag(ctx, pool, target, tagID); err != nil {
+				t.Fatalf("seed filler %d: %v", i, err)
+			}
+		}
+
+		_, err := pool.Exec(ctx, "UPDATE artist_tags SET artist_id = $1 WHERE artist_id = $2 AND tag_id = $3", target, source, shared)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != pgerrcode.UniqueViolation || pgErr.ConstraintName != "artist_tags_pkey" {
+			t.Fatalf("duplicate move: got err %v, want unique violation on artist_tags_pkey", err)
+		}
+
+		var count int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", target).Scan(&count); err != nil {
+			t.Fatalf("count target links: %v", err)
+		}
+		if count != 10 {
+			t.Fatalf("target artist_tags count = %d, want 10 (duplicate move refused)", count)
+		}
+	})
+}
+
+// TestSchema_Migration000011_DownUpRoundTrip proves the 000011 pair
+// round-trips: down restores INSERT-only behavior (UPDATE opens, INSERT cap
+// stays), and up re-closes the UPDATE path (ADR 0004 amendment).
+func TestSchema_Migration000011_DownUpRoundTrip(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
+	ctx := context.Background()
+
+	downSQL, err := os.ReadFile("migrations/000011_artist_tags_cap_on_update.down.sql")
+	if err != nil {
+		t.Fatalf("read down.sql: %v", err)
+	}
+	upSQL, err := os.ReadFile("migrations/000011_artist_tags_cap_on_update.up.sql")
+	if err != nil {
+		t.Fatalf("read up.sql: %v", err)
+	}
+
+	triggerCount := func() int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM pg_trigger WHERE tgrelid = 'artist_tags'::regclass AND tgname = 'artist_tags_cap_update_trigger'").Scan(&n); err != nil {
+			t.Fatalf("count update trigger: %v", err)
+		}
+		return n
+	}
+
+	if _, err := pool.Exec(ctx, string(downSQL)); err != nil {
+		t.Fatalf("exec down.sql: %v", err)
+	}
+	if n := triggerCount(); n != 0 {
+		t.Fatalf("update trigger count after down = %d, want 0", n)
+	}
+
+	artistDown := seedArtistNamed(t, ctx, pool, "roundtrip-down")
+	sourceDown := seedArtistNamed(t, ctx, pool, "roundtrip-down-source")
+	for i := 0; i < 10; i++ {
+		tagID := insertTag(t, ctx, pool, fmt.Sprintf("roundtrip-down-%02d", i))
+		if err := linkTag(ctx, pool, artistDown, tagID); err != nil {
+			t.Fatalf("seed link %d: %v", i, err)
+		}
+	}
+	movingTag := insertTag(t, ctx, pool, "roundtrip-down-moving")
+	if err := linkTag(ctx, pool, sourceDown, movingTag); err != nil {
+		t.Fatalf("link moving tag: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE artist_tags SET artist_id = $1 WHERE artist_id = $2 AND tag_id = $3", artistDown, sourceDown, movingTag); err != nil {
+		t.Fatalf("UPDATE onto 10-link artist after down: %v", err)
+	}
+
+	extraTag := insertTag(t, ctx, pool, "roundtrip-down-extra")
+	_, err = pool.Exec(ctx, "INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2)", artistDown, extraTag)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "artist_tags_max_per_artist" {
+		t.Fatalf("raw INSERT after down: got err %v, want artist_tags_max_per_artist (INSERT trigger unaffected)", err)
+	}
+
+	if _, err := pool.Exec(ctx, string(upSQL)); err != nil {
+		t.Fatalf("exec up.sql: %v", err)
+	}
+	if n := triggerCount(); n != 1 {
+		t.Fatalf("update trigger count after up = %d, want 1", n)
+	}
+
+	artistUp := seedArtistNamed(t, ctx, pool, "roundtrip-up")
+	sourceUp := seedArtistNamed(t, ctx, pool, "roundtrip-up-source")
+	for i := 0; i < 10; i++ {
+		tagID := insertTag(t, ctx, pool, fmt.Sprintf("roundtrip-up-%02d", i))
+		if err := linkTag(ctx, pool, artistUp, tagID); err != nil {
+			t.Fatalf("seed link %d: %v", i, err)
+		}
+	}
+	movingTagUp := insertTag(t, ctx, pool, "roundtrip-up-moving")
+	if err := linkTag(ctx, pool, sourceUp, movingTagUp); err != nil {
+		t.Fatalf("link moving tag: %v", err)
+	}
+	_, err = pool.Exec(ctx, "UPDATE artist_tags SET artist_id = $1 WHERE artist_id = $2 AND tag_id = $3", artistUp, sourceUp, movingTagUp)
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "artist_tags_max_per_artist" {
+		t.Fatalf("UPDATE onto 10-link artist after up: got err %v, want artist_tags_max_per_artist", err)
+	}
+}
