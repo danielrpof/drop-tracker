@@ -112,7 +112,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The user can delete a tag globally after a confirmation stating how many artists carry it. The tag disappears from every artist, and the artists themselves stay on the watchlist untouched.
   5. The user can add, edit, and clear a plain-text note of up to 500 characters on an artist, and it shows on that artist's Watchlist card after a reload.
 
-**Plans:** 7/7 plans executed
+**Plans:** 7/9 plans executed
 
 Plans:
 **Wave 1**
@@ -136,6 +136,14 @@ Plans:
 **Wave 5** *(blocked on Wave 4 completion)*
 
 - [x] 24-07-PLAN.md — Card note display/editor, Undo restores the note, embedded bundle + full gate (wave 5)
+
+**Gap closure — Wave 1** *(from 24-VERIFICATION.md gap 1 / code review WR-03: DB cap bypassable by raw UPDATE)*
+
+- [ ] 24-08-PLAN.md — Additive migration 000011 fires the 10-tag cap on `UPDATE OF artist_id` (merge's `SET tag_id` unaffected), plus DB tests, a down/up round-trip, the ADR 0004 amendment, and a live dev-DB apply
+
+**Gap closure — Wave 2** *(blocked on Gap closure Wave 1; from 24-VERIFICATION.md gap 2 / code review WR-01)*
+
+- [ ] 24-09-PLAN.md — Manage tags delete also drops the tag from the "+ tag" autocomplete vocabulary, plus a route test, the embedded bundle rebuild, and the phase-closing gate
 
 **UI hint**: yes
 
