@@ -112,7 +112,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The user can delete a tag globally after a confirmation stating how many artists carry it. The tag disappears from every artist, and the artists themselves stay on the watchlist untouched.
   5. The user can add, edit, and clear a plain-text note of up to 500 characters on an artist, and it shows on that artist's Watchlist card after a reload.
 
-**Plans:** 8/9 plans executed
+**Plans:** 9/9 plans executed
 
 Plans:
 **Wave 1**
@@ -143,7 +143,7 @@ Plans:
 
 **Gap closure — Wave 2** *(blocked on Gap closure Wave 1; from 24-VERIFICATION.md gap 2 / code review WR-01)*
 
-- [ ] 24-09-PLAN.md — Manage tags delete also drops the tag from the "+ tag" autocomplete vocabulary, plus a route test, the embedded bundle rebuild, and the phase-closing gate
+- [x] 24-09-PLAN.md — Manage tags delete also drops the tag from the "+ tag" autocomplete vocabulary, plus a route test, the embedded bundle rebuild, and the phase-closing gate
 
 **UI hint**: yes
 
@@ -276,7 +276,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 24. Artist Tags & Notes | 8/9 | In Progress|  |
+| 24. Artist Tags & Notes | 9/9 | In Progress|  |
 | 25. Find & Filter — Watchlist and History | 0/? | Not started | - |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
