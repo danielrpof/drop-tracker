@@ -326,6 +326,61 @@ describe("Watchlist route", () => {
     expect(mockListWatchlist).toHaveBeenCalledTimes(1)
   })
 
+  it("deleting a tag in Manage tags removes it from the '+ tag' autocomplete, with no extra listTags call", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "reggaeton" }] },
+      { ...second, tags: [] },
+    ])
+    mockListTags.mockResolvedValue([
+      { id: 1, name: "reggaeton", carrier_count: 1 },
+      { id: 2, name: "drill", carrier_count: 0 },
+    ])
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Delete tag reggaeton" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "r")
+
+    await screen.findByRole("option", { name: "drill" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    await userEvent.type(input, "eggaeton")
+
+    await screen.findByRole("option", { name: "Create “reggaeton”" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(1)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
   it("opens Manage tags and renames a tag carried by two entries, so both cards show the new name with no extra listWatchlist call", async () => {
     const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
     mockListWatchlist.mockResolvedValue([
