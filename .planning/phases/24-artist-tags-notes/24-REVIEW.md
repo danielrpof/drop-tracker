@@ -1,214 +1,191 @@
 ---
 phase: 24-artist-tags-notes
-reviewed: 2026-09-23T00:00:00Z
+reviewed: 2026-09-24T00:00:00Z
 depth: standard
-files_reviewed: 42
+review_kind: incremental
+diff_base: 43c1d568d8411862cc528285548a579ca6fc3506
+files_reviewed: 7
 files_reviewed_list:
-  - cmd/server/main.go
-  - internal/authgate/gate_test.go
-  - internal/db/migrate_test.go
-  - internal/db/migrations/000010_tags_and_notes.down.sql
-  - internal/db/migrations/000010_tags_and_notes.up.sql
-  - internal/db/schema_version_test.go
+  - internal/db/migrations/000011_artist_tags_cap_on_update.up.sql
+  - internal/db/migrations/000011_artist_tags_cap_on_update.down.sql
   - internal/db/tags_schema_test.go
-  - internal/httpserver/server.go
-  - internal/httpserver/tags.go
-  - internal/httpserver/tags_test.go
-  - internal/httpserver/watchlist.go
-  - internal/httpserver/watchlist_test.go
-  - internal/poller/poller_test.go
-  - internal/tags/normalize.go
-  - internal/tags/normalize_test.go
-  - internal/tags/service.go
-  - internal/tags/service_test.go
-  - internal/watchlist/service.go
-  - internal/watchlist/service_test.go
-  - internal/watchlist/zip_test.go
-  - queries/tags.sql
-  - queries/watchlist.sql
-  - web/app/components/common/ConfirmDialog.test.tsx
-  - web/app/components/common/ConfirmDialog.tsx
-  - web/app/components/history/HistoryFilters.test.tsx
-  - web/app/components/watchlist/ArtistNote.test.tsx
-  - web/app/components/watchlist/ArtistNote.tsx
-  - web/app/components/watchlist/ManageTagsDialog.test.tsx
-  - web/app/components/watchlist/ManageTagsDialog.tsx
-  - web/app/components/watchlist/PreferenceToggles.test.tsx
-  - web/app/components/watchlist/SearchResultsColumns.test.tsx
-  - web/app/components/watchlist/TagChips.test.tsx
-  - web/app/components/watchlist/TagChips.tsx
-  - web/app/components/watchlist/TagCombobox.test.tsx
-  - web/app/components/watchlist/TagCombobox.tsx
-  - web/app/components/watchlist/WatchlistRow.tsx
-  - web/app/lib/api.test.ts
-  - web/app/lib/api.ts
-  - web/app/lib/tags.test.ts
-  - web/app/lib/tags.ts
-  - web/app/routes/watchlist.test.tsx
+  - internal/db/migrate_test.go
+  - internal/db/schema_version_test.go
   - web/app/routes/watchlist.tsx
+  - web/app/routes/watchlist.test.tsx
 findings:
-  critical: 0
+  critical: 1
   warning: 5
-  info: 10
-  total: 15
+  info: 11
+  total: 17
 status: issues_found
 ---
 
-# Phase 24: Code Review Report
+# Phase 24: Code Review Report (incremental re-review)
 
-**Reviewed:** 2026-09-23T00:00:00Z
+**Reviewed:** 2026-09-24T00:00:00Z
 **Depth:** standard
-**Files Reviewed:** 42
+**Files Reviewed:** 7
 **Status:** issues_found
 
 ## Summary
 
-I reviewed migration 000010, the tag and note queries, the `internal/tags` and `internal/watchlist` services, the HTTP handlers and route wiring, and the React tag chips, combobox, note editor, Manage tags dialog and route state.
+This is an **incremental re-review** covering only the gap-closure changes since `43c1d56`:
+- **24-08:** migration 000011 adds `artist_tags_cap_update_trigger BEFORE UPDATE OF artist_id`, plus the schema tests for it.
+- **24-09:** `dropTagFromEntries` now also removes a deleted tag from the route's autocomplete vocabulary.
 
-The backend concurrency design holds up when traced. Attach and merge both lock the tag row first (`GetOrCreateTag`'s `DO UPDATE` and `LockTagsForMerge`), so they serialize. The trigger re-checks existence after taking the artist lock, and it uses a fresh snapshot per statement under READ COMMITTED. Merge never inserts. No blockers were found.
+The earlier full review (2026-09-23, 42 files) is replaced by this report. Its findings that were out of scope here are carried forward below, marked **(carried)**. I did not re-verify them, but none of their files changed since `diff_base`.
 
-The defects are mostly in client state handling:
-- A tag deleted in Manage tags stays in the "+ tag" autocomplete.
-- A background `refresh()` can undo optimistic chip changes, and nothing corrects them afterward.
-- Client length limits count UTF-16 code units. The server counts code points.
+**Status of the prior findings in scope:**
+- **WR-01: resolved.** `watchlist.tsx:128` filters `vocabulary` on delete. The new route test fails without the fix: the deleted tag is dropped from Drake's chips, so the old code would have offered it as an `existing` option. It also passes with the fix (19/19 in `watchlist.test.tsx`). One narrower case still exists: a stale in-flight `listTags` response can put the deleted tag back (WR-06).
+- **WR-03: resolved as stated.** A raw `UPDATE ... SET artist_id` onto an artist with 10 links is now refused, a merge's `SET tag_id` does not fire the trigger, and the down/up pair round-trips. The targeted `internal/db` tests pass against the local Postgres. **However, SC2 ("the database refuses an 11th link") still does not hold.** The shared trigger function, first written in 000010 and copied unchanged into 000011, has a concurrency hole that reaches 11 links through INSERT and UPDATE alike. I reproduced it (CR-01). The prior review traced the trigger's re-check and called it sound. That was wrong: the re-check only guards against concurrent *inserts* of the same link, not concurrent *deletes* of it.
 
-On the database side, the cap trigger fires on `INSERT` only. An `UPDATE ... SET artist_id` can still push an artist past 10 links, so SC2's "non-bypassable" claim does not fully hold.
+## Critical Issues
 
-## Warnings
+### CR-01: A concurrent detach of the same link lets the cap trigger skip its lock and count, so an artist reaches 11 tags
 
-### WR-01: Deleting a tag in Manage tags leaves it in the "+ tag" autocomplete, and picking it silently re-creates the tag
+**File:** `internal/db/migrations/000011_artist_tags_cap_on_update.up.sql:13-27` (same logic in `000010_tags_and_notes.up.sql:38-52`)
+**Issue:** Both existence short-circuits use a plain `IF EXISTS (SELECT 1 FROM artist_tags WHERE artist_id = NEW.artist_id AND tag_id = NEW.tag_id)`. That check sees a link another transaction is deleting but has not committed. The trigger returns `NEW` without taking the artist lock or counting, on the assumption that "the link exists, so no net increase". Then:
+- the INSERT's `ON CONFLICT` check, or the UPDATE's PK check, waits for the deleter;
+- the deleter commits, so the conflict is gone and the row is written;
+- this transaction never held the artist lock, so a third transaction that attaches a different tag in between counts 9 committed links and succeeds.
 
-**File:** `web/app/routes/watchlist.tsx:121-130` (wired at `:331`)
-**Issue:** `onDeleted` is bound to `dropTagFromEntries`, which only filters `entries`. The route's `vocabulary` state is never updated. Rename (`renameTagInEntries`, line 145) and merge (`mergeTagInEntries`, lines 168-174) both patch `vocabulary`, but delete does not. `vocabularyStatus` stays `"loaded"`, so `loadVocabulary` never refetches either. After a delete, every row's "+ tag" combobox keeps showing the deleted tag as an `existing` suggestion (`buildTagSuggestions`, `tags.ts:64-72`). Picking it sends `attachTag(entryId, name)`, which get-or-creates a new tag with a new id, resurrecting the tag the user just deleted. The UI never shows the "Create" affordance that would warn them.
-**Fix:**
-```tsx
-function dropTagFromEntries(tagId: number) {
-  setEntries((rows) =>
-    rows ? rows.map((r) => ({ ...r, tags: r.tags.filter((t) => t.id !== tagId) })) : rows
-  )
-  setVocabulary((v) => (v ? v.filter((t) => t.id !== tagId) : v))
-}
+Detach (`DELETE FROM artist_tags ...`) takes no lock on `artists`, so nothing serializes it with the trigger. BEFORE ROW triggers are not re-run after the conflict wait.
+
+Reproduced on the project's `postgres:16` container, in a scratch schema using the exact function body from 000011. Artist 1 started with 10 links, and artist 2 carried tag 1:
 ```
-
-### WR-02: A background `refresh()` overwrites optimistic tag changes, and nothing reconciles afterward
-
-**File:** `web/app/routes/watchlist.tsx:53-58`, `web/app/components/watchlist/TagChips.tsx:109-131, 173-183`
-**Issue:** `refresh()` replaces `entries` wholesale with `setEntries(rows)`. Callers include the add-from-search success and 409 paths, Undo, remove-failure and Retry. `D-24` protects pending *adds*, which live in TagChips' local `pending` state. It does not protect anything already written into `entries`:
-- **Removal lost:** the user clicks a chip's ×, so `removeTag` runs and `detachTag` starts. A `GET /watchlist` answered before the DELETE commits brings the chip back. When the detach later succeeds, nothing removes it again, so the row shows a tag the artist no longer carries.
-- **Attach lost:** `attachTag` resolves and `addTag` inserts the chip. A `GET /watchlist` answered before the attach commit then drops it, and the chip is gone until the next refresh.
-**Fix:** Pick one of these:
-- Track in-flight detaches and attaches at route level (a per-entry set of pending-remove and pending-add tag ids), and re-apply them inside `refresh`'s `setEntries` updater.
-- Or sequence refreshes with a request counter, and after each tag mutation settles, run a reconciling refresh that is issued *after* it:
-```tsx
-const refreshSeq = useRef(0)
-const refresh = useCallback(() => {
-  const seq = ++refreshSeq.current
-  listWatchlist().then((rows) => { if (seq === refreshSeq.current) setEntries(rows) })
-}, [])
-// and in TagChips: detachTag(...).then(() => actions.refresh?.())
+S1: BEGIN; DELETE FROM artist_tags WHERE artist_id=1 AND tag_id=1; <sleep>; COMMIT;
+S2: BEGIN; INSERT INTO artist_tags VALUES (1,1) ON CONFLICT DO NOTHING; <sleep>; COMMIT;
+    -- or: UPDATE artist_tags SET artist_id=1 WHERE artist_id=2 AND tag_id=1
+S3 (after S1 commits, before S2 commits): INSERT INTO artist_tags VALUES (1,11);
+=> artist 1 ends with 11 links, for both the INSERT and the UPDATE variant of S2.
 ```
-
-### WR-03: The cap trigger fires on INSERT only, so `UPDATE artist_tags SET artist_id = ...` bypasses the 10-tag cap
-
-**File:** `internal/db/migrations/000010_tags_and_notes.up.sql:64-67`
-**Issue:** SC2 and ADR 0004 say the database refuses an 11th link even when the API is bypassed. The trigger is `BEFORE INSERT` only. A raw `UPDATE artist_tags SET artist_id = <artist with 10 links> WHERE ...` moves links onto an artist with no check, and the cap is exceeded. The ADR argues that no code path does this today. That is an application-level promise, not the database-level guarantee the success criterion asks for. Merge's `UPDATE ... SET tag_id` must stay unaffected.
-**Fix:** In a new migration, since 000010 must not be edited once applied (see `internal/db/migrations/README.md`), also fire the function for `UPDATE OF artist_id` and short-circuit when `artist_id` is unchanged:
+The same interleaving is reachable through the API: a detach of T, a re-attach of T, and an attach of U, all concurrent on one artist. The window is small, but the whole purpose of this trigger (ADR 0004, SC2) is that it cannot be bypassed.
+**Fix:** Lock the existing link row instead of just testing that it is visible. `FOR KEY SHARE` conflicts with `DELETE` and with a key-changing `UPDATE`. So the check waits for an in-flight delete, re-evaluates under READ COMMITTED, and falls through to the artist lock and count if the row is gone. If the row survives, the lock holds it for the rest of the transaction. Apply this to both checks:
 ```sql
--- at the top of check_artist_tags_max_per_artist():
-IF TG_OP = 'UPDATE' AND NEW.artist_id = OLD.artist_id THEN
+PERFORM 1 FROM artist_tags
+ WHERE artist_id = NEW.artist_id AND tag_id = NEW.tag_id
+   FOR KEY SHARE;
+IF FOUND THEN
     RETURN NEW;
 END IF;
 
-CREATE TRIGGER artist_tags_cap_update_trigger
-    BEFORE UPDATE OF artist_id ON artist_tags
-    FOR EACH ROW EXECUTE FUNCTION check_artist_tags_max_per_artist();
-```
-If you don't add the trigger, add an ADR amendment stating that the guarantee covers inserts only.
+PERFORM 1 FROM artists WHERE id = NEW.artist_id FOR NO KEY UPDATE;
 
-### WR-04: Client length caps and counters count UTF-16 code units, but the server counts code points
+PERFORM 1 FROM artist_tags
+ WHERE artist_id = NEW.artist_id AND tag_id = NEW.tag_id
+   FOR KEY SHARE;
+IF FOUND THEN
+    RETURN NEW;
+END IF;
+```
+I verified this fix against the same three-session script: S3 is refused with `artist_tags_max_per_artist`, and the artist stays at 10 for both variants. The existing same-tag-at-9 behavior is unaffected, because uncommitted inserts are invisible and so not locked. 000011 has not been released, so it can be edited in place per `internal/db/migrations/README.md`. Any database already at version 11 will not re-run it, though, so a new 000012 that re-creates the function is the safer option. Add a forced `pg_stat_activity`-gated test in the style of `TestSchema_TagCapTrigger_SameTagConcurrentAt9` that pins this interleaving. Amend ADR 0004's Consequences section to cover it.
+
+## Warnings
+
+### WR-06: A stale in-flight vocabulary fetch can put a deleted tag back into the autocomplete
+
+**File:** `web/app/routes/watchlist.tsx:188-197` (interacts with `:128` and `:180-183`)
+**Issue:** This is what remains of WR-01. `loadVocabulary` writes its result unconditionally when the request settles. Suppose the user opens "+ tag" (the request starts, status `"loading"`), then opens Manage tags and deletes a tag before that first `listTags()` resolves, which takes a slow network. The late response then overwrites both `handleTagsLoaded`'s fresher list and the delete filter with a list that still contains the deleted tag, and sets status to `"loaded"`, so it is never refetched. Picking that suggestion silently re-creates the tag, which is exactly the WR-01 symptom. The same overwrite also undoes a rename or merge applied during the window.
+**Fix:** Discard stale responses. For example, bump a generation ref in `handleTagsLoaded`, `dropTagFromEntries`, `renameTagInEntries` and `mergeTagInEntries`, and have `loadVocabulary` apply its result only if the generation still matches what it saw when it started:
+```tsx
+const vocabGen = useRef(0)
+function loadVocabulary() {
+  if (vocabularyStatus !== "idle" && vocabularyStatus !== "error") return
+  const gen = ++vocabGen.current
+  setVocabularyStatus("loading")
+  listTags()
+    .then((s) => {
+      if (gen !== vocabGen.current) return
+      setVocabulary(s.map(({ id, name }) => ({ id, name })))
+      setVocabularyStatus("loaded")
+    })
+    .catch(() => { if (gen === vocabGen.current) setVocabularyStatus("error") })
+}
+// in handleTagsLoaded / drop / rename / merge: vocabGen.current++
+```
+
+### WR-07: The "unchanged-artist" subtest passes even without the new short-circuit, so it pins nothing
+
+**File:** `internal/db/tags_schema_test.go:447-462` (guards `000011_artist_tags_cap_on_update.up.sql:9-11`)
+**Issue:** `UPDATE artist_tags SET artist_id = artist_id` leaves `(artist_id, tag_id)` unchanged. The function's first `EXISTS` check finds the row's own pre-update version and returns `NEW` before it ever reaches the count. Delete the `TG_OP = 'UPDATE' AND NEW.artist_id = OLD.artist_id` guard and this subtest still passes. The guard is the only new logic in the function. It matters only when `artist_id` is in the SET list but `tag_id` changes, for example `SET artist_id = artist_id, tag_id = $x` at 10 links. Without the guard, that statement is falsely refused as an 11th link.
+**Fix:** Make the subtest change `tag_id` as well, so it fails without the guard:
+```go
+tag, err := pool.Exec(ctx,
+    "UPDATE artist_tags SET artist_id = artist_id, tag_id = $2 WHERE artist_id = $1 AND tag_id = $3",
+    artist, freshTagID, oneOfTheTenTagIDs)
+// want: no error, RowsAffected == 1, artist still has 10 links
+```
+
+### WR-02 (carried): A background `refresh()` overwrites optimistic tag changes, and nothing reconciles afterward
+
+**File:** `web/app/routes/watchlist.tsx:53-58`, `web/app/components/watchlist/TagChips.tsx:109-131, 173-183`
+**Issue:** `refresh()` still replaces `entries` wholesale. A `GET /watchlist` that returns before an in-flight detach or attach commits undoes the chip change, and nothing corrects it later. 24-09 did not touch this.
+**Fix:** Track in-flight attaches and detaches per entry and re-apply them inside `refresh`'s updater. Or sequence refreshes with a request counter and run a reconciling refresh after each tag mutation settles (see the prior report for the snippet).
+
+### WR-04 (carried): Client length caps and counters count UTF-16 code units, but the server counts code points
 
 **File:** `web/app/components/watchlist/TagCombobox.tsx:99-105, 135, 143-152`; `web/app/components/watchlist/ArtistNote.tsx:123-127, 175, 190`; `web/app/components/watchlist/ManageTagsDialog.tsx:314-321`
-**Issue:** The server caps tag names at 32 and notes at 500 *code points* after NFC. `NormalizeName` says it is "never byte-counted, so a multi-byte name is not rejected for its byte length", and Postgres `char_length` agrees. The client uses `maxLength` and `string.length`, which both count UTF-16 code units:
-- Every astral character (emoji, many CJK extension characters) counts as 2.
-- Decomposed input (`e` + U+0301) counts as 2 before NFC.
+**Issue:** `maxLength` and `.length` count astral and decomposed characters as 2. Legal emoji or CJK-extension tags and notes get cut short, and the counters are wrong.
+**Fix:** Use `[...s.normalize("NFC")].length`, and enforce the cap in `onChange` instead of with `maxLength`.
 
-So a legal 32-code-point emoji tag is cut off at 16 characters. A 300-emoji note cannot be typed. The `{n}/32` and `{n}/500` counters and the "limit reached" announcements show the wrong values. This defeats the TAG-04 encoding intent on the only UI path.
-**Fix:** Count code points after NFC, and enforce the cap in `onChange` instead of with the `maxLength` attribute:
-```ts
-const codePoints = (s: string) => [...s.normalize("NFC")].length
-// handleInputValueChange / handleChange: reject or clamp when codePoints(next) > MAX
-// counters: {codePoints(query)}/{MAX_TAG_LENGTH}
-```
-
-### WR-05: `t.Fatalf` is called from non-test goroutines in the concurrent cap-race test
+### WR-05 (carried): `t.Fatalf` is called from non-test goroutines in the concurrent cap-race test
 
 **File:** `internal/httpserver/tags_test.go:861-869, 909-916`
-**Issue:** `postTag` calls `t.Fatalf` on transport errors, and `TestTags_Attach_ConcurrentCapRace` calls it from two spawned goroutines. `FailNow` must run on the test goroutine. From another goroutine it only exits that goroutine: `wg.Done()` still runs because it is deferred, `statuses[i]` stays 0, and the failure appears as a confusing `sorted statuses = [0 201]` mismatch, or as a panic after the test returns. The sibling test `TestTags_Detach_ConcurrentSameLinkBoth204` gets this right with `t.Errorf` plus `return`.
-**Fix:** Have `postTag` return `(int, error)` for goroutine use. Inside the goroutines, call `t.Errorf` and return, and check `t.Failed()` after `wg.Wait()`.
+**Issue:** `postTag` calls `t.Fatalf` inside goroutines that `TestTags_Attach_ConcurrentCapRace` spawns. `FailNow` from another goroutine only exits that goroutine, so a transport failure shows up as a confusing status mismatch.
+**Fix:** Return `(int, error)`. In the goroutines, call `t.Errorf` and return, then check `t.Failed()` after `wg.Wait()`.
 
 ## Info
 
-### IN-01: The migration comment says tag identity is accent-insensitive, but it isn't
+### IN-11: Comments still name migration 000010 as where the cap trigger is defined
 
+**File:** `queries/tags.sql:18`, `internal/tags/service.go:14, 35`
+**Issue:** The trigger function now in effect is the one 000011 re-created, and the cap now also covers `UPDATE OF artist_id`. These comments point readers to 000010 only. The literal `10` is now also duplicated in 000011's function body (see IN-03).
+**Fix:** Refer to "the artist_tags cap triggers (000010/000011, ADR 0004)", or just to ADR 0004.
+
+### IN-01 (carried): The migration comment says tag identity is accent-insensitive, but it isn't
 **File:** `internal/db/migrations/000010_tags_and_notes.up.sql:14`
-**Issue:** "Case/accent-insensitive identity (TAG-03...)" is wrong. `lower(name)` folds case only. `TestSchema_TagNameUniqueLower` (`tags_schema_test.go:244-251`) inserts `reggaeton` and `reggaetón` as two distinct tags. TAG-03 is case/whitespace identity only.
-**Fix:** Change the comment to "Case-insensitive identity".
+**Fix:** Change it to "Case-insensitive identity".
 
-### IN-02: The `attachTag` doc comment swaps the 201 and 200 meanings
-
+### IN-02 (carried): The `attachTag` doc comment swaps the 201 and 200 meanings
 **File:** `web/app/lib/api.ts:371-373`
-**Issue:** It says "already existed (201) or was newly created (200)". The handler (`tags.go:118-122`) returns 201 for a new link and 200 when the link already existed.
 **Fix:** Swap the two status codes in the comment.
 
-### IN-03: Limit values are hard-coded in several places instead of shared
+### IN-03 (carried): Limit values are hard-coded in several places instead of shared
+**File:** `TagChips.tsx:18-20`, `ManageTagsDialog.tsx:314, 319-321`, `ArtistNote.tsx:123-126, 175, 187-190`, `internal/httpserver/tags.go:351`, `internal/tags/service.go:28`
+**Fix:** Import `MAX_TAGS_PER_ARTIST` and `MAX_TAG_LENGTH`. Build the messages from `MaxNameRunes` and `MaxTagsPerArtist`.
 
-**File:** `web/app/components/watchlist/TagChips.tsx:18-20` (duplicates `MAX_TAGS_PER_ARTIST` exported from `web/app/lib/tags.ts:4`); `ManageTagsDialog.tsx:314, 319-321` (literal `32`/`25` instead of `MAX_TAG_LENGTH`); `ArtistNote.tsx:123-126, 175, 187-190` (`500`/`450`); `internal/httpserver/tags.go:351` and `internal/tags/service.go:28` (literal "32" and "10" in messages instead of `tags.MaxNameRunes` and `MaxTagsPerArtist`)
-**Fix:** Import the existing constants. Build the messages with `fmt.Sprintf` from `MaxNameRunes` and `MaxTagsPerArtist`.
-
-### IN-04: `DeleteTagCountingCarriers` can under-report when an attach commits at the same moment
-
+### IN-04 (carried): `DeleteTagCountingCarriers` can under-report when an attach commits at the same moment
 **File:** `queries/tags.sql:67-75`
-**Issue:** Under READ COMMITTED, the `counted` CTE reads the statement-start snapshot. The `DELETE` may block on an in-flight attach's row lock (from `GetOrCreateTag`'s `DO UPDATE`), then delete the newer row version and cascade the just-committed link. That link is missing from the reported `carrier_count`, so the toast says "from N artists" when N+1 lost the tag.
-**Fix:** Take `SELECT ... FROM tags WHERE id = $1 FOR UPDATE` in a transaction before counting and deleting. Or document the count as best-effort.
+**Fix:** Lock the tag row `FOR UPDATE` before counting, or document the count as best-effort.
 
-### IN-05: A second rename collision during the retry returns 500 instead of 409
-
+### IN-05 (carried): A second rename collision during the retry returns 500 instead of 409
 **File:** `internal/tags/service.go:203-210`
-**Issue:** The retry after a vanished collider goes through `mapTagError`, which does not map `tags_name_lower_idx`. If yet another tag took the name in the meantime, the handler returns a generic 500.
-**Fix:** Loop back into the collision branch, or map the unique violation to a `CollisionError`/409.
+**Fix:** Map `tags_name_lower_idx` to a `CollisionError`, or loop back into the collision branch.
 
-### IN-06: `watchlist_note_not_blank` is mapped to "note contains invalid characters"
-
+### IN-06 (carried): `watchlist_note_not_blank` is mapped to "note contains invalid characters"
 **File:** `internal/watchlist/service.go:532-533`
-**Issue:** A blank-note CHECK violation is reported as an invalid-characters error. The path is unreachable after `NormalizeNote`, but the mapping is misleading if it ever fires.
-**Fix:** Map it to its own sentinel, or treat it as a clear.
+**Fix:** Give it its own sentinel, or treat it as a clear.
 
-### IN-07: A merge target that isn't in the dialog's loaded list disappears from it
-
+### IN-07 (carried): A merge target that isn't in the dialog's loaded list disappears from it
 **File:** `web/app/components/watchlist/ManageTagsDialog.tsx:200-211`
-**Issue:** If the rename collides with a tag created after the dialog loaded, `withoutSource.map` has no target row to update. The merged tag does not appear, and `findIndex` returns -1, so no focus move happens. `renameTarget` and `renameValue` also survive closing and reopening the dialog, so a stale rename row can reappear.
 **Fix:** When the target is missing, insert `merged` into the list. Reset the rename state when `open` becomes false.
 
-### IN-08: The client re-sorts tags with a different order than the server
-
+### IN-08 (carried): The client re-sorts tags with a different order than the server
 **File:** `web/app/components/watchlist/ManageTagsDialog.tsx:47-54`, `web/app/lib/tags.ts:79-84`
-**Issue:** `localeCompare(..., { sensitivity: "base" })` ignores accents and uses locale rules. The server orders by `lower(name), id` (TAG-05). `reggaeton` and `reggaetón` compare equal on the client and fall back to id order, which can differ from the server's order.
-**Fix:** Keep the server order for the loaded list. For re-sorts, compare `toLowerCase()` keys with a plain `<`, then fall back to id.
+**Fix:** Compare `toLowerCase()` keys with a plain `<`, then fall back to id.
 
-### IN-09: The ADR-mandated distinct-tag 10th/11th race is tested only as an unforced HTTP race
+### IN-09 (carried): The ADR-mandated distinct-tag 10th/11th race is tested only as an unforced HTTP race
+**File:** `internal/httpserver/tags_test.go:877-933`, `internal/db/tags_schema_test.go:173-252`
+**Fix:** Add a forced two-transaction variant using distinct tag ids. It pairs naturally with CR-01's new forced test.
 
-**File:** `internal/httpserver/tags_test.go:877-933`, `internal/db/tags_schema_test.go:126-201`
-**Issue:** ADR 0004 requires pinning "two concurrent 10th/11th attaches (one succeeds)". Only the same-tag case is forced at the database level, using `pg_stat_activity`. The distinct-tag case relies on 10 loose HTTP iterations, which can all pass without the two transactions ever overlapping. That run would not prove the `FOR NO KEY UPDATE` lock.
-**Fix:** Add a forced variant of `TestSchema_TagCapTrigger_SameTagConcurrentAt9` using two different tag ids. Assert that txB errors with `artist_tags_max_per_artist` after txA commits.
-
-### IN-10: New comments break the project's 1-3 line comment rule
-
-**File:** e.g. `queries/watchlist.sql:11-25, 62-66`, `internal/watchlist/service.go:382-387, 405-411`, `internal/httpserver/watchlist.go:136-140`, `web/app/components/watchlist/ArtistNote.tsx:15-21, 35-41`, `web/app/components/watchlist/TagChips.tsx:22-27`
-**Issue:** `.claude/CLAUDE.md` asks for 1-3 line intent comments with a single design-doc reference. Many of the new blocks are 5-15 lines, cite several D-xx references, and argue the decision again inline.
+### IN-10 (carried): New comments break the project's 1-3 line comment rule
+**File:** e.g. `queries/watchlist.sql:11-25, 62-66`, `internal/watchlist/service.go:382-387, 405-411`, `internal/httpserver/watchlist.go:136-140`, `ArtistNote.tsx:15-21, 35-41`, `TagChips.tsx:22-27`
+**Issue:** The gap-closure changes themselves follow the rule: the 000011 header and the new `dropTagFromEntries` comment are both short. The earlier blocks remain.
 **Fix:** Cut each block down to its core intent and one reference.
 
 ---
 
-_Reviewed: 2026-09-23T00:00:00Z_
+_Reviewed: 2026-09-24T00:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
