@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.6
 milestone_name: Watchlist Organization
 current_phase: 24
-current_phase_name: artist-tags-notes
+current_phase_name: Artist Tags & Notes
 status: executing
-stopped_at: Completed 24-07-PLAN.md
-last_updated: "2026-09-25T01:47:38.143Z"
-last_activity: 2026-09-23
+stopped_at: Completed 24-08-PLAN.md
+last_updated: "2026-09-25T02:26:28.158Z"
+last_activity: 2026-09-24
 last_activity_desc: Phase 24 execution started
-state_head: 92080a97f652fdb2cbba24a706146ce770b5e5bb
+state_head: 19d5373364ca122b9f18da50b538cc560a389dea
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 0
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 
 ## Current Position
 
-Phase: 24 (artist-tags-notes) — READY TO EXECUTE
-Plan: 7 of 7
+Phase: 24 (Artist Tags & Notes) — EXECUTING
+Plan: 2 of 9
 Status: Ready to execute
-Last activity: 2026-09-23 — Phase 24 execution started
+Last activity: 2026-09-24 — Phase 24 execution started
 
 ## Performance Metrics
 
@@ -154,6 +154,7 @@ Last activity: 2026-09-23 — Phase 24 execution started
 | Phase 24 P05 | ~75min | 3 tasks | 13 files |
 | Phase 24 P06 | ~55min | 3 tasks | 10 files |
 | Phase 24 P07 | 17min | 3 tasks | 6 files |
+| Phase 24 P08 | ~50min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -374,6 +375,7 @@ Recent decisions affecting current work:
 - [Phase 24]: renameTag's collision detection is purely server-driven (only a 409 body carrying target + carrier_count_after_merge maps to a collision result); mergeTagInEntries drops the source chip in place when a card already carries the target so a merge never produces a duplicate chip.
 - [Phase 24]: [Phase 24-07]: Task 1's tracer scope stayed deliberately narrow (save/cancel/disabled-when-unchanged only) so Task 2's TDD RED phase had genuine failing assertions to drive.
 - [Phase 24]: [Phase 24-07]: Reworded a source comment that spelled out dangerouslySetInnerHTML literally, since it tripped the phase's own XSS-surface grep gate though no code used it.
+- [Phase 24]: [Phase 24-08]: Closed verification gap 1 (SC2/TAG-04) with additive migration 000011 extending the per-artist tag cap trigger to BEFORE UPDATE OF artist_id, keeping merge's UPDATE SET tag_id unaffected (D-19) — make/sqlc were not on this session's PATH; ran the underlying Makefile commands directly and reinstalled sqlc v1.31.1 via go install
 
 ### Pending Todos
 
@@ -461,8 +463,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-24T03:30:48.549Z
-Stopped at: Completed 24-07-PLAN.md
+Last session: 2026-09-25T02:26:28.111Z
+Stopped at: Completed 24-08-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

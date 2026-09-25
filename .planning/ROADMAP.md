@@ -112,7 +112,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The user can delete a tag globally after a confirmation stating how many artists carry it. The tag disappears from every artist, and the artists themselves stay on the watchlist untouched.
   5. The user can add, edit, and clear a plain-text note of up to 500 characters on an artist, and it shows on that artist's Watchlist card after a reload.
 
-**Plans:** 7/9 plans executed
+**Plans:** 8/9 plans executed
 
 Plans:
 **Wave 1**
@@ -139,7 +139,7 @@ Plans:
 
 **Gap closure — Wave 1** *(from 24-VERIFICATION.md gap 1 / code review WR-03: DB cap bypassable by raw UPDATE)*
 
-- [ ] 24-08-PLAN.md — Additive migration 000011 fires the 10-tag cap on `UPDATE OF artist_id` (merge's `SET tag_id` unaffected), plus DB tests, a down/up round-trip, the ADR 0004 amendment, and a live dev-DB apply
+- [x] 24-08-PLAN.md — Additive migration 000011 fires the 10-tag cap on `UPDATE OF artist_id` (merge's `SET tag_id` unaffected), plus DB tests, a down/up round-trip, the ADR 0004 amendment, and a live dev-DB apply
 
 **Gap closure — Wave 2** *(blocked on Gap closure Wave 1; from 24-VERIFICATION.md gap 2 / code review WR-01)*
 
@@ -276,7 +276,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 24. Artist Tags & Notes | 7/7 | In Progress|  |
+| 24. Artist Tags & Notes | 8/9 | In Progress|  |
 | 25. Find & Filter — Watchlist and History | 0/? | Not started | - |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
