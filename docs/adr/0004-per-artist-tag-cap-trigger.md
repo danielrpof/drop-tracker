@@ -63,3 +63,16 @@ trigger, and no code path inserts `artist_tags` rows any other way.
 - The existence check runs again after the artist lock, so two concurrent
   attaches of the same tag to a 9-tag artist both succeed instead of the
   second racing into a spurious cap violation.
+
+## Amendment: UPDATE OF artist_id (migration 000011)
+
+The gap: the trigger above was `BEFORE INSERT` only, so a raw
+`UPDATE artist_tags SET artist_id = ...` gave an artist an 11th link with no
+error (24-VERIFICATION gap 1, review WR-03). The fix: 000011 attaches the same
+function to `artist_tags_cap_update_trigger BEFORE UPDATE OF artist_id`, and
+the function returns early when `artist_id` is unchanged. Merges rewrite only
+`tag_id`, so this column-scoped trigger never fires for them (D-19 holds). The
+database guarantee now covers every way a link can reach an artist -- INSERT
+and UPDATE of `artist_id` -- replacing the earlier application-level promise
+that no code path moves links. Pinned by `TestSchema_TagCapTrigger_RawUpdateRefused`,
+`TestSchema_TagCapTrigger_UpdatePaths`, and `TestSchema_Migration000011_DownUpRoundTrip`.
