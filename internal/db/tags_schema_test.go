@@ -84,6 +84,52 @@ func TestSchema_TagCapTrigger_RawInsertRefused(t *testing.T) {
 	}
 }
 
+// TestSchema_TagCapTrigger_RawUpdateRefused closes gap 1 (24-VERIFICATION,
+// review WR-03): migration 000011 extends the cap to UPDATE OF artist_id.
+func TestSchema_TagCapTrigger_RawUpdateRefused(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
+	ctx := context.Background()
+
+	artistA := seedArtistNamed(t, ctx, pool, "a")
+	artistB := seedArtistNamed(t, ctx, pool, "b")
+	for i := 0; i < 10; i++ {
+		tagID := insertTag(t, ctx, pool, fmt.Sprintf("upd-%02d", i))
+		if err := linkTag(ctx, pool, artistA, tagID); err != nil {
+			t.Fatalf("seed link %d on A: %v", i, err)
+		}
+	}
+	tagB := insertTag(t, ctx, pool, "upd-b")
+	if err := linkTag(ctx, pool, artistB, tagB); err != nil {
+		t.Fatalf("seed link on B: %v", err)
+	}
+
+	_, err := pool.Exec(ctx, "UPDATE artist_tags SET artist_id = $1 WHERE artist_id = $2 AND tag_id = $3", artistA, artistB, tagB)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("raw UPDATE moving a link onto a 10-link artist: got err %v, want *pgconn.PgError", err)
+	}
+	if pgErr.Code != pgerrcode.CheckViolation {
+		t.Fatalf("raw UPDATE code = %q, want %q (%s)", pgErr.Code, pgerrcode.CheckViolation, pgErr.Message)
+	}
+	if pgErr.ConstraintName != "artist_tags_max_per_artist" {
+		t.Fatalf("raw UPDATE constraint = %q, want artist_tags_max_per_artist", pgErr.ConstraintName)
+	}
+
+	var countA, countB int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", artistA).Scan(&countA); err != nil {
+		t.Fatalf("count links on A: %v", err)
+	}
+	if countA != 10 {
+		t.Fatalf("artist_tags count for A = %d, want 10 (refused move must not land)", countA)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", artistB).Scan(&countB); err != nil {
+		t.Fatalf("count links on B: %v", err)
+	}
+	if countB != 1 {
+		t.Fatalf("artist_tags count for B = %d, want 1 (link stays on its original artist)", countB)
+	}
+}
+
 // TestTrigger_SkipExisting is ADR 0004 required test 2: a set-based
 // ON CONFLICT DO NOTHING insert naming only already-linked tags is a true
 // no-op at the cap; the same statement naming one new tag still refuses.
@@ -347,3 +393,4 @@ func TestSchema_WatchlistDeleteKeepsTagLinks(t *testing.T) {
 		t.Fatalf("artist_tags count after tag delete = %d, want 0 (cascade)", count)
 	}
 }
+
