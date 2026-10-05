@@ -366,6 +366,10 @@ describe("ManageTagsDialog", () => {
   it("Esc on the merge confirm closes only it, leaving Manage tags open and the rename input intact", async () => {
     const { input } = await openCollisionConfirm()
 
+    // Escape must land on the open confirm, not the rename input mid-refocus.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus()
+    )
     await userEvent.keyboard("{Escape}")
 
     await waitFor(() =>
