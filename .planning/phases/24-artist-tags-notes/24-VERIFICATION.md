@@ -1,9 +1,10 @@
 ---
 phase: 24-artist-tags-notes
 verified: 2026-10-05T22:21:47Z
-status: human_needed
+status: passed
 score: 5/5 roadmap success criteria verified; 24-13 gap-closure must-haves 7/7 truths verified, 5/5 prohibitions hold for task commits (G-24-5 closed in code)
 covered_files:
+
   - .planning/REQUIREMENTS.md
   - .planning/phases/24-artist-tags-notes/24-01-PLAN.md
   - .planning/phases/24-artist-tags-notes/24-01-SUMMARY.md
@@ -66,7 +67,8 @@ covered_files:
   - web/app/lib/tags.ts
   - web/app/routes/watchlist.test.tsx
   - web/app/routes/watchlist.tsx
-covered_digest: "v1:sha256:64a31ad6e4adbe6e3ff10e91f336476e233ce061850b0f495bfecd6ca9733979"
+
+covered_digest: "v1:sha256:6f5529635cf7bbf1eca8085c2abe2c570f747a7b43ff1d141f1d71f7cced989f"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
@@ -77,6 +79,7 @@ re_verification:
   gaps_remaining: []
   regressions: []
 advisory:
+
   - finding: "WR-09 (carried): the invalidateLoad() calls in handleConfirmMerge and handleConfirmDelete in ManageTagsDialog.tsx have no committed regression test"
     category: other
     reason: "Behavior was confirmed correct last round with a throwaway test and a mutation check. This is test-coverage debt; commit the merge-mid-reopen test sketched in the 24-12 review."
@@ -90,6 +93,7 @@ advisory:
     reason: "The lockfile pins 4.3.0 and the shipped CSS contains .wrap-anywhere{overflow-wrap:anywhere}. A 4.0.x resolve would drop the rule silently while the class-level tests stay green. Latent; resolve by raising the floor to ^4.1."
     evidence_status: "no active failure; lockfile pins a compatible version"
 human_verification:
+
   - test: "UAT test 5 re-run (24-13 Task 2 human-check): with the go:embed build at a 375px viewport, create two 32-char tags, 31 W + A and 31 W + B. Rename the first onto the second to open the merge confirm, then cancel. Open Delete on one of them. Finally, open a merge confirm between two short multi-word tags."
     expected: "The merge and delete titles wrap onto several lines inside the dialog: no horizontal scroll, no ellipsis, nothing past the dialog edge. Both full names are readable, the consequence sentence wraps the same way, and Cancel and Merge tags stay visible. Short multi-word titles break only at spaces."
     why_human: "jsdom computes no layout. The verifier's headless-Chrome probe used a hand-built copy of the dialog DOM with the shipped CSS, not the live app. The plan defers this end-of-phase check to UAT, and UAT.md still records G-24-5 as failed until it is re-run."
@@ -121,6 +125,7 @@ human_verification:
 **The code.** `web/app/components/common/ConfirmDialog.tsx:71-76` passes `className="wrap-anywhere"` to both `AlertDialogTitle` and `AlertDialogDescription`, with a 2-line why comment. The vendored `ui/alert-dialog.tsx` merges it through `cn(base, className)`. tailwind-merge keeps it next to the description's `text-balance`, since the two belong to different groups.
 
 **Evidence. I did not rely on SUMMARY claims:**
+
 1. **Tests:** `vitest run ConfirmDialog.test.tsx ManageTagsDialog.test.tsx --coverage.enabled=false` passes 27/27, including both new tests.
 2. **Mutation check:** I stripped `className="wrap-anywhere"` from ConfirmDialog. Exactly the two new tests failed (25 pass, 2 fail), so the tests pin the fix. The file was restored and `git status web/` is clean.
 3. **Shipped CSS:** `internal/webassets/build/client/assets/root-Dg0NMU0m.css` contains `.wrap-anywhere{overflow-wrap:anywhere}`. The class also appears in `watchlist-z6XpSwAW.js`, the chunk that contains ConfirmDialog.
@@ -152,6 +157,7 @@ The live-app visual check (UAT test 5 re-run) stays a human item. The plan defer
 | 7 | Existing tests unchanged and every DoD gate green | VERIFIED | The diff to the test files is additions only. Gates are listed in the spot-checks below. |
 
 **Prohibitions:**
+
 - **`ui/alert-dialog.tsx` not edited:** holds.
 - **Title and description never truncated, clamped, or clipped:** holds. ConfirmDialog adds no `truncate`, `line-clamp`, or `overflow-hidden`.
 - **No `package.json` or lockfile change:** holds. The diff against `main` for deps and out-of-scope packages is empty.
@@ -243,6 +249,7 @@ UAT tests 1-4 and 6-8 passed in `24-UAT.md` and drop out of this list. One plann
 ### Gaps Summary
 
 There are no gaps. Plan 24-13 closes G-24-5 in code:
+
 - ConfirmDialog's title and description carry `overflow-wrap: anywhere`, pinned by two tests that fail without it.
 - The shipped CSS contains the rule, and the embedded bundle matches a fresh build.
 - A headless-Chrome layout probe shows the 32+32 merge and delete titles stay inside the 320px popup. The no-fix control reproduces the reported overflow.
