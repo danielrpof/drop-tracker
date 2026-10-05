@@ -65,6 +65,17 @@ const entry: WatchlistEntry = {
   note: null,
 }
 
+// Lets a test hold a mocked request open and settle it at a chosen moment.
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 describe("Watchlist route", () => {
   it("calls removeWatchlist with the entry's id when its remove control is clicked", async () => {
     mockListWatchlist.mockResolvedValue([entry])
@@ -454,6 +465,100 @@ describe("Watchlist route", () => {
     ).not.toBeInTheDocument()
 
     expect(mockListTags).toHaveBeenCalledTimes(2)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  // Open Manage tags (load 1 stays pending), close it, reopen it (load 2).
+  async function openCloseReopenManageTags() {
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+  }
+
+  it("a Manage tags GET /tags from an earlier open that settles after a delete does not bring the deleted tag back", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "reggaeton" }] },
+      { ...second, tags: [] },
+    ])
+    const fresh: TagSummary[] = [
+      { id: 1, name: "reggaeton", carrier_count: 1 },
+      { id: 2, name: "drill", carrier_count: 0 },
+    ]
+    const afterDelete: TagSummary[] = [
+      { id: 2, name: "drill", carrier_count: 0 },
+    ]
+    const first = deferred<TagSummary[]>()
+    mockListTags
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(fresh)
+      .mockResolvedValue(afterDelete)
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await openCloseReopenManageTags()
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag reggaeton" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      first.resolve(fresh)
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "r")
+
+    await screen.findByRole("option", { name: "drill" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    await userEvent.type(input, "eggaeton")
+
+    await screen.findByRole("option", { name: "Create “reggaeton”" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toBeInTheDocument()
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+    await screen.findByRole("button", { name: "Delete tag drill" })
+    expect(
+      screen.queryByRole("button", { name: "Delete tag reggaeton" })
+    ).not.toBeInTheDocument()
+    expect(mockListTags).toHaveBeenCalledTimes(3)
     expect(mockListWatchlist).toHaveBeenCalledTimes(1)
   })
 

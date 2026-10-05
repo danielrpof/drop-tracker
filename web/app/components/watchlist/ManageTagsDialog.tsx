@@ -88,17 +88,24 @@ export function ManageTagsDialog({
   const cancelFocusIndexRef = useRef<number | null>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const renameSaveRef = useRef<HTMLButtonElement>(null)
+  // Drops a GET /tags that a newer load or a successful mutation superseded (WR-08).
+  const loadGen = useRef(0)
 
   function load() {
+    const gen = ++loadGen.current
     setStatus("loading")
     listTags()
       .then((result) => {
+        if (gen !== loadGen.current) return
         const sorted = sortTags(result)
         setTags(sorted)
         setStatus("loaded")
         onLoaded(sorted)
       })
-      .catch(() => setStatus("error"))
+      .catch(() => {
+        if (gen !== loadGen.current) return
+        setStatus("error")
+      })
   }
 
   useEffect(() => {
