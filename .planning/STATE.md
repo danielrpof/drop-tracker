@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 24
 current_phase_name: Artist Tags & Notes
 status: executing
-stopped_at: Completed 24-10-PLAN.md
-last_updated: "2026-10-05T00:42:38.328Z"
+stopped_at: Completed 24-11-PLAN.md
+last_updated: "2026-10-05T00:48:18.143Z"
 last_activity: 2026-10-04
 last_activity_desc: Phase 24 execution started
-state_head: 126e5068cdad05e1fcd50c153f9d267bb3dd8b0a
+state_head: 22ee249ef272880e829be44088f25abbc3392959
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 ## Current Position
 
 Phase: 24 (Artist Tags & Notes) — EXECUTING
-Plan: 2 of 11
+Plan: 3 of 11
 Status: Ready to execute
 Last activity: 2026-10-04 — Phase 24 execution started
 
@@ -157,6 +157,7 @@ Last activity: 2026-10-04 — Phase 24 execution started
 | Phase 24 P08 | ~50min | 3 tasks | 6 files |
 | Phase 24 P09 | ~35min | 2 tasks | 5 files |
 | Phase 24 P10 | ~25min | 3 tasks | 6 files |
+| Phase 24 P11 | 25m | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -380,6 +381,7 @@ Recent decisions affecting current work:
 - [Phase 24]: [Phase 24-08]: Closed verification gap 1 (SC2/TAG-04) with additive migration 000011 extending the per-artist tag cap trigger to BEFORE UPDATE OF artist_id, keeping merge's UPDATE SET tag_id unaffected (D-19) — make/sqlc were not on this session's PATH; ran the underlying Makefile commands directly and reinstalled sqlc v1.31.1 via go install
 - [Phase 24]: [Phase 24-09]: golangci-lint reinstalled at pinned v2.13.2 via go install after the pre-commit-cached binary (built with go1.25) refused to run against this box's go1.26 toolchain -- tooling-only fix, no source/config change
 - [Phase 24]: 24-10: ship cap-vs-concurrent-detach fix as additive migration 000012 (FOR KEY SHARE existence lock) instead of editing applied 000011
+- [Phase 24]: 24-11: vocabGen generation ref drops a stale GET /tags settle so a deleted/renamed/merged tag cannot return via the + tag autocomplete (WR-06)
 
 ### Pending Todos
 
@@ -467,8 +469,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-05T00:42:38.284Z
-Stopped at: Completed 24-10-PLAN.md
+Last session: 2026-10-05T00:48:18.101Z
+Stopped at: Completed 24-11-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
