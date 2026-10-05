@@ -76,3 +76,10 @@ database guarantee now covers every way a link can reach an artist -- INSERT
 and UPDATE of `artist_id` -- replacing the earlier application-level promise
 that no code path moves links. Pinned by `TestSchema_TagCapTrigger_RawUpdateRefused`,
 `TestSchema_TagCapTrigger_UpdatePaths`, and `TestSchema_Migration000011_DownUpRoundTrip`.
+
+## Amendment: concurrent detach (migration 000012)
+
+The gap: the skip-existing checks only tested visibility, so a link being deleted by an uncommitted detach still counted as existing (24-VERIFICATION re-verification gap 1, review CR-01). A re-attach or move of it skipped the artist lock and the count, and a third attach counted 9 and landed an 11th link.
+The fix: 000012 locks the existing link `FOR KEY SHARE`. That lock waits for an in-flight delete or key-changing update, and when the row is gone it falls through to the artist lock and the count. Uncommitted inserts stay invisible, so two same-tag attaches at 9 still both succeed.
+With this, the 000011 amendment's "every way a link can reach an artist" also holds under concurrency.
+Pinned by `TestSchema_TagCapTrigger_ConcurrentDetachRace`, `TestSchema_TagCapTrigger_DistinctTagConcurrentAt9`, and `TestSchema_Migration000012_DownUpRoundTrip`.
