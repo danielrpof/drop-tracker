@@ -562,6 +562,139 @@ describe("Watchlist route", () => {
     expect(mockListWatchlist).toHaveBeenCalledTimes(1)
   })
 
+  it("a Manage tags GET /tags from an earlier open that settles after a rename does not undo it in '+ tag'", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "Latin" }] },
+      { ...second, tags: [] },
+    ])
+    const old: TagSummary[] = [
+      { id: 1, name: "Latin", carrier_count: 1 },
+      { id: 2, name: "drill", carrier_count: 0 },
+    ]
+    const first = deferred<TagSummary[]>()
+    mockListTags.mockReturnValueOnce(first.promise).mockResolvedValueOnce(old)
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "renamed",
+      tag: { id: 1, name: "Latino" },
+    })
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await openCloseReopenManageTags()
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Rename tag Latin" })
+    )
+    const renameInput = screen.getByRole("textbox", {
+      name: "New name for Latin",
+    })
+    await userEvent.clear(renameInput)
+    await userEvent.type(renameInput, "Latino{Enter}")
+    await screen.findByRole("button", { name: "Rename tag Latino" })
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      first.resolve(old)
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Rihanna" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Rihanna" })
+    await userEvent.type(input, "Latin")
+
+    await screen.findByRole("option", { name: "Latino" })
+    await screen.findByRole("option", { name: "Create “Latin”" })
+    expect(
+      screen.queryByRole("option", { name: "Latin" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("a Manage tags GET /tags from an earlier open that settles after a merge does not bring the merged-away tag back", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 5, name: "rap" }] },
+      { ...second, tags: [] },
+    ])
+    const old: TagSummary[] = [
+      { id: 5, name: "rap", carrier_count: 1 },
+      { id: 9, name: "trap", carrier_count: 0 },
+    ]
+    const first = deferred<TagSummary[]>()
+    mockListTags.mockReturnValueOnce(first.promise).mockResolvedValueOnce(old)
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: { id: 9, name: "trap" },
+      carrierCountAfterMerge: 1,
+    })
+    mockMergeTag.mockResolvedValueOnce({
+      id: 9,
+      name: "trap",
+      carrier_count: 1,
+    })
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await openCloseReopenManageTags()
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Rename tag rap" })
+    )
+    const renameInput = screen.getByRole("textbox", {
+      name: "New name for rap",
+    })
+    await userEvent.clear(renameInput)
+    await userEvent.type(renameInput, "trap{Enter}")
+
+    await screen.findByText("Merge “rap” into “trap”?")
+    await userEvent.click(screen.getByRole("button", { name: "Merge tags" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Rename tag rap" })
+      ).not.toBeInTheDocument()
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      first.resolve(old)
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Rihanna" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Rihanna" })
+    await userEvent.type(input, "rap")
+
+    await screen.findByRole("option", { name: "trap" })
+    await screen.findByRole("option", { name: "Create “rap”" })
+    expect(
+      screen.queryByRole("option", { name: "rap" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
   it("opens Manage tags and renames a tag carried by two entries, so both cards show the new name with no extra listWatchlist call", async () => {
     const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
     mockListWatchlist.mockResolvedValue([

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -26,15 +26,26 @@ const mockDeleteTag = vi.mocked(deleteTag)
 const mockRenameTag = vi.mocked(renameTag)
 const mockMergeTag = vi.mocked(mergeTag)
 
+// Lets a test hold a mocked request open and settle it at a chosen moment.
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 function renderDialog() {
   const onOpenChange = vi.fn()
   const onLoaded = vi.fn()
   const onDeleted = vi.fn()
   const onRenamed = vi.fn()
   const onMerged = vi.fn()
-  render(
+  const element = (open: boolean) => (
     <ManageTagsDialog
-      open
+      open={open}
       onOpenChange={onOpenChange}
       onLoaded={onLoaded}
       onDeleted={onDeleted}
@@ -42,7 +53,9 @@ function renderDialog() {
       onMerged={onMerged}
     />
   )
-  return { onOpenChange, onLoaded, onDeleted, onRenamed, onMerged }
+  const { rerender } = render(element(true))
+  const setOpen = (next: boolean) => rerender(element(next))
+  return { onOpenChange, onLoaded, onDeleted, onRenamed, onMerged, setOpen }
 }
 
 describe("ManageTagsDialog", () => {
@@ -453,5 +466,112 @@ describe("ManageTagsDialog", () => {
       ).not.toBeInTheDocument()
     )
     await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(2))
+  })
+
+  it("drops an older open's GET /tags that settles after a newer load and a delete, so the deleted row stays gone and onLoaded never sees it", async () => {
+    const stale = deferred<TagSummary[]>()
+    mockListTags.mockReturnValueOnce(stale.promise).mockResolvedValueOnce([
+      { id: 1, name: "drill", carrier_count: 3 },
+      { id: 2, name: "trap", carrier_count: 0 },
+    ])
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 3 })
+
+    const { onLoaded, setOpen } = renderDialog()
+    setOpen(false)
+    setOpen(true)
+
+    await screen.findByText("drill")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Delete tag drill" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+    await waitFor(() =>
+      expect(screen.queryByText("drill")).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      stale.resolve([
+        { id: 1, name: "drill", carrier_count: 3 },
+        { id: 2, name: "trap", carrier_count: 0 },
+      ])
+    })
+
+    expect(screen.queryByText("drill")).not.toBeInTheDocument()
+    expect(screen.getByText("trap")).toBeInTheDocument()
+    expect(onLoaded).toHaveBeenCalledTimes(1)
+    expect(onLoaded).toHaveBeenCalledWith([
+      { id: 1, name: "drill", carrier_count: 3 },
+      { id: 2, name: "trap", carrier_count: 0 },
+    ])
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+  })
+
+  it("ignores an older open's GET /tags failure once a newer load has rendered the list", async () => {
+    const stale = deferred<TagSummary[]>()
+    mockListTags
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce([{ id: 1, name: "drill", carrier_count: 2 }])
+
+    const { setOpen } = renderDialog()
+    setOpen(false)
+    setOpen(true)
+    await screen.findByText("drill")
+
+    await act(async () => {
+      stale.reject(new Error("network down"))
+    })
+
+    expect(
+      screen.queryByRole("heading", { name: "Couldn't load tags." })
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("drill")).toBeInTheDocument()
+  })
+
+  it("a rename that succeeds while a reopen's GET /tags is in flight refetches instead of applying that response or stranding on the skeleton", async () => {
+    const reopenLoad = deferred<TagSummary[]>()
+    mockListTags
+      .mockResolvedValueOnce([{ id: 3, name: "Latin", carrier_count: 4 }])
+      .mockReturnValueOnce(reopenLoad.promise)
+      .mockResolvedValueOnce([{ id: 3, name: "Latino", carrier_count: 4 }])
+    const rename = deferred<{
+      kind: "renamed"
+      tag: { id: number; name: string }
+    }>()
+    mockRenameTag.mockReturnValueOnce(rename.promise)
+
+    const { onLoaded, onRenamed, setOpen } = renderDialog()
+
+    await screen.findByText("Latin")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag Latin" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for Latin" })
+    await userEvent.clear(input)
+    await userEvent.type(input, "Latino{Enter}")
+    await waitFor(() => expect(mockRenameTag).toHaveBeenCalledWith(3, "Latino"))
+
+    setOpen(false)
+    setOpen(true)
+    await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      rename.resolve({ kind: "renamed", tag: { id: 3, name: "Latino" } })
+    })
+    await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(3))
+    await screen.findByRole("button", { name: "Rename tag Latino" })
+
+    await act(async () => {
+      reopenLoad.resolve([{ id: 3, name: "Latin", carrier_count: 4 }])
+    })
+
+    expect(screen.queryByText("Latin")).not.toBeInTheDocument()
+    expect(screen.getByText("Latino")).toBeInTheDocument()
+    expect(onRenamed).toHaveBeenCalledWith({ id: 3, name: "Latino" })
+    expect(onLoaded).toHaveBeenCalledTimes(2)
+    expect(onLoaded).toHaveBeenLastCalledWith([
+      { id: 3, name: "Latino", carrier_count: 4 },
+    ])
   })
 })

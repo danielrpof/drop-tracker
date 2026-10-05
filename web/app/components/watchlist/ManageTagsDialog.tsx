@@ -90,13 +90,16 @@ export function ManageTagsDialog({
   const renameSaveRef = useRef<HTMLButtonElement>(null)
   // Drops a GET /tags that a newer load or a successful mutation superseded (WR-08).
   const loadGen = useRef(0)
+  const loadInFlight = useRef(false)
 
   function load() {
     const gen = ++loadGen.current
+    loadInFlight.current = true
     setStatus("loading")
     listTags()
       .then((result) => {
         if (gen !== loadGen.current) return
+        loadInFlight.current = false
         const sorted = sortTags(result)
         setTags(sorted)
         setStatus("loaded")
@@ -104,8 +107,16 @@ export function ManageTagsDialog({
       })
       .catch(() => {
         if (gen !== loadGen.current) return
+        loadInFlight.current = false
         setStatus("error")
       })
+  }
+
+  // A mutation supersedes any in-flight load; refetch so the dialog never
+  // strands on its skeleton after that response is dropped.
+  function invalidateLoad() {
+    loadGen.current++
+    if (loadInFlight.current) load()
   }
 
   useEffect(() => {
@@ -166,6 +177,7 @@ export function ManageTagsDialog({
     try {
       const result = await renameTag(tag.id, trimmed)
       if (result.kind === "renamed") {
+        invalidateLoad()
         setTags((prev) => {
           const updated = prev.map((t) =>
             t.id === tag.id ? { ...t, name: result.tag.name } : t
@@ -204,6 +216,7 @@ export function ManageTagsDialog({
     const { sourceId, sourceName, target } = collisionTarget
     try {
       const merged = await mergeTag(sourceId, target.id)
+      invalidateLoad()
       setTags((prev) => {
         const withoutSource = prev.filter((t) => t.id !== sourceId)
         const updated = withoutSource.map((t) =>
@@ -236,6 +249,7 @@ export function ManageTagsDialog({
     const index = tags.findIndex((t) => t.id === tag.id)
     try {
       const { carrier_count } = await deleteTag(tag.id)
+      invalidateLoad()
       setTags((prev) => {
         const remaining = prev.filter((t) => t.id !== tag.id)
         focusRequestRef.current =
