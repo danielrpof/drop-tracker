@@ -473,6 +473,108 @@ func TestSchema_TagCapTrigger_ConcurrentDetachRace(t *testing.T) {
 	t.Run("insert re-attach", func(t *testing.T) {
 		assertDetachRaceRefused(t, runDetachRace(t, ctx, pool, "cdr-ins", false))
 	})
+
+	t.Run("update move", func(t *testing.T) {
+		res := runDetachRace(t, ctx, pool, "cdr-upd", true)
+		assertDetachRaceRefused(t, res)
+		if res.otherCount != 0 {
+			t.Fatalf("source artist B has %d links, want 0 (T moved to A)", res.otherCount)
+		}
+	})
+}
+
+// TestSchema_TagCapTrigger_DistinctTagConcurrentAt9 is the DB-level pin for
+// ADR 0004 Consequences (review IN-09): of two concurrent attaches of
+// different new tags at 9 links, the first wins and the second is refused.
+func TestSchema_TagCapTrigger_DistinctTagConcurrentAt9(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	artistID := seedArtist(t, ctx, pool)
+	for i := 0; i < 9; i++ {
+		tagID := insertTag(t, ctx, pool, fmt.Sprintf("distinct-%02d", i))
+		if err := linkTag(ctx, pool, artistID, tagID); err != nil {
+			t.Fatalf("seed link %d: %v", i, err)
+		}
+	}
+	tagX := insertTag(t, ctx, pool, "distinct-x")
+	tagY := insertTag(t, ctx, pool, "distinct-y")
+
+	const insertOne = `INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2) ON CONFLICT (artist_id, tag_id) DO NOTHING`
+
+	txA, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txA: %v", err)
+	}
+	var wg sync.WaitGroup
+	// Rolling back txA on every exit path frees the blocked attach, so pool.Close cannot hang.
+	defer func() {
+		rbCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer rbCancel()
+		_ = txA.Rollback(rbCtx)
+		wg.Wait()
+	}()
+	if _, err := txA.Exec(ctx, insertOne, artistID, tagX); err != nil {
+		t.Fatalf("txA insert X: %v", err)
+	}
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire second connection: %v", err)
+	}
+	pidB := conn.Conn().PgConn().PID()
+	errCh := make(chan error, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer conn.Release()
+		_, err := conn.Exec(ctx, insertOne, artistID, tagY)
+		errCh <- err
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	waiting := false
+	for time.Now().Before(deadline) {
+		var waitEventType *string
+		if err := pool.QueryRow(ctx, "SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1", pidB).Scan(&waitEventType); err != nil {
+			t.Fatalf("poll pg_stat_activity: %v", err)
+		}
+		if waitEventType != nil && *waitEventType == "Lock" {
+			waiting = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !waiting {
+		t.Fatal("second attach never observed waiting on a Lock -- the artist-row lock did not serialize it")
+	}
+
+	if err := txA.Commit(ctx); err != nil {
+		t.Fatalf("commit txA: %v", err)
+	}
+
+	var pgErr *pgconn.PgError
+	select {
+	case err := <-errCh:
+		if !errors.As(err, &pgErr) || pgErr.Code != pgerrcode.CheckViolation || pgErr.ConstraintName != "artist_tags_max_per_artist" {
+			t.Fatalf("second attach after first commit: got err %v, want artist_tags_max_per_artist", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("second attach never completed after txA committed")
+	}
+
+	var count int
+	var hasX, hasY bool
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", artistID).Scan(&count); err != nil {
+		t.Fatalf("count links: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM artist_tags WHERE artist_id = $1 AND tag_id = $2), EXISTS (SELECT 1 FROM artist_tags WHERE artist_id = $1 AND tag_id = $3)", artistID, tagX, tagY).Scan(&hasX, &hasY); err != nil {
+		t.Fatalf("check X/Y links: %v", err)
+	}
+	if count != 10 || !hasX || hasY {
+		t.Fatalf("after race: count=%d X linked=%v Y linked=%v, want 10, true, false", count, hasX, hasY)
+	}
 }
 
 // TestSchema_TagNameChecks proves tags_name_length and tags_name_trimmed
@@ -672,19 +774,38 @@ func TestSchema_TagCapTrigger_UpdatePaths(t *testing.T) {
 
 	t.Run("unchanged-artist", func(t *testing.T) {
 		artist := seedArtistNamed(t, ctx, pool, "unchanged")
+		var old int64
 		for i := 0; i < 10; i++ {
 			tagID := insertTag(t, ctx, pool, fmt.Sprintf("unchanged-%02d", i))
 			if err := linkTag(ctx, pool, artist, tagID); err != nil {
 				t.Fatalf("seed link %d: %v", i, err)
 			}
+			if i == 0 {
+				old = tagID
+			}
 		}
 
-		tag, err := pool.Exec(ctx, "UPDATE artist_tags SET artist_id = artist_id WHERE artist_id = $1", artist)
+		// Changing tag_id too makes the TG_OP guard load-bearing (WR-07): the
+		// fresh tag is not skip-existing, so only the guard keeps it from the cap.
+		fresh := insertTag(t, ctx, pool, "unchanged-fresh")
+		tag, err := pool.Exec(ctx, "UPDATE artist_tags SET artist_id = artist_id, tag_id = $1 WHERE artist_id = $2 AND tag_id = $3", fresh, artist, old)
 		if err != nil {
 			t.Fatalf("unchanged-artist UPDATE: %v", err)
 		}
-		if tag.RowsAffected() != 10 {
-			t.Fatalf("rows affected = %d, want 10", tag.RowsAffected())
+		if tag.RowsAffected() != 1 {
+			t.Fatalf("rows affected = %d, want 1", tag.RowsAffected())
+		}
+
+		var count int
+		var hasFresh, hasOld bool
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", artist).Scan(&count); err != nil {
+			t.Fatalf("count links: %v", err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM artist_tags WHERE artist_id = $1 AND tag_id = $2), EXISTS (SELECT 1 FROM artist_tags WHERE artist_id = $1 AND tag_id = $3)", artist, fresh, old).Scan(&hasFresh, &hasOld); err != nil {
+			t.Fatalf("check fresh/old links: %v", err)
+		}
+		if count != 10 || !hasFresh || hasOld {
+			t.Fatalf("after update: count=%d fresh linked=%v old linked=%v, want 10, true, false", count, hasFresh, hasOld)
 		}
 	})
 
@@ -865,4 +986,34 @@ func TestSchema_Migration000011_DownUpRoundTrip(t *testing.T) {
 	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "artist_tags_max_per_artist" {
 		t.Fatalf("UPDATE onto 10-link artist after up: got err %v, want artist_tags_max_per_artist", err)
 	}
+}
+
+// TestSchema_Migration000012_DownUpRoundTrip proves the 000012 pair reopens
+// and re-closes CR-01: down restores 000011's visibility-only check (the race
+// reaches 11), up locks the existing link again (the race is refused at 10).
+func TestSchema_Migration000012_DownUpRoundTrip(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
+	ctx := context.Background()
+
+	downSQL, err := os.ReadFile("migrations/000012_artist_tags_cap_concurrent_detach.down.sql")
+	if err != nil {
+		t.Fatalf("read down.sql: %v", err)
+	}
+	upSQL, err := os.ReadFile("migrations/000012_artist_tags_cap_concurrent_detach.up.sql")
+	if err != nil {
+		t.Fatalf("read up.sql: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, string(downSQL)); err != nil {
+		t.Fatalf("exec down.sql: %v", err)
+	}
+	down := runDetachRace(t, ctx, pool, "rt-down", false)
+	if down.s3Err != nil || !down.s3ReturnedEarly || down.finalCount != 11 {
+		t.Fatalf("after down: s3Err=%v returnedEarly=%v finalCount=%d, want nil, true, 11 (000011 body leaves the hole open)", down.s3Err, down.s3ReturnedEarly, down.finalCount)
+	}
+
+	if _, err := pool.Exec(ctx, string(upSQL)); err != nil {
+		t.Fatalf("exec up.sql: %v", err)
+	}
+	assertDetachRaceRefused(t, runDetachRace(t, ctx, pool, "rt-up", false))
 }
