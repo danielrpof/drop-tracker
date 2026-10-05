@@ -372,7 +372,7 @@ announcement per change, and all six modes are visible at once.
 
 - **Order of operations:** visible list = `entries` → name filter → tag filter (OR within) → muted toggle → custom toggle (AND across all of these) → sort. N = visible length, and M = `entries.length`.
 - **Sticky cards (G4):** an in-card edit (preference checkbox, chip ×, note) never removes its own card, even when the card stops matching. It stays visible with no cue until the next change to search text, sort, tag selection, a toggle, or Clear filters, a chip-click filter change, or a reload. Then the list re-filters. N counts **visible** cards, sticky ones included.
-- **Tags that lose their last carrier:** an in-session chip detach **never prunes** the active tag filter. A tag whose last carrier lost it stays selected until the payload next reloads, and is pruned then (D-13).
+- **Tags that lose their last carrier:** neither an in-session chip detach nor a later `refresh()` prunes the active tag filter. The tag stays selected until the user deselects it, Manage tags deletes or merges it, or a reload's first successful payload load drops it (D-13).
 - **Filtered-to-zero:** when N = 0 and M > 0, the `<ul>` is replaced by the filtered `EmptyState` with **one** action, `Clear filters` (`Button variant="default"`).
 - **Clear filters** (toolbar or empty state):
   - It resets `q`, `tags`, `muted`, and `custom` in one `push` and **preserves `sort`**.
@@ -386,13 +386,20 @@ announcement per change, and all six modes are visible at once.
 | `/history` | `artist` (artist id), `type` (`new_release` / `guest_feature` / `deluxe_change`), `tag` (tag id) |
 
 - **Write mode:** typing writes with `replace` (debounced, as above), and every discrete change (sort, tag add/remove, toggle, History control, Clear filters) writes with `push`. Back then undoes the last deliberate change, and reload reproduces the view.
-- **Invalid params** are dropped silently and the URL is rewritten with `replace`. Invalid means an unknown sort value; a non-integer, zero, or negative id; a tag id absent from the payload-derived set (Watchlist), checked when the payload loads; or a tag id absent from `GET /tags` (History), checked once tags load. This never raises a toast or an error state.
+- **Invalid params** are dropped silently and the URL is rewritten with `replace`. Invalid means an unknown sort value; a non-integer, zero, or negative id; a tag id absent from the payload-derived set (Watchlist), checked once on the first successful payload load (see Router & sticky-state rules); or a tag id absent from `GET /tags` (History), checked once tags load. This never raises a toast or an error state.
 - **Manage tags callbacks (D-13):**
   - `onDeleted(id)` removes `id` from `tags`.
   - `onMerged(source, target)` replaces `source` with `target`, de-duplicates, and re-sorts.
   - `onRenamed` needs no URL change, because names are read from the payload.
   - Each of these writes with `replace`.
 - **Tab links:** the nav `NavLink`s (`/`, `/history`) stay param-free, so switching tabs starts the other tab from its own last URL in history, not a shared one. Watchlist and History filter state never cross-link (D-13).
+
+### Router & sticky-state rules
+
+- **Scroll reset (D-12):** `web/app/root.tsx:37` mounts `<ScrollRestoration />`, and react-router 7.18.2 calls `window.scrollTo(0, 0)` on every navigation, push or replace, unless it passes `preventScrollReset: true`. Every filter, sort, and typing change is a navigation, so Watchlist and History write params only through one shared helper that always passes `{ preventScrollReset: true }`, plus `replace: true` where this spec says replace. Otherwise a chip click 60 cards down jumps to the top.
+- **Sticky set (G4):** keep an explicit `stickyIds` set. A card is visible when it matches the filters or `stickyIds.has(id)`, and an in-card edit adds its card's id. Only the G4 user actions clear the set (search text, sort, tag selection, a toggle, Clear filters, a chip-click filter, reload). An `entries` change never clears or recomputes it, because `watchlist.tsx` calls `refresh()` (a full `GET /watchlist`) after add-from-search, after an Undo restore, and after a failed remove.
+- **Adds are sticky (G4):** an artist added from search (`handleAddSearchResult`) or restored by Undo joins `stickyIds` (id from the POST response), so an add under an active filter never succeeds invisibly.
+- **Tag-id validation runs once (D-13):** URL tag ids are checked against the payload-derived set only on the first successful payload load. After that the tag filter changes only by user action or the Manage tags `onDeleted`/`onMerged` callbacks; `refresh()` never mutates it.
 
 ### History Tag filter (HIST-02, D-11)
 
@@ -533,7 +540,7 @@ Shape-rooted state coverage across 9 surfaces:
 
 Copy lives in the Copywriting Contract, so this section covers state coverage only.
 
-Applicable state considerations resolved: **33 applicable — 28 covered, 5 backstop, 0 unresolved.**
+Applicable state considerations resolved: **35 applicable — 30 covered, 5 backstop, 0 unresolved.**
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
@@ -557,7 +564,9 @@ Applicable state considerations resolved: **33 applicable — 28 covered, 5 back
 | partial | W5 composition | ✅ covered | Name AND (any selected tag) AND muted AND custom, with sort applied last. Only the active axes constrain the list, and the count reflects the result |
 | partial | W7 pending chip | ✅ covered | An optimistic chip with no server id renders its label as plain text with no filter button, so a tag without an id can never be filtered on |
 | partial | W5 in-card edit | ✅ covered | Sticky (G4): the edited card stays visible with no cue and focus stays put. The next filter, sort, or search change (or a reload) re-filters it out. N counts visible cards |
-| partial | W3 last carrier detached | ✅ covered | An in-session detach never prunes the tag filter. Pruning happens on the next payload load, or through Manage tags delete/merge callbacks (D-13) |
+| partial | W5 add under active filter | ✅ covered | An artist added from search or restored by Undo joins the sticky set, so it shows even when it misses the active filters (G4) |
+| partial | W5 refresh after mutation | ✅ covered | The `refresh()` after an add, an Undo, or a failed remove leaves both stickiness and the tag filter unchanged (G4) |
+| partial | W3 last carrier detached | ✅ covered | Neither an in-session detach nor a later `refresh()` prunes the tag filter. It changes only by user action, the Manage tags delete/merge callbacks, or a reload's first successful payload load (D-13) |
 | overflow | W3 chips container | ✅ covered | Selected chips flex-wrap and the container grows vertically. It is never clipped and has no "+n" disclosure |
 | overflow | Toolbar at 375px | ✅ covered | Below `sm` every control stacks full width and the toggles wrap. There is no horizontal scroll |
 | overflow | H1 listbox | ✅ covered | The shared `Combobox<T>` listbox is capped at `max-h-72 overflow-y-auto`, and the highlighted option scrolls into view on arrow keys |
@@ -627,5 +636,8 @@ No third-party registries are declared. `web/components.json` has `registries: {
 - [ ] Reload and Back reproduce the exact view. Holding a key down in the name filter does not trip a browser history-throttling warning.
 - [ ] The toolbar chip × and pressed-toggle Check meet 3:1 against `#27272a`, measured in the running app.
 - [ ] Unchecking a card's last mute under `Has muted events` leaves the card visible (sticky, G4), and the next filter change removes it.
+- [ ] Scrolled far down the Watchlist, clicking a card chip or toggling a filter keeps the scroll position (no jump to the top).
+- [ ] With `Has muted events` on, adding an artist from search shows its new card.
+- [ ] With a tag selected, the `refresh()` after adding an artist leaves that tag in the filter.
 
 **Approval:** approved 2026-10-04 (Visuals FLAG resolved by naming the primary visual anchor)
