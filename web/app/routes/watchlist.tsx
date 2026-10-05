@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Tags } from "lucide-react"
 import { toast } from "sonner"
 
@@ -49,6 +49,9 @@ export default function Watchlist() {
     "idle" | "loading" | "loaded" | "error"
   >("idle")
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
+  // Bumped by every local vocabulary change so a GET /tags that settles
+  // afterwards is discarded (WR-06).
+  const vocabGen = useRef(0)
 
   const refresh = useCallback(() => {
     setError(false)
@@ -117,6 +120,7 @@ export default function Watchlist() {
   // dropTagFromEntries drops the tag from every card and from the
   // autocomplete vocabulary (TAG-06, D-17).
   function dropTagFromEntries(tagId: number) {
+    vocabGen.current++
     setEntries((rows) =>
       rows
         ? rows.map((r) => ({
@@ -133,6 +137,7 @@ export default function Watchlist() {
   // shape as dropTagFromEntries, so it never clobbers a concurrent chip
   // add/remove on an unrelated row.
   function renameTagInEntries(tag: TagRef) {
+    vocabGen.current++
     setEntries((rows) =>
       rows
         ? rows.map((r) => ({
@@ -150,6 +155,7 @@ export default function Watchlist() {
   // replaced in place with the target -- same functional-updater shape as
   // dropTagFromEntries/renameTagInEntries.
   function mergeTagInEntries(sourceId: number, target: TagRef) {
+    vocabGen.current++
     setEntries((rows) =>
       rows
         ? rows.map((r) => {
@@ -178,22 +184,27 @@ export default function Watchlist() {
   // tag" autocomplete on every row sees the same fresh vocabulary Manage
   // tags just loaded, instead of leaving a possibly-stale one in place.
   function handleTagsLoaded(tags: TagSummary[]) {
+    vocabGen.current++
     setVocabulary(tags.map((t) => ({ id: t.id, name: t.name })))
     setVocabularyStatus("loaded")
   }
 
   // loadVocabulary fetches GET /tags only from "idle"/"error" (a failed
   // load retries on the next open), so repeated "+ tag" opens across rows
-  // never refetch once it has loaded (D-30, T-24-30).
+  // never refetch once it has loaded (D-30, T-24-30). A stale settle is a no-op.
   function loadVocabulary() {
     if (vocabularyStatus !== "idle" && vocabularyStatus !== "error") return
+    const gen = ++vocabGen.current
     setVocabularyStatus("loading")
     listTags()
       .then((summaries) => {
+        if (gen !== vocabGen.current) return
         setVocabulary(summaries.map((s) => ({ id: s.id, name: s.name })))
         setVocabularyStatus("loaded")
       })
-      .catch(() => setVocabularyStatus("error"))
+      .catch(() => {
+        if (gen === vocabGen.current) setVocabularyStatus("error")
+      })
   }
 
   // rememberTag inserts a newly created tag into an already-loaded

@@ -22,6 +22,7 @@ import {
   mergeTag,
   removeWatchlist,
   renameTag,
+  type TagSummary,
   type WatchlistEntry,
 } from "~/lib/api"
 import { renderRoute } from "~/lib/test/routeStub"
@@ -378,6 +379,81 @@ describe("Watchlist route", () => {
     ).not.toBeInTheDocument()
 
     expect(mockListTags).toHaveBeenCalledTimes(1)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("a '+ tag' vocabulary fetch that settles after a Manage tags delete does not bring the deleted tag back", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "reggaeton" }] },
+      { ...second, tags: [] },
+    ])
+    const fresh: TagSummary[] = [
+      { id: 1, name: "reggaeton", carrier_count: 1 },
+      { id: 2, name: "drill", carrier_count: 0 },
+    ]
+    let settleFirst: (tags: TagSummary[]) => void = () => {}
+    const pending = new Promise<TagSummary[]>((resolve) => {
+      settleFirst = resolve
+    })
+    mockListTags.mockReturnValueOnce(pending).mockResolvedValue(fresh)
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(1))
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toBeInTheDocument()
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag reggaeton" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      settleFirst(fresh)
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "r")
+
+    await screen.findByRole("option", { name: "drill" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    await userEvent.type(input, "eggaeton")
+
+    await screen.findByRole("option", { name: "Create “reggaeton”" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(2)
     expect(mockListWatchlist).toHaveBeenCalledTimes(1)
   })
 
