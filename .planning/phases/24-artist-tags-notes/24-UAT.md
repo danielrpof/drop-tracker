@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: complete
 phase: 24-artist-tags-notes
 source: [24-VERIFICATION.md]
 started: 2026-10-05T16:00:54Z
-updated: 2026-10-05T16:34:55Z
+updated: 2026-10-05T17:05:00Z
 ---
 
 ## Current Test
@@ -31,9 +31,8 @@ note: "Initial report (no truncation with lowercase 32-char name) was a fixture 
 
 ### 5. Merge confirm title wrap at 375px with two 32-char names
 expected: Title wraps, does not truncate
-result: issue
-reported: "the text overdlows sideways"
-severity: major
+result: pass
+note: "Initial report (title overflowed sideways) fixed by 24-13 wrap-anywhere; re-test passes."
 
 ### 6. Manage tags row truncation at 375px
 expected: '· {n} artists' stays visible
@@ -50,8 +49,8 @@ result: pass
 ## Summary
 
 total: 8
-passed: 7
-issues: 1
+passed: 8
+issues: 0
 pending: 0
 skipped: 0
 blocked: 0
@@ -75,7 +74,9 @@ blocked: 0
 
 - gap_id: G-24-5
   truth: "Merge confirm title wraps at 375px with two 32-char names, does not truncate or overflow"
-  status: failed
+  status: resolved
+  resolved_by: 24-13-PLAN.md
+  resolved_at: 2026-10-05
   reason: "User reported: the text overdlows sideways"
   severity: major
   test: 5
