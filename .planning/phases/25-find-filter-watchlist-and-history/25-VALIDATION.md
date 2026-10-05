@@ -58,6 +58,36 @@ Filled by the planner per task; requirement → test map below is the contract.
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
+### Planner task map (2026-10-05)
+
+| Plan / Task | Requirement | Automated command (narrowest) |
+|-------------|-------------|-------------------------------|
+| 25-01 T1 (tracer) | WLVW-03 | `go test ./internal/httpserver/ -run 'TestWatchlist_List_LatestRelease'` + `make sqlc-check` |
+| 25-01 T2 | WLVW-03 | `go test ./internal/watchlist/ -run 'TestService_List_LatestRelease\|TestService_ProjectionParity'` |
+| 25-02 T1 (tracer) | HIST-02 | `go test ./internal/httpserver/ -run 'TestListEvents_TagFilter$'` + `make sqlc-check` |
+| 25-02 T2 | HIST-02 | `go test ./internal/httpserver/ -run 'TestListEvents_TagFilter\|TestRetention_TagFilter\|TestHandleListEvents_Validation\|TestRetention_DetectionStateQueriesStayUnfiltered'` |
+| 25-03 T1 (tracer) | WLVW-03 | `vitest run app/routes/watchlist.test.tsx` + `typecheck` |
+| 25-03 T2 | WLVW-03 | `vitest run app/lib/format.test.ts app/routes/watchlist.test.tsx` |
+| 25-04 T1 (tracer) | WLVW-01, WLVW-06 | `vitest run app/routes/watchlist.test.tsx` + `typecheck` |
+| 25-04 T2 | WLVW-01, WLVW-06 | `vitest run app/lib/watchlistView.test.ts app/lib/useUrlParams.test.tsx app/components/watchlist/WatchlistToolbar.test.tsx` |
+| 25-04 T3 | WLVW-06 | `vitest run app/routes/watchlist.test.tsx app/lib/watchlistView.test.ts app/components/watchlist/WatchlistToolbar.test.tsx` |
+| 25-05 T1 (tracer) | WLVW-02, WLVW-03 | `vitest run app/routes/watchlist.test.tsx` |
+| 25-05 T2 | WLVW-02, WLVW-03 | `vitest run app/lib/watchlistView.test.ts app/components/watchlist/WatchlistToolbar.test.tsx app/routes/watchlist.test.tsx` |
+| 25-06 T1 (tracer) | HIST-02 | `vitest run app/routes/history.test.tsx app/lib/api.test.ts` |
+| 25-06 T2 | HIST-02 | `vitest run app/components/history/HistoryFilters.test.tsx app/lib/tags.test.ts` |
+| 25-06 T3 | HIST-02 | `vitest run app/routes/history.test.tsx app/components/history/HistoryFilters.test.tsx` |
+| 25-07 T1 (tracer) | WLVW-04 | `vitest run app/routes/watchlist.test.tsx` |
+| 25-07 T2 | WLVW-04 | `vitest run app/components/watchlist/WatchlistTagFilter.test.tsx app/lib/watchlistView.test.ts` |
+| 25-07 T3 | WLVW-04, WLVW-06 | `vitest run app/routes/watchlist.test.tsx app/lib/watchlistView.test.ts` |
+| 25-08 T1 (tracer) | WLVW-05, WLVW-06 | `vitest run app/lib/watchlistView.test.ts app/components/watchlist/WatchlistToolbar.test.tsx app/routes/watchlist.test.tsx` |
+| 25-08 T2 | WLVW-04 | `vitest run app/components/watchlist/TagChips.test.tsx app/routes/watchlist.test.tsx` + full `pnpm test` |
+| 25-09 T1 (tracer) | HIST-02 | `vitest run app/routes/history.test.tsx` |
+| 25-09 T2 | HIST-02 | `vitest run app/lib/historyParams.test.ts app/components/history/HistoryFilters.test.tsx app/routes/history.test.tsx` |
+| 25-10 T1 (tracer) | all | `make web` + bundle string grep + `go build ./...` |
+| 25-10 T2 | all | full Definition of Done chain + blast-radius diff against `9030bfa` |
+
+Go commands run with `TEST_DATABASE_URL='postgres://drop_tracker:drop_tracker@localhost:5432/drop_tracker?sslmode=disable' ... -count=1 -v`. Web commands run as `corepack pnpm --dir web exec vitest run <files> --coverage.enabled=false`. Every task has an automated verify, so no three tasks in a row lack one.
+
 ---
 
 ## Wave 0 Requirements

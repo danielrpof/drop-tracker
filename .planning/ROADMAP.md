@@ -189,7 +189,37 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans**: TBD
+**Plans:** 10 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 25-01-PLAN.md — GET /watchlist gains `latest_release_date` and `next_release_date` from two lateral joins in its single query (G1–G3), with semantics and projection-parity tests
+- [ ] 25-03-PLAN.md — Cards show `Latest release: {date}` / `No releases yet` and `Upcoming: {date}`, `formatReleaseDate`, and the `makeEntry` fixture builder
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 25-02-PLAN.md — GET /events `tag_id` filter inside the retention-aware ListEvents and HasOlderEvents, with retention, paging, and validation tests
+- [ ] 25-04-PLAN.md — Watchlist name filter (accent and `$ø æ ß` folding), "N of M artists", URL state helper, Clear filters and filtered-to-zero state, live announcements, and sticky cards (G4)
+- [ ] 25-06-PLAN.md — History Tag control (D-11), `Combobox<T>` hardening, loading/unavailable labels, and the tag empty state with `Show all tags`
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 25-05-PLAN.md — Sort by name, date added, or latest release with id-stable ties and null-last ordering, URL `sort`, and the sort announcement
+- [ ] 25-09-PLAN.md — History filters move to URL params (`artist`, `type`, `tag`), with stale and malformed params dropped once their source loads (G6)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 25-07-PLAN.md — `Tags: any of` multi-select on the vendored base-ui Combobox, payload-derived options, and D-13 consistency (first-load validation, Manage tags delete/merge, Back)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 25-08-PLAN.md — `Has muted events` / `Custom release types` toggles with full AND composition, and the card chip label as a filter toggle (D-08)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 25-10-PLAN.md — Embedded bundle rebuild, the phase-closing Definition of Done, and the blast-radius gate
+
 **UI hint**: yes
 
 **Notes for the phase planner**
