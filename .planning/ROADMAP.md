@@ -112,7 +112,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The user can delete a tag globally after a confirmation stating how many artists carry it. The tag disappears from every artist, and the artists themselves stay on the watchlist untouched.
   5. The user can add, edit, and clear a plain-text note of up to 500 characters on an artist, and it shows on that artist's Watchlist card after a reload.
 
-**Plans:** 12/12 plans executed
+**Plans:** 12/13 plans executed
 
 Plans:
 **Wave 1**
@@ -156,6 +156,10 @@ Plans:
 **Re-verification gap closure (round 3) — Wave 1** *(from 24-VERIFICATION.md gap 1 / code review WR-08: Manage tags' own GET /tags is unguarded)*
 
 - [x] 24-12-PLAN.md — A dialog-side generation guard drops a Manage tags GET /tags from an earlier open, and a successful delete, rename, or merge invalidates any in-flight load (refetching so the dialog never strands), plus the verifier's close/reopen route test, rename and merge variants, dialog edge tests, the embedded bundle rebuild, and the phase-closing gate
+
+**UAT gap closure — Wave 1** *(from 24-UAT.md gap G-24-5: the merge confirm title overflows sideways at 375px with two 32-char names)*
+
+- [ ] 24-13-PLAN.md — ConfirmDialog's title and description get `wrap-anywhere`, so an unspaced 32-character tag name wraps instead of overflowing. Also adds a ConfirmDialog class test, a merge confirm test with two 32-character names, the embedded bundle rebuild, and the phase-closing gate
 
 **UI hint**: yes
 
