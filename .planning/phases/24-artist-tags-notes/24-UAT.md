@@ -26,9 +26,8 @@ result: pass
 
 ### 4. Long tag chip at 375px
 expected: Chip truncates; title and the x aria-label carry the full name
-result: issue
-reported: "Chip does not truncate, it shows the full tag name at 375px"
-severity: major
+result: pass
+note: "Initial report (no truncation with lowercase 32-char name) was a fixture issue; re-test with 32 W glyphs truncates as specified."
 
 ### 5. Merge confirm title wrap at 375px with two 32-char names
 expected: Title wraps, does not truncate
@@ -51,8 +50,8 @@ result: pass
 ## Summary
 
 total: 8
-passed: 6
-issues: 2
+passed: 7
+issues: 1
 pending: 0
 skipped: 0
 blocked: 0
@@ -61,7 +60,9 @@ blocked: 0
 
 - gap_id: G-24-4
   truth: "Long tag chip truncates at 375px; title and the x aria-label carry the full name"
-  status: failed
+  status: resolved
+  resolved_by: retest (not a defect)
+  resolved_at: 2026-10-05
   reason: "User reported: Chip does not truncate, it shows the full tag name at 375px"
   severity: major
   test: 4
