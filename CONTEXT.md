@@ -72,6 +72,22 @@ _Avoid_: watched artist (that term is event-scoped)
 What a rename becomes when the new name already belongs to a different tag: the renamed tag's links move to the existing tag, which keeps its own stored name, and the renamed tag is deleted. It happens only after the user confirms it.
 _Avoid_: combine, dedupe
 
+**Latest release**:
+The newest release date among an artist's detected new releases, however long ago they were detected, excluding upcoming releases. Guest features and deluxe changes don't count.
+_Avoid_: last drop, most recent event
+
+**Upcoming release**:
+A detected release whose stored date is still in the future at its own precision. A year-only or month-only date that might already have passed is not upcoming.
+_Avoid_: announced release, future release
+
+**Filter**:
+Narrowing the watchlist you already have, by name, tag, or preference.
+_Avoid_: search (that finds new artists)
+
+**Search**:
+Looking up artists on MusicBrainz and Deezer to add to the watchlist.
+_Avoid_: filter (that narrows the existing watchlist)
+
 **Note**:
 The single plain-text annotation on a watchlist entry. It goes away when the artist is removed from the watchlist, and the remove toast's Undo restores it.
 _Avoid_: notes (there is only one), comment, memo

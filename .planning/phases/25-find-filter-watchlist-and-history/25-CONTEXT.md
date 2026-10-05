@@ -45,6 +45,16 @@ Out of scope: server-side paging/sorting (REQUIREMENTS.md Out of Scope), multi-s
 - The exact `LEFT JOIN LATERAL` form, and whether `EXPLAIN` justifies a pure-additive index migration (roadmap note).
 - How the cutoff reaches the `ListWatchlist` query (a `sqlc.arg('cutoff')`, consistent with ListEvents' non-optional cutoff).
 
+### Post-discuss grill overrides (2026-10-04)
+These come from a grill session after discuss and the UI phase. Where they conflict with the decisions above or with `25-UI-SPEC.md`, these win.
+- **G1 (supersedes D-14's retention clause and the roadmap's PITFALLS #8 note):** `latest_release_date` **ignores retention**. It is the newest date among all of the artist's stored `new_release` events, at any age. ListWatchlist and GetWatchlistEntry take **no cutoff**, and `watchlist.Service` does not get the retention setting. With the 90-day default, a retention-scoped value would leave most artists at "No releases yet" and collapse the sort. The accepted cost is that the Watchlist can show a date History no longer lists, and the routes stay unlinked (D-13).
+- **G2 (supersedes D-15's "future dates as-is"):** a date is **upcoming** when it is strictly after UTC `CURRENT_DATE` at its own precision. `2027` and `2026-11` are upcoming on 2026-10-04, but `2026` and `2026-10` are not. Postgres decides this inside the same LATERAL join, so the client never compares dates.
+- **G3 (extends D-03/D-14):** the payload carries two fields. `latest_release_date` is the newest non-upcoming date, and it alone drives the latest-release sort. `next_release_date` is the **nearest** upcoming date, shown as a muted `Upcoming: {date}` line, and it never affects the sort. Both come from the single `GET /watchlist` query and the shared POST/PATCH projection (Phase 24 D-26).
+- **G4 (supersedes UI-SPEC's card-removal focus flow and announcement):** **sticky cards.** An in-card edit never removes its own card from a filtered view, and the card gets no cue. Stickiness clears on a change to search text, sort, tag selection, a toggle, Clear filters, or a chip-click filter, and on reload. "N of M" counts **visible** cards.
+- **G5 (extends D-04):** the name filter adds a fold table after removing accents: `$→s`, `ø→o`, `æ→ae`, `ß→ss`, applied to both the query and the name. `asap` matches A$AP Rocky.
+- **G6 (D-12 sequencing):** History's move to URL state stays in scope as **its own plan**, separate from the HIST-02 tag filter, so the tag filter can land and be verified on its own.
+- **G7 (confirms D-11):** both comboboxes stay, with the UI-SPEC's hand-rolled `Combobox<T>` hardening. A backlog todo covers unifying them on base-ui.
+
 </decisions>
 
 <canonical_refs>

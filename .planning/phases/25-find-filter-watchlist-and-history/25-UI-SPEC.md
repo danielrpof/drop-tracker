@@ -10,6 +10,8 @@ created: "2026-10-04"
 
 # Phase 25 — UI Design Contract
 
+> **Grill overrides (2026-10-04):** G1–G5 in `25-CONTEXT.md` supersede the matching parts of this spec, and the affected sections below are already updated. In short, latest release ignores retention, there is a separate Upcoming line, cards are sticky instead of removed, and the name filter folds `$ ø æ ß`.
+
 > Visual and interaction contract for the **Watchlist list toolbar** (name filter, sort, any-of
 > tag filter, two preference toggles, "N of M artists"), the **latest-release line** and
 > **click-to-filter tag chips** on every Watchlist card, and a **Tag** control on History.
@@ -204,12 +206,12 @@ filters over an empty list are meaningless (D-10 state 1).
 
 ```
 <div class="flex flex-wrap items-baseline justify-between gap-2">
-  <h2 id="watchlist-artists-heading" tabIndex={-1}
+  <h2 id="watchlist-artists-heading"
       class="text-heading font-semibold text-foreground outline-none">Your artists</h2>
   <p class="text-label text-muted-foreground tabular-nums">{N} of {M} artist{s}</p>
 </div>
 ```
-The heading separates the list from the add-artist search above it. That separation, plus the different label, icon, and placeholder, keeps the two inputs from being confused (D-01). `tabIndex={-1}` makes it a programmatic focus target (see Focus management). The count is **always** visible (SC1), including `0 of 52 artists` in the empty state and `52 of 52 artists` when nothing is filtered.
+The heading separates the list from the add-artist search above it. That separation, plus the different label, icon, and placeholder, keeps the two inputs from being confused (D-01). The count is **always** visible (SC1), including `0 of 52 artists` in the empty state and `52 of 52 artists` when nothing is filtered.
 
 ### Toolbar
 
@@ -258,12 +260,15 @@ The name column (`flex min-w-0 flex-1 flex-col gap-1`) becomes:
 [artist name — text-heading, truncate]                       (unchanged)
 [disambiguation — text-label muted, truncate]                (unchanged, omitted when null)
 [latest-release line — text-label muted]                     NEW, always present (D-03)
+[upcoming line — text-label muted]                           NEW, only when next_release_date is set (G3)
 [chip row]                                                   (Phase 24; label is now a toggle)
 [note block]                                                 (Phase 24, unchanged)
 ```
 
 **Latest-release line:** `<p class="text-label text-muted-foreground">` reading either
-`Latest release: {date}` or `No releases yet`. `{date}` is rendered at stored precision by a pure
+`Latest release: {date}` or `No releases yet`. When `next_release_date` is set, a second muted line
+reads `Upcoming: {date}`. The server decides what is upcoming (G2): a date strictly after UTC today at
+its own precision. The client never compares dates. `{date}` is rendered at stored precision by a pure
 helper `formatReleaseDate(raw)` in `web/app/lib/format.ts` (D-15):
 
 | Stored `latest_release_date` | Rendered |
@@ -271,8 +276,7 @@ helper `formatReleaseDate(raw)` in `web/app/lib/format.ts` (D-15):
 | `2024` | `2024` |
 | `2024-05` | `May 2024` |
 | `2024-05-17` | `17 May 2024` |
-| `2026-12-03` (future, announced) | `3 Dec 2026` (no special treatment, D-15) |
-| `null` | line reads `No releases yet` |
+| `null` | line reads `No releases yet` (no stored non-upcoming `new_release` event at any age, G1) |
 | anything not matching those three shapes | the raw string, unchanged |
 
 The helper uses fixed English three-letter months (`Jan`…`Dec`) and **never** constructs a `Date`,
@@ -311,7 +315,7 @@ Artist [All artists ▾]    Event type [All event types ▾]    Tag [All tags �
 
 ### Name filter (WLVW-01, D-04)
 
-- **Match:** case-insensitive and accent-insensitive substring on `entry.name` only (NFD → strip `\p{M}` → lowercase → `includes`, applied to both sides). The disambiguation is not searched. `beyonce` matches `Beyoncé`, and `BAD` matches `Bad Bunny`.
+- **Match:** case-insensitive and accent-insensitive substring on `entry.name` only (NFD → strip `\p{M}` → lowercase → fold `$→s`, `ø→o`, `æ→ae`, `ß→ss` (G5) → `includes`, applied to both sides). `asap` matches `A$AP Rocky`. The disambiguation is not searched. `beyonce` matches `Beyoncé`, and `BAD` matches `Bad Bunny`.
 - **Trim:** leading and trailing whitespace in the query is ignored, so a whitespace-only query matches everything.
 - **Timing:** the list re-filters on **every keystroke with no debounce**. Filtering about 100 rows in memory is instant (SC5).
 - **URL write:** the `q` param is written with `replace` (D-12), **trailing-debounced 300ms**. That matches `SearchBox`'s 300ms and stays under browsers' `history.replaceState` rate limits. The visible input value is local state that re-syncs from the URL on back/forward.
@@ -333,7 +337,7 @@ announcement per change, and all six modes are visible at once.
 | `Latest release (newest)` | `latest-desc` | raw `latest_release_date` text, lexicographic desc | artist id asc |
 | `Latest release (oldest)` | `latest-asc` | raw text, lexicographic asc | artist id asc |
 
-- **Missing values:** `null` latest release sorts **last in both directions** (WLVW-03). Among themselves, those artists keep the id tie-break.
+- **Missing values:** `null` latest release sorts **last in both directions** (WLVW-03). `next_release_date` never affects the sort (G3). Among themselves, those artists keep the id tie-break.
 - **Stable tie-break:** it is always artist id **ascending**, in every direction, so equal-valued artists never swap places when the user flips direction (SC2).
 - **Sort is not a filter:** it never counts as "filtered" and Clear filters never resets it (D-10).
 - **URL write:** a change is written with `push`, and the default value removes the param.
@@ -359,13 +363,13 @@ announcement per change, and all six modes are visible at once.
 ### Card chip click-to-filter (D-08)
 
 - **Toggle:** activating a chip label (click, Enter, or Space) toggles that tag in the **same** tag-filter state the toolbar combobox shows, so both surfaces always agree. Adding the tag to the filter shows its toolbar chip, and the card chip gains the Check icon and ring.
-- **Focus:** focus stays on the chip's label button, unless the card leaves the view (see Focus management).
+- **Focus:** focus stays on the chip's label button. A chip click is a filter change, so it also clears stickiness (G4).
 - **× behavior:** the × behaves exactly as in Phase 24 and detaches the tag. It never changes the filter.
 
 ### Composition, count, and Clear filters (WLVW-06, D-10)
 
 - **Order of operations:** visible list = `entries` → name filter → tag filter (OR within) → muted toggle → custom toggle (AND across all of these) → sort. N = visible length, and M = `entries.length`.
-- **Live re-filtering:** filters are a pure function of `entries` and URL state, so an in-card edit re-filters immediately. Unchecking a card's last mute while `Has muted events` is on removes that card from view (see Focus management for where focus goes).
+- **Sticky cards (G4):** an in-card edit (preference checkbox, chip ×, note) never removes its own card, even when the card stops matching. It stays visible with no cue until the next change to search text, sort, tag selection, a toggle, or Clear filters, a chip-click filter change, or a reload. Then the list re-filters. N counts **visible** cards, sticky ones included.
 - **Tags that lose their last carrier:** an in-session chip detach **never prunes** the active tag filter. A tag whose last carrier lost it stays selected until the payload next reloads, and is pruned then (D-13).
 - **Filtered-to-zero:** when N = 0 and M > 0, the `<ul>` is replaced by the filtered `EmptyState` with **one** action, `Clear filters` (`Button variant="default"`).
 - **Clear filters** (toolbar or empty state):
@@ -410,7 +414,6 @@ announcement per change, and all six modes are visible at once.
 | Tag filter | Toolbar chip × activated | the chips input |
 | Toggle / Sort | Changed | stays on the control (Select returns focus to its trigger) |
 | Card chip label | Toggled, card still visible | stays on that label button |
-| Any in-card control (chip label, chip ×, preference checkbox, note Save) | The edit makes **its own card** leave the filtered view | the **"Your artists" `<h2>`** (`tabIndex={-1}`), never `<body>` |
 | Clear filters (either button) | Activated | the name filter input |
 | History Tag control | Option committed | the Tag trigger (existing `Combobox<T>` behavior) |
 | History "Show all tags" | Activated | the Tag trigger |
@@ -427,7 +430,6 @@ All announcements reuse the **one** existing route-level `role="status"` region 
 | Any search or filter change with N = 0 | 500ms trailing | `No artists match these filters.` |
 | Sort changed | immediately, then the count message is suppressed for that change | `Sorted by {option label}.` (for example `Sorted by Latest release (newest).`) |
 | Clear filters | immediately | `Filters cleared. Showing {M} of {M} artist{s}.` |
-| Own card left the view (focus row above) | immediately | `{artist} no longer matches the filters.` |
 
 History adds no new announcements. Its feed already swaps between skeletons and cards on every filter change.
 
@@ -469,7 +471,8 @@ posture).
 | Element | Copy |
 |---------|------|
 | Latest-release line, has a release | `Latest release: {date}` (for example `Latest release: 17 May 2024`, `Latest release: May 2024`, `Latest release: 2024`) |
-| Latest-release line, none in the retention window | `No releases yet` (D-03) |
+| Latest-release line, no stored release | `No releases yet` (D-03, G1) |
+| Upcoming line (only when `next_release_date` is set) | `Upcoming: {date}` (for example `Upcoming: 12 Dec 2026`, `Upcoming: Nov 2026`, `Upcoming: 2027`) |
 | Chip label button `aria-label` (constant; state carried by `aria-pressed`) | `Filter by {tag}` |
 | Chip × `aria-label` | `Remove tag {name} from {artist}` (unchanged, Phase 24) |
 
@@ -528,7 +531,7 @@ Shape-rooted state coverage across 9 surfaces:
 
 Copy lives in the Copywriting Contract, so this section covers state coverage only.
 
-Applicable state considerations resolved: **32 applicable — 27 covered, 5 backstop, 0 unresolved.**
+Applicable state considerations resolved: **33 applicable — 28 covered, 5 backstop, 0 unresolved.**
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
@@ -536,7 +539,8 @@ Applicable state considerations resolved: **32 applicable — 27 covered, 5 back
 | empty | W5 list, N = 0 < M | ✅ covered | The `<ul>` is replaced by the `No artists match these filters` `EmptyState` with a single `Clear filters` that resets search and every filter but preserves sort |
 | empty | W3 tag popup | ✅ covered | No watched artist carries a tag → `No tags yet — add one with “+ tag” on any artist's card.`; a typed text with no match → `No tags match “{q}”` |
 | empty | W1 name filter | ✅ covered | An empty or whitespace-only query applies no name constraint, and the clear × is not rendered |
-| empty | W6 latest release | ✅ covered | A `null` `latest_release_date` renders `No releases yet` and sorts last in both latest-release directions |
+| empty | W6 latest release | ✅ covered | A `null` `latest_release_date` renders `No releases yet` and sorts last in both latest-release directions. A `null` `next_release_date` renders no Upcoming line |
+| partial | W6 upcoming | ✅ covered | An artist with only an announced release shows `No releases yet` plus `Upcoming: {date}`, and sorts last under latest release (G3) |
 | empty | H2 History feed | ✅ covered | With a tag filter active, no events, and `has_older_events` false, the feed shows `No events for “{tag}”` with a `Show all tags` action. The retention empty state still takes precedence when `has_older_events` is true |
 | loading | W1–W5 toolbar | ✅ covered | The section and toolbar render only after `GET /watchlist` resolves. The existing three `h-24` skeletons render until then, so the toolbar never shows over an empty list |
 | loading | W3 tag options | ✅ covered | Options derive from the loaded payload (D-07). There is no fetch and therefore no loading state |
@@ -550,7 +554,7 @@ Applicable state considerations resolved: **32 applicable — 27 covered, 5 back
 | populated | W7 card chip | ✅ covered | A tag in the active filter shows a leading Check, an inset ring, and `aria-pressed="true"`. Other chips look exactly as they did in Phase 24 |
 | partial | W5 composition | ✅ covered | Name AND (any selected tag) AND muted AND custom, with sort applied last. Only the active axes constrain the list, and the count reflects the result |
 | partial | W7 pending chip | ✅ covered | An optimistic chip with no server id renders its label as plain text with no filter button, so a tag without an id can never be filtered on |
-| partial | W5 in-card edit | ✅ covered | An edit that makes the focused card stop matching removes it at once. Focus moves to the `Your artists` heading, and the status region announces `{artist} no longer matches the filters.` |
+| partial | W5 in-card edit | ✅ covered | Sticky (G4): the edited card stays visible with no cue and focus stays put. The next filter, sort, or search change (or a reload) re-filters it out. N counts visible cards |
 | partial | W3 last carrier detached | ✅ covered | An in-session detach never prunes the tag filter. Pruning happens on the next payload load, or through Manage tags delete/merge callbacks (D-13) |
 | overflow | W3 chips container | ✅ covered | Selected chips flex-wrap and the container grows vertically. It is never clipped and has no "+n" disclosure |
 | overflow | Toolbar at 375px | ✅ covered | Below `sm` every control stacks full width and the toggles wrap. There is no horizontal scroll |
@@ -580,7 +584,8 @@ Not owned by this UI-SPEC. It is recorded so `api.ts` starts from something conc
 
 ```ts
 // WatchlistEntry (web/app/lib/api.ts) gains:
-latest_release_date: string | null   // raw stored text "2024" | "2024-05" | "2024-05-17"; null = none in retention window (D-14)
+latest_release_date: string | null   // newest non-upcoming new_release date, any age (G1/G3); null = none
+next_release_date: string | null     // nearest upcoming date, strictly after UTC today at its precision (G2/G3)
 
 // listEvents() params gain:
 tagId?: number                       // sent as tag_id; composes with artistId / eventType / cursor
@@ -619,6 +624,6 @@ No third-party registries are declared. `web/components.json` has `registries: {
 - [ ] Flipping any sort direction never reorders artists with equal values, and `No releases yet` artists stay at the bottom in both latest-release directions.
 - [ ] Reload and Back reproduce the exact view. Holding a key down in the name filter does not trip a browser history-throttling warning.
 - [ ] The toolbar chip × and pressed-toggle Check meet 3:1 against `#27272a`, measured in the running app.
-- [ ] Unchecking a card's last mute under `Has muted events` moves focus to `Your artists` and announces the change.
+- [ ] Unchecking a card's last mute under `Has muted events` leaves the card visible (sticky, G4), and the next filter change removes it.
 
 **Approval:** approved 2026-10-04 (Visuals FLAG resolved by naming the primary visual anchor)
