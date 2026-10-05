@@ -1,9 +1,9 @@
 ---
-status: complete
+status: diagnosed
 phase: 24-artist-tags-notes
 source: [24-VERIFICATION.md]
 started: 2026-10-05T16:00:54Z
-updated: 2026-10-05T17:05:00Z
+updated: 2026-10-05T18:30:00Z
 ---
 
 ## Current Test
@@ -46,11 +46,32 @@ result: pass
 expected: No artist_tags row references a deleted tag (FK cascade guarantees this structurally); confirm or accept
 result: pass
 
+### 9. Expand and collapse a long note
+expected: "more" expands a clamped note; "less" stays visible and collapses it again; focus stays on the toggle
+result: issue
+reported: "UI audit (24-UI-REVIEW.md fix 1, confirmed in code): after expanding, the more/less button disappears, so the note can't be collapsed and focus drops to body"
+severity: blocker
+source: ui-review
+
+### 10. Manage tags initial focus
+expected: Opening Manage tags focuses row 1's Rename once the list loads (UI-SPEC focus contract)
+result: issue
+reported: "UI audit (24-UI-REVIEW.md fix 2): dialog mounts during loading, focus lands on close x and is never moved once rows load"
+severity: minor
+source: ui-review
+
+### 11. Note textarea font size on mobile
+expected: Note editor textarea is 16px below md (no iOS focus zoom), 14px from md up
+result: issue
+reported: "UI audit (24-UI-REVIEW.md fix 3): className 'text-label md:text-label' forces 14px on mobile"
+severity: minor
+source: ui-review
+
 ## Summary
 
-total: 8
+total: 11
 passed: 8
-issues: 0
+issues: 3
 pending: 0
 skipped: 0
 blocked: 0
@@ -87,3 +108,45 @@ blocked: 0
   missing:
     - "Add overflow-wrap:anywhere (Tailwind wrap-anywhere or [overflow-wrap:anywhere]) to AlertDialogTitle and AlertDialogDescription in ConfirmDialog"
     - "Unit test asserting the wrap class on title/description"
+
+- gap_id: G-24-9
+  truth: "An expanded note keeps its 'less' toggle and can be collapsed again; focus stays on the toggle"
+  status: failed
+  reason: "UI audit: more/less button disappears after expanding a note"
+  severity: blocker
+  test: 9
+  root_cause: "ArtistNote's useLayoutEffect measures overflow as scrollHeight > clientHeight via ResizeObserver. Expanding removes line-clamp-2, the paragraph grows to full height, the observer re-measures, overflow becomes false, and the {overflow && <button>} toggle unmounts (focus falls to body)."
+  artifacts:
+    - path: "web/app/components/watchlist/ArtistNote.tsx"
+      issue: "lines 89-102 overflow measure ignores expanded state; line 252 gates the toggle on overflow"
+  missing:
+    - "Keep overflow true while expanded (only re-measure when collapsed / clamped), so the 'less' toggle stays mounted"
+    - "Component test: stub overflow, click more, simulate a re-measure with no overflow, assert 'less' still rendered and focused, click collapses"
+
+- gap_id: G-24-10
+  truth: "Opening Manage tags moves focus to row 1's Rename once the list loads"
+  status: failed
+  reason: "UI audit: initial focus stays on close x"
+  severity: minor
+  test: 10
+  root_cause: "ManageTagsDialog mounts while status is loading, so the dialog's initial focus lands on the close button; nothing moves focus when status becomes loaded."
+  artifacts:
+    - path: "web/app/components/watchlist/ManageTagsDialog.tsx"
+      issue: "lines 95-113 load path has no focus hand-off on loaded"
+  missing:
+    - "On the first transition to loaded within an open, focus row 1's Rename button (only if focus is still on the dialog/close, never stealing from a user action)"
+    - "Component test asserting focus moves to the first Rename after load"
+
+- gap_id: G-24-11
+  truth: "Note textarea is 16px below md and 14px from md up"
+  status: failed
+  reason: "UI audit: 'text-label md:text-label' forces 14px on mobile"
+  severity: minor
+  test: 11
+  root_cause: "ArtistNote.tsx:179 has an unprefixed text-label that overrides the 16px base below md."
+  artifacts:
+    - path: "web/app/components/watchlist/ArtistNote.tsx"
+      issue: "line 179 className"
+  missing:
+    - "Drop the unprefixed text-label so only md:text-label remains"
+    - "Rebuild embedded SPA (internal/webassets/build/client) after all fixes"
