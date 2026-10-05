@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -245,6 +246,233 @@ func TestSchema_TagCapTrigger_SameTagConcurrentAt9(t *testing.T) {
 	if count != 10 {
 		t.Fatalf("artist_tags count = %d, want 10", count)
 	}
+}
+
+type detachRaceResult struct {
+	s3Err           error
+	s3ReturnedEarly bool // S3 finished before S2 committed
+	finalCount      int  // links on artist A at the end
+	hasT, hasU      bool // A linked to T / U at the end
+	otherCount      int  // links left on artist B (update mode only)
+}
+
+// runDetachRace forces the CR-01 interleaving (ADR 0004 amendment): S1 deletes
+// link T uncommitted, S2 re-attaches or moves T, S3 attaches a different tag.
+func runDetachRace(t *testing.T, ctx context.Context, pool *pgxpool.Pool, label string, viaUpdate bool) detachRaceResult {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	artistA := seedArtistNamed(t, ctx, pool, label+"-a")
+	tagIDs := make([]int64, 10)
+	for i := range tagIDs {
+		tagIDs[i] = insertTag(t, ctx, pool, fmt.Sprintf("%s-%02d", label, i))
+		if err := linkTag(ctx, pool, artistA, tagIDs[i]); err != nil {
+			t.Fatalf("seed link %d: %v", i, err)
+		}
+	}
+	tagT := tagIDs[0]
+	tagU := insertTag(t, ctx, pool, label+"-u")
+
+	s2SQL := `INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2) ON CONFLICT (artist_id, tag_id) DO NOTHING`
+	s2Args := []any{artistA, tagT}
+	var artistB int64
+	if viaUpdate {
+		artistB = seedArtistNamed(t, ctx, pool, label+"-b")
+		if err := linkTag(ctx, pool, artistB, tagT); err != nil {
+			t.Fatalf("seed link on B: %v", err)
+		}
+		s2SQL = `UPDATE artist_tags SET artist_id = $1 WHERE artist_id = $2 AND tag_id = $3`
+		s2Args = []any{artistA, artistB, tagT}
+	}
+
+	var wg sync.WaitGroup
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseS2 := func() { releaseOnce.Do(func() { close(release) }) }
+
+	tx1, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin S1: %v", err)
+	}
+	// Every exit path frees S2 and S1 first, or pool.Close would hang on the blocked connections.
+	defer func() {
+		releaseS2()
+		rbCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer rbCancel()
+		_ = tx1.Rollback(rbCtx)
+		wg.Wait()
+	}()
+	if _, err := tx1.Exec(ctx, "DELETE FROM artist_tags WHERE artist_id = $1 AND tag_id = $2", artistA, tagT); err != nil {
+		t.Fatalf("S1 delete: %v", err)
+	}
+
+	waitingOnLock := func(pid uint32) bool {
+		var waitEventType *string
+		if err := pool.QueryRow(ctx, "SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1", pid).Scan(&waitEventType); err != nil {
+			t.Fatalf("poll pg_stat_activity: %v", err)
+		}
+		return waitEventType != nil && *waitEventType == "Lock"
+	}
+
+	pidCh := make(chan uint32, 1)
+	stmtCh := make(chan error, 1)
+	commitCh := make(chan error, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			stmtCh <- fmt.Errorf("begin S2: %w", err)
+			return
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		pidCh <- tx.Conn().PgConn().PID()
+		if _, err := tx.Exec(ctx, s2SQL, s2Args...); err != nil {
+			stmtCh <- err
+			return
+		}
+		stmtCh <- nil
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		commitCh <- tx.Commit(ctx)
+	}()
+
+	var pidS2 uint32
+	select {
+	case pidS2 = <-pidCh:
+	case err := <-stmtCh:
+		t.Fatalf("S2 setup: %v", err)
+	case <-ctx.Done():
+		t.Fatal("S2 never started")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	s2Waiting := false
+	for time.Now().Before(deadline) {
+		if waitingOnLock(pidS2) {
+			s2Waiting = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !s2Waiting {
+		t.Fatal("S2 never observed waiting on a Lock -- the race window was not opened")
+	}
+
+	if err := tx1.Commit(ctx); err != nil {
+		t.Fatalf("commit S1: %v", err)
+	}
+	select {
+	case err := <-stmtCh:
+		if err != nil {
+			t.Fatalf("S2 statement after S1 commit: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("S2 statement never completed after S1 committed")
+	}
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire S3 connection: %v", err)
+	}
+	pidS3 := conn.Conn().PgConn().PID()
+	s3Ch := make(chan error, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer conn.Release()
+		_, err := conn.Exec(ctx, `INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2) ON CONFLICT (artist_id, tag_id) DO NOTHING`, artistA, tagU)
+		s3Ch <- err
+	}()
+
+	var res detachRaceResult
+	s3Settled := false
+	deadline = time.Now().Add(5 * time.Second)
+	for !s3Settled && time.Now().Before(deadline) {
+		select {
+		case res.s3Err = <-s3Ch:
+			res.s3ReturnedEarly = true
+			s3Settled = true
+		default:
+			if waitingOnLock(pidS3) {
+				s3Settled = true
+			} else {
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+	}
+	if !s3Settled {
+		t.Fatal("S3 neither returned nor blocked on a Lock -- the interleaving was not forced")
+	}
+
+	releaseS2()
+	select {
+	case err := <-commitCh:
+		if err != nil {
+			t.Fatalf("commit S2: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("S2 commit never completed")
+	}
+	if !res.s3ReturnedEarly {
+		select {
+		case res.s3Err = <-s3Ch:
+		case <-ctx.Done():
+			t.Fatal("S3 never completed after S2 committed")
+		}
+	}
+
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", artistA).Scan(&res.finalCount); err != nil {
+		t.Fatalf("count links on A: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM artist_tags WHERE artist_id = $1 AND tag_id = $2)", artistA, tagT).Scan(&res.hasT); err != nil {
+		t.Fatalf("check T link: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM artist_tags WHERE artist_id = $1 AND tag_id = $2)", artistA, tagU).Scan(&res.hasU); err != nil {
+		t.Fatalf("check U link: %v", err)
+	}
+	if viaUpdate {
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM artist_tags WHERE artist_id = $1", artistB).Scan(&res.otherCount); err != nil {
+			t.Fatalf("count links on B: %v", err)
+		}
+	}
+	return res
+}
+
+// assertDetachRaceRefused checks S3 was held behind S2 and then refused at the cap.
+func assertDetachRaceRefused(t *testing.T, res detachRaceResult) {
+	t.Helper()
+	if res.s3ReturnedEarly {
+		t.Fatalf("S3 attached while S2 skipped the artist lock (CR-01): s3Err=%v finalCount=%d", res.s3Err, res.finalCount)
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(res.s3Err, &pgErr) {
+		t.Fatalf("S3: got err %v, want *pgconn.PgError", res.s3Err)
+	}
+	if pgErr.Code != pgerrcode.CheckViolation || pgErr.ConstraintName != "artist_tags_max_per_artist" {
+		t.Fatalf("S3 code/constraint = %q/%q, want %q/artist_tags_max_per_artist (%s)", pgErr.Code, pgErr.ConstraintName, pgerrcode.CheckViolation, pgErr.Message)
+	}
+	if res.finalCount != 10 {
+		t.Fatalf("artist_tags count = %d, want 10", res.finalCount)
+	}
+	if !res.hasT || res.hasU {
+		t.Fatalf("links after race: T present=%v U present=%v, want T present and U absent", res.hasT, res.hasU)
+	}
+}
+
+// TestSchema_TagCapTrigger_ConcurrentDetachRace pins CR-01 (ADR 0004
+// amendment, migration 000012): a third attach racing a concurrent detach
+// plus re-attach or move of the same link must be refused at 10.
+func TestSchema_TagCapTrigger_ConcurrentDetachRace(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
+	ctx := context.Background()
+
+	t.Run("insert re-attach", func(t *testing.T) {
+		assertDetachRaceRefused(t, runDetachRace(t, ctx, pool, "cdr-ins", false))
+	})
 }
 
 // TestSchema_TagNameChecks proves tags_name_length and tags_name_trimmed

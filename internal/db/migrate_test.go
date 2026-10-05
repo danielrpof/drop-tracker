@@ -210,9 +210,9 @@ func TestRunMigrations_AppliesFromScratch(t *testing.T) {
 	if err := sqlDB.QueryRowContext(ctx, "SELECT version, dirty FROM migrate_scratch.schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	// 000011 is the newest migration (gap closure: cap on UPDATE OF artist_id).
-	if version != 11 || dirty {
-		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (11, false)", version, dirty)
+	// 000012 is the newest migration (gap closure: cap vs concurrent detach).
+	if version != 12 || dirty {
+		t.Fatalf("schema_migrations = (version=%d, dirty=%v), want (12, false)", version, dirty)
 	}
 
 	// Isolation assertion 1: the migrations really landed in the scratch
