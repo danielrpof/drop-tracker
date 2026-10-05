@@ -1,5 +1,5 @@
 ---
-status: complete
+status: diagnosed
 phase: 24-artist-tags-notes
 source: [24-VERIFICATION.md]
 started: 2026-10-05T16:00:54Z
@@ -65,8 +65,12 @@ blocked: 0
   reason: "User reported: Chip does not truncate, it shows the full tag name at 375px"
   severity: major
   test: 4
-  artifacts: []
-  missing: []
+  root_cause: "Likely not a defect: below sm the row is flex-col, so the chip gets ~311px; 32 narrow lowercase chars at 14px (~240px) plus the x fit without truncating. The truncation chain (Badge max-w-full, span min-w-0 truncate, parent min-w-0 flex-1) is intact. Re-test with 32 wide glyphs (W) to exercise truncation."
+  artifacts:
+    - path: "web/app/components/watchlist/TagChips.tsx"
+      issue: "none confirmed; truncation only triggers when the chip exceeds the column width"
+  missing:
+    - "Re-test with a 32-char wide-glyph tag (WWWW...) at 375px"
 
 - gap_id: G-24-5
   truth: "Merge confirm title wraps at 375px with two 32-char names, does not truncate or overflow"
@@ -74,5 +78,10 @@ blocked: 0
   reason: "User reported: the text overdlows sideways"
   severity: major
   test: 5
-  artifacts: []
-  missing: []
+  root_cause: "AlertDialogTitle/Description in ConfirmDialog have no overflow-wrap rule, so a 32-char tag name with no spaces is one unbreakable token wider than the ~300px dialog content at 375px and overflows sideways."
+  artifacts:
+    - path: "web/app/components/common/ConfirmDialog.tsx"
+      issue: "title and description lack break-words / overflow-wrap:anywhere"
+  missing:
+    - "Add overflow-wrap:anywhere (Tailwind wrap-anywhere or [overflow-wrap:anywhere]) to AlertDialogTitle and AlertDialogDescription in ConfirmDialog"
+    - "Unit test asserting the wrap class on title/description"
