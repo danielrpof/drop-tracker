@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.6
 milestone_name: Watchlist Organization
 current_phase: 24
-current_phase_name: artist-tags-notes
+current_phase_name: Artist Tags & Notes
 status: executing
-stopped_at: Phase 25 UI-SPEC approved
-last_updated: "2026-10-05T01:22:03.268Z"
+stopped_at: Completed 24-12-PLAN.md
+last_updated: "2026-10-05T01:37:23.577Z"
 last_activity: 2026-10-04
 last_activity_desc: Phase 24 execution started
-state_head: 63c122a5fdacae276708cbe1460d402cc50e443a
+state_head: 411006bb91a32bd60ecd23da4f4d61777ef51952
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
   percent: 0
 ---
 
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 
 ## Current Position
 
-Phase: 24 (artist-tags-notes) — READY TO EXECUTE
-Plan: 3 of 11
+Phase: 24 (Artist Tags & Notes) — EXECUTING
+Plan: 2 of 12
 Status: Ready to execute
 Last activity: 2026-10-04 — Phase 24 execution started
 
@@ -158,6 +158,7 @@ Last activity: 2026-10-04 — Phase 24 execution started
 | Phase 24 P09 | ~35min | 2 tasks | 5 files |
 | Phase 24 P10 | ~25min | 3 tasks | 6 files |
 | Phase 24 P11 | 25m | 2 tasks | 4 files |
+| Phase 24 P12 | 6 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -382,6 +383,7 @@ Recent decisions affecting current work:
 - [Phase 24]: [Phase 24-09]: golangci-lint reinstalled at pinned v2.13.2 via go install after the pre-commit-cached binary (built with go1.25) refused to run against this box's go1.26 toolchain -- tooling-only fix, no source/config change
 - [Phase 24]: 24-10: ship cap-vs-concurrent-detach fix as additive migration 000012 (FOR KEY SHARE existence lock) instead of editing applied 000011
 - [Phase 24]: 24-11: vocabGen generation ref drops a stale GET /tags settle so a deleted/renamed/merged tag cannot return via the + tag autocomplete (WR-06)
+- [Phase 24]: 24-12: ManageTagsDialog guards load() with a generation ref; invalidateLoad() on delete/rename/merge success bumps it and refetches only when a load was in flight (no skeleton strand)
 
 ### Pending Todos
 
@@ -469,9 +471,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-05T01:03:35.918Z
-Stopped at: Phase 25 UI-SPEC approved
-Resume file: .planning/phases/25-find-filter-watchlist-and-history/25-UI-SPEC.md
+Last session: 2026-10-05T01:37:23.539Z
+Stopped at: Completed 24-12-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
