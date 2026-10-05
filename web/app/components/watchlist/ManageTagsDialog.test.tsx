@@ -361,6 +361,44 @@ describe("ManageTagsDialog", () => {
     expect(mockMergeTag).not.toHaveBeenCalled()
   })
 
+  it("a merge confirm naming two 32-character tags renders the full title and consequence in wrapping elements", async () => {
+    const source = "a".repeat(32)
+    const target = "b".repeat(32)
+    mockListTags.mockResolvedValue([
+      { id: 5, name: source, carrier_count: 3 },
+      { id: 9, name: target, carrier_count: 4 },
+    ])
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: { id: 9, name: target },
+      carrierCountAfterMerge: 7,
+    })
+
+    renderDialog()
+
+    await screen.findByText(source)
+    await userEvent.click(
+      screen.getByRole("button", { name: `Rename tag ${source}` })
+    )
+    const input = screen.getByRole("textbox", {
+      name: `New name for ${source}`,
+    })
+    await userEvent.clear(input)
+    await userEvent.type(input, `${target}{Enter}`)
+
+    const title = await screen.findByRole("heading", {
+      name: `Merge “${source}” into “${target}”?`,
+    })
+    expect(title).toHaveClass("wrap-anywhere")
+    expect(title).not.toHaveClass("truncate")
+    expect(
+      screen.getByText(
+        `7 artists will carry “${target}”, and “${source}” will be deleted.`
+      )
+    ).toHaveClass("wrap-anywhere")
+    expect(mockMergeTag).not.toHaveBeenCalled()
+  })
+
   it("Cancel on the merge confirm returns to the still-open rename input with its text intact and focuses Save", async () => {
     const { input } = await openCollisionConfirm()
 

@@ -68,8 +68,12 @@ export function ConfirmDialog({
     >
       <AlertDialogContent size="default" finalFocus={finalFocus}>
         <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
+          {/* An unspaced 32-char tag name must wrap; only overflow-wrap:anywhere
+              shrinks min-content inside the centered header grid (G-24-5). */}
+          <AlertDialogTitle className="wrap-anywhere">{title}</AlertDialogTitle>
+          <AlertDialogDescription className="wrap-anywhere">
+            {description}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>

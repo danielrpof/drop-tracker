@@ -49,6 +49,19 @@ describe("ConfirmDialog", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
   })
 
+  it("title and description carry wrap-anywhere so a long unspaced tag name wraps instead of overflowing", () => {
+    renderDialog(() => Promise.resolve())
+
+    const title = screen.getByRole("heading", { name: "Delete “rap”?" })
+    expect(title).toHaveClass("wrap-anywhere")
+    expect(title).not.toHaveClass("truncate")
+    expect(
+      screen.getByText(
+        "No artists on your watchlist carry this tag, and this can't be undone."
+      )
+    ).toHaveClass("wrap-anywhere")
+  })
+
   it("Cancel closes without calling onConfirm", async () => {
     const onConfirm = vi.fn(() => Promise.resolve())
     const { onOpenChange } = renderDialog(onConfirm)
