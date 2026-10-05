@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 24
 current_phase_name: Artist Tags & Notes
 status: executing
-stopped_at: Completed 24-09-PLAN.md
-last_updated: "2026-10-05T00:33:33.902Z"
-last_activity: 2026-09-24
+stopped_at: Completed 24-10-PLAN.md
+last_updated: "2026-10-05T00:42:38.328Z"
+last_activity: 2026-10-04
 last_activity_desc: Phase 24 execution started
-state_head: 77de93d070578ae4ea1db166d0494b208bbac5ad
+state_head: 126e5068cdad05e1fcd50c153f9d267bb3dd8b0a
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 11
-  completed_plans: 9
+  completed_plans: 10
   percent: 0
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 
 ## Current Position
 
-Phase: 24 (Artist Tags & Notes) — READY TO EXECUTE
-Plan: 3 of 9
+Phase: 24 (Artist Tags & Notes) — EXECUTING
+Plan: 2 of 11
 Status: Ready to execute
-Last activity: 2026-09-24 — Phase 24 execution started
+Last activity: 2026-10-04 — Phase 24 execution started
 
 ## Performance Metrics
 
@@ -156,6 +156,7 @@ Last activity: 2026-09-24 — Phase 24 execution started
 | Phase 24 P07 | 17min | 3 tasks | 6 files |
 | Phase 24 P08 | ~50min | 3 tasks | 6 files |
 | Phase 24 P09 | ~35min | 2 tasks | 5 files |
+| Phase 24 P10 | ~25min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -378,6 +379,7 @@ Recent decisions affecting current work:
 - [Phase 24]: [Phase 24-07]: Reworded a source comment that spelled out dangerouslySetInnerHTML literally, since it tripped the phase's own XSS-surface grep gate though no code used it.
 - [Phase 24]: [Phase 24-08]: Closed verification gap 1 (SC2/TAG-04) with additive migration 000011 extending the per-artist tag cap trigger to BEFORE UPDATE OF artist_id, keeping merge's UPDATE SET tag_id unaffected (D-19) — make/sqlc were not on this session's PATH; ran the underlying Makefile commands directly and reinstalled sqlc v1.31.1 via go install
 - [Phase 24]: [Phase 24-09]: golangci-lint reinstalled at pinned v2.13.2 via go install after the pre-commit-cached binary (built with go1.25) refused to run against this box's go1.26 toolchain -- tooling-only fix, no source/config change
+- [Phase 24]: 24-10: ship cap-vs-concurrent-detach fix as additive migration 000012 (FOR KEY SHARE existence lock) instead of editing applied 000011
 
 ### Pending Todos
 
@@ -465,8 +467,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-25T03:05:08.317Z
-Stopped at: Completed 24-09-PLAN.md
+Last session: 2026-10-05T00:42:38.284Z
+Stopped at: Completed 24-10-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
