@@ -1,8 +1,8 @@
 ---
 phase: 24-artist-tags-notes
-verified: 2026-09-25T03:24:53Z
+verified: 2026-10-05T01:05:00Z
 status: gaps_found
-score: 4/5 roadmap success criteria verified (SC2 still partial — DB cap bypassable under a concurrent detach, reproduced)
+score: 5/5 roadmap success criteria verified; 1 gap-closure must-have FAILED (24-11 TAG-06 concurrency edge + its prohibition, WR-08, reproduced)
 covered_files:
   - .planning/REQUIREMENTS.md
   - .planning/phases/24-artist-tags-notes/24-01-PLAN.md
@@ -23,6 +23,10 @@ covered_files:
   - .planning/phases/24-artist-tags-notes/24-08-SUMMARY.md
   - .planning/phases/24-artist-tags-notes/24-09-PLAN.md
   - .planning/phases/24-artist-tags-notes/24-09-SUMMARY.md
+  - .planning/phases/24-artist-tags-notes/24-10-PLAN.md
+  - .planning/phases/24-artist-tags-notes/24-10-SUMMARY.md
+  - .planning/phases/24-artist-tags-notes/24-11-PLAN.md
+  - .planning/phases/24-artist-tags-notes/24-11-SUMMARY.md
   - cmd/server/main.go
   - docs/adr/0004-per-artist-tag-cap-trigger.md
   - internal/db/migrate_test.go
@@ -30,6 +34,8 @@ covered_files:
   - internal/db/migrations/000010_tags_and_notes.up.sql
   - internal/db/migrations/000011_artist_tags_cap_on_update.down.sql
   - internal/db/migrations/000011_artist_tags_cap_on_update.up.sql
+  - internal/db/migrations/000012_artist_tags_cap_concurrent_detach.down.sql
+  - internal/db/migrations/000012_artist_tags_cap_concurrent_detach.up.sql
   - internal/db/schema_version_test.go
   - internal/db/tags_schema_test.go
   - internal/httpserver/server.go
@@ -42,6 +48,7 @@ covered_files:
   - queries/watchlist.sql
   - web/app/components/common/ConfirmDialog.tsx
   - web/app/components/watchlist/ArtistNote.tsx
+  - web/app/components/watchlist/ManageTagsDialog.test.tsx
   - web/app/components/watchlist/ManageTagsDialog.tsx
   - web/app/components/watchlist/TagChips.tsx
   - web/app/components/watchlist/TagCombobox.tsx
@@ -50,80 +57,87 @@ covered_files:
   - web/app/lib/tags.ts
   - web/app/routes/watchlist.test.tsx
   - web/app/routes/watchlist.tsx
-covered_digest: "v1:sha256:c2c3c08e9d9889b8da482426e8d6f15fa5eff27c6cdcb71baf77cc5490bc2269"
+covered_digest: "v1:sha256:561e72fc88fdca04ebfb46fb5af62e528dcc115c4b49b45643186a83d259167f"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
   previous_status: gaps_found
   previous_score: 4/5
   gaps_closed:
-    - "Raw `UPDATE artist_tags SET artist_id = <10-link artist>` is now refused (000011 BEFORE UPDATE OF artist_id trigger; TestSchema_TagCapTrigger_RawUpdateRefused PASS)"
-    - "Deleting a tag in Manage tags now removes it from the route vocabulary / '+ tag' autocomplete (dropTagFromEntries calls setVocabulary; route test PASS)"
+    - "SC2 / TAG-04 DB cap under a concurrent detach (CR-01): migration 000012 locks the existing link FOR KEY SHARE; TestSchema_TagCapTrigger_ConcurrentDetachRace (insert re-attach + update move) and TestSchema_Migration000012_DownUpRoundTrip (down reaches 11, up refused at 10) pass against live PG, run by this verifier"
+    - "WR-06 (route's own '+ tag' GET /tags settling late): vocabGen guard in loadVocabulary; deferred-promise route test passes"
+    - "WR-07 (unchanged-artist subtest did not pin the TG_OP guard): subtest now also changes tag_id; passes"
   gaps_remaining:
-    - "SC2 / TAG-04 database-level cap: the same truth still fails, now through a different root cause (concurrent-detach race in the shared trigger function, CR-01)"
+    - "Stale GET /tags can still revive a deleted tag in the '+ tag' vocabulary, now via ManageTagsDialog's own unguarded load() -> onLoaded -> handleTagsLoaded (review WR-08). Same symptom as WR-06; declared 24-11 must-have and prohibition both falsified"
   regressions: []
 gaps:
-  - truth: "SC2 / TAG-04: an 11th tag on one artist is refused ... and the database refuses it even when the API check is bypassed"
+  - truth: "24-11 / TAG-06 concurrency edge: a GET /tags response that settles after a fresher local vocabulary change, whether a Manage tags load, delete, rename, or merge, never overwrites the route vocabulary. Prohibition: picking a suggestion must never silently re-create a tag the user just deleted, even when a GET /tags response settles after the delete."
     status: failed
     severity: blocker
     reason: >-
-      The shared trigger function check_artist_tags_max_per_artist() (000010,
-      re-created unchanged in logic by 000011) short-circuits with a plain
-      `IF EXISTS (SELECT 1 FROM artist_tags WHERE artist_id=NEW.artist_id AND
-      tag_id=NEW.tag_id)`. Under MVCC that SELECT still sees a link another
-      transaction has deleted but not yet committed, so the trigger returns
-      NEW without taking the artist lock or counting. The INSERT's ON CONFLICT
-      arbiter (or the UPDATE's PK check) then waits for the deleter, the
-      deleter commits, the row is written, and the BEFORE ROW trigger is not
-      re-run. A third transaction attaching a different tag in that window
-      counts 9 committed links and succeeds. Independently reproduced by this
-      verifier in a throwaway database (postgres:16 container) using the exact
-      000011 function body and both triggers: artist at 10 links ended at 11
-      for BOTH the `INSERT ... ON CONFLICT DO NOTHING` variant and the
-      `UPDATE artist_tags SET artist_id` variant. Sequential control at 10 was
-      refused as expected. Reachable through the API too (AttachTag is the
-      only cap guard; there is no API-level count), though only with a
-      microsecond window since Detach is a single autocommit statement.
+      Reproduced by this verifier with a deterministic throwaway vitest
+      (created, run, deleted; working tree left clean): open Manage tags with
+      the first listTags deferred, close, reopen (second listTags resolves),
+      delete 'reggaeton', close, then settle the first listTags with the old
+      list. Typing 'r' in '+ tag' offers 'reggaeton' as an existing option
+      (assertion failed: found role=option 'reggaeton'); listTags was called
+      exactly twice, so status is 'loaded' and nothing refetches. Root cause:
+      ManageTagsDialog.load() (ManageTagsDialog.tsx:92-102) has no staleness
+      guard and calls setTags/onLoaded on every settle, even after close;
+      handleTagsLoaded (watchlist.tsx:186-190) bumps vocabGen and writes
+      unconditionally, so a stale dialog response always wins. attachTag
+      sends the name (api.ts:374-383), so picking the stale suggestion makes
+      GetOrCreateTag silently re-create the deleted tag. The same overwrite
+      can undo a rename or merge. Roadmap SC4 still holds as written (server
+      delete, count confirm, artists untouched); what fails is the explicit
+      must-have and prohibition the 24-11 gap-closure plan declared for
+      exactly this symptom class.
     artifacts:
-      - path: "internal/db/migrations/000011_artist_tags_cap_on_update.up.sql"
-        issue: "Lines 13-27: both skip-existing checks are plain IF EXISTS, which a concurrent uncommitted DELETE of the same link defeats"
-      - path: "internal/db/migrations/000010_tags_and_notes.up.sql"
-        issue: "Lines 38-52: same logic (shipped; must not be edited)"
-      - path: "docs/adr/0004-per-artist-tag-cap-trigger.md"
-        issue: "Amendment claims the DB guarantee covers every way a link can reach an artist; not true under a concurrent detach"
-    missing:
-      - "New migration 000012 (dev DB is already at 11|f, so editing 000011 in place would never re-run there) that re-creates check_artist_tags_max_per_artist() with both skip-existing checks as `PERFORM 1 FROM artist_tags WHERE artist_id = NEW.artist_id AND tag_id = NEW.tag_id FOR KEY SHARE; IF FOUND THEN RETURN NEW; END IF;` — keep the TG_OP='UPDATE' early return and the FOR NO KEY UPDATE artist lock. This verifier ran that exact shape against the same three-session race: the third attach is refused with artist_tags_max_per_artist and the artist stays at 10 for both INSERT and UPDATE variants"
-      - "Paired 000012 down file restoring the 000011 function body; bump expectedSchemaVersionOnDisk and the from-scratch (12, false) pin"
-      - "Forced, pg_stat_activity-gated DB test (style of TestSchema_TagCapTrigger_SameTagConcurrentAt9): S1 deletes link T uncommitted, S2 re-attaches T (and a variant moving T by UPDATE) and blocks, S1 commits, S3 attaches U; assert S3 fails 23514/artist_tags_max_per_artist and the artist ends at 10"
-      - "Confirm TestSchema_TagCapTrigger_SameTagConcurrentAt9 and TestTrigger_SkipExisting still pass (uncommitted inserts are invisible, so FOR KEY SHARE does not change them)"
-      - "ADR 0004 amendment covering the concurrent-detach case — OR, if the user deliberately accepts the race window, an override (template in the report) plus an ADR note stating the guarantee is serial-only against a concurrent detach of the same link"
-  - truth: "24-09 prohibition: picking a suggestion must never silently re-create a tag the user just deleted (TAG-06 / SC4 autocomplete)"
-    status: partial
-    severity: warning
-    reason: >-
-      The normal flow is fixed and tested. Residual (review WR-06, confirmed by
-      reading web/app/routes/watchlist.tsx:188-197): loadVocabulary writes its
-      listTags() result unconditionally on settle. If the '+ tag' vocabulary
-      request is still in flight when the user opens Manage tags and deletes a
-      tag, the late response overwrites the filtered vocabulary with a list that
-      still contains the deleted tag and sets status 'loaded' (never refetched);
-      picking it re-creates the tag. Same overwrite can undo a rename/merge. Not
-      reproduced (needs a stalled request); non-blocking on its own, cheap to
-      close in the same gap plan.
-    artifacts:
+      - path: "web/app/components/watchlist/ManageTagsDialog.tsx"
+        issue: "load() (lines 92-102) applies every listTags settle (setTags, setStatus, onLoaded) with no generation check; useEffect([open]) starts a new load per open without invalidating the previous one; mutation success paths do not invalidate an in-flight load"
       - path: "web/app/routes/watchlist.tsx"
-        issue: "loadVocabulary has no stale-response guard; handleTagsLoaded/drop/rename/merge do not invalidate an in-flight load"
+        issue: "handleTagsLoaded (186-190) trusts every onLoaded call; vocabGen only guards the route's own loadVocabulary"
+      - path: "web/app/routes/watchlist.test.tsx"
+        issue: "The 24-11 test only defers the route's first listTags; no test has two dialog loads in flight"
     missing:
-      - "Generation ref bumped in handleTagsLoaded, dropTagFromEntries, renameTagInEntries, mergeTagInEntries; loadVocabulary applies its result (and error status) only if the generation is unchanged"
-      - "Route test with a deferred listTags promise: open '+ tag', open Manage tags and delete, then resolve the first listTags with the old list; assert the deleted tag is not offered as existing"
+      - "Generation ref in ManageTagsDialog: `const gen = ++loadGen.current` in load(); apply setTags/setStatus/onLoaded (and the error status) only while `gen === loadGen.current`; bump loadGen in the success paths of handleConfirmDelete, handleSaveRename (renamed) and handleConfirmMerge (review WR-08 fix sketch)"
+      - "Route (or dialog) test: first Manage tags listTags deferred, close + reopen with the second resolved, delete X, close, settle the first with a list containing X; assert '+ tag' does not offer X as existing, the dialog list does not show X on reopen, and listTags call counts are unchanged"
+      - "Optional same pattern for rename/merge (late list must not undo them)"
+      - "Rebuild the embedded SPA (make web steps) and re-run the web suite"
+      - "OR, if the user accepts the window, add the override below and leave TAG-06 Complete"
+human_verification:
+  - test: "End-to-end tags + note CRUD in a real browser through the go:embed build"
+    expected: "Create/pick/remove chips; reload; remove + re-add the artist and tags return; add/edit/clear a note and reload; delete a tag in Manage tags and '+ tag' no longer offers it as existing"
+    why_human: "Full user flow across reloads and the embedded bundle"
+  - test: "Slow-network (DevTools Slow 3G) stale-vocabulary race (24-11 Task 2 human-check, deferred end-of-phase)"
+    expected: "Open '+ tag', then Manage tags, delete a tag before the first GET /tags returns; the deleted tag is never offered as existing. After the WR-08 fix also try close/reopen Manage tags under throttling"
+    why_human: "Real network timing through the browser"
+  - test: "Combobox popup overflow (24-05 backstop): 30+ tags, a 32-char name, narrow viewport"
+    expected: "Popup scrolls inside its own bounds; no clipped option"
+    why_human: "Visual layout"
+  - test: "Long tag chip at 375px (24-04 backstop)"
+    expected: "Chip truncates; title and the x aria-label carry the full name"
+    why_human: "Visual layout"
+  - test: "Merge confirm title wrap at 375px with two 32-char names (24-06 backstop)"
+    expected: "Title wraps, does not truncate"
+    why_human: "Visual layout"
+  - test: "Manage tags row truncation at 375px (24-06 backstop)"
+    expected: "'· {n} artists' stays visible"
+    why_human: "Visual layout"
+  - test: "UI-SPEC contrast/hit-area audit of chips, x, '+ tag', note pencil"
+    expected: "Meets UI-SPEC contrast and 44px-equivalent hit areas"
+    why_human: "Visual/accessibility judgment"
+  - test: "Delete-vs-attach race (24-02 backstop)"
+    expected: "No artist_tags row references a deleted tag (FK cascade guarantees this structurally); confirm or accept"
+    why_human: "Concurrency judgment item carried from 24-02"
 ---
 
 # Phase 24: Artist Tags & Notes Verification Report
 
 **Phase Goal:** The user can label any watchlist artist with free-form tags and a short note right on its Watchlist card, and manage the tag vocabulary globally. There is one tag per name regardless of casing or stray whitespace, and tags stay with the artist across a remove and re-add.
-**Verified:** 2026-09-25T03:24:53Z
+**Verified:** 2026-10-05T01:05:00Z
 **Status:** gaps_found
-**Re-verification:** Yes, after gap-closure plans 24-08 and 24-09
+**Re-verification:** Yes, after gap-closure round 2 (plans 24-10 and 24-11)
 
 ## Goal Achievement
 
@@ -131,154 +145,164 @@ gaps:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Type a tag on a card, pick from autocomplete or create on the fly, see a chip, remove it. Tags persist across reload and across remove + re-add | VERIFIED (regression check) | No regression. `internal/tags`, `internal/watchlist` (`TestService_Remove_LeavesArtistTagsIntact`) and `internal/httpserver` (`TestTags_*`) pass against live PG. `TestSchema_WatchlistDeleteKeepsTagLinks` passes. The full web suite passes 334/334. |
-| 2 | `Reggaeton ` attaches existing `reggaeton`. Over 32 chars or an 11th tag is refused from the UI or the API, **and the DB refuses it even when the API check is bypassed** | FAILED (partial), BLOCKER | The UPDATE-path gap is closed: `TestSchema_TagCapTrigger_RawUpdateRefused` and the 5 `UpdatePaths` subtests pass, the dev DB reads `11\|f`, and both triggers are present. **But the DB cap is still bypassable.** A concurrent, uncommitted DELETE of the same link makes the plain `IF EXISTS` skip-existing check return early, with no lock and no count. I reproduced this myself and got 11 links on both the INSERT and UPDATE paths (see Spot-Checks). Identity, length, and the API/UI cap all still hold. |
-| 3 | Rename once and the new name shows everywhere. Renaming onto an existing name asks for confirmation naming both tags, and nothing merges without it | VERIFIED (regression check) | Rename/merge files are unchanged since the prior verification. `Merge`-filtered tests in tags/httpserver pass. The ManageTagsDialog vitest passes under the project's `pnpm test` config (see Info note on one timing-sensitive test). |
-| 4 | Delete a tag globally after a confirmation stating the carrier count. The tag disappears from every artist, and the artists stay untouched | VERIFIED | `dropTagFromEntries` (watchlist.tsx:117-129) now filters `entries` and `vocabulary`. The route test "deleting a tag in Manage tags removes it from the '+ tag' autocomplete, with no extra listTags call" passes (watchlist.test.tsx:329). The rebuilt bundle `watchlist-CWaO3Pt5.js` replaces `DQRWM9Da`. A residual stale-response race remains (WR-06, warning gap 2). It does not negate the SC as written. |
-| 5 | Add, edit, and clear a plain-text note up to 500 chars, shown on the card after reload | VERIFIED (regression check) | Unchanged since the prior verification. `TestSchema_NoteChecks` passes. ArtistNote vitest passes. |
+| 1 | Type a tag on a card, pick from autocomplete or create on the fly, see a chip, remove it. Tags persist across reload and remove + re-add | VERIFIED (regression) | Full Go suite green against live PG (internal/tags, watchlist, httpserver, db all ok). `TestSchema_WatchlistDeleteKeepsTagLinks` passes. Web suite 335/335. |
+| 2 | `Reggaeton ` attaches existing `reggaeton`. Over 32 chars or an 11th tag is refused from UI or API, and the DB refuses it even when the API is bypassed | VERIFIED (gap closed) | 000012 replaces both skip-existing `IF EXISTS` checks with `PERFORM ... FOR KEY SHARE; IF FOUND`. I ran `TestSchema_TagCapTrigger_ConcurrentDetachRace` (insert re-attach + update move): S3 refused 23514/`artist_tags_max_per_artist`, artist at 10, T present, U absent. `TestSchema_Migration000012_DownUpRoundTrip` passes, which proves fail-first in-run: on the 000011 body the same forced race reaches 11, on 000012 it is refused. The test gates on `pg_stat_activity.wait_event_type='Lock'`, not sleeps. `DistinctTagConcurrentAt9`, `SameTagConcurrentAt9`, `RawInsertRefused`, `RawUpdateRefused`, 5 `UpdatePaths` subtests, `TagNameChecks` all pass. Dev DB `12\|f`, public function contains `FOR KEY SHARE`, both triggers present. |
+| 3 | Rename once, new name everywhere. Renaming onto an existing name confirms naming both tags; nothing merges without it | VERIFIED (regression) | Merge-confirm Esc test now gated on Cancel focus; ManageTagsDialog suite 18/18 three consecutive runs with coverage disabled. Tag/httpserver merge tests pass. Caveat: a late stale dialog GET can undo a rename in the autocomplete (WR-08, gap 1). |
+| 4 | Delete a tag globally after a confirmation stating carrier count; tag disappears from every artist; artists untouched | VERIFIED (as written) | Server delete + count confirm unchanged and tested; the route drops the tag from cards and vocabulary. The stale-response revival path (WR-08) does not undo the server delete, but it violates the 24-11 must-have below. |
+| 5 | Add, edit, clear a plain-text note up to 500 chars, shown after reload | VERIFIED (regression) | `TestSchema_NoteChecks` passes; ArtistNote tests in the green web suite. |
 
-**Score:** 4/5 roadmap truths verified. 0 truths are present but behavior-unverified.
+**Score:** 5/5 roadmap truths verified (0 present-but-behavior-unverified).
 
-**24-08 plan must-haves:** 8 of 9 hold as stated. The UPDATE refusal, merge-shape, unchanged-artist, below-cap and two-row moves, duplicate-move PK violation, INSERT-path guarantees, 000011 round-trip, version pins/migration-check, and the ADR amendment are all present. Two failures:
-- The plan's stated purpose ("the database refuses an 11th link whether it arrives by INSERT or by moving an existing link") and the ADR amendment's "covers every way a link can reach an artist" are false under concurrency (gap 1).
-- The "unchanged-artist" truth holds behaviorally, but its subtest does not pin the new `TG_OP='UPDATE'` guard (WR-07, confirmed). `SET artist_id = artist_id` hits the first EXISTS on its own row and returns before the guard matters.
+### Gap-closure plan must-haves
 
-**24-09 plan must-haves:** all 6 truths are verified. The no-extra-GET, the non-deleted tags still offered, the existing route tests, the rebuilt bundle, and the green web suite were all re-run by me. The prohibition "never silently re-create a just-deleted tag" is flagged partial because of WR-06 (gap 2).
+**24-10 (TAG-04): 10/10 verified.**
+- INSERT re-attach race refused at 10: VERIFIED (ran).
+- UPDATE move race refused, B empty: VERIFIED (ran).
+- Hole reproduces on 000011 body, closed on 000012: VERIFIED (round-trip test ran).
+- Distinct-tag 10th/11th at 9: VERIFIED (ran).
+- Prior guarantees: VERIFIED (all prior cap/skip/merge-shape/duplicate-move/000011 round-trip tests ran green).
+- WR-07 guard pinned: VERIFIED by code reading. The subtest now changes `tag_id` to a fresh tag, so without the `TG_OP` early return it falls to the count at 10. The SUMMARY's mutation evidence is consistent with that.
+- Empty and encoding edges: VERIFIED.
+- 000010/000011 unchanged: VERIFIED (`git diff --exit-code 77de93d` clean).
+- migration-check, sqlc, versions, dev DB: VERIFIED. migration-check found nothing on 000012 up; sqlc v1.31.1 produced no diff; `expectedSchemaVersionOnDisk = 12`; from-scratch wants `(12, false)`; dev DB is `12|f`.
+- ADR amendment: VERIFIED (present, names the tests). Prohibitions hold: no edits to old migrations, the trigger only refuses, and 24-10 did not edit REQUIREMENTS.md.
+- Minor: IN-14. `DistinctTagConcurrentAt9` is listed under the 000012 amendment even though it pins the artist lock, not the detach fix. Info only.
 
-### CR-01 independent assessment
+**24-11 (TAG-06, TAG-05): 11/12 verified, 1 FAILED.**
+- '+ tag' fetch settling after a Manage tags delete is discarded: VERIFIED (route test passes).
+- Non-deleted tags still offered; listTags called twice, listWatchlist once: VERIFIED.
+- Create still works on listTags failure, and a non-stale failure sets error: VERIFIED (test "still lets Enter attach via Create when listTags rejects", plus the code at watchlist.tsx:205-207).
+- Existing route tests pass: VERIFIED.
+- **TAG-06 concurrency edge ("a GET /tags response that settles after a fresher local vocabulary change ... never overwrites the route vocabulary"): FAILED.** Reproduced, see gap 1.
+- TAG-06 idempotency, TAG-05 adjacency/Esc, empty and ordering edges: VERIFIED. Go suite green; Esc test 3/3 coverage-disabled runs.
+- Embedded bundle rebuilt: VERIFIED. A fresh `pnpm run build` is byte-identical to `internal/webassets/build/client` (`diff -rq` clean, `watchlist-FROF-wNL.js`).
+- Whole-phase DoD: VERIFIED. go vet, golangci-lint 0 issues, full Go suite, sqlc, prettier and web suite are all green. I did not re-run the coverage gate; the SUMMARY reports 89.33%.
+- **Prohibition "picking a suggestion must never silently re-create a tag the user just deleted, even when a GET /tags response settles after the delete": VIOLATED** (same reproduction). `attachTag` posts the name, so `GetOrCreateTag` re-creates the tag.
 
-I did not take the reviewer's claim on trust. My reasoning and evidence:
+### WR-08 decision: goal-blocking gap (BLOCKER), not a warning
 
-- **Postgres semantics.** Under READ COMMITTED, each statement in the plpgsql function takes a fresh snapshot. A row whose `xmax` belongs to an in-progress deleter is still *visible*, so `EXISTS` returns true. The unique/arbiter check (`ON CONFLICT` speculative insert, or the PK index insert for the UPDATE's new tuple version) waits on the deleter's xid. After the deleter commits, the conflict is gone and the write proceeds. BEFORE ROW triggers run once, before that retry loop, and are not re-fired. `DELETE FROM artist_tags` takes no lock on `artists`, and the waiting writer's FK `KEY SHARE` does not conflict with a third session's `FOR NO KEY UPDATE`. So the third session's count sees 9 and passes.
-- **Reproduction.** I created a throwaway DB `verify_cr01_scratch` on the project's `postgres:16` container, loaded the exact 000011 up file plus the INSERT trigger, seeded artist 1 at 10 links and artist 2 carrying tag 1, and ran three psql sessions:
-  - S1 `DELETE (1,1)` then sleep, then commit.
-  - S2 `INSERT (1,1) ON CONFLICT DO NOTHING` blocked until S1 committed, returned at +0.3 ms, then slept before committing.
-  - S3 `INSERT (1,11)` ran after S1's commit and succeeded while S2 was still open.
-  - Final count for artist 1 was **11**. The UPDATE variant (`SET artist_id=1 WHERE artist_id=2 AND tag_id=1`) also ended at **11**. A sequential control at 10 was refused. The scratch DB was dropped, and the dev DB was not touched.
-- **Fix check.** I swapped in the reviewer's `PERFORM ... FOR KEY SHARE; IF FOUND` shape and re-ran both variants. S3 was refused with `artist_tags_max_per_artist`, and the artist stayed at 10 in both cases.
-- **Classification: BLOCKER against SC2/TAG-04.** SC2's clause is specifically about the database refusing the 11th link when the API is bypassed. Raw concurrent SQL is such a bypass, and it produces 11 links deterministically. This is the same standard the prior verification applied to the raw-UPDATE hole. The practical risk through the API is very low: it needs a detach of T, a re-attach of T, and an attach of U, all concurrent on one artist, inside a microsecond autocommit window, in a single-user app. If you judge that acceptable, use the override template below instead of a fix.
+1. **Reproduced, not inferred.** I wrote a throwaway vitest in `web/app/routes/`, ran it, and deleted it; the working tree is clean. Sequence:
+   - Manage tags opens with the first `listTags` deferred, then closes.
+   - It reopens and the second `listTags` resolves.
+   - Delete `reggaeton`, then close.
+   - Settle the first `listTags` with the pre-delete list.
+   - Type `r` in "+ tag": `reggaeton` is rendered as an existing option, and `listTags` was called exactly twice.
 
-### WR-06 assessment (against TAG-06)
+   The assertion failed: `expected document not to contain element, found <div role="option">reggaeton</div>`.
+2. **It falsifies declared must-haves, not just a review nicety.** 24-11 promoted this symptom class to a must-have truth worded for *any* `GET /tags` response, explicitly naming "a Manage tags load", and to a prohibition "even when a GET /tags response settles after the delete." Both fail on the path WR-08 describes. Under the verifier rules, a FAILED must-have truth is a BLOCKER.
+3. **Why this differs from the prior round's WR-06 = WARNING.** Then, the symptom was outside any declared must-have, and only the 24-09 prohibition was partially affected. Now the gap-closure plan whose sole purpose was to close this symptom declared it as a must-have and did not close it.
+4. **Scope of the blocker.** All five roadmap SCs hold as written. The server delete and the data model are correct, and "one tag per name" still holds: a re-created tag is a single new row. The fix is small (a dialog-side generation ref plus one test). If you judge the window acceptable (it needs out-of-order `GET /tags` responses across a close/reopen plus a delete), use the override below. That turns the status into `human_needed`.
 
-Confirmed by code reading. `loadVocabulary` (watchlist.tsx:188-197) has no generation/stale guard, and nothing invalidates an in-flight load. TAG-06 itself (delete globally with a count confirmation) is satisfied. The residual only violates the 24-09 prohibition, and only when the first `GET /tags` outlives both the Manage-tags fetch and a confirmed delete. I rate it **WARNING**, not a blocker, and list it as gap 2 so it gets closed in the same plan.
+```yaml
+overrides:
+  - must_have: "24-11 / TAG-06 concurrency edge: a GET /tags response that settles after a fresher local vocabulary change, whether a Manage tags load, delete, rename, or merge, never overwrites the route vocabulary"
+    reason: "Only reachable when an earlier Manage tags GET /tags outlives a close/reopen and a delete; server state stays correct and a reload clears it. Accepted for a single-user app; tracked as WR-08."
+    accepted_by: "<name>"
+    accepted_at: "<ISO timestamp>"
+```
 
 ### Required Artifacts
 
 | Artifact | Status | Details |
 |----------|--------|---------|
-| `internal/db/migrations/000011_artist_tags_cap_on_update.{up,down}.sql` | VERIFIED (with gap) | `artist_tags_cap_update_trigger BEFORE UPDATE OF artist_id` exists. The down body is byte-identical to 000010's function (diffed). The race is inherited in the up body. |
-| `internal/db/migrations/000010_*` | VERIFIED | Unchanged since 43c1d56, as the prohibition requires. |
-| `internal/db/tags_schema_test.go` | VERIFIED | `RawUpdateRefused`, `UpdatePaths` (5 subtests), and `Migration000011_DownUpRoundTrip` all pass. There is no test for the concurrent-detach interleaving. |
-| `internal/db/{schema_version,migrate}_test.go` | VERIFIED | `expectedSchemaVersionOnDisk = 11`. From-scratch expects `(11, false)`. |
-| `docs/adr/0004-per-artist-tag-cap-trigger.md` | VERIFIED (claim overstated) | The amendment is present, but "covers every way a link can reach an artist" does not hold under concurrency. |
-| `web/app/routes/watchlist.tsx` / `.test.tsx` | VERIFIED | Vocabulary filter on delete, plus a new route test. |
-| `internal/webassets/build/client` | VERIFIED | Rebuilt in 54dab01 (new watchlist and manifest hashes). The bundle contains the Manage tags / delete strings. |
-| All other phase-24 artifacts | VERIFIED (regression) | Unchanged since the prior verification. Their tests pass. |
+| `internal/db/migrations/000012_artist_tags_cap_concurrent_detach.up.sql` | VERIFIED | `CREATE OR REPLACE` of the shared function. Both skip-existing checks use `FOR KEY SHARE`. Keeps the TG_OP early return, the artist `FOR NO KEY UPDATE`, and the unchanged RAISE literal. Applied on dev DB. |
+| `internal/db/migrations/000012_...down.sql` | VERIFIED | Restores the `IF EXISTS` body (000011 shape); the round-trip test proves the behavior reverts. |
+| `internal/db/tags_schema_test.go` | VERIFIED | `runDetachRace` forces the interleaving with Lock-wait gating and safe cleanup. The race, round-trip, distinct-tag and WR-07 tests are substantive and pass. |
+| `internal/db/schema_version_test.go`, `migrate_test.go` | VERIFIED | Pinned to 12 / `(12, false)`. |
+| `docs/adr/0004-per-artist-tag-cap-trigger.md` | VERIFIED | Concurrent-detach amendment present. |
+| `web/app/routes/watchlist.tsx` | VERIFIED (partial vs gap 1) | `vocabGen` guard is correct for `loadVocabulary`. `handleTagsLoaded` is unguarded against stale dialog loads. |
+| `web/app/routes/watchlist.test.tsx` | VERIFIED | Deferred-promise test passes. It does not cover two dialog loads. |
+| `web/app/components/watchlist/ManageTagsDialog.test.tsx` | VERIFIED | Focus-gated Esc test; all four original assertions intact. |
+| `web/app/components/watchlist/ManageTagsDialog.tsx` | STUB-free, but GAP | `load()` has no staleness guard (gap 1). |
+| `internal/webassets/build/client` | VERIFIED | In sync with a fresh build. |
 
 ### Key Link Verification
 
 | From | To | Via | Status |
 |------|----|-----|--------|
-| 000011 update trigger | `check_artist_tags_max_per_artist()` → `CONSTRAINT = 'artist_tags_max_per_artist'` → `ErrTagCapReached` | same literal | WIRED |
-| merge `UPDATE ... SET tag_id` | does not fire `UPDATE OF artist_id` | column-scoped trigger | WIRED (merge-shape subtest, `Merge` tests pass) |
-| 000011 down | 000010 function body | byte-identical | WIRED (diff clean, round-trip test passes) |
-| ManageTagsDialog `onDeleted` | `dropTagFromEntries` → `setEntries` + `setVocabulary` | route updater | WIRED (was PARTIAL) |
-| `loadVocabulary` | route `vocabulary` | unguarded async set | WIRED, with a stale-overwrite hazard (gap 2) |
-| trigger skip-existing check | artist lock + count | plain `IF EXISTS` | BROKEN under concurrent delete (gap 1) |
+| 000012 function | `artist_tags_cap_trigger` + `artist_tags_cap_update_trigger` | same function OID, no trigger DDL | WIRED (pg_trigger lists both; behavior tests pass through both paths) |
+| skip-existing `FOR KEY SHARE` | waits on in-flight DELETE/key-UPDATE, then artist lock + count | row lock | WIRED (race tests) |
+| RAISE `artist_tags_max_per_artist` | `ErrTagCapReached` → HTTP 409 | unchanged literal | WIRED (httpserver/tags suites green) |
+| `loadVocabulary` | `vocabulary` | `gen === vocabGen.current` | WIRED |
+| ManageTagsDialog `load()` → `onLoaded` | `handleTagsLoaded` → `vocabulary` | unguarded | **BROKEN under a stale dialog response (gap 1)** |
+| `make web` | committed embed tree | copy | WIRED (diff clean) |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data | Source | Real data | Status |
 |----------|------|--------|-----------|--------|
-| TagCombobox | `vocabulary` | GET /tags (lazy), patched locally on create, rename, merge, and now delete | yes | FLOWING (a stale in-flight response can clobber it, gap 2) |
-| TagChips / ManageTagsDialog / ArtistNote | unchanged | unchanged | yes | FLOWING |
+| TagCombobox | `vocabulary` | GET /tags (route lazy load + Manage tags loads), patched on create/rename/merge/delete | yes | FLOWING. A stale Manage tags load can clobber it (gap 1). |
+| TagChips / ManageTagsDialog / ArtistNote | entries, tags, note | GET /watchlist, GET /tags | yes | FLOWING |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| DB tag/cap/note schema tests | `go test ./internal/db -run 'TestSchema_Tag\|TestTrigger\|TestSchema_Migration000011\|TestSchema_NoteChecks\|TestSchema_WatchlistDeleteKeepsTagLinks\|TestExpectedSchemaVersion'` (live PG) | 11/11 PASS, including the 5 UpdatePaths subtests | PASS |
-| Merge/cap/HTTP regression | `go test ./internal/tags ./internal/watchlist ./internal/httpserver -run 'Merge\|Remove_LeavesArtistTagsIntact\|TestTags_\|Cap'` | ok ×3 | PASS |
-| Dev DB state | `select version,dirty from schema_migrations`, `pg_trigger` | `11\|f`, both cap triggers present | PASS |
-| migration-check | `go run ./cmd/migration-check --mode scan` | no findings | PASS |
-| go vet | `go vet ./...` | exit 0 | PASS |
-| Full web suite | `corepack pnpm test` | 23 files, 334/334. Coverage 92/85/92/94 | PASS |
-| Delete clears autocomplete | watchlist.test.tsx:329 (in the suite above) | PASS | PASS |
-| **DB cap under concurrent detach (INSERT)** | 3 psql sessions, scratch DB, exact 000011 body | artist 10 → **11**, no error | **FAIL (gap 1)** |
-| **DB cap under concurrent detach (UPDATE)** | same, S2 = `UPDATE ... SET artist_id` | artist 10 → **11**, no error | **FAIL (gap 1)** |
-| Proposed FOR KEY SHARE fix | same race, patched function | S3 refused, artist stays 10 (both variants) | PASS (fix validated) |
-
-golangci-lint was not on PATH in this session, so I did not re-run it. The 24-09 SUMMARY claims it passed after a reinstall.
+| Cap trigger + schema tests | `go test ./internal/db -v -run 'TestSchema_TagCapTrigger\|TestTrigger\|TestSchema_Migration00001\|TagNameChecks\|NoteChecks\|WatchlistDeleteKeepsTagLinks\|ExpectedSchemaVersion\|FromScratch'` | all PASS, no SKIP (ConcurrentDetachRace 2/2, UpdatePaths 5/5, both round-trips) | PASS |
+| Full Go suite (once) | `go test ./... -count=1` (live PG, no -race on Windows) | 25 packages ok | PASS |
+| go vet / golangci-lint | `go vet ./...`; `golangci-lint run` | clean / 0 issues | PASS |
+| sqlc drift | `sqlc generate && git diff --exit-code internal/db/sqlc/` | clean (v1.31.1) | PASS |
+| migration-check | `--mode=scan --files 000012 up/down` | no findings | PASS |
+| Dev DB | `schema_migrations`, `pg_proc`, `pg_trigger` | `12\|f`, `FOR KEY SHARE` present, 2 triggers | PASS |
+| Web suite | `pnpm test` | 23 files, 335/335, 92.12/84.99/91.79/94.27 | PASS |
+| Prettier | `prettier --check` | clean | PASS |
+| Esc test stability | ManageTagsDialog suite, coverage disabled, x3 | 18/18 each | PASS |
+| Embedded bundle | fresh `pnpm run build` + `diff -rq` | identical | PASS |
+| **WR-08 stale dialog load** | throwaway vitest (deleted after) | deleted tag offered as existing | **FAIL (gap 1)** |
 
 ### Probe Execution
 
-No probes are declared for this phase, so Step 7c is not applicable.
+No probes declared for this phase; Step 7c not applicable.
 
 ### Requirements Coverage
 
 | Requirement | Source Plan | Status | Evidence |
 |-------------|-------------|--------|----------|
-| TAG-01 | 24-01, 02, 04, 05 | SATISFIED | unchanged; tests pass |
+| TAG-01 | 24-01, 02, 04, 05 | SATISFIED | unchanged; suites green |
 | TAG-02 | 24-01, 04 | SATISFIED | unchanged |
 | TAG-03 | 24-01, 02, 05 | SATISFIED | unchanged |
-| TAG-04 | 24-01, 05, 08 | **BLOCKED (partial)** | The API and UI enforce both caps, and the DB enforces length. The DB count cap now covers INSERT and UPDATE OF artist_id, but a concurrent detach defeats it (gap 1). |
-| TAG-05 | 24-02, 06 | SATISFIED | unchanged |
-| TAG-06 | 24-02, 06, 09 | SATISFIED | delete + count confirm; vocabulary now synced (WR-06 residual is a warning) |
+| TAG-04 | 24-01, 05, 08, 10 | SATISFIED | CR-01 closed; API/UI/DB caps all hold, including under concurrent detach |
+| TAG-05 | 24-02, 06, 11 | SATISFIED | rename/merge flows tested. A stale dialog GET can undo a rename in the autocomplete only (gap 1 side effect) |
+| TAG-06 | 24-02, 06, 09, 11 | **BLOCKED (partial)** | Delete + count confirm works. The 24-11 concurrency must-have and prohibition fail (gap 1) |
 | TAG-07 | 24-01, 03, 04 | SATISFIED | unchanged |
 | NOTE-01 | 24-03, 07 | SATISFIED | unchanged |
 
-All 8 IDs are claimed by at least one plan, and none are orphaned. **REQUIREMENTS.md is inconsistent:** it marks TAG-04 `[x]` / Complete (lines 14 and 87), which is premature given gap 1. The other six are shown as "Gaps Found". The orchestrator should reconcile these marks with this verdict.
+All 8 IDs are claimed by plans; none are orphaned. **Traceability inconsistency:** REQUIREMENTS.md marks TAG-06 `[x]` / Complete (lines 16, 89; set in 34f1e10 during 24-09), while TAG-04 and the rest read "Gaps Found". Given this verdict, TAG-04 can move to Complete, and TAG-06 should read Gaps Found until gap 1 is fixed or overridden. The orchestrator should reconcile this.
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| migrations 000011 (and 000010) | 13-27 (38-52) | visibility-only `IF EXISTS` used as a concurrency guard | Blocker | gap 1 (CR-01) |
-| web/app/routes/watchlist.tsx | 188-197 | unguarded async state write | Warning | gap 2 (WR-06) |
-| internal/db/tags_schema_test.go | 445-461 | subtest passes without the guard it claims to pin | Warning | WR-07. The `TG_OP='UPDATE'` early return is untested. Changing `tag_id` too would pin it. |
-| web/app/components/watchlist/ManageTagsDialog.test.tsx | 366-379 | timing-sensitive `waitFor` (default 1000 ms) | Info | The "Esc on the merge confirm..." test fails 3/3 when the file runs with `--coverage.enabled=false`, passes alone, and passes under the project's `pnpm test`. The file is unchanged since 24-06. This is flaky-test hygiene, not a phase gap. |
-| queries/tags.sql:18, internal/tags/service.go:14,35 | — | comments cite only 000010 for the trigger | Info | IN-11 |
-| — | — | TBD/FIXME/XXX/TODO/HACK in files changed by 24-08/09 | none | — |
+| web/app/components/watchlist/ManageTagsDialog.tsx | 92-102 | unguarded async state write + callback after close | Blocker | gap 1 (WR-08) |
+| web/app/routes/watchlist.tsx | 52-54 | comment says "every local vocabulary change" bumps vocabGen; `rememberTag` does not (IN-12) | Info | Comment accuracy |
+| web/app/routes/watchlist.test.tsx | 385-458 | test passes even if the drop/rename/merge bumps are removed (IN-13) | Info | Bumps unpinned |
+| docs/adr/0004-per-artist-tag-cap-trigger.md | 85 | cites `DistinctTagConcurrentAt9` as pinning 000012 (IN-14) | Info | Doc precision |
+| internal/db/tags_schema_test.go | ~312, ~532 | Lock-wait poll duplicated 3x (IN-15) | Info | Maintainability |
+| files changed by 24-10/24-11 | — | TBD/FIXME/XXX/TODO/HACK | none | — |
 
-Carried warnings WR-02, WR-04, and WR-05 are unchanged and are not must-haves (see the prior report).
+The carried warnings WR-02, WR-04 and WR-05 are unchanged and are not must-haves.
 
 ### Human Verification Required
 
-These items are carried forward and still open once the gaps close. The phase moves to `human_needed` after gap closure until they are done.
-
-1. **End-to-end tags + note CRUD in a real browser.** Create, pick, and remove chips. Reload. Remove the artist and re-add it: the tags should return. Add, edit, and clear a note, then reload. Delete a tag in Manage tags, then open "+ tag": the deleted tag should not be offered as existing.
-2. **Combobox popup overflow (24-05 backstop).** With 30+ tags, a 32-char name, and a narrow viewport, the popup should scroll inside its own bounds and no option should be clipped.
-3. **Long tag chip at 375px (24-04 backstop).** The chip truncates, and `title` plus the × aria-label carry the full name.
-4. **Merge title wrap at 375px (24-06 backstop).** Two 32-char names should wrap, not truncate.
-5. **Manage tags row truncation at 375px (24-06 backstop).** `· {n} artists` should stay visible.
-6. **UI-SPEC contrast/hit-area audit** of the chips, the ×, "+ tag", and the note pencil.
-7. **Delete-vs-attach race (24-02 backstop).** No `artist_tags` row should reference a deleted tag. The FK cascade guarantees this structurally. Confirm or accept.
+These are listed in the frontmatter `human_verification` and remain open after gap 1 closes:
+- End-to-end CRUD in a real browser.
+- The 24-11 slow-network race check.
+- Combobox overflow.
+- 375px chip, merge title, and Manage tags row layouts.
+- Contrast/hit-area audit.
+- The delete-vs-attach race confirmation.
 
 ### Gaps Summary
 
-The gap-closure plans did what they said:
-- Raw `UPDATE ... SET artist_id` is now refused.
-- Merges are unaffected.
-- The migration pair round-trips.
-- Deleting a tag now clears it from the autocomplete.
+Round 2 closed the blocker it targeted:
+- Migration 000012 makes the DB tag cap hold under a concurrent detach.
+- I confirmed this with forced-interleaving tests, including a round-trip test that shows the hole open on the old body and closed on the new one.
+- 24-10's must-haves all hold.
+- The route's own stale `+ tag` fetch is now discarded.
 
-All of this is backed by passing tests I re-ran.
-
-SC2's DB clause still fails, though, for a root cause neither the plan nor the prior verification caught. The trigger's skip-existing checks rely on visibility, not locking, so a concurrent uncommitted detach of the same link lets a writer skip the artist lock, and a third writer then counts only 9. I reproduced 11 links on both the INSERT and UPDATE paths, and confirmed that the `FOR KEY SHARE` rewrite closes the hole. The fix belongs in a new migration 000012, because the dev DB is already at version 11. Add a forced interleaving test and an ADR note alongside it. WR-06 (stale vocabulary response) and WR-07 (test that does not pin the guard) are cheap to fold into the same plan.
-
-**If you accept the concurrency window rather than fixing it**, add this to the frontmatter and amend ADR 0004:
-
-```yaml
-overrides:
-  - must_have: "the database refuses an 11th tag on one artist even when the API check is bypassed"
-    reason: "Cap holds for all serial writes and concurrent attaches; the only bypass needs a concurrent uncommitted detach of the same link plus a third attach in the window. Accepted as out of scope for a single-user app; ADR 0004 documents the limitation."
-    accepted_by: "<name>"
-    accepted_at: "<ISO timestamp>"
-```
-
-**Deferred:** none. Phase 26 SC2 reuses the per-artist cap for bulk add but does not commit to fixing this race. This gap stays in Phase 24.
+One gap remains, and it is the same user-visible symptom as WR-06 reached through a different path. Manage tags' own `GET /tags` has no staleness guard, and the route accepts every dialog load unconditionally. A late response from an earlier open therefore puts a deleted tag back into the autocomplete, and picking it silently re-creates the tag. I reproduced this deterministically. It falsifies the TAG-06 concurrency must-have and the prohibition that 24-11 itself declared, so it is classified as a blocker. Either close it with a dialog-side generation guard and a two-loads-in-flight test, or accept it via the override above. No later phase covers it, so nothing is deferred.
 
 ---
 
-_Verified: 2026-09-25T03:24:53Z_
+_Verified: 2026-10-05T01:05:00Z_
 _Verifier: Claude (gsd-verifier)_
