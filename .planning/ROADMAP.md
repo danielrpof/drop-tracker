@@ -112,7 +112,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The user can delete a tag globally after a confirmation stating how many artists carry it. The tag disappears from every artist, and the artists themselves stay on the watchlist untouched.
   5. The user can add, edit, and clear a plain-text note of up to 500 characters on an artist, and it shows on that artist's Watchlist card after a reload.
 
-**Plans:** 9/9 plans executed
+**Plans:** 9/11 plans executed
 
 Plans:
 **Wave 1**
@@ -144,6 +144,14 @@ Plans:
 **Gap closure — Wave 2** *(blocked on Gap closure Wave 1; from 24-VERIFICATION.md gap 2 / code review WR-01)*
 
 - [x] 24-09-PLAN.md — Manage tags delete also drops the tag from the "+ tag" autocomplete vocabulary, plus a route test, the embedded bundle rebuild, and the phase-closing gate
+
+**Re-verification gap closure — Wave 1** *(from 24-VERIFICATION.md re-verification gap 1 / code review CR-01: DB cap bypassable under a concurrent detach; plus WR-07)*
+
+- [ ] 24-10-PLAN.md — Additive migration 000012 locks the existing link `FOR KEY SHARE` in the cap trigger, plus forced three-session race tests (INSERT and UPDATE), a distinct-tag race test, a 000012 down/up round-trip, a WR-07 subtest that pins the `TG_OP` guard, the ADR 0004 amendment, and a live dev-DB apply
+
+**Re-verification gap closure — Wave 2** *(blocked on Re-verification gap closure Wave 1; from 24-VERIFICATION.md re-verification gap 2 / code review WR-06)*
+
+- [ ] 24-11-PLAN.md — A generation guard drops a stale "+ tag" GET /tags response that settles after a Manage tags load, delete, rename, or merge, plus a deferred-promise route test, a de-flaked merge-confirm Esc test, the embedded bundle rebuild, and the phase-closing gate
 
 **UI hint**: yes
 
