@@ -10,7 +10,7 @@ created: "2026-10-04"
 
 # Phase 25 — UI Design Contract
 
-> **Grill overrides (2026-10-04):** G1–G5 in `25-CONTEXT.md` supersede the matching parts of this spec, and the affected sections below are already updated. In short, latest release ignores retention, there is a separate Upcoming line, cards are sticky instead of removed, and the name filter folds `$ ø æ ß`.
+> **Grill overrides (2026-10-04):** G1–G7 in `25-CONTEXT.md` supersede the matching parts of this spec, and the affected sections below are already updated. In short, latest release ignores retention, there is a separate Upcoming line, cards are sticky instead of removed, the name filter folds `$ ø æ ß`, History's move to URL state is its own plan (G6), and both comboboxes stay, with base-ui unification left to a backlog todo (G7).
 
 > Visual and interaction contract for the **Watchlist list toolbar** (name filter, sort, any-of
 > tag filter, two preference toggles, "N of M artists"), the **latest-release line** and
@@ -19,7 +19,7 @@ created: "2026-10-04"
 
 **Scope of this phase's UI:**
 - `web/app/routes/watchlist.tsx` gains a "Your artists" list section: heading, count, toolbar, and a filtered-to-zero empty state. The add-artist `SearchBox` stays at the top, unchanged (D-01).
-- `WatchlistRow` gains a latest-release line (D-03). `TagChips` turns each chip label into a filter toggle, and the × still detaches the tag (D-08).
+- `WatchlistRow` gains a latest-release line (D-03) and, when an upcoming date exists, an Upcoming line (G3). `TagChips` turns each chip label into a filter toggle, and the × still detaches the tag (D-08).
 - `HistoryFilters` gains a third control, **Tag**, built on its own hand-rolled `Combobox<T>` (D-11). `history.tsx` gains a tag-specific empty state.
 - Watchlist and History filter state move from `useState` into URL query params (D-12, D-13).
 
@@ -33,7 +33,7 @@ tokens, **zero** npm packages, and **zero** newly vendored shadcn components. Ev
 needs is already in `web/app/components/ui/`.
 
 **Upstream contract (read first):**
-- `.planning/phases/25-find-filter-watchlist-and-history/25-CONTEXT.md`: decisions **D-01…D-16** are locked, and nothing here overrides them
+- `.planning/phases/25-find-filter-watchlist-and-history/25-CONTEXT.md`: decisions **D-01…D-16** and the post-discuss grill overrides **G1–G7** are locked; where a G conflicts with a D, the G wins
 - `.planning/REQUIREMENTS.md`: WLVW-01…06, HIST-02
 - `.planning/ROADMAP.md` §Phase 25: success criteria 1–5 and "Notes for the phase planner"
 - `.planning/phases/24-artist-tags-notes/24-UI-SPEC.md`: chip treatment [R1], the 24px dense-target exception [R3], chip truncation [R4], and the single route-level status region [R6]
@@ -130,7 +130,7 @@ This is unchanged from Phase 6: **exactly 4 sizes and exactly 2 weights**, set t
 | Display | 28px (1.75rem) | 600 | 1.2 | `<h1>Watchlist</h1>`, `<h1>History</h1>` (unchanged) |
 | Heading | 20px (1.25rem) | 600 | 1.2 | **New `<h2>Your artists</h2>`**; `EmptyState` headings; artist name (unchanged) |
 | Body | 16px (1.0rem) | 400 | 1.5 | `EmptyState` bodies; History Tag trigger and options (the existing `text-body` of `Combobox<T>`) |
-| Label | 14px (0.875rem) | 400 | 1.5 | Toolbar control labels (`Filter watchlist`, `Sort by`, `Tags: any of`, legend `Show only`); the "N of M artists" count; the **latest-release line**; tag-filter chip text; Select and Combobox option text (built-in `text-sm` = 14px); the name filter input text (Input's built-in `md:text-sm`) |
+| Label | 14px (0.875rem) | 400 | 1.5 | Toolbar control labels (`Filter watchlist`, `Sort by`, `Tags: any of`, legend `Show only`); the "N of M artists" count; the **latest-release and Upcoming lines**; tag-filter chip text; Select and Combobox option text (built-in `text-sm` = 14px); the name filter input text (Input's built-in `md:text-sm`) |
 
 - `ComboboxChip`'s built-in `text-xs font-medium` is overridden with **`h-6 text-label font-normal`**, matching the card chip [R1]. This phase introduces no 12px text and no 500 weight.
 - `Button`'s built-in `font-medium` (500) is the pre-existing component-level exception from Phases 6, 19, and 24. It is not a new weight.
@@ -154,7 +154,7 @@ Dark theme only, using the locked Phase 6 `.dark` token set. **This phase adds z
 1. Focus-visible rings on every new control: name filter, clear ×, sort trigger, tag filter, toggles, Clear filters, card chip label buttons, History Tag trigger. These inherit `focus-visible:ring-ring/50` and the `InputGroup` / `ComboboxChips` `focus-within` ring.
 2. The **"Clear filters" button inside the filtered-to-zero `EmptyState`** (`Button variant="default"`). It is the single primary action in that view.
 
-Never used for: a pressed toggle, an active filter chip, the active-tag marker on card chips, the count, the latest-release line, the toolbar "Clear filters" (ghost), or History's "Show all tags" (secondary).
+Never used for: a pressed toggle, an active filter chip, the active-tag marker on card chips, the count, the latest-release and Upcoming lines, the toolbar "Clear filters" (ghost), or History's "Show all tags" (secondary).
 
 ### Filter-active signals are neutral and never color-only
 
@@ -171,7 +171,7 @@ This keeps Phase 24 [R1] intact: a tag chip never takes a hue, a tinted fill, or
 |---------|------------|------------|----------|----------|
 | Pressed toggle text and Check | `--secondary-foreground` ≈ `#fafafa` | `#27272a` | ≥ 4.5:1 | ≈ 14.2:1 |
 | Off toggle text | `--foreground` ≈ `#fafafa` | `bg-input/30` over `#09090b` ≈ `#141416` | ≥ 4.5:1 | ≈ 17:1 |
-| Count, latest-release line, toolbar labels | `--muted-foreground` ≈ `#a1a1aa` | `#09090b` (toolbar) / `#18181b` (card) | ≥ 4.5:1 | ≈ 7.8:1 / ≈ 6.9:1 |
+| Count, latest-release and Upcoming lines, toolbar labels | `--muted-foreground` ≈ `#a1a1aa` | `#09090b` (toolbar) / `#18181b` (card) | ≥ 4.5:1 | ≈ 7.8:1 / ≈ 6.9:1 |
 | Active-chip ring | `foreground/30` ≈ `#666668` | chip fill `#27272a` | ≥ 3:1 is not required, because the Check icon carries the state | ≈ 2.6:1 (decorative reinforcement only) |
 | Toolbar chip × | `--muted-foreground` ≈ `#a1a1aa` | `#27272a` | ≥ 3:1 | ≈ 5.8:1 (needs the vendored-file edit; `opacity-50` would be ≈ 2.5:1) |
 
@@ -269,18 +269,20 @@ The name column (`flex min-w-0 flex-1 flex-col gap-1`) becomes:
 `Latest release: {date}` or `No releases yet`. When `next_release_date` is set, a second muted line
 reads `Upcoming: {date}`. The server decides what is upcoming (G2): a date strictly after UTC today at
 its own precision. The client never compares dates. `{date}` is rendered at stored precision by a pure
-helper `formatReleaseDate(raw)` in `web/app/lib/format.ts` (D-15):
+helper `formatReleaseDate(raw)` in `web/app/lib/format.ts` (D-15), which formats both fields:
 
-| Stored `latest_release_date` | Rendered |
-|------------------------------|----------|
+| Stored value | Rendered |
+|--------------|----------|
 | `2024` | `2024` |
 | `2024-05` | `May 2024` |
 | `2024-05-17` | `17 May 2024` |
-| `null` | line reads `No releases yet` (no stored non-upcoming `new_release` event at any age, G1) |
+| `null` | latest: the line reads `No releases yet` (no stored non-upcoming `new_release` event at any age, G1); next: no Upcoming line renders |
 | anything not matching those three shapes | the raw string, unchanged |
 
 The helper uses fixed English three-letter months (`Jan`…`Dec`) and **never** constructs a `Date`,
 so no timezone can shift the day and no ICU variant can emit `Sept`.
+
+**Layout discretion (planner/executor):** the latest-release and Upcoming lines may render as one wrapping line, `Latest release: 17 May 2024 · Upcoming: 12 Dec 2026`, with the `·` separator `aria-hidden` and the row `flex flex-wrap gap-x-2`, to keep cards compact. Copy is unchanged either way.
 
 **Chip label as a filter toggle (D-08):** inside the unchanged Phase 24 `Badge`, the label `<span>`
 becomes:
@@ -591,7 +593,7 @@ next_release_date: string | null     // nearest upcoming date, strictly after UT
 tagId?: number                       // sent as tag_id; composes with artistId / eventType / cursor
 ```
 
-- `latest_release_date` comes from the single `GET /watchlist` query and the shared POST/PATCH projection (Phase 24 D-26). The SPA never computes it.
+- `latest_release_date` and `next_release_date` both come from the single `GET /watchlist` query and the shared POST/PATCH projection (Phase 24 D-26). The SPA never computes either.
 - History's Tag options come from the existing `listTags()` (`GET /tags`), and the Watchlist never calls it for filtering (D-07).
 - The module comment in `web/app/routes/watchlist.tsx` that cites Phase 06 D-03/D-04 ("never re-sorts client-side", "no release activity") must be rewritten to reflect D-02/D-03 of this phase, in 1–3 lines (CLAUDE.md comment discipline).
 

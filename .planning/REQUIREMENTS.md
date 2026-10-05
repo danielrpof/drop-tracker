@@ -24,7 +24,7 @@
 
 - [ ] **WLVW-01**: User can search the watchlist by artist name
 - [ ] **WLVW-02**: User can sort by name (A–Z/Z–A) or date added (newest/oldest), with a stable tie-break
-- [ ] **WLVW-03**: User can sort by latest release (the artist's newest own `new_release` event date); artists with none sort last in both directions
+- [ ] **WLVW-03**: User can sort by latest release (the artist's newest own `new_release` event date that is not upcoming); artists with none sort last in both directions
 - [ ] **WLVW-04**: User can filter the watchlist by one or more tags
 - [ ] **WLVW-05**: User can filter to artists with muted event types or non-default release-type filters
 - [ ] **WLVW-06**: Search, sort, and filters combine; the view shows "N of M artists" and an empty state with a clear-filters action
