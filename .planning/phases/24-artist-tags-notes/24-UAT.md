@@ -1,19 +1,15 @@
 ---
-status: testing
+status: diagnosed
 phase: 24-artist-tags-notes
 source: [24-VERIFICATION.md]
 retest_after: 24-14
 started: 2026-10-05T16:00:54Z
-updated: 2026-10-06T20:06:42Z
+updated: 2026-10-06T21:20:00Z
 ---
 
 ## Current Test
 
-number: 12
-name: Re-test G-24-9 — expand and collapse a long note (after 24-14)
-expected: |
-  Mouse and keyboard: "more" expands a clamped note, the toggle stays mounted reading "less" with focus on it; "less" re-clamps to 2 lines, toggle reads "more", focus stays on it. A short note shows no toggle.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -74,26 +70,29 @@ source: ui-review
 
 ### 12. Re-test G-24-9 — expand and collapse a long note (after 24-14)
 expected: Mouse and keyboard: "more" expands a clamped note, the toggle stays mounted reading "less" with focus on it; "less" re-clamps to 2 lines, toggle reads "more", focus stays on it. A short note shows no toggle.
-result: [pending]
+result: pass
 
 ### 13. Re-test G-24-10 — Manage tags initial focus (after 24-14)
 expected: With DevTools network throttled, open Manage tags: focus moves once from the close x to row 1's Rename when the list loads; with an empty vocabulary focus stays on the x; moving focus during loading is not stolen.
-result: [pending]
+result: pass
 
 ### 14. Re-test G-24-11 — note textarea font size (after 24-14)
 expected: Note textarea computes 16px at 375px width and 14px at >=768px; no zoom on focus on iOS Safari.
-result: [pending]
+result: issue
+reported: "Its 14px at 375 but it looks good"
+severity: minor
 
 ### 15. Manage tags reopen after closing mid-rename (code review WR-01)
 expected: Decide: open Manage tags, click Rename on row 1, close with x, reopen — row 1 currently reappears in stale rename mode with focus on its Cancel. Pass = accept/defer as follow-up; issue = fix now (reset rename state on open, select Rename by data attribute, add test).
-result: [pending]
+result: pass
+note: "Accepted as-is (WR-01 stale rename state on reopen)."
 
 ## Summary
 
 total: 15
-passed: 8
-issues: 3
-pending: 4
+passed: 11
+issues: 4
+pending: 0
 skipped: 0
 blocked: 0
 
@@ -132,7 +131,9 @@ blocked: 0
 
 - gap_id: G-24-9
   truth: "An expanded note keeps its 'less' toggle and can be collapsed again; focus stays on the toggle"
-  status: failed
+  status: resolved
+  resolved_by: 24-14-PLAN.md
+  resolved_at: 2026-10-06
   reason: "UI audit: more/less button disappears after expanding a note"
   severity: blocker
   test: 9
@@ -146,7 +147,9 @@ blocked: 0
 
 - gap_id: G-24-10
   truth: "Opening Manage tags moves focus to row 1's Rename once the list loads"
-  status: failed
+  status: resolved
+  resolved_by: 24-14-PLAN.md
+  resolved_at: 2026-10-06
   reason: "UI audit: initial focus stays on close x"
   severity: minor
   test: 10
@@ -160,7 +163,9 @@ blocked: 0
 
 - gap_id: G-24-11
   truth: "Note textarea is 16px below md and 14px from md up"
-  status: failed
+  status: resolved
+  resolved_by: 24-14-PLAN.md
+  resolved_at: 2026-10-06
   reason: "UI audit: 'text-label md:text-label' forces 14px on mobile"
   severity: minor
   test: 11
@@ -171,3 +176,18 @@ blocked: 0
   missing:
     - "Drop the unprefixed text-label so only md:text-label remains"
     - "Rebuild embedded SPA (internal/webassets/build/client) after all fixes"
+
+- gap_id: G-24-14
+  truth: "Note textarea is 16px below md (no iOS focus zoom) and 14px from md up"
+  status: failed
+  reason: "User reported: Its 14px at 375 but it looks good"
+  severity: minor
+  test: 14
+  root_cause: "Likely not a code defect: source and the embedded build (63c38b6) are correct. Textarea merges to 'text-base md:text-sm max-h-40 overflow-y-auto md:text-label'; built CSS has .text-base = 16px and .md:text-label only inside @media (width>=48rem). A 14px reading at 375px points to a Go binary built before 63c38b6 (stale go:embed assets), a cached bundle, or a viewport not actually below 768 CSS px."
+  artifacts:
+    - path: "web/app/components/watchlist/ArtistNote.tsx"
+      issue: "none confirmed; line 179 is 'max-h-40 overflow-y-auto md:text-label'"
+    - path: "internal/webassets/build/client/assets/watchlist-Bo02kuoH.js"
+      issue: "none; carries the fixed className"
+  missing:
+    - "Rebuild/restart the Go binary, hard-reload, re-measure at 375px (expect 16px); confirm no focus zoom on iOS Safari"
