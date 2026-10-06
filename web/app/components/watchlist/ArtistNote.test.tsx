@@ -1,8 +1,8 @@
 import { useState } from "react"
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 
 import { ApiError, type WatchlistEntry, updateNote } from "~/lib/api"
 
@@ -64,6 +64,21 @@ describe("ArtistNote", () => {
     const textarea = screen.getByRole("textbox", { name: "Note for Drake" })
     expect(textarea).toHaveValue("")
     expect(textarea).toHaveFocus()
+  })
+
+  it("the note textarea keeps the 16px base size below md and switches to the label size only from md up", async () => {
+    render(
+      <ArtistNote entry={entry} onEntryChange={vi.fn()} announce={vi.fn()} />
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add note for Drake" })
+    )
+
+    const textarea = screen.getByRole("textbox", { name: "Note for Drake" })
+    expect(textarea).toHaveClass("text-base")
+    expect(textarea).toHaveClass("md:text-label")
+    expect(textarea).not.toHaveClass("text-label")
   })
 
   it("Save calls updateNote with the trimmed text and patches the entry", async () => {
@@ -360,6 +375,68 @@ describe("ArtistNote", () => {
     expect(
       document.getElementById("note-1")?.className.includes("line-clamp-2")
     ).toBe(false)
+  })
+
+  it("an expanded note keeps its 'less' toggle mounted and focused after the grown paragraph re-measures, and 'less' collapses it again", async () => {
+    const observers = new Set<{ cb: () => void }>()
+    class FakeResizeObserver {
+      cb: () => void
+      constructor(cb: () => void) {
+        this.cb = cb
+      }
+      observe() {
+        observers.add(this)
+      }
+      unobserve() {}
+      disconnect() {
+        observers.delete(this)
+      }
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver)
+    onTestFinished(() => {
+      vi.unstubAllGlobals()
+    })
+
+    // Clamped paragraphs overflow; an unclamped one has grown to full height.
+    Object.defineProperty(HTMLParagraphElement.prototype, "scrollHeight", {
+      configurable: true,
+      value: 100,
+    })
+    Object.defineProperty(HTMLParagraphElement.prototype, "clientHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains("line-clamp-2") ? 40 : 100
+      },
+    })
+
+    render(
+      <ArtistNote
+        entry={{ ...entry, note: "a long note that wraps well past two lines" }}
+        onEntryChange={vi.fn()}
+        announce={vi.fn()}
+      />
+    )
+
+    const toggle = await screen.findByRole("button", { name: "more" })
+    await userEvent.click(toggle)
+
+    act(() => {
+      observers.forEach((o) => o.cb())
+    })
+
+    const less = screen.getByRole("button", { name: "less" })
+    expect(less).toBe(toggle)
+    expect(less).toHaveAttribute("aria-expanded", "true")
+    expect(less).toHaveFocus()
+    expect(document.getElementById("note-1")).not.toHaveClass("line-clamp-2")
+
+    await userEvent.click(toggle)
+
+    const more = screen.getByRole("button", { name: "more" })
+    expect(more).toBe(toggle)
+    expect(more).toHaveAttribute("aria-expanded", "false")
+    expect(more).toHaveFocus()
+    expect(document.getElementById("note-1")).toHaveClass("line-clamp-2")
   })
 
   it("renders no more/less toggle when the note fits in two lines", () => {
