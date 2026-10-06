@@ -30,7 +30,7 @@ created: "2026-10-05"
 
 ## Threat Register
 
-Built from the `<threat_model>` blocks of plans 24-01…24-13; `T-24-SC` (repeated per plan) is collapsed to one row. T-24-23 is transferred to the render layer and closed by T-24-24/27/34/37 (no `dangerouslySetInnerHTML` in `web/app`).
+Built from the `<threat_model>` blocks of plans 24-01…24-14; `T-24-SC` (repeated per plan) is collapsed to one row. T-24-23 is transferred to the render layer and closed by T-24-24/27/34/37 (no `dangerouslySetInnerHTML` in `web/app`).
 
 | Threat ID | Category | Component | Severity | Disposition | Mitigation | Status |
 |-----------|----------|-----------|----------|-------------|------------|--------|
@@ -100,6 +100,10 @@ Built from the `<threat_model>` blocks of plans 24-01…24-13; `T-24-SC` (repeat
 | T-24-63 | Tampering (integrity of user intent) | Merge and delete ConfirmDialog titles overflowing sideways at narrow widths (G-24-5), hiding part of a tag name, so the user confirms a merge or delete without seeing both names (D-09) | low | mitigate | `wrap-anywhere` on `AlertDialogTitle` and `AlertDialogDescription` in ConfirmDialog. | closed |
 | T-24-64 | Tampering (supply chain) | Frozen install inside the `web` recipe | medium | mitigate | `pnpm install --frozen-lockfile` before the build, plus the acceptance diff that requires `web/package.json` and `web/pnpm-lock.yaml` unchanged against main. | closed |
 | T-24-65 | Tampering (stored XSS) | Tag names in the confirm title and description | low | accept | No rendering path changes. | closed |
+| T-24-66 | Tampering (integrity of user intent) | ManageTagsDialog initial-focus hand-off re-arming on reload | low | mitigate | Hand-off armed only by `open` and consumed by the first successful load; pinned by the "reload ... leaves focus alone" test in `ManageTagsDialog.test.tsx`. | closed |
+| T-24-67 | Denial of Service (accessibility) | ArtistNote 'less' toggle unmounting while focused (G-24-9) | low | mitigate | Overflow measured only while clamped; pinned by the fake-ResizeObserver test in `ArtistNote.test.tsx`. | closed |
+| T-24-68 | Tampering (supply chain) | Frozen install inside the `web` recipe | medium | mitigate | `pnpm install --frozen-lockfile` in `make web`. | closed |
+| T-24-69 | Tampering (stored XSS) | Note text and tag names in the changed components | low | accept | No rendering path changes; still plain JSX text (T-24-37). | closed |
 
 *Status: open · closed · open — below high threshold (non-blocking)*
 *Severity: critical > high > medium > low — only open threats at or above workflow.security_block_on count toward threats_open*
@@ -124,6 +128,7 @@ Built from the `<threat_model>` blocks of plans 24-01…24-13; `T-24-SC` (repeat
 | AR-56 | T-24-56 | No rendering path changes. | operator (plan-time register) | 2026-10-05 |
 | AR-62 | T-24-62 | No rendering path changes. | operator (plan-time register) | 2026-10-05 |
 | AR-65 | T-24-65 | No rendering path changes. | operator (plan-time register) | 2026-10-05 |
+| AR-69 | T-24-69 | No rendering path changes; still plain JSX text (T-24-37). | operator (plan-time register) | 2026-10-06 |
 
 *Accepted risks do not resurface in future audit runs.*
 
@@ -134,6 +139,7 @@ Built from the `<threat_model>` blocks of plans 24-01…24-13; `T-24-SC` (repeat
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-10-05 | 66 | 66 | 0 | gsd-secure-phase (orchestrator, ASVS L1 grep-depth) |
+| 2026-10-06 | 70 | 70 | 0 | gsd-secure-phase (orchestrator, ASVS L1 grep-depth) |
 
 L1 evidence: every named pin test exists (`internal/db`, `internal/tags`, `internal/httpserver`, `web/app`) and ran green during validate-phase on 2026-10-05; tag/note routes are registered inside `registerDataRoutes` (session + CSRF gate); the only `fetch(` in `web/app/lib/api.ts` is inside `apiFetch`; `mergeTag` is called only from `handleConfirmMerge` (ConfirmDialog `onConfirm`); zero `dangerouslySetInnerHTML` in `web/app`; zero string-built SQL in `internal/tags`; no diff vs main under `internal/notifier`, `internal/discord`, or the external clients; migrations 000010/000011 unchanged since `77de93d`.
 
@@ -144,6 +150,15 @@ L1 evidence: every named pin test exists (`internal/db`, `internal/tags`, `inter
 | Closed | 66 |
 | Open | 0 |
 
+## Security Audit 2026-10-06
+| Metric | Count |
+|--------|-------|
+| Threats found | 70 |
+| Closed | 70 |
+| Open | 0 |
+
+Added plan 24-14's T-24-66…69 (its T-24-SC collapses into the existing row). L1 evidence re-checked: tag/note routes inside `registerDataRoutes`, sole `fetch(` inside `apiFetch`, zero `dangerouslySetInnerHTML` in `web/app`, `--frozen-lockfile` in `make web`. Post-phase, `43f00c1` changed `web/pnpm-lock.yaml` via `pnpm-workspace.yaml` overrides to clear new trivy-fs CVEs in transitive deps (no new package); CVE-2026-93687 (`braces`, unfixed, dev-only via shadcn CLI) is in `.trivyignore` until 2026-11-05.
+
 ---
 
 ## Sign-Off
@@ -153,4 +168,4 @@ L1 evidence: every named pin test exists (`internal/db`, `internal/tags`, `inter
 - [x] `threats_open: 0` confirmed
 - [x] `status: verified` set in frontmatter
 
-**Approval:** verified 2026-10-05
+**Approval:** verified 2026-10-06
