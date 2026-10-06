@@ -485,5 +485,5 @@ Resume file: None
 ## Operator Next Steps
 
 - Phase 24 (Artist Tags & Notes) is complete: 14/14 plans, UAT 15/15, verification passed.
-- Start Phase 25 with `/gsd-discuss-phase 25` (no CONTEXT.md yet), then `/gsd-ui-phase 25` and `/gsd-plan-phase 25`.
+- Phase 25 is already discussed and planned (CONTEXT, UI-SPEC, 10 plans on disk): run `/gsd-execute-phase 25`.
 - Before Phase 27, run `/gsd-sketch` on the paste-a-list review screen
