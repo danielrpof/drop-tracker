@@ -6,10 +6,10 @@ current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
 status: planning
 stopped_at: Phase 24 complete, ready to plan Phase 25
-last_updated: "2026-10-06T20:38:48.014Z"
+last_updated: "2026-10-06T21:40:10.711Z"
 last_activity: 2026-10-06
 last_activity_desc: Phase 24 complete, transitioned to Phase 25
-state_head: 769dd404905464cdf13be86fa5ad791b0752ee34
+state_head: 43f00c104424775675eecba8545aeb3045255c0f
 progress:
   total_phases: 5
   completed_phases: 1
@@ -443,6 +443,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 260916-wao | Close T-22-15 (22-SECURITY.md, blocking) / CR-01 (22-REVIEW.md): `buildDigestEmbed` now caps the whole Description at Discord's 4096-rune limit, truncating on a full line boundary and appending a "... N more events" note; `SendDigestIfDue` still acks every event id in the batch (rendered or truncated-out), closing the self-sustaining retry loop. Interim guard only — DGST-12's full multi-message split stays Phase 23's job. `go vet`/`golangci-lint`/full test suite/`make coverage-gate` (91.38%) all clean; `/gsd-secure-phase 22` still needs a re-run to flip 22-SECURITY.md's frontmatter. | 2026-09-16 | 741dc93 | [260916-wao-add-an-interim-truncate-and-ack-guard-fo](./quick/260916-wao-add-an-interim-truncate-and-ack-guard-fo/) |
 | 260917-mfa | Fix a data race in `TestDigestScheduler_CheckError_LoggedAndLoopContinues` (internal/notifier/scheduler_test.go) caught by `go test -race` in CI, blocking the Phase 22 UAT smoke test: added a mutex-guarded `syncBuffer`/`newSyncTestLogger` local to the file, and moved the test's `Stop()` call (error checked) ahead of its log-buffer assertions, since `Stop` itself also logs and its completed drain is the only real happens-before edge proving the loop goroutine is done writing. Reproduced RED under WSL2 first; 50 consecutive `-race` iterations clean after the fix, plus 20 of the whole test family and one full-package `-race` run. No production code or shared test helpers touched. CI re-run 35276004417 confirmed `test` green and `build-scan` unblocked. | 2026-09-17 | 58ada7a | [260917-mfa-fix-a-data-race-in-internal-notifier-sch](./quick/260917-mfa-fix-a-data-race-in-internal-notifier-sch/) |
 | 261005-ezu | Apply Phase 25 UI-SPEC review fixes: align wording with grill overrides G1–G7 and the Upcoming line; add Router & sticky-state rules (preventScrollReset helper, sticky set survives refresh(), adds are sticky, URL tag-id validation on first load only); WLVW-03 excludes upcoming dates. Docs only. | 2026-10-05 | 2b448b5 | [261005-ezu-apply-phase-25-ui-spec-review-fixes](./quick/261005-ezu-apply-phase-25-ui-spec-review-fixes/) |
+| 31 | Fix trivy-fs: override transitive web CVEs, expiring ignore for unfixable braces CVE | 2026-10-06 | 43f00c1 | — |
 
 ### Roadmap Evolution
 
