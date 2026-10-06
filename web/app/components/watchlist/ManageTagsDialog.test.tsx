@@ -123,6 +123,64 @@ describe("ManageTagsDialog", () => {
     ])
   })
 
+  it("opening with tags hands focus from the close button to row 1's Rename once the list loads", async () => {
+    const first = deferred<TagSummary[]>()
+    mockListTags.mockReturnValueOnce(first.promise)
+
+    renderDialog()
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Close" })).toHaveFocus()
+    )
+
+    await act(async () => {
+      first.resolve([
+        { id: 2, name: "latin", carrier_count: 0 },
+        { id: 1, name: "Drill", carrier_count: 1 },
+      ])
+    })
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Rename tag Drill" })
+      ).toHaveFocus()
+    )
+  })
+
+  it("a reload later in the same open session leaves focus alone instead of pulling it to row 1's Rename", async () => {
+    const reload = deferred<TagSummary[]>()
+    const vocabulary: TagSummary[] = [
+      { id: 1, name: "Drill", carrier_count: 1 },
+      { id: 2, name: "latin", carrier_count: 2 },
+    ]
+    mockListTags
+      .mockResolvedValueOnce(vocabulary)
+      .mockReturnValueOnce(reload.promise)
+    mockDeleteTag.mockRejectedValueOnce(new Error("network down"))
+
+    renderDialog()
+
+    await screen.findByText("latin")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Delete tag latin" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+    await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      reload.resolve(vocabulary)
+    })
+
+    expect(
+      await screen.findByRole("button", { name: "Rename tag Drill" })
+    ).not.toHaveFocus()
+  })
+
   it("delete confirm calls deleteTag, toasts with the server's count, removes the row, and calls onDeleted", async () => {
     mockListTags.mockResolvedValue([{ id: 1, name: "drill", carrier_count: 3 }])
     mockDeleteTag.mockResolvedValueOnce({ carrier_count: 3 })
