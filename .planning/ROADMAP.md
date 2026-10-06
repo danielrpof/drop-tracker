@@ -87,7 +87,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 
 **Milestone Goal:** Keep a 50+ artist watchlist manageable. The user can label, annotate, find, bulk-change, and bulk-add artists, with no new background API polling.
 
-- [ ] **Phase 24: Artist Tags & Notes** - Free-form, case-insensitive tags with autocomplete and a plain-text note on each Watchlist card, global tag rename/merge/delete, and tags that belong to the artist so they survive a remove and re-add
+- [x] **Phase 24: Artist Tags & Notes** - Free-form, case-insensitive tags with autocomplete and a plain-text note on each Watchlist card, global tag rename/merge/delete, and tags that belong to the artist so they survive a remove and re-add (completed 2026-10-06)
 - [ ] **Phase 25: Find & Filter — Watchlist and History** - Client-side name search, stable sorts (including latest release), and tag/preference filters over the fully loaded watchlist, plus a retention-aware tag filter on the History feed
 - [ ] **Phase 26: Bulk Edit & Remove** - Multi-select on the Watchlist with one-action tag add/remove, preference changes, and a count-confirmed all-or-nothing remove, backed by set-based transactional endpoints
 - [ ] **Phase 27: Paste-a-List Bulk Add** - Paste names one per line, watch them resolve one search at a time within the existing rate limits, review best matches by confidence, and add the confirmed set in one request
@@ -112,7 +112,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
   4. The user can delete a tag globally after a confirmation stating how many artists carry it. The tag disappears from every artist, and the artists themselves stay on the watchlist untouched.
   5. The user can add, edit, and clear a plain-text note of up to 500 characters on an artist, and it shows on that artist's Watchlist card after a reload.
 
-**Plans:** 14/14 plans executed
+**Plans:** 14/14 plans complete
 
 Plans:
 **Wave 1**
@@ -326,7 +326,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 24. Artist Tags & Notes | 14/14 | In Progress|  |
+| 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
 | 25. Find & Filter — Watchlist and History | 0/? | Not started | - |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |

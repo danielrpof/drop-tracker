@@ -2,43 +2,43 @@
 gsd_state_version: "1.0"
 milestone: v1.6
 milestone_name: Watchlist Organization
-current_phase: 24
-current_phase_name: Artist Tags & Notes
-status: executing
-stopped_at: Completed 24-14-PLAN.md
-last_updated: "2026-10-06T19:55:02.439Z"
+current_phase: 25
+current_phase_name: Find & Filter — Watchlist and History
+status: planning
+stopped_at: Phase 24 complete, ready to plan Phase 25
+last_updated: "2026-10-06T20:38:48.014Z"
 last_activity: 2026-10-06
-last_activity_desc: Phase 24 execution started
-state_head: 3c1c04013e729e6c86978207a084ced04c7c68de
+last_activity_desc: Phase 24 complete, transitioned to Phase 25
+state_head: 769dd404905464cdf13be86fa5ad791b0752ee34
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 24
   completed_plans: 14
-  percent: 0
+  percent: 20
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-22)
+See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 24 — Artist Tags & Notes
+**Current focus:** Phase 25 — Find & Filter — Watchlist and History
 
 ## Current Position
 
-Phase: 24 (Artist Tags & Notes) — EXECUTING
-Plan: 2 of 14
-Status: Ready to execute
-Last activity: 2026-10-06 — Phase 24 execution started
+Phase: 25 — Find & Filter — Watchlist and History
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-06 — Phase 24 complete, transitioned to Phase 25
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 99
+- Total plans completed: 113
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -69,6 +69,7 @@ Last activity: 2026-10-06 — Phase 24 execution started
 | 21 | 3 | - | - |
 | 22 | 4 | - | - |
 | 23 | 4 | - | - |
+| 24 | 14 | - | - |
 
 **Recent Trend:**
 
@@ -396,6 +397,7 @@ Recent decisions affecting current work:
 - [minor] Fix dead `resuming = true` assignment in `flushMidGroup` digest chunker (Phase 23 code review WR-01, never fixed) — `.planning/todos/pending/2026-09-18-fix-dead-resuming-assignment-in-flushmidgroup-digest-chunker.md`
 - [minor] Pin chunk-count test fixture constants with a precondition test (Phase 23 code review WR-02, never fixed) — `.planning/todos/pending/2026-09-18-pin-chunk-count-test-fixture-constants-with-a-precondition-t.md` — scheduled into Phase 28 (must land before tags lengthen digest lines)
 - [cosmetic] Fix singular/plural grammar in digest remainder marker (Phase 23 code review IN-01, never fixed) — `.planning/todos/pending/2026-09-18-fix-singular-plural-grammar-in-digest-remainder-marker.md`
+- [minor] Manage tags reopens a row in stale rename mode after closing mid-rename (Phase 24 code review WR-01, accepted in UAT): reset rename state on open, select Rename by data attribute, add a test.
 
 _Closed 2026-09-05: trivy-fs HIGH CVE bump (browserslist/fast-uri) — quick task 260905-fa4. Confirmed CI-green on runs 33978945980 / 33979094225._
 _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick task 260905-et1. Confirmed live (guardcheck notice on run 33978945980; build-scan runs on 33979094225)._
@@ -476,12 +478,12 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-06T19:55:02.362Z
-Stopped at: Completed 24-14-PLAN.md
+Last session: 2026-10-06T21:45:00Z
+Stopped at: Phase 24 complete, ready to plan Phase 25
 Resume file: None
 
 ## Operator Next Steps
 
-- Review `.planning/ROADMAP.md`: 5 phases, 28/28 v1.6 requirements mapped
-- Start Phase 24 with `/gsd-discuss-phase 24`. Its open decisions are the DB-layer tag-count cap, note lifetime on remove, and delete-count scope. Then run `/gsd-ui-phase 24` and `/gsd-plan-phase 24`.
+- Phase 24 (Artist Tags & Notes) is complete: 14/14 plans, UAT 15/15, verification passed.
+- Start Phase 25 with `/gsd-discuss-phase 25` (no CONTEXT.md yet), then `/gsd-ui-phase 25` and `/gsd-plan-phase 25`.
 - Before Phase 27, run `/gsd-sketch` on the paste-a-list review screen
