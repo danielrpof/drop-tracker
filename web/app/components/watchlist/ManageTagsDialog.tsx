@@ -91,6 +91,7 @@ export function ManageTagsDialog({
   // Drops a GET /tags that a newer load or a successful mutation superseded (WR-08).
   const loadGen = useRef(0)
   const loadInFlight = useRef(false)
+  const initialFocusPendingRef = useRef(false)
 
   function load() {
     const gen = ++loadGen.current
@@ -120,6 +121,7 @@ export function ManageTagsDialog({
   }
 
   useEffect(() => {
+    initialFocusPendingRef.current = open
     if (open) load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -138,6 +140,26 @@ export function ManageTagsDialog({
       listRef.current?.querySelectorAll<HTMLLIElement>("li")[req.index]
     row?.querySelector<HTMLButtonElement>("button")?.focus()
   }, [tags])
+
+  // The first load of each open hands focus to row 1's Rename (G-24-10);
+  // later reloads, and focus the user already moved, are left alone.
+  useLayoutEffect(() => {
+    if (status !== "loaded" || !initialFocusPendingRef.current) return
+    initialFocusPendingRef.current = false
+    const list = listRef.current
+    const target = list?.querySelector<HTMLButtonElement>("li button")
+    if (!list || !target) return
+    const popup = list.closest('[data-slot="dialog-content"]')
+    const active = document.activeElement
+    const closeButton = popup?.querySelector('[data-slot="dialog-close"]')
+    const fromPopupChrome =
+      !active ||
+      active === document.body ||
+      !popup?.contains(active) ||
+      active === popup ||
+      active === closeButton
+    if (fromPopupChrome) target.focus()
+  }, [status])
 
   // Selects the rename input's text once it mounts (UI-SPEC: "the rename
   // input opens with its text selected"), and focuses it.
