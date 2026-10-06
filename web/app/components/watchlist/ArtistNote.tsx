@@ -82,15 +82,15 @@ export function ArtistNote({
     target?.focus()
   }, [editing])
 
-  // Measures the display paragraph for overflow (UI-SPEC: "more"/"less"
-  // shown only when the clamped text actually overflows). jsdom performs
-  // no layout, so tests stub scrollHeight/clientHeight directly; a real
-  // browser re-measures on resize via ResizeObserver when available.
+  // Overflow is measured on the clamped paragraph only (G-24-9): while
+  // expanded the last result is kept so "less" stays mounted. jsdom has no
+  // layout, so tests stub the measurement.
   useLayoutEffect(() => {
     if (editing || entry.note === null) {
       setOverflow(false)
       return
     }
+    if (expanded) return
     const el = noteRef.current
     if (!el) return
     const measure = () => setOverflow(el.scrollHeight > el.clientHeight)
@@ -99,7 +99,7 @@ export function ArtistNote({
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [editing, entry.note])
+  }, [editing, entry.note, expanded])
 
   function openEditor() {
     setValue(entry.note ?? "")
@@ -176,7 +176,7 @@ export function ArtistNote({
           readOnly={saving}
           aria-busy={saving}
           aria-describedby={counterId}
-          className="max-h-40 overflow-y-auto text-label md:text-label"
+          className="max-h-40 overflow-y-auto md:text-label"
           aria-label={`Note for ${entry.name}`}
           placeholder="Add a note about this artist"
         />
