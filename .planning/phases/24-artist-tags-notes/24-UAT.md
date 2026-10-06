@@ -1,10 +1,10 @@
 ---
-status: diagnosed
+status: complete
 phase: 24-artist-tags-notes
 source: [24-VERIFICATION.md]
 retest_after: 24-14
 started: 2026-10-05T16:00:54Z
-updated: 2026-10-06T21:20:00Z
+updated: 2026-10-06T21:40:00Z
 ---
 
 ## Current Test
@@ -49,24 +49,18 @@ result: pass
 
 ### 9. Expand and collapse a long note
 expected: "more" expands a clamped note; "less" stays visible and collapses it again; focus stays on the toggle
-result: issue
-reported: "UI audit (24-UI-REVIEW.md fix 1, confirmed in code): after expanding, the more/less button disappears, so the note can't be collapsed and focus drops to body"
-severity: blocker
-source: ui-review
+result: pass
+note: "Initial report UI audit (24-UI-REVIEW.md fix 1, confirmed in code): after expanding, the more/less button disappears, so the note can't be collapsed and focus drops to body — fixed by 24-14; re-test 12 passes."
 
 ### 10. Manage tags initial focus
 expected: Opening Manage tags focuses row 1's Rename once the list loads (UI-SPEC focus contract)
-result: issue
-reported: "UI audit (24-UI-REVIEW.md fix 2): dialog mounts during loading, focus lands on close x and is never moved once rows load"
-severity: minor
-source: ui-review
+result: pass
+note: "Initial report UI audit (24-UI-REVIEW.md fix 2): dialog mounts during loading, focus lands on close x and is never moved once rows load — fixed by 24-14; re-test 13 passes."
 
 ### 11. Note textarea font size on mobile
 expected: Note editor textarea is 16px below md (no iOS focus zoom), 14px from md up
-result: issue
-reported: "UI audit (24-UI-REVIEW.md fix 3): className 'text-label md:text-label' forces 14px on mobile"
-severity: minor
-source: ui-review
+result: pass
+note: "Initial report UI audit (24-UI-REVIEW.md fix 3): className 'text-label md:text-label' forces 14px on mobile — fixed by 24-14; re-test 14 passes."
 
 ### 12. Re-test G-24-9 — expand and collapse a long note (after 24-14)
 expected: Mouse and keyboard: "more" expands a clamped note, the toggle stays mounted reading "less" with focus on it; "less" re-clamps to 2 lines, toggle reads "more", focus stays on it. A short note shows no toggle.
@@ -78,9 +72,8 @@ result: pass
 
 ### 14. Re-test G-24-11 — note textarea font size (after 24-14)
 expected: Note textarea computes 16px at 375px width and 14px at >=768px; no zoom on focus on iOS Safari.
-result: issue
-reported: "Its 14px at 375 but it looks good"
-severity: minor
+result: pass
+note: "Initial report Its 14px at 375 but it looks good — was a stale build; after rebuild the note textarea computes 16px at 375px."
 
 ### 15. Manage tags reopen after closing mid-rename (code review WR-01)
 expected: Decide: open Manage tags, click Rename on row 1, close with x, reopen — row 1 currently reappears in stale rename mode with focus on its Cancel. Pass = accept/defer as follow-up; issue = fix now (reset rename state on open, select Rename by data attribute, add test).
@@ -90,8 +83,8 @@ note: "Accepted as-is (WR-01 stale rename state on reopen)."
 ## Summary
 
 total: 15
-passed: 11
-issues: 4
+passed: 15
+issues: 0
 pending: 0
 skipped: 0
 blocked: 0
@@ -179,7 +172,9 @@ blocked: 0
 
 - gap_id: G-24-14
   truth: "Note textarea is 16px below md (no iOS focus zoom) and 14px from md up"
-  status: failed
+  status: resolved
+  resolved_by: retest (stale build, not a defect)
+  resolved_at: 2026-10-06
   reason: "User reported: Its 14px at 375 but it looks good"
   severity: minor
   test: 14
