@@ -2,19 +2,19 @@
 gsd_state_version: "1.0"
 milestone: v1.6
 milestone_name: Watchlist Organization
-current_phase: 25
-current_phase_name: find-filter-watchlist-and-history
+current_phase: 24
+current_phase_name: Artist Tags & Notes
 status: executing
-stopped_at: Completed 24-13-PLAN.md
-last_updated: "2026-10-05T16:58:16.403Z"
-last_activity: 2026-10-05
+stopped_at: Completed 24-14-PLAN.md
+last_updated: "2026-10-06T19:55:02.439Z"
+last_activity: 2026-10-06
 last_activity_desc: Phase 24 execution started
-state_head: 5d942ef6f247e584e53251c8f051d0ae1d89569e
+state_head: 3c1c04013e729e6c86978207a084ced04c7c68de
 progress:
   total_phases: 5
   completed_phases: 0
-  total_plans: 23
-  completed_plans: 13
+  total_plans: 24
+  completed_plans: 14
   percent: 0
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 
 ## Current Position
 
-Phase: 25 (find-filter-watchlist-and-history) — READY TO EXECUTE
-Plan: 2 of 13
+Phase: 24 (Artist Tags & Notes) — EXECUTING
+Plan: 2 of 14
 Status: Ready to execute
-Last activity: 2026-10-05 — Phase 24 execution started
+Last activity: 2026-10-06 — Phase 24 execution started
 
 ## Performance Metrics
 
@@ -160,6 +160,7 @@ Last activity: 2026-10-05 — Phase 24 execution started
 | Phase 24 P11 | 25m | 2 tasks | 4 files |
 | Phase 24 P12 | 6 min | 3 tasks | 4 files |
 | Phase 24 P13 | 7 min | 2 tasks | 4 files |
+| Phase 24 P14 | 20 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -386,6 +387,7 @@ Recent decisions affecting current work:
 - [Phase 24]: 24-11: vocabGen generation ref drops a stale GET /tags settle so a deleted/renamed/merged tag cannot return via the + tag autocomplete (WR-06)
 - [Phase 24]: 24-12: ManageTagsDialog guards load() with a generation ref; invalidateLoad() on delete/rename/merge success bumps it and refetches only when a load was in flight (no skeleton strand)
 - [Phase 24]: 24-13: wrap-anywhere on ConfirmDialog title/description (not break-word) so unspaced 32-char tag names wrap in the centered header grid (G-24-5)
+- [Phase 24]: 24-14: overflow latch via dependency-plus-early-return in ArtistNote; Manage tags hand-off consumed only by a successful load (G-24-9..11)
 
 ### Pending Todos
 
@@ -474,8 +476,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-05T16:58:16.338Z
-Stopped at: Completed 24-13-PLAN.md
+Last session: 2026-10-06T19:55:02.362Z
+Stopped at: Completed 24-14-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
