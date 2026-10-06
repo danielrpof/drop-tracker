@@ -2,9 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   ApiError,
+  addWatchlist,
+  attachTag,
+  deleteTag,
+  detachTag,
   listEvents,
+  listTags,
+  mergeTag,
   removeWatchlist,
+  renameTag,
+  updateNote,
   type EventsPage,
+  type TagSummary,
 } from "~/lib/api"
 
 // This is the one file in the suite that stubs the runtime's own fetch --
@@ -63,12 +72,260 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     expect(err).toBeInstanceOf(ApiError)
     expect((err as ApiError).status).toBe(500)
     expect((err as ApiError).message).toBe("Internal Server Error")
+    expect((err as ApiError).body).toBeUndefined()
+  })
+
+  it("keeps the parsed JSON error body on ApiError.body for a non-2xx JSON response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: "tag name already in use",
+          target: { id: 9, name: "trap" },
+          carrier_count_after_merge: 7,
+        }),
+        { status: 409 }
+      )
+    )
+
+    const err = await listEvents().then(
+      () => {
+        throw new Error("expected listEvents() to reject")
+      },
+      (e: unknown) => e
+    )
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).body).toEqual({
+      error: "tag name already in use",
+      target: { id: 9, name: "trap" },
+      carrier_count_after_merge: 7,
+    })
   })
 
   it("resolves to undefined for a no-content response without attempting to parse a body", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
 
     await expect(removeWatchlist(42)).resolves.toBeUndefined()
+  })
+
+  it("detachTag DELETEs /watchlist/{entryId}/tags/{tagId} carrying the CSRF header and resolves on 204", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    await expect(detachTag(42, 7)).resolves.toBeUndefined()
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/42/tags/7")
+    expect(init.method).toBe("DELETE")
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("attachTag POSTs /watchlist/{entryId}/tags with the name body, the CSRF header, and resolves the server's tag", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 9, name: "reggaeton" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(attachTag(42, "Reggaeton")).resolves.toEqual({
+      id: 9,
+      name: "reggaeton",
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/42/tags")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({ name: "Reggaeton" })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("listTags GETs /tags and resolves the vocabulary array with no CSRF header", async () => {
+    const vocabulary: TagSummary[] = [
+      { id: 1, name: "latin", carrier_count: 3 },
+      { id: 2, name: "reggaeton", carrier_count: 12 },
+    ]
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(vocabulary), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(listTags()).resolves.toEqual(vocabulary)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/tags")
+    expect(init?.headers).toBeUndefined()
+  })
+
+  it("deleteTag DELETEs /tags/{id} carrying the CSRF header and resolves the watched carrier_count", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ carrier_count: 3 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(deleteTag(9)).resolves.toEqual({ carrier_count: 3 })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/tags/9")
+    expect(init.method).toBe("DELETE")
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("renameTag PATCHes /tags/{id} with the name body and CSRF header, resolving a plain rename as {kind: 'renamed', tag}", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 3, name: "latin" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(renameTag(3, "latin")).resolves.toEqual({
+      kind: "renamed",
+      tag: { id: 3, name: "latin" },
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/tags/3")
+    expect(init.method).toBe("PATCH")
+    expect(JSON.parse(init.body as string)).toEqual({ name: "latin" })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("renameTag maps a 409 collision body to {kind: 'collision', target, carrierCountAfterMerge}", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: "tag name already in use",
+          target: { id: 9, name: "trap" },
+          carrier_count_after_merge: 7,
+        }),
+        { status: 409 }
+      )
+    )
+
+    await expect(renameTag(5, "TRAP")).resolves.toEqual({
+      kind: "collision",
+      target: { id: 9, name: "trap" },
+      carrierCountAfterMerge: 7,
+    })
+  })
+
+  it("renameTag rethrows a non-collision failure", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "tag not found" }), {
+        status: 404,
+      })
+    )
+
+    await expect(renameTag(5, "latin")).rejects.toMatchObject({
+      status: 404,
+      message: "tag not found",
+    })
+  })
+
+  it("mergeTag POSTs /tags/{id}/merge with {into} and the CSRF header, resolving the merge response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 9, name: "trap", carrier_count: 7 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(mergeTag(5, 9)).resolves.toEqual({
+      id: 9,
+      name: "trap",
+      carrier_count: 7,
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/tags/5/merge")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({ into: 9 })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("updateNote PUTs /watchlist/{entryId}/note with {note} and the CSRF header, resolving the updated entry", async () => {
+    const updatedEntry = {
+      id: 42,
+      artist_id: 7,
+      mbid: "mbid-drake",
+      name: "Drake",
+      deezer_id: null,
+      disambiguation: null,
+      image_url: null,
+      release_types: ["album"],
+      muted_event_types: [],
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      tags: [],
+      note: "crate digger",
+    }
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(updatedEntry), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(updateNote(42, "crate digger")).resolves.toEqual(updatedEntry)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/42/note")
+    expect(init.method).toBe("PUT")
+    expect(JSON.parse(init.body as string)).toEqual({ note: "crate digger" })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("updateNote always sends the note key, including an explicit null when clearing", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ note: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await updateNote(42, null)
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ note: null })
+  })
+
+  it("addWatchlist sends the optional note field when supplied, and omits the key entirely when undefined", async () => {
+    // A fresh Response per call -- a single Response body can only be read once.
+    fetchMock.mockImplementation(
+      () =>
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    )
+
+    await addWatchlist({ mbid: "m", name: "n", note: "crate digger" })
+    const bodyWithNote = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string
+    )
+    expect(bodyWithNote.note).toBe("crate digger")
+
+    await addWatchlist({ mbid: "m", name: "n" })
+    const bodyWithoutNote = JSON.parse(
+      (fetchMock.mock.calls[1][1] as RequestInit).body as string
+    )
+    expect("note" in bodyWithoutNote).toBe(false)
   })
 
   it("resolves an OK response to the parsed body", async () => {

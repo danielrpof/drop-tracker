@@ -56,6 +56,22 @@ export interface EventsPage {
   has_older_events: boolean
 }
 
+// TagRef mirrors internal/watchlist.TagRef's JSON shape -- one tag attached
+// to a WatchlistEntry.
+export interface TagRef {
+  id: number
+  name: string
+}
+
+// TagSummary mirrors internal/tags.Summary's JSON shape -- one row of the
+// global tag vocabulary (GET /tags), carrying only its watched-artist count
+// (D-11).
+export interface TagSummary {
+  id: number
+  name: string
+  carrier_count: number
+}
+
 // WatchlistEntry mirrors internal/watchlist.Entry's JSON shape. GET
 // /watchlist returns a bare array of these -- no envelope.
 export interface WatchlistEntry {
@@ -70,6 +86,11 @@ export interface WatchlistEntry {
   muted_event_types: string[]
   created_at: string
   updated_at: string
+  // tags/note mirror internal/watchlist.Entry.Tags/Entry.Note (24-01):
+  // tags is sorted by name and never null; note singular, never null
+  // (D-28), null meaning unset.
+  tags: TagRef[]
+  note: string | null
 }
 
 // SearchArtist mirrors internal/httpserver/search.go's SearchArtist.
@@ -164,14 +185,19 @@ export interface NotificationSettings {
 
 // ApiError carries the HTTP status and the server's fixed {"error": "..."}
 // message, so callers can branch on status (e.g. 409 vs 500) without
-// re-parsing the response body themselves.
+// re-parsing the response body themselves. body carries the full parsed
+// JSON of a non-2xx response when it was valid JSON (e.g. the rename 409's
+// {target, carrier_count_after_merge}) -- undefined when the body wasn't
+// JSON, so a caller narrows before reading fields off it.
 export class ApiError extends Error {
   status: number
+  body?: unknown
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body?: unknown) {
     super(message)
     this.name = "ApiError"
     this.status = status
+    this.body = body
   }
 }
 
@@ -224,16 +250,18 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     let message = res.statusText
+    let parsedBody: unknown
     try {
       const body = (await res.json()) as { error?: string }
+      parsedBody = body
       if (body.error) {
         message = body.error
       }
     } catch {
       // Body wasn't valid JSON (or was empty) -- fall back to statusText,
-      // set above.
+      // set above, and leave parsedBody undefined.
     }
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, message, parsedBody)
   }
 
   return (await res.json()) as T
@@ -275,6 +303,7 @@ export async function addWatchlist(params: {
   deezerId?: string
   disambiguation?: string
   imageUrl?: string
+  note?: string
 }): Promise<WatchlistEntry> {
   return apiFetch<WatchlistEntry>("/watchlist", {
     method: "POST",
@@ -285,7 +314,24 @@ export async function addWatchlist(params: {
       deezer_id: params.deezerId,
       disambiguation: params.disambiguation,
       image_url: params.imageUrl,
+      note: params.note,
     }),
+  })
+}
+
+// updateNote saves, edits, or clears the note on a watchlist entry (NOTE-01,
+// D-06, D-25) through its own dedicated PUT endpoint -- never PATCH, since a
+// clear (null) is an explicit request the shared updateWatchlistPreferences
+// PATCH's "absent key means untouched" contract cannot express. The note key
+// is always sent, including null.
+export async function updateNote(
+  entryId: number,
+  note: string | null
+): Promise<WatchlistEntry> {
+  return apiFetch<WatchlistEntry>(`/watchlist/${entryId}/note`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
   })
 }
 
@@ -310,6 +356,103 @@ export async function updateWatchlistPreferences(
 // carries no body -- apiFetch returns undefined for it.
 export async function removeWatchlist(id: number): Promise<void> {
   await apiFetch<void>(`/watchlist/${id}`, { method: "DELETE" })
+}
+
+// detachTag removes one tag from a watchlist entry (TAG-02, D-20, D-21).
+// Detach is idempotent server-side, so a link that's already gone still
+// resolves 204 through the same undefined-on-204 path.
+export async function detachTag(entryId: number, tagId: number): Promise<void> {
+  await apiFetch<void>(`/watchlist/${entryId}/tags/${tagId}`, {
+    method: "DELETE",
+  })
+}
+
+// attachTag creates-or-finds and links one tag to a watchlist entry
+// (TAG-01, D-20, D-29). Resolves the server's stored casing regardless of
+// whether the tag already existed (201) or was newly created (200) -- the
+// caller does not need to branch on status.
+export async function attachTag(
+  entryId: number,
+  name: string
+): Promise<TagRef> {
+  return apiFetch<TagRef>(`/watchlist/${entryId}/tags`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+}
+
+// listTags fetches the whole tag vocabulary (TAG-05, D-13, D-30) -- the
+// autocomplete source, loaded lazily on first "+ tag" or Manage tags open,
+// never at Watchlist mount.
+export async function listTags(): Promise<TagSummary[]> {
+  return apiFetch<TagSummary[]>("/tags")
+}
+
+// deleteTag removes a tag from the vocabulary everywhere (TAG-06, D-17,
+// D-22). The response's carrier_count (watched artists only, D-11) is what
+// the Manage tags delete toast reports -- the client never computes it.
+export async function deleteTag(
+  id: number
+): Promise<{ carrier_count: number }> {
+  return apiFetch<{ carrier_count: number }>(`/tags/${id}`, {
+    method: "DELETE",
+  })
+}
+
+// RenameTagResult is renameTag's closed result: a plain rename (including a
+// case-only one) resolves "renamed"; a collision with a different tag
+// resolves "collision" with the server's target (in its stored casing,
+// D-23) and the post-merge union count -- never computed client-side.
+export type RenameTagResult =
+  | { kind: "renamed"; tag: TagRef }
+  | { kind: "collision"; target: TagRef; carrierCountAfterMerge: number }
+
+// renameTag applies a rename (TAG-05, D-09, D-22). The collision case is
+// detected purely from the server's 409 body (never a client pre-check,
+// D-22): only an ApiError with status 409 and a body carrying `target` is
+// mapped to the collision result -- any other rejection (404 tag gone, 500,
+// a non-JSON body) rethrows unchanged so the caller's generic failure path
+// handles it.
+export async function renameTag(
+  id: number,
+  name: string
+): Promise<RenameTagResult> {
+  try {
+    const tag = await apiFetch<TagRef>(`/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+    return { kind: "renamed", tag }
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409 && err.body) {
+      const body = err.body as {
+        target?: TagRef
+        carrier_count_after_merge?: number
+      }
+      if (body.target && typeof body.carrier_count_after_merge === "number") {
+        return {
+          kind: "collision",
+          target: body.target,
+          carrierCountAfterMerge: body.carrier_count_after_merge,
+        }
+      }
+    }
+    throw err
+  }
+}
+
+// mergeTag confirms a rename collision (TAG-05, D-09, D-19, D-22): it merges
+// by id, never by name, so a target renamed since a prior 409 is still
+// merged correctly. Resolves the target's post-merge {id, name,
+// carrier_count} -- the count the Manage tags merge toast reports.
+export async function mergeTag(id: number, into: number): Promise<TagSummary> {
+  return apiFetch<TagSummary>(`/tags/${id}/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ into }),
+  })
 }
 
 // searchArtists fans out to every configured source (WLST-01, D-01, D-02,

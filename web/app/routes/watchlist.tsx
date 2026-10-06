@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Tags } from "lucide-react"
 import { toast } from "sonner"
 
 import { EmptyState } from "~/components/common/EmptyState"
 import { Button } from "~/components/ui/button"
 import { Skeleton } from "~/components/ui/skeleton"
+import { ManageTagsDialog } from "~/components/watchlist/ManageTagsDialog"
 import { SearchBox } from "~/components/watchlist/SearchBox"
 import { SearchResultsColumns } from "~/components/watchlist/SearchResultsColumns"
 import { WatchlistRow } from "~/components/watchlist/WatchlistRow"
@@ -11,8 +13,11 @@ import {
   ApiError,
   type SearchArtist,
   type SearchResponse,
+  type TagRef,
+  type TagSummary,
   type WatchlistEntry,
   addWatchlist,
+  listTags,
   listWatchlist,
   removeWatchlist,
 } from "~/lib/api"
@@ -36,6 +41,17 @@ export default function Watchlist() {
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(
     null
   )
+  const [statusMessage, setStatusMessage] = useState("")
+  // vocabulary loads lazily on first "+ tag" (or Manage tags) open, never
+  // at mount (D-30, Phase 25 SC5) -- the Watchlist route stays one request.
+  const [vocabulary, setVocabulary] = useState<TagRef[] | null>(null)
+  const [vocabularyStatus, setVocabularyStatus] = useState<
+    "idle" | "loading" | "loaded" | "error"
+  >("idle")
+  const [manageTagsOpen, setManageTagsOpen] = useState(false)
+  // Bumped by every local vocabulary change so a GET /tags that settles
+  // afterwards is discarded (WR-06).
+  const vocabGen = useRef(0)
 
   const refresh = useCallback(() => {
     setError(false)
@@ -61,6 +77,148 @@ export default function Watchlist() {
     setEntries((rows) =>
       rows ? rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) : rows
     )
+  }
+
+  // addTag/removeTag are the D-24 functional per-item updaters TagChips
+  // drives directly (not a whole-array snapshot): each only ever touches
+  // its own entry's tags array, so concurrent chip add/remove on one row
+  // can never clobber each other. addTag is a no-op when the tag is
+  // already present (idempotent attach, D-21) and inserts at a clamped
+  // index so a failed-remove rollback restores the chip's original
+  // position.
+  function addTag(entryId: number, tag: TagRef, index?: number) {
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) => {
+            if (r.id !== entryId || r.tags.some((t) => t.id === tag.id)) {
+              return r
+            }
+            const tags = [...r.tags]
+            const at =
+              index === undefined
+                ? tags.length
+                : Math.max(0, Math.min(index, tags.length))
+            tags.splice(at, 0, tag)
+            return { ...r, tags }
+          })
+        : rows
+    )
+  }
+
+  function removeTag(entryId: number, tagId: number) {
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) =>
+            r.id === entryId
+              ? { ...r, tags: r.tags.filter((t) => t.id !== tagId) }
+              : r
+          )
+        : rows
+    )
+  }
+
+  // dropTagFromEntries drops the tag from every card and from the
+  // autocomplete vocabulary (TAG-06, D-17).
+  function dropTagFromEntries(tagId: number) {
+    vocabGen.current++
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) => ({
+            ...r,
+            tags: r.tags.filter((t) => t.id !== tagId),
+          }))
+        : rows
+    )
+    setVocabulary((v) => (v ? v.filter((t) => t.id !== tagId) : v))
+  }
+
+  // renameTagInEntries applies a completed Manage tags rename to every
+  // card's chip with that id (TAG-05, D-17) -- same functional-updater
+  // shape as dropTagFromEntries, so it never clobbers a concurrent chip
+  // add/remove on an unrelated row.
+  function renameTagInEntries(tag: TagRef) {
+    vocabGen.current++
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) => ({
+            ...r,
+            tags: r.tags.map((t) => (t.id === tag.id ? tag : t)),
+          }))
+        : rows
+    )
+    setVocabulary((v) => (v ? v.map((t) => (t.id === tag.id ? tag : t)) : v))
+  }
+
+  // mergeTagInEntries applies a confirmed Manage tags merge (TAG-05, D-17,
+  // D-19) to every card: an entry that already carries the target just
+  // drops the source (no duplicate chip), otherwise the source chip is
+  // replaced in place with the target -- same functional-updater shape as
+  // dropTagFromEntries/renameTagInEntries.
+  function mergeTagInEntries(sourceId: number, target: TagRef) {
+    vocabGen.current++
+    setEntries((rows) =>
+      rows
+        ? rows.map((r) => {
+            if (!r.tags.some((t) => t.id === sourceId)) return r
+            if (r.tags.some((t) => t.id === target.id)) {
+              return { ...r, tags: r.tags.filter((t) => t.id !== sourceId) }
+            }
+            return {
+              ...r,
+              tags: r.tags.map((t) => (t.id === sourceId ? target : t)),
+            }
+          })
+        : rows
+    )
+    setVocabulary((v) =>
+      v
+        ? v.some((t) => t.id === target.id)
+          ? v.filter((t) => t.id !== sourceId)
+          : v.map((t) => (t.id === sourceId ? target : t))
+        : v
+    )
+  }
+
+  // handleTagsLoaded is ManageTagsDialog's onLoaded (D-30): it replaces the
+  // whole route vocabulary with what the dialog just fetched, so the "+
+  // tag" autocomplete on every row sees the same fresh vocabulary Manage
+  // tags just loaded, instead of leaving a possibly-stale one in place.
+  function handleTagsLoaded(tags: TagSummary[]) {
+    vocabGen.current++
+    setVocabulary(tags.map((t) => ({ id: t.id, name: t.name })))
+    setVocabularyStatus("loaded")
+  }
+
+  // loadVocabulary fetches GET /tags only from "idle"/"error" (a failed
+  // load retries on the next open), so repeated "+ tag" opens across rows
+  // never refetch once it has loaded (D-30, T-24-30). A stale settle is a no-op.
+  function loadVocabulary() {
+    if (vocabularyStatus !== "idle" && vocabularyStatus !== "error") return
+    const gen = ++vocabGen.current
+    setVocabularyStatus("loading")
+    listTags()
+      .then((summaries) => {
+        if (gen !== vocabGen.current) return
+        setVocabulary(summaries.map((s) => ({ id: s.id, name: s.name })))
+        setVocabularyStatus("loaded")
+      })
+      .catch(() => {
+        if (gen === vocabGen.current) setVocabularyStatus("error")
+      })
+  }
+
+  // rememberTag inserts a newly created tag into an already-loaded
+  // vocabulary, so other rows and Manage tags see it without a reload.
+  function rememberTag(tag: TagRef) {
+    setVocabulary((v) =>
+      v === null || v.some((t) => t.id === tag.id) ? v : [...v, tag]
+    )
+  }
+
+  // announce feeds the single route-level status region below (UI-SPEC
+  // [R6]: one contextual, atomic message, never one live region per chip).
+  function announce(message: string) {
+    setStatusMessage(message)
   }
 
   // handleAddSearchResult wires SearchResultsColumns' "Add to Watchlist"
@@ -147,6 +305,7 @@ export default function Watchlist() {
             deezerId: entry.deezer_id ?? undefined,
             disambiguation: entry.disambiguation ?? undefined,
             imageUrl: entry.image_url ?? undefined,
+            note: entry.note ?? undefined,
           })
             .then(refresh)
             .catch(() => {
@@ -161,7 +320,28 @@ export default function Watchlist() {
 
   return (
     <div className="flex flex-col gap-6 p-8">
-      <h1 className="text-display font-semibold text-foreground">Watchlist</h1>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-display font-semibold text-foreground">
+          Watchlist
+        </h1>
+        <Button variant="secondary" onClick={() => setManageTagsOpen(true)}>
+          <Tags aria-hidden="true" />
+          Manage tags
+        </Button>
+      </div>
+
+      <div role="status" aria-atomic="true" className="sr-only">
+        {statusMessage}
+      </div>
+
+      <ManageTagsDialog
+        open={manageTagsOpen}
+        onOpenChange={setManageTagsOpen}
+        onLoaded={handleTagsLoaded}
+        onDeleted={dropTagFromEntries}
+        onRenamed={renameTagInEntries}
+        onMerged={mergeTagInEntries}
+      />
 
       <div className="flex flex-col gap-6">
         <SearchBox onResults={setSearchResponse} />
@@ -202,6 +382,14 @@ export default function Watchlist() {
               entry={entry}
               onEntryChange={handleEntryChange}
               onRemove={handleRemove}
+              tagActions={{
+                addTag,
+                removeTag,
+                vocabulary,
+                loadVocabulary,
+                rememberTag,
+              }}
+              announce={announce}
             />
           ))}
         </ul>

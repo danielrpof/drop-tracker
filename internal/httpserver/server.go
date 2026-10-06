@@ -42,6 +42,7 @@ type Server struct {
 	appVersion       string
 	pollInterval     time.Duration
 	settingsStore    SettingsStore
+	tags             TagStore
 }
 
 // serverConfig collects the optional settings New applies before building
@@ -58,6 +59,7 @@ type serverConfig struct {
 	appVersion        string
 	pollInterval      time.Duration
 	settingsStore     SettingsStore
+	tags              TagStore
 }
 
 // Option customises New, mirroring internal/poller's and internal/notifier's
@@ -175,6 +177,7 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	s.appVersion = cfg.appVersion
 	s.pollInterval = cfg.pollInterval
 	s.settingsStore = cfg.settingsStore
+	s.tags = cfg.tags
 
 	r := chi.NewRouter()
 
@@ -264,6 +267,9 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	r.Get("/watchlist", s.handleListWatchlist)
 	r.Patch("/watchlist/{id}", s.handleUpdateWatchlist)
 	r.Delete("/watchlist/{id}", s.handleRemoveWatchlist)
+	// The note has its own PUT (D-25): PATCH stays preferences-only so Phase
+	// 26's bulk preferences request, which mirrors it, can never set notes.
+	r.Put("/watchlist/{id}/note", s.handleUpdateNote)
 	r.Get("/events", s.handleListEvents)
 	// /status inherits gate.Authenticate + gate.RequireCSRFHeader + the
 	// X-Instance-Gated header on the gated path exactly as /events does; it is
@@ -275,6 +281,19 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	// and no path allowlist -- structural gating, not a code-path decision.
 	r.Get("/settings/notifications", s.handleGetSettings)
 	r.Put("/settings/notifications", s.handleUpdateSettings)
+	// Tag attach/detach (TAG-01, TAG-02, D-20) -- registered here, not in a
+	// separate function, so both inherit gate.Authenticate +
+	// gate.RequireCSRFHeader exactly like every other data route (T-24-03,
+	// T-24-04).
+	r.Post("/watchlist/{id}/tags", s.handleAttachTag)
+	r.Delete("/watchlist/{id}/tags/{tag_id}", s.handleDetachTag)
+	// Tag vocabulary (TAG-05, TAG-06, D-22) -- global list/rename/merge/delete,
+	// same registration point so every route inherits gate.Authenticate +
+	// gate.RequireCSRFHeader.
+	r.Get("/tags", s.handleListTags)
+	r.Patch("/tags/{id}", s.handleRenameTag)
+	r.Delete("/tags/{id}", s.handleDeleteTag)
+	r.Post("/tags/{id}/merge", s.handleMergeTag)
 }
 
 // securityResponseHeaders sets response headers that apply to every route in

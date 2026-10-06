@@ -1,5 +1,27 @@
 {
-  "model_profile": "balanced",
+  "model_profile": "adaptive",
+  "models": {
+    "discuss": "opus",
+    "planning": "opus",
+    "verification": "opus",
+    "execution": "sonnet"
+  },
+  "model_overrides": {
+    "gsd-advisor-researcher": "claude-opus-5-5",
+    "gsd-plan-checker": "haiku",
+    "gsd-code-reviewer": "claude-opus-5-5",
+    "gsd-security-auditor": "claude-opus-5-5",
+    "gsd-debugger": "claude-opus-5-5",
+    "gsd-code-fixer": "sonnet",
+    "gsd-nyquist-auditor": "sonnet",
+    "gsd-ui-researcher": "opus"
+  },
+  "model_profile_overrides": {
+    "claude": {
+      "opus": "claude-opus-5-5",
+      "sonnet": "claude-sonnet-5-5"
+    }
+  },
   "commit_docs": true,
   "parallelization": true,
   "search_gitignored": false,
@@ -92,11 +114,5 @@
   "granularity": "standard",
   "graphify": {
     "enabled": true
-  },
-  "model_overrides": {
-    "gsd-ui-researcher": "opus"
-  },
-  "models": {
-    "discuss": "opus"
   }
 }

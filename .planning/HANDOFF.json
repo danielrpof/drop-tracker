@@ -1,0 +1,52 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-09-23T04:28:11.055Z",
+  "phase": "24",
+  "phase_name": "artist-tags-notes",
+  "phase_dir": ".planning/phases/24-artist-tags-notes",
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "paused",
+  "stage": "plan-phase: pre-planning artifacts done, planner not yet run to completion",
+  "completed_tasks": [
+    {"id": 1, "name": "Grill session on 24-CONTEXT + 24-UI-SPEC (decisions D-18…D-31)", "status": "done", "commit": "uncommitted"},
+    {"id": 2, "name": "ADR 0004 per-artist tag cap trigger", "status": "done", "commit": "uncommitted"},
+    {"id": 3, "name": "CONTEXT.md glossary: Tag, Tag vocabulary, Tag link, Carrier, Merge, Note", "status": "done", "commit": "uncommitted"},
+    {"id": 4, "name": "24-RESEARCH.md", "status": "done", "commit": "5ce799b"},
+    {"id": 5, "name": "24-VALIDATION.md", "status": "done", "commit": "620a945"},
+    {"id": 6, "name": "24-PATTERNS.md", "status": "done", "commit": "uncommitted"},
+    {"id": 7, "name": "gsd-planner run", "status": "in_progress", "progress": "stopped by user before writing any PLAN.md"}
+  ],
+  "remaining_tasks": [
+    {"id": 8, "name": "Re-run gsd-planner (PLAN.md files)", "status": "not_started"},
+    {"id": 9, "name": "gsd-plan-checker revision loop (max 3)", "status": "not_started"},
+    {"id": 10, "name": "Requirements + decision coverage gates, STATE/ROADMAP update, commit plans", "status": "not_started"}
+  ],
+  "blockers": [],
+  "async_jobs": [],
+  "human_actions_pending": [
+    {"action": "Decide whether to re-run the planner (it was stopped, likely by /remote-control)", "context": "No PLAN.md exists yet", "blocking": true}
+  ],
+  "decisions": [
+    {"decision": "10-per-artist cap = BEFORE INSERT trigger: skip-existing, FOR NO KEY UPDATE lock, RAISE check_violation CONSTRAINT artist_tags_max_per_artist; merges rewrite tag_id via UPDATE", "rationale": "SC2 requires DB refusal when API bypassed; Phase 26 ON CONFLICT bulk add; ADR 0004", "phase": "24"},
+    {"decision": "Tag routes under /watchlist/{id}/tags; attach/detach idempotent (200/204)", "rationale": "Same id space as PATCH, note, Phase 26 bulk ids", "phase": "24"},
+    {"decision": "Rename 409 {target, carrier_count_after_merge} from unique violation; POST /tags/{id}/merge {into: id}; merge keeps target casing", "rationale": "No stale-name merges; TAG-03", "phase": "24"},
+    {"decision": "Note: column watchlist.note (singular); PUT /watchlist/{id}/note; Undo re-add restores note", "rationale": "Keeps PATCH preferences-only for Phase 26; avoids silent note loss", "phase": "24"},
+    {"decision": "000010 adds CHECK name = btrim(name) and note non-empty", "rationale": "Adding CHECKs later costs an expand/contract cycle", "phase": "24"},
+    {"decision": "Chips use functional updaters + per-row pending set (amends D-03)", "rationale": "Snapshot rollback loses tags on rapid adds", "phase": "24"},
+    {"decision": "Vocabulary loads lazily; POST/PATCH /watchlist return tags + note", "rationale": "Phase 25 one-request SC; accurate WatchlistEntry", "phase": "24"},
+    {"decision": "GET /watchlist enrichment uses parallel array_agg, not json_agg", "rationale": "sqlc#3438 types json_agg as interface{} (research)", "phase": "24"}
+  ],
+  "uncommitted_files": [
+    " M .planning/ROADMAP.md",
+    " M .planning/STATE.md",
+    " M .planning/phases/24-artist-tags-notes/24-CONTEXT.md",
+    " M .planning/phases/24-artist-tags-notes/24-UI-SPEC.md",
+    " M CONTEXT.md",
+    "?? .planning/phases/24-artist-tags-notes/24-PATTERNS.md",
+    "?? docs/adr/0004-per-artist-tag-cap-trigger.md"
+  ],
+  "next_action": "Run /gsd-plan-phase 24 (research, validation and patterns exist and will be reused); pass the orchestrator notes listed in .continue-here.md to the planner",
+  "context_notes": "Plan-phase got through research, VALIDATION.md, security gate (ASVS L1, block on high), pattern mapping, and the edge probe (12/15 edges pre-resolved from locked decisions; TAG-01/03/07 unclassified -> flagged assumptions). Planner was stopped mid-run with nothing written."
+}

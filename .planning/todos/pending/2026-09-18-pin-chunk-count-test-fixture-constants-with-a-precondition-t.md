@@ -3,6 +3,7 @@ created: 2026-09-18T17:25:03.367Z
 title: Pin chunk-count test fixture constants with a precondition test
 area: notifier
 severity: minor
+resolves_phase: 28
 files:
   - internal/notifier/digest_test.go:139-166
   - internal/notifier/digest_chunk_test.go

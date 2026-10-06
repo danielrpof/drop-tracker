@@ -1,42 +1,44 @@
 ---
-gsd_state_version: 1.0
-milestone: v1.5
-status: "v1.5 shipped — PR #6"
-stopped_at: Phase 23 complete — all phases complete
-last_updated: "2026-09-18T18:01:45.200Z"
-last_activity: 2026-09-18
-state_head: 63df9f525c6b6ea727259b45b017572428051e39
-milestone_name: Digest Notifications (Phases 20-23) — SHIPPED 2026-09-18
-current_phase: 23
+gsd_state_version: "1.0"
+milestone: v1.6
+milestone_name: Watchlist Organization
+current_phase: 25
+current_phase_name: Find & Filter — Watchlist and History
+status: planning
+stopped_at: Phase 24 complete, ready to plan Phase 25
+last_updated: "2026-10-06T21:40:10.711Z"
+last_activity: 2026-10-06
+last_activity_desc: Phase 24 complete, transitioned to Phase 25
+state_head: 43f00c104424775675eecba8545aeb3045255c0f
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 15
-  completed_plans: 15
-  percent: 100
+  total_phases: 5
+  completed_phases: 1
+  total_plans: 24
+  completed_plans: 14
+  percent: 20
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-18)
+See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Milestone v1.5 complete (Phases 20-23) — ready to close out
+**Current focus:** Phase 25 — Find & Filter — Watchlist and History
 
 ## Current Position
 
-Phase: Milestone v1.5 complete
-Plan: —
-Status: v1.5 shipped — PR #6
-Last activity: 2026-09-18
+Phase: 25 — Find & Filter — Watchlist and History
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-06 — Phase 24 complete, transitioned to Phase 25
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 99
+- Total plans completed: 113
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -67,6 +69,7 @@ Last activity: 2026-09-18
 | 21 | 3 | - | - |
 | 22 | 4 | - | - |
 | 23 | 4 | - | - |
+| 24 | 14 | - | - |
 
 **Recent Trend:**
 
@@ -145,6 +148,20 @@ Last activity: 2026-09-18
 | Phase 23 P02 | 5min | 2 tasks | 2 files |
 | Phase 23 P03 | 9min | 3 tasks | 2 files |
 | Phase 23 P04 | 35min | 3 tasks | 5 files |
+| Phase 24 P01 | ~120min | 3 tasks | 23 files |
+| Phase 24 P02 | ~20min | 3 tasks | 8 files |
+| Phase 24 P04 | ~20min | 2 tasks | 10 files |
+| Phase 24 P03 | ~50min | 2 tasks | 10 files |
+| Phase 24 P05 | ~75min | 3 tasks | 13 files |
+| Phase 24 P06 | ~55min | 3 tasks | 10 files |
+| Phase 24 P07 | 17min | 3 tasks | 6 files |
+| Phase 24 P08 | ~50min | 3 tasks | 6 files |
+| Phase 24 P09 | ~35min | 2 tasks | 5 files |
+| Phase 24 P10 | ~25min | 3 tasks | 6 files |
+| Phase 24 P11 | 25m | 2 tasks | 4 files |
+| Phase 24 P12 | 6 min | 3 tasks | 4 files |
+| Phase 24 P13 | 7 min | 2 tasks | 4 files |
+| Phase 24 P14 | 20 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -347,13 +364,40 @@ Recent decisions affecting current work:
 - [Phase 23]: [Phase 23-04]: maxDigestChunks=20 cap and ~3-minute digestSendBudget both stop cleanly at chunk boundaries, never cancelling an in-flight Discord POST; both leave digest_last_slot_at/digest_last_sent_at un-advanced so the digest self-drains across successive ticks inside the grace window (D-23/D-24/D-25/D-26)
 - [Phase 23]: [Phase 23-04]: Observability -- shutdown drain line reworded from Error to Warn (D-27), chunk-failure log gained an errors.Is rate_limited discriminator against discord.ErrRateLimited (D-28), and the digest sent summary gained chunk_count/pending_remainder fields plus a separate cap/budget Warn firing only when a bound actually bit (D-29)
 
+- [v1.6 Roadmap]: 5 phases derived from the 28 v1.6 requirements. Phase 24 is Artist Tags & Notes (TAG-01…07, NOTE-01). Phase 25 is Find & Filter — Watchlist and History (WLVW-01…06, HIST-02). Phase 26 is Bulk Edit & Remove (BULK-01…05). Phase 27 is Paste-a-List Bulk Add (IMPT-01…05). Phase 28 is Tags on Discord Notifications (NTFY-05…07). Numbering continues from v1.5's Phase 23; Phase 17 stays deferred and its number is not reused.
+- [v1.6 Roadmap]: Deviation from research. Its backend-only "data foundation" phase and its separate Watchlist UI phase became one vertical Phase 24 (migration, then `internal/tags`, then API, then card UI). A migration plus a package plus routes with no UI has task-shaped success criteria, the same reason v1.5 folded its inert foundation phase into the settings panel. The `latest_release_date` enrichment moved to Phase 25, which uses it.
+- [v1.6 Roadmap]: HIST-02 was grouped into Phase 25 with the Watchlist filters instead of becoming a single-requirement phase. It shares the tag vocabulary and combobox, and its retention constraint (the tag filter goes inside the existing `ListEvents`/`HasOlderEvents`, PITFALLS #9) is a Phase 25 planner note.
+- [v1.6 Roadmap]: Phase 26 depends on Phase 25 because "select all visible" (BULK-01) is defined by the filtered view. Phase 28 depends only on Phase 24 but is sequenced last on purpose. It is the only phase touching Phase 23's chunker and ack invariants (highest blast radius), and it absorbs the pending WR-02 chunk-fixture precondition todo.
+- [v1.6 Roadmap]: Flagged for the Phase 27 planner: the confirm step has its own write-timeout trap, separate from the resolve step (already locked as client-orchestrated). `watchlist.Service.Add` runs an artist-art match bounded by an 8s `matchTimeout` when no image URL is supplied, so looping it inside one bulk-confirm request brings back the 15s `writeTimeout` collision. Carry search-result image URLs through and skip or defer matching for the rest; the art backfill sweep only runs at startup.
+- [v1.6 Roadmap]: Open decisions left for discuss-phase rather than silently resolved: (1) the DB-layer mechanism for the 10-tags-per-artist cap (a CHECK can't count rows, so a trigger or an artist-row-locked guarded insert, which must also hold for Phase 26's bulk attach); (2) note lifetime on remove (research puts notes on the `watchlist` row, so they vanish while tags survive); (3) TAG-06 count scope (watched artists only, or every artist carrying the tag); (4) latest release vs. the retention window, plus partial-date handling; (5) multi-tag filter AND vs. OR; (6) bulk partial-outcome semantics for reversible actions; (7) paste-a-list confidence-tier rules and maximum paste size; (8) Phase 28 tag-read failure posture (recommendation: send without tags and log a Warn).
+- [v1.6 Roadmap]: Phases 24-27 carry UI hints, so run `/gsd-ui-phase` before planning each. Phase 27 is also flagged to run `/gsd-sketch` first on its review screen (research flag). Phase 28 is backend-only.
+- [Phase 24]: 24-01: Detach and DetachTag SQL landed a commit earlier than Task 3's literal position (no behavior/scope change); TagStore's HTTP-facing Detach method and route are still Task 3's deliverable. — Writing the attach/detach SQL trio together in Task 2 was simpler than splitting DetachTag out
+- [Phase 24]: 24-01: Live database collation confirmed en_US.utf8, closing 24-RESEARCH.md Assumption A1 -- non-ASCII tag identity tests are real proof
+- [Phase 24]: 24-02: parseTagID generalized to take the path-param name (id vs tag_id) rather than a second near-duplicate parser
+- [Phase 24]: 24-02: each task's full query+service+handler+test work landed as one feat commit, matching 24-01's precedent -- workflow.tdd_mode is not enabled, so the plan-level RED/GREEN gate does not apply to this type: execute plan
+- [Phase 24]: [Phase 24-04]: TagChips uses route-level functional addTag/removeTag updaters (D-24) instead of whole-array optimistic snapshots, so concurrent chip removals on one row never clobber each other; focus-within self-reference used for the chip's own size since group-focus-within cannot target its own declaring element.
+- [Phase 24]: 24-03: GetWatchlistEntry copies ListWatchlist's select list byte-for-byte; sqlc.ListWatchlistRow(row) struct conversion in Service.get enforces D-26 projection parity at compile time
+- [Phase 24]: [Phase 24-05]: base-ui Combobox needed two behavioral fixes -- filtering onOpenChange reason "none" so Enter-with-nothing-selectable never closes the whole editor, and suppressing a one-shot post-commit input-value echo so a cleared input stays cleared.
+- [Phase 24]: ApiError gained an optional body field carrying the parsed non-2xx JSON, so renameTag's 409-collision mapping (and any future structured-error consumer) shares the one ApiError shape apiFetch already throws everywhere.
+- [Phase 24]: renameTag's collision detection is purely server-driven (only a 409 body carrying target + carrier_count_after_merge maps to a collision result); mergeTagInEntries drops the source chip in place when a card already carries the target so a merge never produces a duplicate chip.
+- [Phase 24]: [Phase 24-07]: Task 1's tracer scope stayed deliberately narrow (save/cancel/disabled-when-unchanged only) so Task 2's TDD RED phase had genuine failing assertions to drive.
+- [Phase 24]: [Phase 24-07]: Reworded a source comment that spelled out dangerouslySetInnerHTML literally, since it tripped the phase's own XSS-surface grep gate though no code used it.
+- [Phase 24]: [Phase 24-08]: Closed verification gap 1 (SC2/TAG-04) with additive migration 000011 extending the per-artist tag cap trigger to BEFORE UPDATE OF artist_id, keeping merge's UPDATE SET tag_id unaffected (D-19) — make/sqlc were not on this session's PATH; ran the underlying Makefile commands directly and reinstalled sqlc v1.31.1 via go install
+- [Phase 24]: [Phase 24-09]: golangci-lint reinstalled at pinned v2.13.2 via go install after the pre-commit-cached binary (built with go1.25) refused to run against this box's go1.26 toolchain -- tooling-only fix, no source/config change
+- [Phase 24]: 24-10: ship cap-vs-concurrent-detach fix as additive migration 000012 (FOR KEY SHARE existence lock) instead of editing applied 000011
+- [Phase 24]: 24-11: vocabGen generation ref drops a stale GET /tags settle so a deleted/renamed/merged tag cannot return via the + tag autocomplete (WR-06)
+- [Phase 24]: 24-12: ManageTagsDialog guards load() with a generation ref; invalidateLoad() on delete/rename/merge success bumps it and refetches only when a load was in flight (no skeleton strand)
+- [Phase 24]: 24-13: wrap-anywhere on ConfirmDialog title/description (not break-word) so unspaced 32-char tag names wrap in the centered header grid (G-24-5)
+- [Phase 24]: 24-14: overflow latch via dependency-plus-early-return in ArtistNote; Manage tags hand-off consumed only by a successful load (G-24-9..11)
+
 ### Pending Todos
 
 - [minor] Delete the stale tracked `web/package-lock.json` — a drifting second lockfile Trivy also scans. `.planning/todos/pending/2026-09-05-delete-stale-web-package-lock-json.md`
 - [minor] Move `shadcn` out of `web/package.json` `dependencies` (it's a CLI no code imports) — cleanup only, NOT a security fix; reclassifying hides Trivy findings without fixing them. `.planning/todos/pending/2026-09-05-move-shadcn-out-of-frontend-dependencies.md`
 - [minor] Fix dead `resuming = true` assignment in `flushMidGroup` digest chunker (Phase 23 code review WR-01, never fixed) — `.planning/todos/pending/2026-09-18-fix-dead-resuming-assignment-in-flushmidgroup-digest-chunker.md`
-- [minor] Pin chunk-count test fixture constants with a precondition test (Phase 23 code review WR-02, never fixed) — `.planning/todos/pending/2026-09-18-pin-chunk-count-test-fixture-constants-with-a-precondition-t.md`
+- [minor] Pin chunk-count test fixture constants with a precondition test (Phase 23 code review WR-02, never fixed) — `.planning/todos/pending/2026-09-18-pin-chunk-count-test-fixture-constants-with-a-precondition-t.md` — scheduled into Phase 28 (must land before tags lengthen digest lines)
 - [cosmetic] Fix singular/plural grammar in digest remainder marker (Phase 23 code review IN-01, never fixed) — `.planning/todos/pending/2026-09-18-fix-singular-plural-grammar-in-digest-remainder-marker.md`
+- [minor] Manage tags reopens a row in stale rename mode after closing mid-rename (Phase 24 code review WR-01, accepted in UAT): reset rename state on open, select Rename by data attribute, add a test.
 
 _Closed 2026-09-05: trivy-fs HIGH CVE bump (browserslist/fast-uri) — quick task 260905-fa4. Confirmed CI-green on runs 33978945980 / 33979094225._
 _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick task 260905-et1. Confirmed live (guardcheck notice on run 33978945980; build-scan runs on 33979094225)._
@@ -398,6 +442,8 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 27 | Fold Phase 22 grilling-session decisions (D-11–D-26) into 22-CONTEXT, ROADMAP Phase 22/23 notes + deploy sequencing, REQUIREMENTS DGST-05/15, STATE, and CONTEXT.md glossary. Docs only. | 2026-09-16 | 4e4e434 | — |
 | 260916-wao | Close T-22-15 (22-SECURITY.md, blocking) / CR-01 (22-REVIEW.md): `buildDigestEmbed` now caps the whole Description at Discord's 4096-rune limit, truncating on a full line boundary and appending a "... N more events" note; `SendDigestIfDue` still acks every event id in the batch (rendered or truncated-out), closing the self-sustaining retry loop. Interim guard only — DGST-12's full multi-message split stays Phase 23's job. `go vet`/`golangci-lint`/full test suite/`make coverage-gate` (91.38%) all clean; `/gsd-secure-phase 22` still needs a re-run to flip 22-SECURITY.md's frontmatter. | 2026-09-16 | 741dc93 | [260916-wao-add-an-interim-truncate-and-ack-guard-fo](./quick/260916-wao-add-an-interim-truncate-and-ack-guard-fo/) |
 | 260917-mfa | Fix a data race in `TestDigestScheduler_CheckError_LoggedAndLoopContinues` (internal/notifier/scheduler_test.go) caught by `go test -race` in CI, blocking the Phase 22 UAT smoke test: added a mutex-guarded `syncBuffer`/`newSyncTestLogger` local to the file, and moved the test's `Stop()` call (error checked) ahead of its log-buffer assertions, since `Stop` itself also logs and its completed drain is the only real happens-before edge proving the loop goroutine is done writing. Reproduced RED under WSL2 first; 50 consecutive `-race` iterations clean after the fix, plus 20 of the whole test family and one full-package `-race` run. No production code or shared test helpers touched. CI re-run 35276004417 confirmed `test` green and `build-scan` unblocked. | 2026-09-17 | 58ada7a | [260917-mfa-fix-a-data-race-in-internal-notifier-sch](./quick/260917-mfa-fix-a-data-race-in-internal-notifier-sch/) |
+| 261005-ezu | Apply Phase 25 UI-SPEC review fixes: align wording with grill overrides G1–G7 and the Upcoming line; add Router & sticky-state rules (preventScrollReset helper, sticky set survives refresh(), adds are sticky, URL tag-id validation on first load only); WLVW-03 excludes upcoming dates. Docs only. | 2026-10-05 | 2b448b5 | [261005-ezu-apply-phase-25-ui-spec-review-fixes](./quick/261005-ezu-apply-phase-25-ui-spec-review-fixes/) |
+| 31 | Fix trivy-fs: override transitive web CVEs, expiring ignore for unfixable braces CVE | 2026-10-06 | 43f00c1 | — |
 
 ### Roadmap Evolution
 
@@ -411,6 +457,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 
 - v1.5 milestone opened (2026-09-11): Phases 20-23 added — Digest Settings & Operator Control, Real-Time ↔ Digest Mutual Exclusion, Scheduled Digest Send, Digest Readability & Discord Limits. Phase numbering continued from 19. Two deliberate deviations from the research's five-phase proposal: its inert "Digest Foundation" phase was folded into the settings/UI phase, and the mutual-exclusion gate was moved *ahead* of the digest sender (an un-gated real-time drain empties the outbox every poll cycle, which would make the sender unverifiable and the digest look broken rather than duplicated).
 - Phase 21 context revised (2026-09-16) after a `/grill-with-docs` pass: the settings read now fails closed (reversing the 2026-09-11 fail-open lock), all outbox sends share the `notifying` lock (ADR 0002, which constrains Phase 22's digest send to a `Notifier` method), the mode is re-read before each send, staleness is anchored to `created_at`, logging happens only on mode changes, `SettingsReader` is a required argument, and SPA helper text is back in scope. See `21-CONTEXT.md` D-01..D-07.
+- v1.6 milestone opened (2026-09-22): Phases 24-28 added (Artist Tags & Notes; Find & Filter — Watchlist and History; Bulk Edit & Remove; Paste-a-List Bulk Add; Tags on Discord Notifications). Numbering continued from 23. Research's six-phase proposal was compressed to five: its foundation and Watchlist UI phases became one vertical tags/notes slice, and History-by-tag joined the find/filter phase.
 
 ## Deferred Items
 
@@ -432,10 +479,12 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-18T15:02:03.145Z
-Stopped at: Phase 23 complete — all phases complete
+Last session: 2026-10-06T21:45:00Z
+Stopped at: Phase 24 complete, ready to plan Phase 25
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Phase 24 (Artist Tags & Notes) is complete: 14/14 plans, UAT 15/15, verification passed.
+- Phase 25 is already discussed and planned (CONTEXT, UI-SPEC, 10 plans on disk): run `/gsd-execute-phase 25`.
+- Before Phase 27, run `/gsd-sketch` on the paste-a-list review screen

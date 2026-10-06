@@ -133,6 +133,11 @@ type addWatchlistRequest struct {
 	ImageURL        *string   `json:"image_url"`
 	ReleaseTypes    *[]string `json:"release_types"`
 	MutedEventTypes *[]string `json:"muted_event_types"`
+	// Note is optional (D-27): the SPA's remove-toast Undo re-adds it so a
+	// restored artist does not silently lose the note D-10 would otherwise
+	// drop. Subject to the same trim / empty-to-null / 500-rune rules as PUT
+	// /watchlist/{id}/note.
+	Note *string `json:"note"`
 }
 
 // handleAddWatchlist implements POST /watchlist (WLST-02): decode, reject
@@ -221,12 +226,26 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// D-27: fail-fast the same way PUT /watchlist/{id}/note's rules apply,
+	// before ever calling the store -- Service.Add's own NormalizeNote call
+	// is the non-bypassable backstop for any other caller of Add.
+	note, err := watchlist.NormalizeNote(req.Note)
+	switch {
+	case errors.Is(err, watchlist.ErrNoteTooLong):
+		writeError(w, http.StatusBadRequest, "note must be at most 500 characters")
+		return
+	case errors.Is(err, watchlist.ErrNoteInvalid):
+		writeError(w, http.StatusBadRequest, "note contains invalid characters")
+		return
+	}
+
 	params := watchlist.AddParams{
 		MBID:           mbid,
 		Name:           name,
 		DeezerID:       req.DeezerID,
 		Disambiguation: req.Disambiguation,
 		ImageURL:       req.ImageURL,
+		Note:           note,
 	}
 	if req.ReleaseTypes != nil {
 		params.ReleaseTypes = *req.ReleaseTypes
@@ -244,6 +263,12 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 		// These sentinels wrap only the offending value, which came from
 		// the client, so echoing err.Error() leaks nothing.
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	case errors.Is(err, watchlist.ErrNoteTooLong):
+		writeError(w, http.StatusBadRequest, "note must be at most 500 characters")
+		return
+	case errors.Is(err, watchlist.ErrNoteInvalid):
+		writeError(w, http.StatusBadRequest, "note contains invalid characters")
 		return
 	case err != nil:
 		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
@@ -330,6 +355,68 @@ func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	case err != nil:
+		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(entry)
+}
+
+// updateNoteRequest is the request DTO for PUT /watchlist/{id}/note. Note is
+// json.RawMessage, not *string, so the handler can distinguish an absent key
+// (len == 0, rejected) from an explicit JSON null (valid, clears the note)
+// before ever unmarshalling into a *string (D-25).
+type updateNoteRequest struct {
+	Note json.RawMessage `json:"note"`
+}
+
+// handleUpdateNote implements PUT /watchlist/{id}/note (D-25, NOTE-01):
+// trim, empty-to-null, and a 500-rune cap, applied by watchlist.NormalizeNote
+// before the store call so a rejected note never reaches the database. 200
+// on success with the full updated entry, on the same tags + note
+// projection every other route uses (D-26).
+func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
+	id, err := parseWatchlistID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid watchlist id")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxAddWatchlistBodyBytes)
+
+	var req updateNoteRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Note) == 0 {
+		writeError(w, http.StatusBadRequest, "note is required")
+		return
+	}
+
+	var note *string
+	if err := json.Unmarshal(req.Note, &note); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	entry, err := s.watchlist.UpdateNote(r.Context(), id, note)
+	switch {
+	case errors.Is(err, watchlist.ErrNoteTooLong):
+		writeError(w, http.StatusBadRequest, "note must be at most 500 characters")
+		return
+	case errors.Is(err, watchlist.ErrNoteInvalid):
+		writeError(w, http.StatusBadRequest, "note contains invalid characters")
+		return
+	case errors.Is(err, watchlist.ErrNotFound):
+		writeError(w, http.StatusNotFound, "watchlist entry not found")
+		return
+	case err != nil:
+		// Note text must never reach a log (T-24-20) -- err.Error() here is
+		// always a wrapped driver/query error, never the note itself.
 		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return

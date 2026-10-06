@@ -1,0 +1,2 @@
+# braces: no upstream fix yet; dev-only via shadcn CLI -> fast-glob, not in the shipped bundle.
+CVE-2026-93687 exp:2026-11-05

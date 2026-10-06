@@ -4,12 +4,16 @@ import { CoverArt } from "~/components/common/CoverArt"
 import { Button } from "~/components/ui/button"
 import type { WatchlistEntry } from "~/lib/api"
 
+import { ArtistNote } from "./ArtistNote"
 import { PreferenceToggles } from "./PreferenceToggles"
+import { TagChips, type TagActions } from "./TagChips"
 
 export interface WatchlistRowProps {
   entry: WatchlistEntry
   onEntryChange: (id: number, patch: Partial<WatchlistEntry>) => void
   onRemove: (entry: WatchlistEntry) => void
+  tagActions: TagActions
+  announce: (message: string) => void
 }
 
 // WatchlistRow renders one WatchlistEntry: the artist's art, name, and --
@@ -26,6 +30,8 @@ export function WatchlistRow({
   entry,
   onEntryChange,
   onRemove,
+  tagActions,
+  announce,
 }: WatchlistRowProps) {
   return (
     <li className="flex flex-col gap-4 rounded-md bg-card p-4 sm:flex-row sm:items-center">
@@ -43,6 +49,12 @@ export function WatchlistRow({
             {entry.disambiguation}
           </span>
         )}
+        <TagChips entry={entry} actions={tagActions} announce={announce} />
+        <ArtistNote
+          entry={entry}
+          onEntryChange={onEntryChange}
+          announce={announce}
+        />
       </div>
 
       <PreferenceToggles entry={entry} onEntryChange={onEntryChange} />

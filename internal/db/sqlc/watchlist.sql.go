@@ -26,19 +26,29 @@ func (q *Queries) CountWatchlist(ctx context.Context) (int64, error) {
 }
 
 const createWatchlistEntry = `-- name: CreateWatchlistEntry :one
-INSERT INTO watchlist (artist_id, release_types, muted_event_types)
-VALUES ($1, $2, $3)
-RETURNING id, artist_id, release_types, muted_event_types, created_at, updated_at
+INSERT INTO watchlist (artist_id, release_types, muted_event_types, note)
+VALUES ($1, $2, $3, $4)
+RETURNING id, artist_id, release_types, muted_event_types, created_at, updated_at, note
 `
 
 type CreateWatchlistEntryParams struct {
 	ArtistID        int64    `json:"artist_id"`
 	ReleaseTypes    []string `json:"release_types"`
 	MutedEventTypes []string `json:"muted_event_types"`
+	Note            *string  `json:"note"`
 }
 
+// note (D-27): stays positional -- sqlc rejects mixing $n with
+// sqlc.arg/sqlc.narg in one query -- and stays nullable, so the generated
+// Note param is a *string; nil is a plain add, a caller-supplied value is
+// Undo restoring what D-10 would otherwise drop.
 func (q *Queries) CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error) {
-	row := q.db.QueryRow(ctx, createWatchlistEntry, arg.ArtistID, arg.ReleaseTypes, arg.MutedEventTypes)
+	row := q.db.QueryRow(ctx, createWatchlistEntry,
+		arg.ArtistID,
+		arg.ReleaseTypes,
+		arg.MutedEventTypes,
+		arg.Note,
+	)
 	var i Watchlist
 	err := row.Scan(
 		&i.ID,
@@ -47,6 +57,7 @@ func (q *Queries) CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistE
 		&i.MutedEventTypes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Note,
 	)
 	return i, err
 }
@@ -70,10 +81,79 @@ func (q *Queries) DeleteWatchlistEntry(ctx context.Context, id int64) (int64, er
 	return result.RowsAffected(), nil
 }
 
+const getWatchlistEntry = `-- name: GetWatchlistEntry :one
+SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
+       a.disambiguation, a.image_url,
+       w.release_types, w.muted_event_types, w.note, w.created_at, w.updated_at,
+       ARRAY(
+         SELECT t.id FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::bigint[] AS tag_ids,
+       ARRAY(
+         SELECT t.name FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::text[] AS tag_names
+FROM watchlist w
+JOIN artists a ON a.id = w.artist_id
+WHERE w.id = $1
+`
+
+type GetWatchlistEntryRow struct {
+	ID              int64              `json:"id"`
+	ArtistID        int64              `json:"artist_id"`
+	Mbid            string             `json:"mbid"`
+	Name            string             `json:"name"`
+	DeezerID        *string            `json:"deezer_id"`
+	Disambiguation  *string            `json:"disambiguation"`
+	ImageUrl        *string            `json:"image_url"`
+	ReleaseTypes    []string           `json:"release_types"`
+	MutedEventTypes []string           `json:"muted_event_types"`
+	Note            *string            `json:"note"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	TagIds          []int64            `json:"tag_ids"`
+	TagNames        []string           `json:"tag_names"`
+}
+
+// Byte-for-byte ListWatchlist's select list and joins, narrowed to one row
+// (D-26): the Go struct conversion in watchlist.Service.get only compiles
+// while the two projections stay identical, which is what enforces the
+// "same projection everywhere" guarantee at build time rather than by
+// convention.
+func (q *Queries) GetWatchlistEntry(ctx context.Context, id int64) (GetWatchlistEntryRow, error) {
+	row := q.db.QueryRow(ctx, getWatchlistEntry, id)
+	var i GetWatchlistEntryRow
+	err := row.Scan(
+		&i.ID,
+		&i.ArtistID,
+		&i.Mbid,
+		&i.Name,
+		&i.DeezerID,
+		&i.Disambiguation,
+		&i.ImageUrl,
+		&i.ReleaseTypes,
+		&i.MutedEventTypes,
+		&i.Note,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TagIds,
+		&i.TagNames,
+	)
+	return i, err
+}
+
 const listWatchlist = `-- name: ListWatchlist :many
 SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
        a.disambiguation, a.image_url,
-       w.release_types, w.muted_event_types, w.created_at, w.updated_at
+       w.release_types, w.muted_event_types, w.note, w.created_at, w.updated_at,
+       ARRAY(
+         SELECT t.id FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::bigint[] AS tag_ids,
+       ARRAY(
+         SELECT t.name FROM artist_tags link JOIN tags t ON t.id = link.tag_id
+         WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
+       )::text[] AS tag_names
 FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
 ORDER BY a.name ASC, a.id ASC
@@ -89,8 +169,11 @@ type ListWatchlistRow struct {
 	ImageUrl        *string            `json:"image_url"`
 	ReleaseTypes    []string           `json:"release_types"`
 	MutedEventTypes []string           `json:"muted_event_types"`
+	Note            *string            `json:"note"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	TagIds          []int64            `json:"tag_ids"`
+	TagNames        []string           `json:"tag_names"`
 }
 
 // Both watchlist and artists have a column named id -- every selected
@@ -100,6 +183,14 @@ type ListWatchlistRow struct {
 // so the artist id is a required, not cosmetic, ORDER BY tiebreak: without
 // it, two equally-named artists would come back in whatever order the
 // planner happens to choose, which is non-deterministic across runs.
+//
+// tag_ids/tag_names (D-26, D-30, single query): two parallel ARRAY(...)
+// subqueries, never json_agg (sqlc-dev/sqlc#3438 emits interface{} under
+// pgx/v5). ARRAY(subquery) is already {} for no rows, not NULL, so no
+// COALESCE is needed. Both subqueries share FROM/JOIN/WHERE/ORDER BY byte
+// for byte, differing only in the aggregated column -- watchlist.zipTags
+// pairs them index-for-index, and a future edit to one without the other
+// would silently mispair ids with names (24-RESEARCH.md Pitfall 4).
 func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error) {
 	rows, err := q.db.Query(ctx, listWatchlist)
 	if err != nil {
@@ -119,8 +210,11 @@ func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 			&i.ImageUrl,
 			&i.ReleaseTypes,
 			&i.MutedEventTypes,
+			&i.Note,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TagIds,
+			&i.TagNames,
 		); err != nil {
 			return nil, err
 		}
@@ -130,6 +224,27 @@ func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateWatchlistNote = `-- name: UpdateWatchlistNote :execrows
+UPDATE watchlist SET note = $1, updated_at = now() WHERE id = $2
+`
+
+type UpdateWatchlistNoteParams struct {
+	Note *string `json:"note"`
+	ID   int64   `json:"id"`
+}
+
+// :execrows distinguishes "updated" from "no such id" without a preceding
+// existence SELECT, mirroring DeleteWatchlistEntry's idiom. The response
+// entry itself comes from a follow-up GetWatchlistEntry call
+// (Service.UpdateNote), not from this statement's own return.
+func (q *Queries) UpdateWatchlistNote(ctx context.Context, arg UpdateWatchlistNoteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateWatchlistNote, arg.Note, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateWatchlistPreferences = `-- name: UpdateWatchlistPreferences :one

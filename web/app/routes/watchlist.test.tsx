@@ -2,15 +2,29 @@ import {
   act,
   render,
   screen,
+  waitFor,
   waitForElementToBeRemoved,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createRoutesStub } from "react-router"
+import { toast } from "sonner"
 import { describe, expect, it, vi } from "vitest"
 
 import App from "~/root"
 import { authStore } from "~/lib/authStore"
-import { listWatchlist, removeWatchlist, type WatchlistEntry } from "~/lib/api"
+import {
+  addWatchlist,
+  attachTag,
+  deleteTag,
+  detachTag,
+  listTags,
+  listWatchlist,
+  mergeTag,
+  removeWatchlist,
+  renameTag,
+  type TagSummary,
+  type WatchlistEntry,
+} from "~/lib/api"
 import { renderRoute } from "~/lib/test/routeStub"
 
 import Watchlist from "./watchlist"
@@ -18,9 +32,22 @@ import Watchlist from "./watchlist"
 // D-06 / TEST-02: bare vi.mock at the top of the file, no factory, no
 // passthrough -- no real apiFetch can ever reach the runtime's own fetch.
 vi.mock("~/lib/api")
+// renderRoute stubs Watchlist directly, so root.tsx's <Toaster/> is never
+// mounted -- a real sonner toast() call is already a silent no-op in these
+// tests. Mocking it just makes the Undo action's onClick reachable for the
+// plan 24-07 Task 2 Undo case below (D-27), with no behavior change for any
+// existing test in this file.
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const mockListWatchlist = vi.mocked(listWatchlist)
+const mockAddWatchlist = vi.mocked(addWatchlist)
 const mockRemoveWatchlist = vi.mocked(removeWatchlist)
+const mockDetachTag = vi.mocked(detachTag)
+const mockListTags = vi.mocked(listTags)
+const mockAttachTag = vi.mocked(attachTag)
+const mockDeleteTag = vi.mocked(deleteTag)
+const mockRenameTag = vi.mocked(renameTag)
+const mockMergeTag = vi.mocked(mergeTag)
 
 const entry: WatchlistEntry = {
   id: 42,
@@ -34,6 +61,19 @@ const entry: WatchlistEntry = {
   muted_event_types: [],
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  tags: [],
+  note: null,
+}
+
+// Lets a test hold a mocked request open and settle it at a chosen moment.
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 describe("Watchlist route", () => {
@@ -108,6 +148,19 @@ describe("Watchlist route", () => {
     expect(screen.getByText("Search above to add one.")).toBeInTheDocument()
   })
 
+  it("mounts exactly one route-level status region, present before the watchlist even loads (UI-SPEC [R6])", async () => {
+    mockListWatchlist.mockResolvedValue([entry])
+
+    renderRoute(Watchlist, "/")
+
+    const regions = screen.getAllByRole("status")
+    expect(regions).toHaveLength(1)
+    expect(regions[0]).toHaveAttribute("aria-atomic", "true")
+
+    await screen.findByText("Drake")
+    expect(screen.getAllByRole("status")).toHaveLength(1)
+  })
+
   it("re-fetches the true server state when removeWatchlist fails, so the row reappears", async () => {
     mockListWatchlist.mockResolvedValueOnce([entry])
     mockRemoveWatchlist.mockRejectedValueOnce(new Error("network down"))
@@ -128,6 +181,646 @@ describe("Watchlist route", () => {
     await screen.findByText("Drake")
 
     expect(mockListWatchlist).toHaveBeenCalledTimes(2)
+  })
+
+  it("removes one tag chip and calls detachTag once when its × is clicked", async () => {
+    mockListWatchlist.mockResolvedValue([
+      {
+        ...entry,
+        tags: [
+          { id: 1, name: "reggaeton" },
+          { id: 2, name: "latin" },
+        ],
+      },
+    ])
+    mockDetachTag.mockResolvedValue(undefined)
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("reggaeton")
+    expect(screen.getByText("latin")).toBeInTheDocument()
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Remove tag reggaeton from Drake",
+      })
+    )
+
+    expect(screen.queryByText("reggaeton")).not.toBeInTheDocument()
+    expect(screen.getByText("latin")).toBeInTheDocument()
+    expect(mockDetachTag).toHaveBeenCalledTimes(1)
+    expect(mockDetachTag).toHaveBeenCalledWith(42, 1)
+  })
+
+  it("never calls listTags at mount, and calls it exactly once across two rows' '+ tag' opens", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([entry, second])
+    mockListTags.mockResolvedValue([])
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    expect(mockListTags).not.toHaveBeenCalled()
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(1))
+
+    // The open combobox's popup layer marks the rest of the page inert
+    // (base-ui's own background-isolation behavior) -- close it first so
+    // Rihanna's row is reachable again before opening its own editor.
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toBeInTheDocument()
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Rihanna" })
+    )
+    expect(mockListTags).toHaveBeenCalledTimes(1)
+  })
+
+  it("typing a name and pressing Enter attaches it and shows the server's resolved casing", async () => {
+    mockListWatchlist.mockResolvedValue([entry])
+    mockListTags.mockResolvedValue([])
+    mockAttachTag.mockResolvedValue({ id: 9, name: "reggaeton" })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "Reggaeton{Enter}")
+
+    expect(mockAttachTag).toHaveBeenCalledWith(42, "Reggaeton")
+    await screen.findByText("reggaeton")
+  })
+
+  it("still lets Enter attach via Create when listTags rejects", async () => {
+    mockListWatchlist.mockResolvedValue([entry])
+    mockListTags.mockRejectedValue(new Error("network down"))
+    mockAttachTag.mockResolvedValue({ id: 5, name: "drill" })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "drill{Enter}")
+
+    expect(mockAttachTag).toHaveBeenCalledWith(42, "drill")
+    await screen.findAllByText("drill")
+  })
+
+  it("a pick that brings the artist to 10 tags shows the 'max 10 tags' hint through the real route wiring (D-14)", async () => {
+    const nineTags = Array.from({ length: 9 }, (_, i) => ({
+      id: i + 1,
+      name: `tag${i}`,
+    }))
+    mockListWatchlist.mockResolvedValue([{ ...entry, tags: nineTags }])
+    mockListTags.mockResolvedValue([])
+    mockAttachTag.mockResolvedValue({ id: 99, name: "drill" })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "drill{Enter}")
+
+    await screen.findByText("max 10 tags")
+    expect(
+      screen.queryByRole("button", { name: "Add tag to Drake" })
+    ).toBeNull()
+  })
+
+  it("opens Manage tags and deletes a tag carried by two entries, so both cards lose the chip with no extra listWatchlist call", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "reggaeton" }] },
+      { ...second, tags: [{ id: 1, name: "reggaeton" }] },
+    ])
+    mockListTags.mockResolvedValue([
+      { id: 1, name: "reggaeton", carrier_count: 2 },
+    ])
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 2 })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    expect(screen.getAllByText("reggaeton")).toHaveLength(2)
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Delete tag reggaeton" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+
+    await waitFor(() =>
+      expect(screen.queryAllByText("reggaeton")).toHaveLength(0)
+    )
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("deleting a tag in Manage tags removes it from the '+ tag' autocomplete, with no extra listTags call", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "reggaeton" }] },
+      { ...second, tags: [] },
+    ])
+    mockListTags.mockResolvedValue([
+      { id: 1, name: "reggaeton", carrier_count: 1 },
+      { id: 2, name: "drill", carrier_count: 0 },
+    ])
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Delete tag reggaeton" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "r")
+
+    await screen.findByRole("option", { name: "drill" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    await userEvent.type(input, "eggaeton")
+
+    await screen.findByRole("option", { name: "Create “reggaeton”" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(1)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("a '+ tag' vocabulary fetch that settles after a Manage tags delete does not bring the deleted tag back", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "reggaeton" }] },
+      { ...second, tags: [] },
+    ])
+    const fresh: TagSummary[] = [
+      { id: 1, name: "reggaeton", carrier_count: 1 },
+      { id: 2, name: "drill", carrier_count: 0 },
+    ]
+    let settleFirst: (tags: TagSummary[]) => void = () => {}
+    const pending = new Promise<TagSummary[]>((resolve) => {
+      settleFirst = resolve
+    })
+    mockListTags.mockReturnValueOnce(pending).mockResolvedValue(fresh)
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(1))
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toBeInTheDocument()
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag reggaeton" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      settleFirst(fresh)
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "r")
+
+    await screen.findByRole("option", { name: "drill" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    await userEvent.type(input, "eggaeton")
+
+    await screen.findByRole("option", { name: "Create “reggaeton”" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  // Open Manage tags (load 1 stays pending), close it, reopen it (load 2).
+  async function openCloseReopenManageTags() {
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+  }
+
+  it("a Manage tags GET /tags from an earlier open that settles after a delete does not bring the deleted tag back", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "reggaeton" }] },
+      { ...second, tags: [] },
+    ])
+    const fresh: TagSummary[] = [
+      { id: 1, name: "reggaeton", carrier_count: 1 },
+      { id: 2, name: "drill", carrier_count: 0 },
+    ]
+    const afterDelete: TagSummary[] = [
+      { id: 2, name: "drill", carrier_count: 0 },
+    ]
+    const first = deferred<TagSummary[]>()
+    mockListTags
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(fresh)
+      .mockResolvedValue(afterDelete)
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await openCloseReopenManageTags()
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag reggaeton" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      first.resolve(fresh)
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    await userEvent.type(input, "r")
+
+    await screen.findByRole("option", { name: "drill" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    await userEvent.type(input, "eggaeton")
+
+    await screen.findByRole("option", { name: "Create “reggaeton”" })
+    expect(
+      screen.queryByRole("option", { name: "reggaeton" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toBeInTheDocument()
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+    await screen.findByRole("button", { name: "Delete tag drill" })
+    expect(
+      screen.queryByRole("button", { name: "Delete tag reggaeton" })
+    ).not.toBeInTheDocument()
+    expect(mockListTags).toHaveBeenCalledTimes(3)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("a Manage tags GET /tags from an earlier open that settles after a rename does not undo it in '+ tag'", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "Latin" }] },
+      { ...second, tags: [] },
+    ])
+    const old: TagSummary[] = [
+      { id: 1, name: "Latin", carrier_count: 1 },
+      { id: 2, name: "drill", carrier_count: 0 },
+    ]
+    const first = deferred<TagSummary[]>()
+    mockListTags.mockReturnValueOnce(first.promise).mockResolvedValueOnce(old)
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "renamed",
+      tag: { id: 1, name: "Latino" },
+    })
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await openCloseReopenManageTags()
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Rename tag Latin" })
+    )
+    const renameInput = screen.getByRole("textbox", {
+      name: "New name for Latin",
+    })
+    await userEvent.clear(renameInput)
+    await userEvent.type(renameInput, "Latino{Enter}")
+    await screen.findByRole("button", { name: "Rename tag Latino" })
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      first.resolve(old)
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Rihanna" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Rihanna" })
+    await userEvent.type(input, "Latin")
+
+    await screen.findByRole("option", { name: "Latino" })
+    await screen.findByRole("option", { name: "Create “Latin”" })
+    expect(
+      screen.queryByRole("option", { name: "Latin" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("a Manage tags GET /tags from an earlier open that settles after a merge does not bring the merged-away tag back", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 5, name: "rap" }] },
+      { ...second, tags: [] },
+    ])
+    const old: TagSummary[] = [
+      { id: 5, name: "rap", carrier_count: 1 },
+      { id: 9, name: "trap", carrier_count: 0 },
+    ]
+    const first = deferred<TagSummary[]>()
+    mockListTags.mockReturnValueOnce(first.promise).mockResolvedValueOnce(old)
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: { id: 9, name: "trap" },
+      carrierCountAfterMerge: 1,
+    })
+    mockMergeTag.mockResolvedValueOnce({
+      id: 9,
+      name: "trap",
+      carrier_count: 1,
+    })
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await openCloseReopenManageTags()
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Rename tag rap" })
+    )
+    const renameInput = screen.getByRole("textbox", {
+      name: "New name for rap",
+    })
+    await userEvent.clear(renameInput)
+    await userEvent.type(renameInput, "trap{Enter}")
+
+    await screen.findByText("Merge “rap” into “trap”?")
+    await userEvent.click(screen.getByRole("button", { name: "Merge tags" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Rename tag rap" })
+      ).not.toBeInTheDocument()
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Manage tags" })
+      ).not.toBeInTheDocument()
+    )
+
+    await act(async () => {
+      first.resolve(old)
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Rihanna" })
+    )
+    const input = screen.getByRole("combobox", { name: "Add tag to Rihanna" })
+    await userEvent.type(input, "rap")
+
+    await screen.findByRole("option", { name: "trap" })
+    await screen.findByRole("option", { name: "Create “rap”" })
+    expect(
+      screen.queryByRole("option", { name: "rap" })
+    ).not.toBeInTheDocument()
+
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens Manage tags and renames a tag carried by two entries, so both cards show the new name with no extra listWatchlist call", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 1, name: "Latin" }] },
+      { ...second, tags: [{ id: 1, name: "Latin" }] },
+    ])
+    mockListTags.mockResolvedValue([{ id: 1, name: "Latin", carrier_count: 2 }])
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "renamed",
+      tag: { id: 1, name: "latin" },
+    })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    expect(screen.getAllByText("Latin")).toHaveLength(2)
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag Latin" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for Latin" })
+    await userEvent.clear(input)
+    await userEvent.type(input, "latin{Enter}")
+
+    await waitFor(() => expect(screen.queryAllByText("Latin")).toHaveLength(0))
+    expect(screen.getAllByText("latin")).toHaveLength(3)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens Manage tags, confirms a rename collision's merge, and every card carrying the source shows the target instead, with no extra listWatchlist call", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([
+      { ...entry, tags: [{ id: 5, name: "rap" }] },
+      { ...second, tags: [{ id: 5, name: "rap" }] },
+    ])
+    mockListTags.mockResolvedValue([
+      { id: 5, name: "rap", carrier_count: 2 },
+      { id: 9, name: "trap", carrier_count: 1 },
+    ])
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: { id: 9, name: "trap" },
+      carrierCountAfterMerge: 3,
+    })
+    mockMergeTag.mockResolvedValueOnce({
+      id: 9,
+      name: "trap",
+      carrier_count: 3,
+    })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    expect(screen.getAllByText("rap")).toHaveLength(2)
+
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag rap" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for rap" })
+    await userEvent.clear(input)
+    await userEvent.type(input, "trap{Enter}")
+
+    await screen.findByText("Merge “rap” into “trap”?")
+    await userEvent.click(screen.getByRole("button", { name: "Merge tags" }))
+
+    await waitFor(() => expect(screen.queryAllByText("rap")).toHaveLength(0))
+    expect(screen.getAllByText("trap")).toHaveLength(3)
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  // plan 24-07 Task 2: the remove toast's Undo restores the entry's note
+  // (D-27) -- Undo must never silently drop it.
+  function undoAction() {
+    const call = vi.mocked(toast.success).mock.calls[0] as [
+      string,
+      { action?: { onClick: () => void } },
+    ]
+    return call[1].action
+  }
+
+  it("Undo re-adds the artist with its note", async () => {
+    const withNote: WatchlistEntry = { ...entry, note: "crate digger" }
+    mockListWatchlist.mockResolvedValueOnce([withNote])
+    mockRemoveWatchlist.mockResolvedValueOnce(undefined)
+    mockAddWatchlist.mockResolvedValue(withNote)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Drake from watchlist" })
+    )
+    await waitFor(() => expect(mockRemoveWatchlist).toHaveBeenCalled())
+
+    undoAction()?.onClick()
+
+    await waitFor(() =>
+      expect(mockAddWatchlist).toHaveBeenCalledWith(
+        expect.objectContaining({ note: "crate digger" })
+      )
+    )
+  })
+
+  it("Undo for an entry with no note sends no note value", async () => {
+    mockListWatchlist.mockResolvedValueOnce([entry])
+    mockRemoveWatchlist.mockResolvedValueOnce(undefined)
+    mockAddWatchlist.mockResolvedValue(entry)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Drake")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Drake from watchlist" })
+    )
+    await waitFor(() => expect(mockRemoveWatchlist).toHaveBeenCalled())
+
+    undoAction()?.onClick()
+
+    await waitFor(() => expect(mockAddWatchlist).toHaveBeenCalled())
+    expect(mockAddWatchlist.mock.calls[0][0].note).toBeUndefined()
   })
 })
 
