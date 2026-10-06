@@ -1,14 +1,19 @@
 ---
-status: diagnosed
+status: testing
 phase: 24-artist-tags-notes
 source: [24-VERIFICATION.md]
+retest_after: 24-14
 started: 2026-10-05T16:00:54Z
-updated: 2026-10-05T18:30:00Z
+updated: 2026-10-06T20:06:42Z
 ---
 
 ## Current Test
 
-[testing complete]
+number: 12
+name: Re-test G-24-9 — expand and collapse a long note (after 24-14)
+expected: |
+  Mouse and keyboard: "more" expands a clamped note, the toggle stays mounted reading "less" with focus on it; "less" re-clamps to 2 lines, toggle reads "more", focus stays on it. A short note shows no toggle.
+awaiting: user response
 
 ## Tests
 
@@ -67,12 +72,28 @@ reported: "UI audit (24-UI-REVIEW.md fix 3): className 'text-label md:text-label
 severity: minor
 source: ui-review
 
+### 12. Re-test G-24-9 — expand and collapse a long note (after 24-14)
+expected: Mouse and keyboard: "more" expands a clamped note, the toggle stays mounted reading "less" with focus on it; "less" re-clamps to 2 lines, toggle reads "more", focus stays on it. A short note shows no toggle.
+result: [pending]
+
+### 13. Re-test G-24-10 — Manage tags initial focus (after 24-14)
+expected: With DevTools network throttled, open Manage tags: focus moves once from the close x to row 1's Rename when the list loads; with an empty vocabulary focus stays on the x; moving focus during loading is not stolen.
+result: [pending]
+
+### 14. Re-test G-24-11 — note textarea font size (after 24-14)
+expected: Note textarea computes 16px at 375px width and 14px at >=768px; no zoom on focus on iOS Safari.
+result: [pending]
+
+### 15. Manage tags reopen after closing mid-rename (code review WR-01)
+expected: Decide: open Manage tags, click Rename on row 1, close with x, reopen — row 1 currently reappears in stale rename mode with focus on its Cancel. Pass = accept/defer as follow-up; issue = fix now (reset rename state on open, select Rename by data attribute, add test).
+result: [pending]
+
 ## Summary
 
-total: 11
+total: 15
 passed: 8
 issues: 3
-pending: 0
+pending: 4
 skipped: 0
 blocked: 0
 
