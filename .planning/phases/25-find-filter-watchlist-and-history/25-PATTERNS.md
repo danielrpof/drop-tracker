@@ -183,7 +183,7 @@ Plain JSX text only (XSS posture noted in the file's header comment).
 **Analog:** itself.
 - Header comment (26-32) cites Phase 06 D-03/D-04 "never re-sorts client-side"; rewrite to 1-3 lines.
 - Functional-updater helpers `handleEntryChange` (76), `addTag` (89), `removeTag` (108): each also adds the id to `stickyIds` state (G4).
-- Manage-tags hooks `dropTagFromEntries` (122), `renameTagInEntries` (139), `mergeTagInEntries` (157): also update the URL `tags` param through the ref-based writer with `replace` (D-13).
+- Manage-tags hook `applyTagChange` (the route's TagVocabularyProvider `onChange`, quick 261007-kt1): its `deleted` / `merged` branches also update the URL `tags` param through the ref-based writer with `replace` (D-13).
 - `handleAddSearchResult` (249) and the Undo `.then(refresh)` (310): both need the new artist id added to `stickyIds`; `addWatchlist` response currently discarded at line 258.
 - Render (377-396): wrap in `<section aria-labelledby="watchlist-artists-heading">` with heading row, toolbar, and `visible.map` or the filtered-to-zero `EmptyState`. Reuse `announce` (220) and the status div (333).
 - The empty-entries state at 373-375 stays untouched.
