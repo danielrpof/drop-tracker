@@ -1,37 +1,28 @@
 -- name: GetWatchlistArtistID :one
--- Resolves the artist a watchlist entry belongs to, so attach/detach can
--- address artist_tags (which keys on artists.id, TAG-07) through the same
--- entry id every other watchlist route uses (D-20).
+-- Resolves a watchlist entry's artist; artist_tags keys on artists.id (TAG-07).
 SELECT artist_id FROM watchlist WHERE id = $1;
 
 -- name: GetOrCreateTag :one
--- One statement, no fallback SELECT (D-29): the no-op DO UPDATE is what
--- makes RETURNING yield the existing row on a collision, preserving the
--- first-entered casing (TAG-03). Conflict target is the tags_name_lower_idx
--- expression index from migration 000010.
+-- No fallback SELECT (D-29): the no-op DO UPDATE makes RETURNING yield the
+-- existing row on a collision, keeping its first-entered casing.
 INSERT INTO tags (name) VALUES ($1)
 ON CONFLICT ((lower(name))) DO UPDATE SET name = tags.name
 RETURNING id, name;
 
 -- name: AttachTag :execrows
--- Rows affected: 1 = new link, 0 = the artist already carried this tag
--- (D-21 idempotent attach). The artist_tags_cap_trigger (migration 000010)
--- enforces the 10-tag cap; this statement never counts anything itself.
+-- 1 row = new link, 0 = already linked (D-21). The cap trigger enforces the
+-- 10-tag limit; this statement never counts.
 INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2)
 ON CONFLICT (artist_id, tag_id) DO NOTHING;
 
 -- name: DetachTag :execrows
--- Any affected count is success (D-21): 0 rows means the link was already
--- gone, which is not an error for an idempotent detach.
+-- Any affected count is success; 0 rows means the link was already gone (D-21).
 DELETE FROM artist_tags WHERE artist_id = $1 AND tag_id = $2;
 
 -- name: ListTags :many
--- Watched-only carrier count (D-11): count(w.id) counts a row only when the
--- LEFT JOIN watchlist actually matched, so a tag whose only links belong to
--- removed artists (or no links at all) still surfaces with count 0 (D-12,
--- D-13) instead of being dropped by an inner join. Ordered by lower(name)
--- then id: tags_name_lower_idx makes lower(name) unique, so this is a
--- total, repeatable order (TAG-05).
+-- count(w.id) counts only matched watchlist rows, so tags carried solely by
+-- removed artists, or by none, still list with 0 instead of being dropped by
+-- an inner join (D-11). lower(name) is unique, so the order is total.
 SELECT t.id, t.name, count(w.id)::bigint AS carrier_count
 FROM tags t
 LEFT JOIN artist_tags link ON link.tag_id = t.id
@@ -40,30 +31,24 @@ GROUP BY t.id, t.name
 ORDER BY lower(t.name), t.id;
 
 -- name: RenameTag :one
--- A plain rename by id. A collision is never checked here -- it surfaces as
--- a tags_name_lower_idx unique violation, which Service.Rename maps to
--- *CollisionError (D-09, D-22). A case-only rename of the same row cannot
--- conflict with its own index entry.
+-- No collision pre-check: a tags_name_lower_idx unique violation is mapped
+-- to *CollisionError by Service.Rename (D-22).
 UPDATE tags SET name = $2 WHERE id = $1 RETURNING id, name;
 
 -- name: GetTagByName :one
--- Used only *after* a tags_name_lower_idx violation, to identify the
--- collider (D-22) -- never a pre-check.
+-- Only after a tags_name_lower_idx violation, to identify the collider (D-22).
 SELECT id, name FROM tags WHERE lower(name) = lower($1);
 
 -- name: CountCarriersForTags :one
--- Watched carriers across one or more tags, each artist counted once even
--- when it carries more than one of the given tags (union count, D-19/SC3).
+-- Watched carriers across the given tags, each artist counted once (D-19).
 SELECT count(DISTINCT w.artist_id)::bigint AS carrier_count
 FROM artist_tags link
 JOIN watchlist w ON w.artist_id = link.artist_id
 WHERE link.tag_id = ANY(@tag_ids::bigint[]);
 
 -- name: DeleteTagCountingCarriers :one
--- Both CTEs read the same pre-statement snapshot (Postgres WITH semantics):
--- counted's SELECT never sees deleted's cascade removal of artist_tags, so
--- the reported count is exactly the watched-carrier count the delete
--- removed (TAG-06). Zero rows means the tag did not exist.
+-- Both CTEs share one snapshot, so counted never sees deleted's cascade and
+-- reports the carriers the delete removed (TAG-06). Zero rows = no such tag.
 WITH counted AS (
     SELECT count(w.id)::bigint AS carrier_count
     FROM artist_tags link
@@ -74,20 +59,16 @@ WITH counted AS (
 )
 SELECT deleted.id, counted.carrier_count FROM deleted, counted;
 
--- Merge (D-19, ADR 0004): delete duplicate source links, repoint the rest,
--- delete the source tag -- never insert, so a 10-tag artist merging in a
--- tag it already carries never transiently holds 11 links.
+-- Merge statement order and why it never inserts: ADR 0004.
 
 -- name: LockTagsForMerge :many
--- ORDER BY id FOR UPDATE takes both tag locks in id order so two concurrent
--- merges sharing a tag cannot deadlock; the lock also parks a concurrent
--- attach/rename of either tag until this transaction commits.
+-- Locks both tags in id order so concurrent merges cannot deadlock; it also
+-- parks a concurrent attach/rename until commit.
 SELECT id, name FROM tags WHERE id = ANY(@ids::bigint[]) ORDER BY id FOR UPDATE;
 
 -- name: DeleteDuplicateSourceLinks :execrows
--- Removes the source's links for artists that already carry the target --
--- these would otherwise become duplicate (artist_id, target) rows once
--- RepointSourceLinks runs.
+-- Drops source links for artists already carrying the target, which would
+-- otherwise duplicate once RepointSourceLinks runs.
 DELETE FROM artist_tags src
 WHERE src.tag_id = @source_id
   AND EXISTS (
@@ -96,18 +77,14 @@ WHERE src.tag_id = @source_id
   );
 
 -- name: RepointSourceLinks :execrows
--- Rewrites the source's remaining links to the target via UPDATE, never
--- INSERT (D-19) -- an UPDATE never fires the cap trigger's BEFORE INSERT
--- check, which is why this is the only statement shape that cannot
--- transiently exceed the cap.
+-- Repoints the remaining links via UPDATE, never INSERT (ADR 0004).
 UPDATE artist_tags SET tag_id = @target_id WHERE tag_id = @source_id;
 
 -- name: DeleteTag :execrows
 DELETE FROM tags WHERE id = $1;
 
 -- name: CountCarriers :one
--- Watched carriers of one tag (D-11), used to report the merge target's
--- post-merge count.
+-- Watched carriers of one tag, for the merge target's post-merge count.
 SELECT count(w.id)::bigint AS carrier_count
 FROM artist_tags link
 JOIN watchlist w ON w.artist_id = link.artist_id

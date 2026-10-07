@@ -62,20 +62,17 @@ type TagStore interface {
 	Merge(ctx context.Context, sourceID, targetID int64) (tags.Summary, error)
 }
 
-// WithTags supplies the tags domain dependency backing POST
-// /watchlist/{id}/tags and DELETE /watchlist/{id}/tags/{tag_id}. Absent,
-// the handlers answer 503 with the shared fixed error body, mirroring
-// WithSettings/WithStatus; a cmd/server binary always wires it.
+// WithTags supplies the tags store backing every tag route: attach/detach
+// under /watchlist/{id}/tags and the /tags list, rename, merge and delete
+// routes. Absent, they all answer 503, like WithSettings/WithStatus.
 func WithTags(store TagStore) Option {
 	return func(c *serverConfig) {
 		c.tags = store
 	}
 }
 
-// parseTagID reads and validates a tag-id path segment named param the same
-// way parseWatchlistID validates {id} -- tags.id is BIGSERIAL, so 0 and
-// negatives are never valid. param is "tag_id" on the watchlist-scoped
-// attach/detach routes and "id" on the /tags/{id} vocabulary routes.
+// parseTagID validates a tag-id path segment like parseWatchlistID; param is
+// "tag_id" on the watchlist-scoped routes and "id" on /tags/{id}.
 func parseTagID(r *http.Request, param string) (int64, error) {
 	raw := chi.URLParam(r, param)
 	id, err := strconv.ParseInt(raw, 10, 64)
@@ -85,9 +82,8 @@ func parseTagID(r *http.Request, param string) (int64, error) {
 	return id, nil
 }
 
-// attachTagRequest is the request DTO for POST /watchlist/{id}/tags. It
-// carries only the client-suppliable field -- id is server-derived from the
-// path, so an over-posted id is rejected by DisallowUnknownFields.
+// attachTagRequest is the request DTO for POST /watchlist/{id}/tags; the id
+// comes from the path, so an over-posted one fails DisallowUnknownFields.
 type attachTagRequest struct {
 	Name string `json:"name"`
 }
@@ -98,8 +94,7 @@ type tagResponse struct {
 	Name string `json:"name"`
 }
 
-// handleAttachTag implements POST /watchlist/{id}/tags (TAG-01, D-20, D-21).
-// tags.Service validates the name.
+// handleAttachTag implements POST /watchlist/{id}/tags (TAG-01).
 func (s *Server) handleAttachTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -134,9 +129,8 @@ func (s *Server) handleAttachTag(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(tagResponse{ID: result.Tag.ID, Name: result.Tag.Name})
 }
 
-// handleDetachTag implements DELETE /watchlist/{id}/tags/{tag_id} (TAG-02,
-// D-20, D-21). Any outcome short of "watchlist entry not found" is 204 --
-// detaching a link that never existed is idempotent success, never 404.
+// handleDetachTag implements DELETE /watchlist/{id}/tags/{tag_id}. Only an
+// unknown entry is 404; a missing link is idempotent 204 (D-21).
 func (s *Server) handleDetachTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -163,10 +157,8 @@ func (s *Server) handleDetachTag(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleListTags implements GET /tags (TAG-05, D-11, D-13, D-30): the whole
-// vocabulary with watched-only carrier counts, in the stable lower(name)
-// order the DB query already guarantees. Also the autocomplete source
-// (D-30) and Manage tags' list (D-22).
+// handleListTags implements GET /tags (TAG-05): the whole vocabulary with
+// watched-only carrier counts, also the autocomplete source.
 func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -189,9 +181,8 @@ type renameTagRequest struct {
 	Name string `json:"name"`
 }
 
-// tagCollisionResponse is the 409 body for a rename whose normalized name
-// collides with a different existing tag (D-22): everything the merge
-// confirm dialog needs, verbatim (24-UI-SPEC.md Copywriting).
+// tagCollisionResponse is the 409 body for a rename collision: everything
+// the merge confirm dialog needs (D-22).
 type tagCollisionResponse struct {
 	Error                  string   `json:"error"`
 	Code                   string   `json:"code"`
@@ -205,8 +196,7 @@ type deleteTagResponse struct {
 	CarrierCount int64 `json:"carrier_count"`
 }
 
-// handleRenameTag implements PATCH /tags/{id} (TAG-05, D-09, D-22, D-23).
-// tags.Service validates the name.
+// handleRenameTag implements PATCH /tags/{id} (TAG-05).
 func (s *Server) handleRenameTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -250,10 +240,8 @@ func (s *Server) handleRenameTag(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(tagResponse{ID: renamed.ID, Name: renamed.Name})
 }
 
-// handleDeleteTag implements DELETE /tags/{id} (TAG-06, D-11, SC4): removes
-// the tag from every artist (including removed ones) and reports the
-// watched-carrier count. Unlike detach, a missing tag id is a genuine 404 --
-// deleting a tag that never existed is not an idempotent no-op.
+// handleDeleteTag implements DELETE /tags/{id} (TAG-06). Unlike detach, an
+// unknown tag id is a genuine 404.
 func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -282,9 +270,8 @@ type mergeTagRequest struct {
 	Into int64 `json:"into"`
 }
 
-// handleMergeTag implements POST /tags/{id}/merge (TAG-05, D-19, D-22,
-// D-23): the confirmed-merge counterpart to a 409 rename collision. {id} is
-// the source tag; into is the target.
+// handleMergeTag implements POST /tags/{id}/merge (D-19), the confirmed
+// counterpart to a 409 rename collision. {id} is the source; into the target.
 func (s *Server) handleMergeTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")

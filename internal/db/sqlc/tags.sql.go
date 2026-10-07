@@ -19,9 +19,8 @@ type AttachTagParams struct {
 	TagID    int64 `json:"tag_id"`
 }
 
-// Rows affected: 1 = new link, 0 = the artist already carried this tag
-// (D-21 idempotent attach). The artist_tags_cap_trigger (migration 000010)
-// enforces the 10-tag cap; this statement never counts anything itself.
+// 1 row = new link, 0 = already linked (D-21). The cap trigger enforces the
+// 10-tag limit; this statement never counts.
 func (q *Queries) AttachTag(ctx context.Context, arg AttachTagParams) (int64, error) {
 	result, err := q.db.Exec(ctx, attachTag, arg.ArtistID, arg.TagID)
 	if err != nil {
@@ -37,8 +36,7 @@ JOIN watchlist w ON w.artist_id = link.artist_id
 WHERE link.tag_id = $1
 `
 
-// Watched carriers of one tag (D-11), used to report the merge target's
-// post-merge count.
+// Watched carriers of one tag, for the merge target's post-merge count.
 func (q *Queries) CountCarriers(ctx context.Context, tagID int64) (int64, error) {
 	row := q.db.QueryRow(ctx, countCarriers, tagID)
 	var carrier_count int64
@@ -53,8 +51,7 @@ JOIN watchlist w ON w.artist_id = link.artist_id
 WHERE link.tag_id = ANY($1::bigint[])
 `
 
-// Watched carriers across one or more tags, each artist counted once even
-// when it carries more than one of the given tags (union count, D-19/SC3).
+// Watched carriers across the given tags, each artist counted once (D-19).
 func (q *Queries) CountCarriersForTags(ctx context.Context, tagIds []int64) (int64, error) {
 	row := q.db.QueryRow(ctx, countCarriersForTags, tagIds)
 	var carrier_count int64
@@ -76,9 +73,8 @@ type DeleteDuplicateSourceLinksParams struct {
 	TargetID int64 `json:"target_id"`
 }
 
-// Removes the source's links for artists that already carry the target --
-// these would otherwise become duplicate (artist_id, target) rows once
-// RepointSourceLinks runs.
+// Drops source links for artists already carrying the target, which would
+// otherwise duplicate once RepointSourceLinks runs.
 func (q *Queries) DeleteDuplicateSourceLinks(ctx context.Context, arg DeleteDuplicateSourceLinksParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteDuplicateSourceLinks, arg.SourceID, arg.TargetID)
 	if err != nil {
@@ -116,10 +112,8 @@ type DeleteTagCountingCarriersRow struct {
 	CarrierCount int64 `json:"carrier_count"`
 }
 
-// Both CTEs read the same pre-statement snapshot (Postgres WITH semantics):
-// counted's SELECT never sees deleted's cascade removal of artist_tags, so
-// the reported count is exactly the watched-carrier count the delete
-// removed (TAG-06). Zero rows means the tag did not exist.
+// Both CTEs share one snapshot, so counted never sees deleted's cascade and
+// reports the carriers the delete removed (TAG-06). Zero rows = no such tag.
 func (q *Queries) DeleteTagCountingCarriers(ctx context.Context, tagID int64) (DeleteTagCountingCarriersRow, error) {
 	row := q.db.QueryRow(ctx, deleteTagCountingCarriers, tagID)
 	var i DeleteTagCountingCarriersRow
@@ -136,8 +130,7 @@ type DetachTagParams struct {
 	TagID    int64 `json:"tag_id"`
 }
 
-// Any affected count is success (D-21): 0 rows means the link was already
-// gone, which is not an error for an idempotent detach.
+// Any affected count is success; 0 rows means the link was already gone (D-21).
 func (q *Queries) DetachTag(ctx context.Context, arg DetachTagParams) (int64, error) {
 	result, err := q.db.Exec(ctx, detachTag, arg.ArtistID, arg.TagID)
 	if err != nil {
@@ -157,10 +150,8 @@ type GetOrCreateTagRow struct {
 	Name string `json:"name"`
 }
 
-// One statement, no fallback SELECT (D-29): the no-op DO UPDATE is what
-// makes RETURNING yield the existing row on a collision, preserving the
-// first-entered casing (TAG-03). Conflict target is the tags_name_lower_idx
-// expression index from migration 000010.
+// No fallback SELECT (D-29): the no-op DO UPDATE makes RETURNING yield the
+// existing row on a collision, keeping its first-entered casing.
 func (q *Queries) GetOrCreateTag(ctx context.Context, name string) (GetOrCreateTagRow, error) {
 	row := q.db.QueryRow(ctx, getOrCreateTag, name)
 	var i GetOrCreateTagRow
@@ -177,8 +168,7 @@ type GetTagByNameRow struct {
 	Name string `json:"name"`
 }
 
-// Used only *after* a tags_name_lower_idx violation, to identify the
-// collider (D-22) -- never a pre-check.
+// Only after a tags_name_lower_idx violation, to identify the collider (D-22).
 func (q *Queries) GetTagByName(ctx context.Context, lower string) (GetTagByNameRow, error) {
 	row := q.db.QueryRow(ctx, getTagByName, lower)
 	var i GetTagByNameRow
@@ -190,9 +180,7 @@ const getWatchlistArtistID = `-- name: GetWatchlistArtistID :one
 SELECT artist_id FROM watchlist WHERE id = $1
 `
 
-// Resolves the artist a watchlist entry belongs to, so attach/detach can
-// address artist_tags (which keys on artists.id, TAG-07) through the same
-// entry id every other watchlist route uses (D-20).
+// Resolves a watchlist entry's artist; artist_tags keys on artists.id (TAG-07).
 func (q *Queries) GetWatchlistArtistID(ctx context.Context, id int64) (int64, error) {
 	row := q.db.QueryRow(ctx, getWatchlistArtistID, id)
 	var artist_id int64
@@ -215,12 +203,9 @@ type ListTagsRow struct {
 	CarrierCount int64  `json:"carrier_count"`
 }
 
-// Watched-only carrier count (D-11): count(w.id) counts a row only when the
-// LEFT JOIN watchlist actually matched, so a tag whose only links belong to
-// removed artists (or no links at all) still surfaces with count 0 (D-12,
-// D-13) instead of being dropped by an inner join. Ordered by lower(name)
-// then id: tags_name_lower_idx makes lower(name) unique, so this is a
-// total, repeatable order (TAG-05).
+// count(w.id) counts only matched watchlist rows, so tags carried solely by
+// removed artists, or by none, still list with 0 instead of being dropped by
+// an inner join (D-11). lower(name) is unique, so the order is total.
 func (q *Queries) ListTags(ctx context.Context) ([]ListTagsRow, error) {
 	rows, err := q.db.Query(ctx, listTags)
 	if err != nil {
@@ -251,12 +236,9 @@ type LockTagsForMergeRow struct {
 	Name string `json:"name"`
 }
 
-// Merge (D-19, ADR 0004): delete duplicate source links, repoint the rest,
-// delete the source tag -- never insert, so a 10-tag artist merging in a
-// tag it already carries never transiently holds 11 links.
-// ORDER BY id FOR UPDATE takes both tag locks in id order so two concurrent
-// merges sharing a tag cannot deadlock; the lock also parks a concurrent
-// attach/rename of either tag until this transaction commits.
+// Merge statement order and why it never inserts: ADR 0004.
+// Locks both tags in id order so concurrent merges cannot deadlock; it also
+// parks a concurrent attach/rename until commit.
 func (q *Queries) LockTagsForMerge(ctx context.Context, ids []int64) ([]LockTagsForMergeRow, error) {
 	rows, err := q.db.Query(ctx, lockTagsForMerge, ids)
 	if err != nil {
@@ -291,10 +273,8 @@ type RenameTagRow struct {
 	Name string `json:"name"`
 }
 
-// A plain rename by id. A collision is never checked here -- it surfaces as
-// a tags_name_lower_idx unique violation, which Service.Rename maps to
-// *CollisionError (D-09, D-22). A case-only rename of the same row cannot
-// conflict with its own index entry.
+// No collision pre-check: a tags_name_lower_idx unique violation is mapped
+// to *CollisionError by Service.Rename (D-22).
 func (q *Queries) RenameTag(ctx context.Context, arg RenameTagParams) (RenameTagRow, error) {
 	row := q.db.QueryRow(ctx, renameTag, arg.ID, arg.Name)
 	var i RenameTagRow
@@ -311,10 +291,7 @@ type RepointSourceLinksParams struct {
 	SourceID int64 `json:"source_id"`
 }
 
-// Rewrites the source's remaining links to the target via UPDATE, never
-// INSERT (D-19) -- an UPDATE never fires the cap trigger's BEFORE INSERT
-// check, which is why this is the only statement shape that cannot
-// transiently exceed the cap.
+// Repoints the remaining links via UPDATE, never INSERT (ADR 0004).
 func (q *Queries) RepointSourceLinks(ctx context.Context, arg RepointSourceLinksParams) (int64, error) {
 	result, err := q.db.Exec(ctx, repointSourceLinks, arg.TargetID, arg.SourceID)
 	if err != nil {

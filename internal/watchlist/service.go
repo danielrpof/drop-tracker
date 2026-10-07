@@ -67,17 +67,15 @@ var (
 	// happened (WR-01, G-02-1).
 	ErrNoPreferencesSupplied = errors.New("no preferences supplied")
 	// ErrNoteTooLong is returned when a note exceeds MaxNoteRunes after
-	// trimming (D-25, NOTE-01).
+	// trimming (NOTE-01).
 	ErrNoteTooLong = fmt.Errorf("note must be at most %d characters", MaxNoteRunes)
-	// ErrNoteInvalid is returned when a note contains a character Postgres
-	// text cannot store (U+0000) -- Postgres itself would reject the write,
-	// so this is caught before ever reaching the database.
+	// ErrNoteInvalid is returned when a note contains U+0000, which Postgres
+	// text cannot store.
 	ErrNoteInvalid = errors.New("note contains invalid characters")
 )
 
-// TagRef is the tag shape embedded in Entry.Tags -- kept in this package
-// (not imported from internal/tags) so watchlist never depends on tags
-// (24-RESEARCH.md Architectural Responsibility Map).
+// TagRef is the tag shape in Entry.Tags, declared here so watchlist never
+// imports internal/tags.
 type TagRef struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
@@ -111,9 +109,7 @@ type AddParams struct {
 	ImageURL        *string
 	ReleaseTypes    []string
 	MutedEventTypes []string
-	// Note is optional (D-27): the remove toast's Undo re-adds it so a
-	// restored artist does not silently lose the note D-10 would otherwise
-	// drop. nil means no note, matching a plain add.
+	// Note is optional; the remove toast's Undo re-adds it (D-27).
 	Note *string
 }
 
@@ -228,9 +224,8 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 		}
 	}
 
-	// D-27: normalize the optional note alongside the two preference axes,
-	// before any database call, so a rejected note leaves no artists row
-	// behind either -- the same rule the two axes above already follow.
+	// Normalize the note before any database call, like the axes above, so a
+	// rejected note leaves no artists row behind (D-27).
 	note, err := NormalizeNote(p.Note)
 	if err != nil {
 		return Entry{}, err
@@ -317,8 +312,7 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 		return Entry{}, fmt.Errorf("create watchlist entry: %w", err)
 	}
 
-	// D-26: the response comes from the same projection GET /watchlist uses,
-	// not a hand-built Entry -- tags/note are accurate on every route.
+	// Re-read through the shared projection so tags/note are accurate (D-26).
 	return s.get(ctx, entry.ID)
 }
 
@@ -344,9 +338,8 @@ func (s *Service) List(ctx context.Context) ([]Entry, error) {
 	return entries, nil
 }
 
-// entryFromRow maps a ListWatchlist row into the API-facing Entry shape --
-// shared by List and get (below) so both routes build the same value the
-// same way. Always returns a non-nil Tags slice (D-26).
+// entryFromRow maps a ListWatchlist row into an Entry for List and get, with
+// a non-nil Tags slice (D-26).
 func entryFromRow(row sqlc.ListWatchlistRow) (Entry, error) {
 	tags, err := zipTags(row.TagIds, row.TagNames)
 	if err != nil {
@@ -369,10 +362,8 @@ func entryFromRow(row sqlc.ListWatchlistRow) (Entry, error) {
 	}, nil
 }
 
-// get reads one entry through the same projection List uses (D-26): the
-// sqlc.ListWatchlistRow(...) conversion below only compiles while
-// GetWatchlistEntry's select list stays identical to ListWatchlist's, which
-// is what enforces "same projection everywhere" at build time.
+// get reads one entry through List's projection (D-26); the ListWatchlistRow
+// conversion only compiles while both select lists stay identical.
 func (s *Service) get(ctx context.Context, id int64) (Entry, error) {
 	row, err := s.q.GetWatchlistEntry(ctx, id)
 	if err != nil {
@@ -384,10 +375,8 @@ func (s *Service) get(ctx context.Context, id int64) (Entry, error) {
 	return entryFromRow(sqlc.ListWatchlistRow(row))
 }
 
-// NormalizeNote applies D-25's trim / empty-to-null / length-cap rules
-// before any database write, shared by PUT /watchlist/{id}/note and POST
-// /watchlist's optional note (D-27). nil in means "no note supplied"; the
-// watchlist_note_length CHECK is the backstop.
+// NormalizeNote trims, maps empty to nil and caps length (D-25) for the note
+// route and Add's optional note. nil in means no note supplied.
 func NormalizeNote(raw *string) (*string, error) {
 	if raw == nil {
 		return nil, nil
@@ -405,13 +394,9 @@ func NormalizeNote(raw *string) (*string, error) {
 	return &trimmed, nil
 }
 
-// zipTags pairs ListWatchlist's two parallel array_agg-free ARRAY(...)
-// projections index-for-index into TagRef (D-26, 24-RESEARCH.md Pattern 5).
-// Both projections share the same FROM/JOIN/WHERE/ORDER BY, so their
-// lengths always match in practice -- the length check below turns any
-// future drift between the two subqueries into a loud error instead of a
-// silently mispaired {id, name} (Pitfall 4). Always returns a non-nil
-// slice, even for zero tags, so the JSON encoding is never null (D-26).
+// zipTags pairs ListWatchlist's two parallel ARRAY(...) projections into
+// TagRefs (D-26). The length check turns drift between the subqueries into
+// an error instead of a mispaired id/name. Never returns nil.
 func zipTags(ids []int64, names []string) ([]TagRef, error) {
 	if len(ids) != len(names) {
 		return nil, fmt.Errorf("tag_ids/tag_names length mismatch: %d ids, %d names", len(ids), len(names))
@@ -486,10 +471,8 @@ func (s *Service) UpdatePreferences(ctx context.Context, id int64, p Preferences
 		return Entry{}, fmt.Errorf("update watchlist preferences: %w", err)
 	}
 
-	// D-26: re-read through the shared projection rather than hand-building
-	// the response, so tags/note are accurate here too. A concurrent delete
-	// landing between the UPDATE above and this read surfaces as the same
-	// honest ErrNotFound -- get's own pgx.ErrNoRows translation.
+	// Re-read through the shared projection (D-26); a concurrent delete
+	// between the UPDATE and here surfaces as ErrNotFound.
 	return s.get(ctx, updated.ID)
 }
 
@@ -513,11 +496,8 @@ func (s *Service) Remove(ctx context.Context, id int64) error {
 	return nil
 }
 
-// UpdateNote applies D-25's PUT /watchlist/{id}/note semantics: normalize
-// first (trim, empty-to-null, length cap) so a rejected note never touches
-// the database, then write and re-read through get so the response carries
-// the same tags + note projection every other route does (D-26). The
-// watchlist_note_length CHECK is the backstop (T-24-21).
+// UpdateNote normalizes the note before touching the database, writes it and
+// re-reads through get so the response matches every other route (D-25).
 func (s *Service) UpdateNote(ctx context.Context, id int64, note *string) (Entry, error) {
 	normalized, err := NormalizeNote(note)
 	if err != nil {

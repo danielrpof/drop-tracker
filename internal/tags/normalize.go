@@ -26,13 +26,9 @@ var (
 	ErrNameInvalid = errors.New("tag name contains invalid characters")
 )
 
-// NormalizeName applies NFC (so a decomposed and precomposed form of the
-// same tag are one identity), trims outer whitespace and collapses internal
-// runs to a single space, then validates: empty/blank is ErrNameRequired,
-// a control character other than whitespace is ErrNameInvalid, and more
-// than MaxNameRunes is ErrNameTooLong. Rune-counted after NFC, matching
-// Postgres char_length (TAG-04 encoding probe) -- never byte-counted, so a
-// multi-byte name is not rejected for its byte length.
+// NormalizeName applies NFC, trims and collapses interior whitespace, then
+// returns ErrNameRequired, ErrNameInvalid or ErrNameTooLong. Length counts
+// code points after NFC to match Postgres char_length (TAG-04).
 func NormalizeName(raw string) (string, error) {
 	s := norm.NFC.String(raw)
 	s = strings.Join(strings.Fields(s), " ")

@@ -281,15 +281,11 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	// and no path allowlist -- structural gating, not a code-path decision.
 	r.Get("/settings/notifications", s.handleGetSettings)
 	r.Put("/settings/notifications", s.handleUpdateSettings)
-	// Tag attach/detach (TAG-01, TAG-02, D-20) -- registered here, not in a
-	// separate function, so both inherit gate.Authenticate +
-	// gate.RequireCSRFHeader exactly like every other data route (T-24-03,
-	// T-24-04).
+	// Tag routes sit with the other data routes so they inherit
+	// gate.Authenticate and gate.RequireCSRFHeader (T-24-03).
 	r.Post("/watchlist/{id}/tags", s.handleAttachTag)
 	r.Delete("/watchlist/{id}/tags/{tag_id}", s.handleDetachTag)
-	// Tag vocabulary (TAG-05, TAG-06, D-22) -- global list/rename/merge/delete,
-	// same registration point so every route inherits gate.Authenticate +
-	// gate.RequireCSRFHeader.
+	// Global tag vocabulary.
 	r.Get("/tags", s.handleListTags)
 	r.Patch("/tags/{id}", s.handleRenameTag)
 	r.Delete("/tags/{id}", s.handleDeleteTag)

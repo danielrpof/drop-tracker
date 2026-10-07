@@ -27,7 +27,7 @@ var (
 	// merge, delete) when the id does not exist.
 	ErrTagNotFound = errors.New("tag not found")
 	// ErrTagCapReached is returned when an attach would exceed
-	// MaxTagsPerArtist (TAG-04, ADR 0004).
+	// MaxTagsPerArtist (ADR 0004).
 	ErrTagCapReached = fmt.Errorf("artist already has the maximum of %d tags", MaxTagsPerArtist)
 	// ErrMergeIntoSelf is returned when Merge's source and target ids are
 	// the same.
@@ -58,11 +58,9 @@ type Summary struct {
 	CarrierCount int64  `json:"carrier_count"`
 }
 
-// CollisionError is returned by Rename when the normalized new name matches
-// a different, already-existing tag (D-22). Target carries the colliding
-// tag's own stored casing (D-23); CarrierCountAfterMerge is the watched
-// carrier union of both tags -- what a subsequent confirmed merge would
-// return.
+// CollisionError is returned by Rename when the new name matches a different
+// tag (D-22). Target keeps its stored casing; CarrierCountAfterMerge is what
+// a confirmed merge would return.
 type CollisionError struct {
 	Target                 Tag
 	CarrierCountAfterMerge int64
@@ -90,11 +88,8 @@ func NewService(db DB) *Service {
 	return &Service{db: db, q: sqlc.New(db)}
 }
 
-// Attach normalizes name, then in one transaction: resolves entryID's
-// artist, gets-or-creates the tag (D-29), and links it (the cap trigger
-// does the enforcement, ADR 0004). The get-or-create and the link insert
-// share the transaction so a refused link never leaves a new orphan tag
-// behind.
+// Attach gets-or-creates the tag and links it to entryID's artist in one
+// transaction, so a link refused by the cap trigger leaves no orphan tag (D-29).
 func (s *Service) Attach(ctx context.Context, entryID int64, name string) (AttachResult, error) {
 	normalized, err := NormalizeName(name)
 	if err != nil {
@@ -134,9 +129,8 @@ func (s *Service) Attach(ctx context.Context, entryID int64, name string) (Attac
 	return AttachResult{Tag: Tag{ID: tag.ID, Name: tag.Name}, Created: affected == 1}, nil
 }
 
-// Detach removes a tag link. Any affected count is success -- 0 rows means
-// the link was already gone, which D-21 treats as idempotent success, not
-// an error. An unknown entry id is still ErrEntryNotFound.
+// Detach removes a tag link; an already-gone link is success (D-21). An
+// unknown entry id is still ErrEntryNotFound.
 func (s *Service) Detach(ctx context.Context, entryID, tagID int64) error {
 	artistID, err := s.q.GetWatchlistArtistID(ctx, entryID)
 	if err != nil {
@@ -152,9 +146,8 @@ func (s *Service) Detach(ctx context.Context, entryID, tagID int64) error {
 	return nil
 }
 
-// List returns the whole tag vocabulary ordered by lower(name) then id
-// (TAG-05), with watched-only carrier counts (D-11) -- including tags with
-// zero links (D-12) and tags only removed artists carry (D-13). Never nil.
+// List returns the whole vocabulary ordered by lower(name) then id, with
+// watched-only carrier counts, zero-count tags included (D-11). Never nil.
 func (s *Service) List(ctx context.Context) ([]Summary, error) {
 	rows, err := s.q.ListTags(ctx)
 	if err != nil {
@@ -167,12 +160,8 @@ func (s *Service) List(ctx context.Context) ([]Summary, error) {
 	return summaries, nil
 }
 
-// Rename normalizes the new name, then attempts RenameTag directly --
-// collision detection happens from the tags_name_lower_idx unique
-// violation, never a pre-check (D-09, D-22): RenameTag is always called
-// before any GetTagByName lookup. A case-only rename of the same row (or a
-// rename to its own current name) never collides, since a row's own index
-// entry cannot conflict with itself.
+// Rename detects a collision from the tags_name_lower_idx unique violation,
+// never a pre-check (D-22); a case-only rename of the same row cannot collide.
 func (s *Service) Rename(ctx context.Context, id int64, name string) (Tag, error) {
 	normalized, err := NormalizeName(name)
 	if err != nil {
@@ -221,10 +210,8 @@ func (s *Service) Rename(ctx context.Context, id int64, name string) (Tag, error
 	}
 }
 
-// Delete removes a tag from the vocabulary everywhere, including links held
-// by removed artists (D-11 counts only watched carriers, but a delete still
-// removes every link, cascaded by artist_tags' FK). Returns the watched
-// carrier count it deleted from, for the confirmation toast (TAG-06).
+// Delete removes the tag and every link, removed artists' included, and
+// returns the watched carrier count for the confirmation toast (TAG-06).
 func (s *Service) Delete(ctx context.Context, id int64) (int64, error) {
 	row, err := s.q.DeleteTagCountingCarriers(ctx, id)
 	if err != nil {
@@ -236,12 +223,8 @@ func (s *Service) Delete(ctx context.Context, id int64) (int64, error) {
 	return row.CarrierCount, nil
 }
 
-// Merge unions sourceID's carriers into targetID, keeping the target's
-// stored casing (D-23). One transaction, statement order fixed by ADR 0004
-// / D-19: delete the source's duplicate links, UPDATE (never INSERT) the
-// rest onto the target, then delete the source tag -- an UPDATE never fires
-// the cap trigger's BEFORE INSERT check, so a 10-tag artist merging in a tag
-// it already carries never transiently holds 11 links.
+// Merge moves sourceID's links onto targetID, keeps the target's casing and
+// deletes the source in one transaction, never inserting links (ADR 0004).
 func (s *Service) Merge(ctx context.Context, sourceID, targetID int64) (Summary, error) {
 	if sourceID == targetID {
 		return Summary{}, ErrMergeIntoSelf

@@ -1,8 +1,6 @@
 -- name: CreateWatchlistEntry :one
--- note (D-27): stays positional -- sqlc rejects mixing $n with
--- sqlc.arg/sqlc.narg in one query -- and stays nullable, so the generated
--- Note param is a *string; nil is a plain add, a caller-supplied value is
--- Undo restoring what D-10 would otherwise drop.
+-- note stays positional and nullable: sqlc rejects mixing $n with
+-- sqlc.arg/narg, and a nil *string is a plain add (D-27).
 INSERT INTO watchlist (artist_id, release_types, muted_event_types, note)
 VALUES ($1, $2, $3, $4)
 RETURNING *;
@@ -16,13 +14,9 @@ RETURNING *;
 -- it, two equally-named artists would come back in whatever order the
 -- planner happens to choose, which is non-deterministic across runs.
 --
--- tag_ids/tag_names (D-26, D-30, single query): two parallel ARRAY(...)
--- subqueries, never json_agg (sqlc-dev/sqlc#3438 emits interface{} under
--- pgx/v5). ARRAY(subquery) is already {} for no rows, not NULL, so no
--- COALESCE is needed. Both subqueries share FROM/JOIN/WHERE/ORDER BY byte
--- for byte, differing only in the aggregated column -- watchlist.zipTags
--- pairs them index-for-index, and a future edit to one without the other
--- would silently mispair ids with names (24-RESEARCH.md Pitfall 4).
+-- tag_ids/tag_names (D-26): parallel ARRAY(...) subqueries, not json_agg
+-- (sqlc#3438 emits interface{}). They must stay identical but for the column,
+-- or zipTags would mispair ids and names.
 SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
        a.disambiguation, a.image_url,
        w.release_types, w.muted_event_types, w.note, w.created_at, w.updated_at,
@@ -39,11 +33,8 @@ JOIN artists a ON a.id = w.artist_id
 ORDER BY a.name ASC, a.id ASC;
 
 -- name: GetWatchlistEntry :one
--- Byte-for-byte ListWatchlist's select list and joins, narrowed to one row
--- (D-26): the Go struct conversion in watchlist.Service.get only compiles
--- while the two projections stay identical, which is what enforces the
--- "same projection everywhere" guarantee at build time rather than by
--- convention.
+-- ListWatchlist's select list narrowed to one row (D-26); Service.get only
+-- compiles while the projections stay identical.
 SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
        a.disambiguation, a.image_url,
        w.release_types, w.muted_event_types, w.note, w.created_at, w.updated_at,
@@ -60,10 +51,8 @@ JOIN artists a ON a.id = w.artist_id
 WHERE w.id = $1;
 
 -- name: UpdateWatchlistNote :execrows
--- :execrows distinguishes "updated" from "no such id" without a preceding
--- existence SELECT, mirroring DeleteWatchlistEntry's idiom. The response
--- entry itself comes from a follow-up GetWatchlistEntry call
--- (Service.UpdateNote), not from this statement's own return.
+-- :execrows tells "updated" from "no such id" without an existence SELECT;
+-- Service.UpdateNote re-reads the entry via GetWatchlistEntry.
 UPDATE watchlist SET note = sqlc.narg('note'), updated_at = now() WHERE id = sqlc.arg('id');
 
 -- name: UpdateWatchlistPreferences :one

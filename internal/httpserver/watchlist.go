@@ -56,8 +56,8 @@ type errorResponse struct {
 	Code  string `json:"code,omitempty"`
 }
 
-// writeError writes a D-13 error body. msg is a fixed operator string or a
-// domain sentinel's own text, never raw downstream error text (T-02-03).
+// writeError writes an error body; msg is a fixed or sentinel string, never
+// raw downstream error text (T-02-03).
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeErrorCode(w, status, "", msg)
 }
@@ -381,17 +381,14 @@ func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(entry)
 }
 
-// updateNoteRequest is the request DTO for PUT /watchlist/{id}/note. Note is
-// json.RawMessage, not *string, so the handler can distinguish an absent key
-// (len == 0, rejected) from an explicit JSON null (valid, clears the note)
-// before ever unmarshalling into a *string (D-25).
+// updateNoteRequest is the PUT /watchlist/{id}/note DTO. Note is RawMessage
+// so an absent key (rejected) differs from an explicit null (clears) (D-25).
 type updateNoteRequest struct {
 	Note json.RawMessage `json:"note"`
 }
 
-// handleUpdateNote implements PUT /watchlist/{id}/note (D-25, NOTE-01).
-// watchlist.Service owns note validation; 200 returns the full updated entry
-// (D-26).
+// handleUpdateNote implements PUT /watchlist/{id}/note (NOTE-01); 200 returns
+// the full updated entry.
 func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	id, err := parseWatchlistID(r)
 	if err != nil {
@@ -426,8 +423,7 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "watchlist entry not found")
 		return
 	case err != nil:
-		// Note text must never reach a log (T-24-20) -- err.Error() here is
-		// always a wrapped driver/query error, never the note itself.
+		// Note text must never reach a log (T-24-20); err is a driver error.
 		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
