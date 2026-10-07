@@ -2,15 +2,18 @@ import { useState } from "react"
 
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   ApiError,
   attachTag,
   detachTag,
+  listTags,
   type TagRef,
   type WatchlistEntry,
 } from "~/lib/api"
+
+import { TagVocabularyProvider } from "~/lib/useTagVocabulary"
 
 import { TagChips, type TagActions } from "./TagChips"
 
@@ -21,11 +24,18 @@ vi.mock("~/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/api")>()),
   attachTag: vi.fn(),
   detachTag: vi.fn(),
+  listTags: vi.fn(),
 }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const mockDetachTag = vi.mocked(detachTag)
 const mockAttachTag = vi.mocked(attachTag)
+const mockListTags = vi.mocked(listTags)
+
+// A never-settling vocabulary load keeps the vocabulary null, as the old inert stub did.
+beforeEach(() => {
+  mockListTags.mockReturnValue(new Promise(() => {}))
+})
 
 const entry: WatchlistEntry = {
   id: 42,
@@ -46,30 +56,18 @@ const entry: WatchlistEntry = {
   note: null,
 }
 
-// baseTagActions stubs the vocabulary/loadVocabulary/rememberTag seam
-// TagChips also drives (D-30) -- these tests exercise the chip row itself,
-// not the "+ tag" combobox, so the stubs stay inert.
-function baseTagActions(): Pick<
-  TagActions,
-  "vocabulary" | "loadVocabulary" | "rememberTag"
-> {
-  return {
-    vocabulary: null,
-    loadVocabulary: vi.fn(),
-    rememberTag: vi.fn(),
-  }
-}
-
 function renderChips() {
   const addTag = vi.fn()
   const removeTag = vi.fn()
   const announce = vi.fn()
   render(
-    <TagChips
-      entry={entry}
-      actions={{ addTag, removeTag, ...baseTagActions() }}
-      announce={announce}
-    />
+    <TagVocabularyProvider>
+      <TagChips
+        entry={entry}
+        actions={{ addTag, removeTag }}
+        announce={announce}
+      />
+    </TagVocabularyProvider>
   )
   return { addTag, removeTag, announce }
 }
@@ -85,11 +83,13 @@ describe("TagChips", () => {
 
   it("renders only the '+ tag' trigger when the entry has no tags -- no empty-row gap (D-02)", () => {
     render(
-      <TagChips
-        entry={{ ...entry, tags: [] }}
-        actions={{ addTag: vi.fn(), removeTag: vi.fn(), ...baseTagActions() }}
-        announce={vi.fn()}
-      />
+      <TagVocabularyProvider>
+        <TagChips
+          entry={{ ...entry, tags: [] }}
+          actions={{ addTag: vi.fn(), removeTag: vi.fn() }}
+          announce={vi.fn()}
+        />
+      </TagVocabularyProvider>
     )
 
     expect(
@@ -170,10 +170,13 @@ function Harness({
           : e
       )
     },
-    ...baseTagActions(),
   }
 
-  return <TagChips entry={entry} actions={actions} announce={onAnnounce} />
+  return (
+    <TagVocabularyProvider>
+      <TagChips entry={entry} actions={actions} announce={onAnnounce} />
+    </TagVocabularyProvider>
+  )
 }
 
 function tagRefs(names: string[]): TagRef[] {

@@ -1,3 +1,5 @@
+import type { ReactNode } from "react"
+
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
@@ -9,6 +11,7 @@ import {
   renameTag,
   type TagSummary,
 } from "~/lib/api"
+import { TagVocabularyProvider } from "~/lib/useTagVocabulary"
 
 import { ManageTagsDialog } from "./ManageTagsDialog"
 
@@ -39,23 +42,19 @@ function deferred<T>() {
 
 function renderDialog() {
   const onOpenChange = vi.fn()
-  const onLoaded = vi.fn()
-  const onDeleted = vi.fn()
-  const onRenamed = vi.fn()
-  const onMerged = vi.fn()
-  const element = (open: boolean) => (
-    <ManageTagsDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      onLoaded={onLoaded}
-      onDeleted={onDeleted}
-      onRenamed={onRenamed}
-      onMerged={onMerged}
-    />
+  const onChange = vi.fn()
+  // The provider sits outside rerender so its state survives setOpen.
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <TagVocabularyProvider onChange={onChange}>
+      {children}
+    </TagVocabularyProvider>
   )
-  const { rerender } = render(element(true))
+  const element = (open: boolean) => (
+    <ManageTagsDialog open={open} onOpenChange={onOpenChange} />
+  )
+  const { rerender } = render(element(true), { wrapper })
   const setOpen = (next: boolean) => rerender(element(next))
-  return { onOpenChange, onLoaded, onDeleted, onRenamed, onMerged, setOpen }
+  return { onOpenChange, onChange, setOpen }
 }
 
 describe("ManageTagsDialog", () => {
@@ -104,7 +103,7 @@ describe("ManageTagsDialog", () => {
     ]
     mockListTags.mockResolvedValue(vocabulary)
 
-    const { onLoaded } = renderDialog()
+    renderDialog()
 
     await screen.findByRole("list", { name: "Tags" })
     const rows = screen.getAllByRole("listitem")
@@ -115,12 +114,6 @@ describe("ManageTagsDialog", () => {
     expect(rows[1]).toHaveTextContent("· 0 artists")
     expect(rows[2]).toHaveTextContent("reggaeton")
     expect(rows[2]).toHaveTextContent("· 12 artists")
-
-    expect(onLoaded).toHaveBeenCalledWith([
-      { id: 1, name: "Drill", carrier_count: 1 },
-      { id: 2, name: "latin", carrier_count: 0 },
-      { id: 3, name: "reggaeton", carrier_count: 12 },
-    ])
   })
 
   it("opening with tags hands focus from the close button to row 1's Rename once the list loads", async () => {
@@ -181,11 +174,11 @@ describe("ManageTagsDialog", () => {
     ).not.toHaveFocus()
   })
 
-  it("delete confirm calls deleteTag, toasts with the server's count, removes the row, and calls onDeleted", async () => {
+  it("delete confirm calls deleteTag, toasts with the server's count, removes the row, and emits a deleted change", async () => {
     mockListTags.mockResolvedValue([{ id: 1, name: "drill", carrier_count: 3 }])
     mockDeleteTag.mockResolvedValueOnce({ carrier_count: 3 })
 
-    const { onDeleted } = renderDialog()
+    const { onChange } = renderDialog()
 
     await screen.findByText("drill")
     await userEvent.click(
@@ -198,7 +191,9 @@ describe("ManageTagsDialog", () => {
     await userEvent.click(confirmButton)
 
     await waitFor(() => expect(mockDeleteTag).toHaveBeenCalledWith(1))
-    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(1))
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith({ kind: "deleted", tagId: 1 })
+    )
     await waitFor(() =>
       expect(screen.queryByText("drill")).not.toBeInTheDocument()
     )
@@ -246,7 +241,7 @@ describe("ManageTagsDialog", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   })
 
-  it("renames a tag on Enter: shows Saving..., toasts, updates the row, refocuses Rename, and calls onRenamed", async () => {
+  it("renames a tag on Enter: shows Saving..., toasts, updates the row, refocuses Rename, and emits a renamed change", async () => {
     mockListTags.mockResolvedValue([{ id: 3, name: "Latin", carrier_count: 4 }])
     let resolveRename!: (v: {
       kind: "renamed"
@@ -258,7 +253,7 @@ describe("ManageTagsDialog", () => {
       })
     )
 
-    const { onRenamed } = renderDialog()
+    const { onChange } = renderDialog()
 
     await screen.findByText("Latin")
     await userEvent.click(
@@ -276,7 +271,10 @@ describe("ManageTagsDialog", () => {
 
     await waitFor(() => expect(screen.getByText("latin")).toBeInTheDocument())
     expect(screen.queryByText("Latin")).not.toBeInTheDocument()
-    expect(onRenamed).toHaveBeenCalledWith({ id: 3, name: "latin" })
+    expect(onChange).toHaveBeenCalledWith({
+      kind: "renamed",
+      tag: { id: 3, name: "latin" },
+    })
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Rename tag latin" })
@@ -542,7 +540,7 @@ describe("ManageTagsDialog", () => {
   })
 
   it("confirming the merge shows Merging..., disables both buttons, calls mergeTag by id, toasts, removes the source row, updates the target's count, and focuses the target's Rename", async () => {
-    const { onMerged } = await openCollisionConfirm()
+    const { onChange } = await openCollisionConfirm()
     let resolveMerge!: (v: {
       id: number
       name: string
@@ -567,10 +565,10 @@ describe("ManageTagsDialog", () => {
     )
     expect(screen.getByText("trap")).toBeInTheDocument()
     expect(screen.getByText("· 7 artists")).toBeInTheDocument()
-    expect(onMerged).toHaveBeenCalledWith(5, {
-      id: 9,
-      name: "trap",
-      carrier_count: 7,
+    expect(onChange).toHaveBeenCalledWith({
+      kind: "merged",
+      sourceId: 5,
+      target: { id: 9, name: "trap", carrier_count: 7 },
     })
     await waitFor(() =>
       expect(
@@ -597,7 +595,7 @@ describe("ManageTagsDialog", () => {
     await waitFor(() => expect(mockListTags).toHaveBeenCalledTimes(2))
   })
 
-  it("drops an older open's GET /tags that settles after a newer load and a delete, so the deleted row stays gone and onLoaded never sees it", async () => {
+  it("drops an older open's GET /tags that settles after a newer load and a delete, so the deleted row stays gone", async () => {
     const stale = deferred<TagSummary[]>()
     mockListTags.mockReturnValueOnce(stale.promise).mockResolvedValueOnce([
       { id: 1, name: "drill", carrier_count: 3 },
@@ -605,7 +603,7 @@ describe("ManageTagsDialog", () => {
     ])
     mockDeleteTag.mockResolvedValueOnce({ carrier_count: 3 })
 
-    const { onLoaded, setOpen } = renderDialog()
+    const { setOpen } = renderDialog()
     setOpen(false)
     setOpen(true)
 
@@ -629,11 +627,6 @@ describe("ManageTagsDialog", () => {
 
     expect(screen.queryByText("drill")).not.toBeInTheDocument()
     expect(screen.getByText("trap")).toBeInTheDocument()
-    expect(onLoaded).toHaveBeenCalledTimes(1)
-    expect(onLoaded).toHaveBeenCalledWith([
-      { id: 1, name: "drill", carrier_count: 3 },
-      { id: 2, name: "trap", carrier_count: 0 },
-    ])
     expect(mockListTags).toHaveBeenCalledTimes(2)
   })
 
@@ -670,7 +663,7 @@ describe("ManageTagsDialog", () => {
     }>()
     mockRenameTag.mockReturnValueOnce(rename.promise)
 
-    const { onLoaded, onRenamed, setOpen } = renderDialog()
+    const { onChange, setOpen } = renderDialog()
 
     await screen.findByText("Latin")
     await userEvent.click(
@@ -697,10 +690,10 @@ describe("ManageTagsDialog", () => {
 
     expect(screen.queryByText("Latin")).not.toBeInTheDocument()
     expect(screen.getByText("Latino")).toBeInTheDocument()
-    expect(onRenamed).toHaveBeenCalledWith({ id: 3, name: "Latino" })
-    expect(onLoaded).toHaveBeenCalledTimes(2)
-    expect(onLoaded).toHaveBeenLastCalledWith([
-      { id: 3, name: "Latino", carrier_count: 4 },
-    ])
+    expect(onChange).toHaveBeenCalledWith({
+      kind: "renamed",
+      tag: { id: 3, name: "Latino" },
+    })
+    expect(mockListTags).toHaveBeenCalledTimes(3)
   })
 })

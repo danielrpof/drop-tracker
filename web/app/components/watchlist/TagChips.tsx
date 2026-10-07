@@ -13,21 +13,17 @@ import {
   type WatchlistEntry,
 } from "~/lib/api"
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_ARTIST } from "~/lib/limits"
+import { useTagVocabulary } from "~/lib/useTagVocabulary"
 
 import { TagCombobox } from "./TagCombobox"
 
 // TagActions is the route-level functional-updater pair TagChips drives
 // (D-24, amends D-03): each call touches only its own tag, never a
 // whole-array snapshot, so concurrent removals on one row can't clobber
-// each other. vocabulary/loadVocabulary/rememberTag back the "+ tag"
-// autocomplete (D-30): the vocabulary loads on first use, is kept in route
-// state, and grows as tags are created.
+// each other.
 export interface TagActions {
   addTag(entryId: number, tag: TagRef, index?: number): void
   removeTag(entryId: number, tagId: number): void
-  vocabulary: TagRef[] | null
-  loadVocabulary(): void
-  rememberTag(tag: TagRef): void
 }
 
 // pendingIdCounter backs the module-level temp-id sequence for optimistic
@@ -66,6 +62,7 @@ type FocusRequest =
 // posture). The row always renders -- it holds at least the "+ tag"
 // trigger, never an empty gap (D-02).
 export function TagChips({ entry, actions, announce }: TagChipsProps) {
+  const { vocabulary, ensureLoaded, remember } = useTagVocabulary()
   const containerRef = useRef<HTMLDivElement>(null)
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const focusRequestRef = useRef<FocusRequest>(null)
@@ -128,7 +125,7 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
   }
 
   function handleOpen() {
-    actions.loadVocabulary()
+    ensureLoaded()
     setEditorOpen(true)
   }
 
@@ -167,7 +164,7 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
       .then((tag) => {
         setPending((p) => p.filter((item) => item.tempId !== tempId))
         actions.addTag(entry.id, tag)
-        actions.rememberTag(tag)
+        remember(tag)
         announce(
           reachesCap
             ? `Added “${tag.name}” to ${entry.name}. Max ${MAX_TAGS_PER_ARTIST} tags reached.`
@@ -237,7 +234,7 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
       {editorOpen ? (
         <TagCombobox
           entry={entry}
-          vocabulary={actions.vocabulary}
+          vocabulary={vocabulary}
           onArtist={entry.tags}
           pendingNames={pending.map((p) => p.name)}
           onCommit={handleCommit}

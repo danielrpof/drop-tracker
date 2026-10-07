@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Tags } from "lucide-react"
 import { toast } from "sonner"
 
@@ -14,14 +14,17 @@ import {
   type SearchArtist,
   type SearchResponse,
   type TagRef,
-  type TagSummary,
   type WatchlistEntry,
   addWatchlist,
-  listTags,
   listWatchlist,
   removeWatchlist,
 } from "~/lib/api"
 import { isAddableSource } from "~/lib/sources"
+import {
+  rewriteTags,
+  TagVocabularyProvider,
+  type TagChange,
+} from "~/lib/useTagVocabulary"
 
 // Watchlist renders the UI-02 management surface: fetches listWatchlist()
 // on mount and renders the entries in exactly the order the server
@@ -42,16 +45,7 @@ export default function Watchlist() {
     null
   )
   const [statusMessage, setStatusMessage] = useState("")
-  // vocabulary loads lazily on first "+ tag" (or Manage tags) open, never
-  // at mount (D-30, Phase 25 SC5) -- the Watchlist route stays one request.
-  const [vocabulary, setVocabulary] = useState<TagRef[] | null>(null)
-  const [vocabularyStatus, setVocabularyStatus] = useState<
-    "idle" | "loading" | "loaded" | "error"
-  >("idle")
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
-  // Bumped by every local vocabulary change so a GET /tags that settles
-  // afterwards is discarded (WR-06).
-  const vocabGen = useRef(0)
 
   const refresh = useCallback(() => {
     setError(false)
@@ -117,101 +111,15 @@ export default function Watchlist() {
     )
   }
 
-  // dropTagFromEntries drops the tag from every card and from the
-  // autocomplete vocabulary (TAG-06, D-17).
-  function dropTagFromEntries(tagId: number) {
-    vocabGen.current++
-    setEntries((rows) =>
-      rows
-        ? rows.map((r) => ({
-            ...r,
-            tags: r.tags.filter((t) => t.id !== tagId),
-          }))
-        : rows
-    )
-    setVocabulary((v) => (v ? v.filter((t) => t.id !== tagId) : v))
-  }
-
-  // renameTagInEntries applies a completed Manage tags rename to every
-  // card's chip with that id (TAG-05, D-17) -- same functional-updater
-  // shape as dropTagFromEntries, so it never clobbers a concurrent chip
-  // add/remove on an unrelated row.
-  function renameTagInEntries(tag: TagRef) {
-    vocabGen.current++
-    setEntries((rows) =>
-      rows
-        ? rows.map((r) => ({
-            ...r,
-            tags: r.tags.map((t) => (t.id === tag.id ? tag : t)),
-          }))
-        : rows
-    )
-    setVocabulary((v) => (v ? v.map((t) => (t.id === tag.id ? tag : t)) : v))
-  }
-
-  // mergeTagInEntries applies a confirmed Manage tags merge (TAG-05, D-17,
-  // D-19) to every card: an entry that already carries the target just
-  // drops the source (no duplicate chip), otherwise the source chip is
-  // replaced in place with the target -- same functional-updater shape as
-  // dropTagFromEntries/renameTagInEntries.
-  function mergeTagInEntries(sourceId: number, target: TagRef) {
-    vocabGen.current++
+  // The only place rows' tags change for a Manage tags rename/merge/delete.
+  function applyTagChange(change: TagChange) {
     setEntries((rows) =>
       rows
         ? rows.map((r) => {
-            if (!r.tags.some((t) => t.id === sourceId)) return r
-            if (r.tags.some((t) => t.id === target.id)) {
-              return { ...r, tags: r.tags.filter((t) => t.id !== sourceId) }
-            }
-            return {
-              ...r,
-              tags: r.tags.map((t) => (t.id === sourceId ? target : t)),
-            }
+            const tags = rewriteTags(r.tags, change)
+            return tags === r.tags ? r : { ...r, tags }
           })
         : rows
-    )
-    setVocabulary((v) =>
-      v
-        ? v.some((t) => t.id === target.id)
-          ? v.filter((t) => t.id !== sourceId)
-          : v.map((t) => (t.id === sourceId ? target : t))
-        : v
-    )
-  }
-
-  // handleTagsLoaded is ManageTagsDialog's onLoaded (D-30): it replaces the
-  // whole route vocabulary with what the dialog just fetched, so the "+
-  // tag" autocomplete on every row sees the same fresh vocabulary Manage
-  // tags just loaded, instead of leaving a possibly-stale one in place.
-  function handleTagsLoaded(tags: TagSummary[]) {
-    vocabGen.current++
-    setVocabulary(tags.map((t) => ({ id: t.id, name: t.name })))
-    setVocabularyStatus("loaded")
-  }
-
-  // loadVocabulary fetches GET /tags only from "idle"/"error" (a failed
-  // load retries on the next open), so repeated "+ tag" opens across rows
-  // never refetch once it has loaded (D-30, T-24-30). A stale settle is a no-op.
-  function loadVocabulary() {
-    if (vocabularyStatus !== "idle" && vocabularyStatus !== "error") return
-    const gen = ++vocabGen.current
-    setVocabularyStatus("loading")
-    listTags()
-      .then((summaries) => {
-        if (gen !== vocabGen.current) return
-        setVocabulary(summaries.map((s) => ({ id: s.id, name: s.name })))
-        setVocabularyStatus("loaded")
-      })
-      .catch(() => {
-        if (gen === vocabGen.current) setVocabularyStatus("error")
-      })
-  }
-
-  // rememberTag inserts a newly created tag into an already-loaded
-  // vocabulary, so other rows and Manage tags see it without a reload.
-  function rememberTag(tag: TagRef) {
-    setVocabulary((v) =>
-      v === null || v.some((t) => t.id === tag.id) ? v : [...v, tag]
     )
   }
 
@@ -319,81 +227,76 @@ export default function Watchlist() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-display font-semibold text-foreground">
-          Watchlist
-        </h1>
-        <Button variant="secondary" onClick={() => setManageTagsOpen(true)}>
-          <Tags aria-hidden="true" />
-          Manage tags
-        </Button>
-      </div>
+    <TagVocabularyProvider onChange={applyTagChange}>
+      <div className="flex flex-col gap-6 p-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h1 className="text-display font-semibold text-foreground">
+            Watchlist
+          </h1>
+          <Button variant="secondary" onClick={() => setManageTagsOpen(true)}>
+            <Tags aria-hidden="true" />
+            Manage tags
+          </Button>
+        </div>
 
-      <div role="status" aria-atomic="true" className="sr-only">
-        {statusMessage}
-      </div>
+        <div role="status" aria-atomic="true" className="sr-only">
+          {statusMessage}
+        </div>
 
-      <ManageTagsDialog
-        open={manageTagsOpen}
-        onOpenChange={setManageTagsOpen}
-        onLoaded={handleTagsLoaded}
-        onDeleted={dropTagFromEntries}
-        onRenamed={renameTagInEntries}
-        onMerged={mergeTagInEntries}
-      />
+        <ManageTagsDialog
+          open={manageTagsOpen}
+          onOpenChange={setManageTagsOpen}
+        />
 
-      <div className="flex flex-col gap-6">
-        <SearchBox onResults={setSearchResponse} />
-        {searchResponse && (
-          <SearchResultsColumns
-            response={searchResponse}
-            watchlistEntries={entries}
-            onAdd={handleAddSearchResult}
+        <div className="flex flex-col gap-6">
+          <SearchBox onResults={setSearchResponse} />
+          {searchResponse && (
+            <SearchResultsColumns
+              response={searchResponse}
+              watchlistEntries={entries}
+              onAdd={handleAddSearchResult}
+            />
+          )}
+        </div>
+
+        {error && (
+          <EmptyState
+            heading="Couldn't load your watchlist."
+            body="Please try again."
+            action={<Button onClick={refresh}>Retry</Button>}
           />
         )}
+
+        {!error && entries === null && (
+          <div className="flex flex-col gap-4">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-24 w-full rounded-md" />
+            ))}
+          </div>
+        )}
+
+        {!error && entries !== null && entries.length === 0 && (
+          <EmptyState
+            heading="No artists yet"
+            body="Search above to add one."
+          />
+        )}
+
+        {!error && entries !== null && entries.length > 0 && (
+          <ul className="flex flex-col gap-4">
+            {entries.map((entry) => (
+              <WatchlistRow
+                key={entry.id}
+                entry={entry}
+                onEntryChange={handleEntryChange}
+                onRemove={handleRemove}
+                tagActions={{ addTag, removeTag }}
+                announce={announce}
+              />
+            ))}
+          </ul>
+        )}
       </div>
-
-      {error && (
-        <EmptyState
-          heading="Couldn't load your watchlist."
-          body="Please try again."
-          action={<Button onClick={refresh}>Retry</Button>}
-        />
-      )}
-
-      {!error && entries === null && (
-        <div className="flex flex-col gap-4">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-24 w-full rounded-md" />
-          ))}
-        </div>
-      )}
-
-      {!error && entries !== null && entries.length === 0 && (
-        <EmptyState heading="No artists yet" body="Search above to add one." />
-      )}
-
-      {!error && entries !== null && entries.length > 0 && (
-        <ul className="flex flex-col gap-4">
-          {entries.map((entry) => (
-            <WatchlistRow
-              key={entry.id}
-              entry={entry}
-              onEntryChange={handleEntryChange}
-              onRemove={handleRemove}
-              tagActions={{
-                addTag,
-                removeTag,
-                vocabulary,
-                loadVocabulary,
-                rememberTag,
-              }}
-              announce={announce}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
+    </TagVocabularyProvider>
   )
 }

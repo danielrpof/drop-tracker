@@ -262,6 +262,49 @@ describe("Watchlist route", () => {
     await screen.findByText("reggaeton")
   })
 
+  it("a tag created while the first vocabulary load is in flight survives that load", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([entry, second])
+    const first = deferred<TagSummary[]>()
+    mockListTags
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValue([{ id: 9, name: "dembow", carrier_count: 1 }])
+    mockAttachTag.mockResolvedValue({ id: 9, name: "dembow" })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    await userEvent.type(
+      screen.getByRole("combobox", { name: "Add tag to Drake" }),
+      "dembow{Enter}"
+    )
+    await screen.findByText("dembow")
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toBeInTheDocument()
+    )
+
+    await act(async () => {
+      first.resolve([])
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Rihanna" })
+    )
+    await userEvent.type(
+      screen.getByRole("combobox", { name: "Add tag to Rihanna" }),
+      "dem"
+    )
+
+    await screen.findByRole("option", { name: "dembow" })
+    expect(mockListTags).toHaveBeenCalledTimes(2)
+  })
+
   it("still lets Enter attach via Create when listTags rejects", async () => {
     mockListWatchlist.mockResolvedValue([entry])
     mockListTags.mockRejectedValue(new Error("network down"))
