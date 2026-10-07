@@ -1,9 +1,7 @@
 package tags_test
 
-// Whitebox-adjacent: NormalizeName is exported, but this file lives beside
-// service_test.go's package tags_test convention (internal/watchlist's
-// normalize_test.go precedent is whitebox because normalizeSet is
-// unexported; NormalizeName here is exported, so package tags_test is fine).
+// External test package: NormalizeName is exported, so no whitebox access is
+// needed (unlike internal/watchlist's normalizeSet tests).
 
 import (
 	"errors"

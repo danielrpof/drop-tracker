@@ -1567,7 +1567,7 @@ func TestWatchlist_Add_DoesNotLeakInternals(t *testing.T) {
 	}
 }
 
-// --- Plan 24-03 Task 1: PUT /watchlist/{id}/note ---
+// --- PUT /watchlist/{id}/note ---
 
 // noteEntryBody extends watchlistEntryBody with the fields
 // TestWatchlist_NoteEndToEnd needs to assert on.
@@ -1576,10 +1576,8 @@ type noteEntryBody struct {
 	Note *string `json:"note"`
 }
 
-// TestWatchlist_NoteEndToEnd proves PUT /watchlist/{id}/note end to end
-// against real Postgres (D-25, D-26, NOTE-01): trim + store, GET reflects
-// it, null/whitespace clears it, a missing/malformed body is 400, and a
-// missing id is 404.
+// TestWatchlist_NoteEndToEnd covers PUT /watchlist/{id}/note against Postgres
+// (NOTE-01): trim + store, clear on null/whitespace, 400 on a bad body, 404.
 func TestWatchlist_NoteEndToEnd(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_http_test")
 	mbid := testMBID(t)
@@ -1779,7 +1777,7 @@ func TestWatchlist_Note_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
 	}
 }
 
-// --- Plan 24-03 Task 2: POST note + shared projection ---
+// --- POST note + shared projection ---
 
 // fullEntryBody decodes every field TestWatchlist_Add_WithNoteEndToEnd and
 // TestWatchlist_Patch_ReturnsTagsAndNote assert on, including the D-26
@@ -1790,9 +1788,8 @@ type fullEntryBody struct {
 	Note *string            `json:"note"`
 }
 
-// TestWatchlist_Add_WithNoteEndToEnd proves POST /watchlist accepts an
-// optional note and returns it through the shared projection, with tags as
-// a non-nil empty array for a freshly-added artist (D-26, D-27).
+// TestWatchlist_Add_WithNoteEndToEnd: POST /watchlist takes an optional note
+// and returns tags as a non-nil empty array for a new artist (D-27).
 func TestWatchlist_Add_WithNoteEndToEnd(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_http_test")
 

@@ -1,9 +1,7 @@
 package db_test
 
-// Schema-level proof for migration 000010 (D-18, ADR 0004): these tests
-// exercise the database directly with raw SQL, before internal/tags exists,
-// so the cap trigger, name/note CHECKs, and cascade behaviour are proven
-// independent of any service-layer guard (SC2).
+// Schema-level proof for migration 000010 (ADR 0004): raw SQL against the
+// database, so the cap trigger, CHECKs and cascades hold with no service guard.
 
 import (
 	"context"
@@ -56,8 +54,8 @@ func linkTag(ctx context.Context, pool *pgxpool.Pool, artistID, tagID int64) err
 	return err
 }
 
-// TestSchema_TagCapTrigger_RawInsertRefused is ADR 0004's SC2 proof: the
-// database refuses an 11th link via a raw INSERT with no API code involved.
+// TestSchema_TagCapTrigger_RawInsertRefused: the database refuses an 11th
+// link via a raw INSERT with no API code involved (ADR 0004).
 func TestSchema_TagCapTrigger_RawInsertRefused(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
 	ctx := context.Background()
@@ -166,11 +164,9 @@ func TestTrigger_SkipExisting(t *testing.T) {
 	}
 }
 
-// TestSchema_TagCapTrigger_SameTagConcurrentAt9 is ADR 0004 required test 1:
-// two concurrent attaches of the same new tag at 9 links both succeed and
-// leave exactly one link, because the trigger re-checks existence after the
-// artist-row lock. The interleaving is forced, not hoped for: txB's backend
-// is observed waiting on the lock via pg_stat_activity before txA commits.
+// TestSchema_TagCapTrigger_SameTagConcurrentAt9 (ADR 0004): two concurrent
+// attaches of the same new tag at 9 links both succeed with one link. The
+// interleaving is forced: txB is seen waiting in pg_stat_activity before txA commits.
 func TestSchema_TagCapTrigger_SameTagConcurrentAt9(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
 	ctx := context.Background()
@@ -256,8 +252,8 @@ type detachRaceResult struct {
 	otherCount      int  // links left on artist B (update mode only)
 }
 
-// runDetachRace forces the CR-01 interleaving (ADR 0004 amendment): S1 deletes
-// link T uncommitted, S2 re-attaches or moves T, S3 attaches a different tag.
+// runDetachRace forces the ADR 0004 amendment's interleaving: S1 deletes link
+// T uncommitted, S2 re-attaches or moves T, S3 attaches a different tag.
 func runDetachRace(t *testing.T, ctx context.Context, pool *pgxpool.Pool, label string, viaUpdate bool) detachRaceResult {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -463,9 +459,8 @@ func assertDetachRaceRefused(t *testing.T, res detachRaceResult) {
 	}
 }
 
-// TestSchema_TagCapTrigger_ConcurrentDetachRace pins CR-01 (ADR 0004
-// amendment, migration 000012): a third attach racing a concurrent detach
-// plus re-attach or move of the same link must be refused at 10.
+// TestSchema_TagCapTrigger_ConcurrentDetachRace: a third attach racing a
+// detach plus re-attach or move of the same link is refused at 10 (ADR 0004).
 func TestSchema_TagCapTrigger_ConcurrentDetachRace(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
 	ctx := context.Background()
@@ -483,9 +478,8 @@ func TestSchema_TagCapTrigger_ConcurrentDetachRace(t *testing.T) {
 	})
 }
 
-// TestSchema_TagCapTrigger_DistinctTagConcurrentAt9 is the DB-level pin for
-// ADR 0004 Consequences (review IN-09): of two concurrent attaches of
-// different new tags at 9 links, the first wins and the second is refused.
+// TestSchema_TagCapTrigger_DistinctTagConcurrentAt9 (ADR 0004): of two
+// concurrent attaches of different new tags at 9 links, the second is refused.
 func TestSchema_TagCapTrigger_DistinctTagConcurrentAt9(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -577,10 +571,8 @@ func TestSchema_TagCapTrigger_DistinctTagConcurrentAt9(t *testing.T) {
 	}
 }
 
-// TestSchema_TagNameChecks proves tags_name_length and tags_name_trimmed
-// (D-28): a too-long or blank name is rejected, an untrimmed name is
-// rejected, and a 32-rune multi-byte name is accepted -- matching Postgres
-// char_length, which TAG-04's encoding probe requires.
+// TestSchema_TagNameChecks covers tags_name_length and tags_name_trimmed
+// (D-28): too-long, blank and untrimmed names fail; a 32-rune multi-byte name passes.
 func TestSchema_TagNameChecks(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
 	ctx := context.Background()
@@ -610,10 +602,9 @@ func TestSchema_TagNameChecks(t *testing.T) {
 	}
 }
 
-// TestSchema_TagNameUniqueLower proves the tags_name_lower_idx expression
-// index (D-29's ON CONFLICT target, TAG-03) including the non-ASCII pair
-// D-31 requires. A C/POSIX collation would fail only the second assertion,
-// so its failure message reports the database's actual collation.
+// TestSchema_TagNameUniqueLower proves tags_name_lower_idx (D-31), including
+// a non-ASCII pair. A C/POSIX collation fails only that one, so its message
+// reports the actual collation.
 func TestSchema_TagNameUniqueLower(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
 	ctx := context.Background()
@@ -725,10 +716,9 @@ func TestSchema_WatchlistDeleteKeepsTagLinks(t *testing.T) {
 	}
 }
 
-// TestSchema_TagCapTrigger_UpdatePaths pins the UPDATE-path guarantees 000011
-// must and must not disturb: merges still work, unchanged-artist updates are
-// free, below-cap moves succeed, and cap-breaking or duplicate moves are
-// refused (D-19, ADR 0004 amendment).
+// TestSchema_TagCapTrigger_UpdatePaths pins the UPDATE-path behavior of
+// migration 000011: merges and below-cap moves work, cap-breaking or
+// duplicate moves are refused (ADR 0004).
 func TestSchema_TagCapTrigger_UpdatePaths(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_schema_test")
 	ctx := context.Background()

@@ -156,7 +156,7 @@ func TestTags_AttachEndToEnd(t *testing.T) {
 	}
 }
 
-// --- Task 1: GET /tags (vocabulary list) ---
+// --- GET /tags (vocabulary list) ---
 
 // tagSummaryWire is the JSON shape of a single GET /tags entry.
 type tagSummaryWire struct {
@@ -165,11 +165,9 @@ type tagSummaryWire struct {
 	CarrierCount int64  `json:"carrier_count"`
 }
 
-// TestTags_ListEndToEnd is the tracer for the vocabulary routes: an empty
-// isolated schema proves GET /tags answers a literal "[]" (never null,
-// never omitted), then a seeded vocabulary proves watched-only carrier
-// counts (D-11), a zero-link tag surfacing (D-12), and a removed-artist-only
-// link still surfacing uncounted (D-13), all in the DB's lower(name) order.
+// TestTags_ListEndToEnd is the vocabulary tracer: an empty schema answers a
+// literal "[]", then a seeded one proves watched-only counts, zero-link and
+// removed-artist-only tags still listed, in lower(name) order (D-11).
 func TestTags_ListEndToEnd(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_http_list_test")
 	ctx := context.Background()
@@ -277,7 +275,7 @@ func TestTags_List_ServiceUnavailableWhenStoreOmitted(t *testing.T) {
 	}
 }
 
-// --- Task 2: Rename (409 collision), Delete ---
+// --- Rename (409 collision), Delete ---
 
 func TestTags_Rename_Success200(t *testing.T) {
 	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameFunc: func(_ context.Context, id int64, name string) (tags.Tag, error) {
@@ -522,9 +520,8 @@ func TestTags_RenameEndToEnd_AppliesToWatchlist(t *testing.T) {
 	}
 }
 
-// TestTags_DeleteEndToEnd_LeavesWatchlistUntouched proves TAG-06/D-11/SC4
-// against real Postgres: DELETE reports the watched count and every
-// watchlist row's preferences and note stay byte-identical.
+// TestTags_DeleteEndToEnd_LeavesWatchlistUntouched proves DELETE reports the
+// watched count and leaves every watchlist row byte-identical (TAG-06).
 func TestTags_DeleteEndToEnd_LeavesWatchlistUntouched(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_http_delete_test")
 	ctx := context.Background()
@@ -590,12 +587,10 @@ func TestTags_DeleteEndToEnd_LeavesWatchlistUntouched(t *testing.T) {
 	}
 }
 
-// --- Task 3: error mapping, concurrency, gate/CSRF ---
+// --- Error mapping, concurrency, gate/CSRF ---
 
-// fakeTagStore is a file-local double for httpserver.TagStore, mirroring
-// fakeSettingsStore's func-field shape. attachCalls/detachCalls, when
-// non-nil, count invocations so "store never called" is a direct
-// observation.
+// fakeTagStore is a func-field double for httpserver.TagStore, like
+// fakeSettingsStore; non-nil attachCalls/detachCalls count invocations.
 type fakeTagStore struct {
 	attachFunc  func(ctx context.Context, entryID int64, name string) (tags.AttachResult, error)
 	detachFunc  func(ctx context.Context, entryID, tagID int64) error
@@ -822,11 +817,9 @@ func postTag(t *testing.T, ts *httptest.Server, entryID int64, name string) int 
 	return resp.StatusCode
 }
 
-// TestTags_Attach_ConcurrentCapRace is ADR 0004 required test 1 at the HTTP
-// layer: two concurrent POSTs of two different new names against an artist
-// at 9 links yield exactly one 201 and one 409, and the artist ends with
-// exactly 10 links. Looped with fresh names each iteration -- an unforced
-// race can pass by luck on a single run.
+// TestTags_Attach_ConcurrentCapRace (ADR 0004): two concurrent POSTs of
+// different new names at 9 links yield one 201 and one 409. Looped, since an
+// unforced race can pass by luck once.
 func TestTags_Attach_ConcurrentCapRace(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_http_race_test")
 	ctx := context.Background()
@@ -1011,7 +1004,7 @@ func TestTags_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
 	}
 }
 
-// --- 24-02 Task 3: Merge, and gate/CSRF coverage for all four vocabulary routes ---
+// --- Merge, and gate/CSRF coverage for the vocabulary routes ---
 
 func TestTags_Merge_Success200(t *testing.T) {
 	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{mergeFunc: func(_ context.Context, sourceID, targetID int64) (tags.Summary, error) {
@@ -1125,10 +1118,8 @@ func TestTags_Merge_NonNumericIDReturns400(t *testing.T) {
 	}
 }
 
-// TestTags_MergeEndToEnd proves a real merge against Postgres: the target's
-// carrier count unions both tags' watched artists, the source tag is gone,
-// and a 10-tag artist carrying only the source still merges (ADR test 3, at
-// the HTTP layer).
+// TestTags_MergeEndToEnd: the target's count unions both tags' watched
+// artists, the source is gone, and a 10-tag artist still merges (ADR 0004).
 func TestTags_MergeEndToEnd(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_http_merge_test")
 	ctx := context.Background()
@@ -1230,12 +1221,9 @@ func TestTags_Vocabulary_Gated401NoCookie(t *testing.T) {
 	}
 }
 
-// TestTags_Vocabulary_GatedForbiddenWithoutCSRFHeader proves the three
-// vocabulary write routes answer 403 and never reach the store without
-// X-Requested-With, even with a valid session cookie. GET /tags is a read
-// verb, so it is not part of this check (the CSRF-header requirement is a
-// no-op for it, mirroring TestTags_Gated401NoCookie's own /status
-// precedent).
+// TestTags_Vocabulary_GatedForbiddenWithoutCSRFHeader: the three write routes
+// answer 403 without X-Requested-With and never reach the store. GET /tags is
+// a read verb, so the CSRF requirement does not apply.
 func TestTags_Vocabulary_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
 	var renameCalls, mergeCalls, deleteCalls int32
 	store := fakeTagStore{renameCalls: &renameCalls, mergeCalls: &mergeCalls, deleteCalls: &deleteCalls}
