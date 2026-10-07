@@ -255,9 +255,9 @@ describe("ArtistNote", () => {
     expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled()
   })
 
-  it("a 400 length rejection shows the server-backstop copy", async () => {
+  it("a note_too_long rejection shows the server-backstop copy", async () => {
     mockUpdateNote.mockRejectedValueOnce(
-      new ApiError(400, "note must be at most 500 characters")
+      new ApiError(400, "anything", undefined, "note_too_long")
     )
     const withNote = { ...entry, note: "old note" }
 
@@ -274,6 +274,50 @@ describe("ArtistNote", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await screen.findByText("Notes can be at most 500 characters.")
+  })
+
+  it("the same message without a code shows the generic save error", async () => {
+    mockUpdateNote.mockRejectedValueOnce(
+      new ApiError(400, "note must be at most 500 characters")
+    )
+    render(
+      <ArtistNote entry={entry} onEntryChange={vi.fn()} announce={vi.fn()} />
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add note for Drake" })
+    )
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Note for Drake" }),
+      "hi"
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await screen.findByText(
+      "Couldn't save the note — your text is still here. Try again."
+    )
+  })
+
+  it("counts code points: 500 emoji is within the limit, 501 blocks Save and Ctrl+Enter, and there is no maxlength", async () => {
+    mockUpdateNote.mockResolvedValue({ ...entry, note: "x" })
+    render(
+      <ArtistNote entry={entry} onEntryChange={vi.fn()} announce={vi.fn()} />
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add note for Drake" })
+    )
+    const textarea = screen.getByRole("textbox", { name: "Note for Drake" })
+    expect(textarea).not.toHaveAttribute("maxlength")
+
+    fireEvent.change(textarea, { target: { value: "🎵".repeat(500) } })
+    expect(screen.getByText("500/500")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+
+    fireEvent.change(textarea, { target: { value: "🎵".repeat(501) } })
+    expect(screen.getByText("501/500")).toHaveClass("text-destructive")
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true })
+    expect(mockUpdateNote).not.toHaveBeenCalled()
   })
 
   it("a successful save focuses the pencil and announces 'Note saved for {artist}.' when the saved note is non-empty", async () => {

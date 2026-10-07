@@ -183,28 +183,30 @@ export interface NotificationSettings {
 
 // ---- Error type ---------------------------------------------------------
 
-// ApiError carries the HTTP status and the server's fixed {"error": "..."}
-// message, so callers can branch on status (e.g. 409 vs 500) without
-// re-parsing the response body themselves. body carries the full parsed
+// ApiError carries the HTTP status and the server's {"error": "..."} message.
+// code is the optional stable machine-readable code (e.g. "tag_cap_reached")
+// callers branch on instead of message text. body carries the full parsed
 // JSON of a non-2xx response when it was valid JSON (e.g. the rename 409's
 // {target, carrier_count_after_merge}) -- undefined when the body wasn't
 // JSON, so a caller narrows before reading fields off it.
 export class ApiError extends Error {
   status: number
   body?: unknown
+  code?: string
 
-  constructor(status: number, message: string, body?: unknown) {
+  constructor(status: number, message: string, body?: unknown, code?: string) {
     super(message)
     this.name = "ApiError"
     this.status = status
     this.body = body
+    this.code = code
   }
 }
 
 // ---- Fetch core ----------------------------------------------------------
 
 // apiFetch is the single fetch path every wrapper below funnels through:
-// it parses a D-13 {"error": "..."} body on failure and throws ApiError, so
+// it parses a D-13 {"error": "...", "code"?: "..."} body on failure and throws ApiError, so
 // every caller gets the same error shape regardless of which endpoint
 // failed.
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -251,17 +253,21 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     let message = res.statusText
     let parsedBody: unknown
+    let code: string | undefined
     try {
-      const body = (await res.json()) as { error?: string }
+      const body = (await res.json()) as { error?: string; code?: unknown }
       parsedBody = body
       if (body.error) {
         message = body.error
+      }
+      if (typeof body.code === "string") {
+        code = body.code
       }
     } catch {
       // Body wasn't valid JSON (or was empty) -- fall back to statusText,
       // set above, and leave parsedBody undefined.
     }
-    throw new ApiError(res.status, message, parsedBody)
+    throw new ApiError(res.status, message, parsedBody, code)
   }
 
   return (await res.json()) as T

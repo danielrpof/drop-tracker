@@ -12,12 +12,9 @@ import {
   type TagRef,
   type WatchlistEntry,
 } from "~/lib/api"
+import { MAX_TAG_LENGTH, MAX_TAGS_PER_ARTIST } from "~/lib/limits"
 
 import { TagCombobox } from "./TagCombobox"
-
-// MAX_TAGS_PER_ARTIST mirrors the DB trigger's cap (D-14, TAG-04): the "+
-// tag" trailing slot swaps to the "max 10 tags" hint at this count.
-const MAX_TAGS_PER_ARTIST = 10
 
 // TagActions is the route-level functional-updater pair TagChips drives
 // (D-24, amends D-03): each call touches only its own tag, never a
@@ -136,18 +133,14 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
   }
 
   // attachErrorMessage maps a rejected attach to its exact UI-SPEC Toasts
-  // copy: the 409/400 API backstops get their own message, anything else
-  // gets the generic one.
+  // copy by API error code; anything else gets the generic one.
   function attachErrorMessage(err: unknown, name: string): string {
     if (err instanceof ApiError) {
-      if (err.status === 409) {
-        return `${entry.name} already has 10 tags — remove one first.`
+      if (err.code === "tag_cap_reached") {
+        return `${entry.name} already has ${MAX_TAGS_PER_ARTIST} tags — remove one first.`
       }
-      if (
-        err.status === 400 &&
-        err.message === "tag name must be at most 32 characters"
-      ) {
-        return "Tags can be at most 32 characters."
+      if (err.code === "tag_name_too_long") {
+        return `Tags can be at most ${MAX_TAG_LENGTH} characters.`
       }
     }
     return `Couldn't add “${name}” to ${entry.name} — try again.`
@@ -177,7 +170,7 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
         actions.rememberTag(tag)
         announce(
           reachesCap
-            ? `Added “${tag.name}” to ${entry.name}. Max 10 tags reached.`
+            ? `Added “${tag.name}” to ${entry.name}. Max ${MAX_TAGS_PER_ARTIST} tags reached.`
             : `Added “${tag.name}” to ${entry.name}.`
         )
       })
@@ -259,7 +252,9 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
           }}
         />
       ) : atCap ? (
-        <span className="text-label text-muted-foreground">max 10 tags</span>
+        <span className="text-label text-muted-foreground">
+          max {MAX_TAGS_PER_ARTIST} tags
+        </span>
       ) : (
         <Button
           ref={addButtonRef}

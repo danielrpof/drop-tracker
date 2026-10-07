@@ -380,6 +380,39 @@ describe("ManageTagsDialog", () => {
     expect(screen.getByText("25/32")).toBeInTheDocument()
   })
 
+  it("counts code points in rename: 32 emoji can be saved, 33 cannot", async () => {
+    mockListTags.mockResolvedValue([{ id: 1, name: "drill", carrier_count: 2 }])
+    mockRenameTag.mockResolvedValue({
+      kind: "renamed",
+      tag: { id: 1, name: "🎵".repeat(32) },
+    })
+
+    renderDialog()
+
+    await screen.findByText("drill")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag drill" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for drill" })
+    expect(input).not.toHaveAttribute("maxlength")
+
+    await userEvent.clear(input)
+    await userEvent.paste("🎵".repeat(33))
+    expect(screen.getByText("33/32")).toHaveClass("text-destructive")
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    await userEvent.keyboard("{Enter}")
+    expect(mockRenameTag).not.toHaveBeenCalled()
+
+    await userEvent.clear(input)
+    await userEvent.paste("🎵".repeat(32))
+    expect(screen.getByText("32/32")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+    await userEvent.keyboard("{Enter}")
+    await waitFor(() =>
+      expect(mockRenameTag).toHaveBeenCalledWith(1, "🎵".repeat(32))
+    )
+  })
+
   async function openCollisionConfirm() {
     mockListTags.mockResolvedValue([
       { id: 5, name: "rap", carrier_count: 3 },

@@ -12,14 +12,11 @@ import {
 } from "~/components/ui/combobox"
 import type { TagRef, WatchlistEntry } from "~/lib/api"
 import {
-  buildTagSuggestions,
   MAX_TAG_LENGTH,
-  type TagSuggestion,
-} from "~/lib/tags"
-
-// COUNTER_THRESHOLD is where the "{n}/32" counter and its screen-reader
-// crossing announcement first appear (D-15).
-const COUNTER_THRESHOLD = 25
+  TAG_COUNTER_THRESHOLD,
+  tagNameLength,
+} from "~/lib/limits"
+import { buildTagSuggestions, type TagSuggestion } from "~/lib/tags"
 
 export interface TagComboboxProps {
   entry: WatchlistEntry
@@ -78,7 +75,14 @@ export function TagCombobox({
     onArtist,
     pendingNames,
   })
-  const items = suggestions.state === "items" ? suggestions.items : []
+  const queryLength = tagNameLength(query)
+  const overLimit = queryLength > MAX_TAG_LENGTH
+  // An over-limit new name can't be created, so Enter must not commit it;
+  // existing tags stay pickable.
+  const items =
+    suggestions.state === "items"
+      ? suggestions.items.filter((i) => !(overLimit && i.kind === "create"))
+      : []
 
   function commit(item: TagSuggestion) {
     const label = itemLabel(item)
@@ -96,13 +100,17 @@ export function TagCombobox({
       suppressEchoRef.current = null
       if (value === suppressed) return
     }
-    if (query.length < MAX_TAG_LENGTH && value.length >= MAX_TAG_LENGTH) {
+    const prevLength = tagNameLength(query)
+    const nextLength = tagNameLength(value)
+    if (prevLength < MAX_TAG_LENGTH && nextLength >= MAX_TAG_LENGTH) {
       setLiveMessage(`Tag name limit reached — ${MAX_TAG_LENGTH} characters.`)
     } else if (
-      query.length < COUNTER_THRESHOLD &&
-      value.length >= COUNTER_THRESHOLD
+      prevLength < TAG_COUNTER_THRESHOLD &&
+      nextLength >= TAG_COUNTER_THRESHOLD
     ) {
-      setLiveMessage(`${MAX_TAG_LENGTH - COUNTER_THRESHOLD} characters left.`)
+      setLiveMessage(
+        `${MAX_TAG_LENGTH - TAG_COUNTER_THRESHOLD} characters left.`
+      )
     }
     setQuery(value)
   }
@@ -132,7 +140,6 @@ export function TagCombobox({
     >
       <div className="flex items-center gap-1">
         <ComboboxInput
-          maxLength={MAX_TAG_LENGTH}
           placeholder="Tag name"
           aria-label={`Add tag to ${entry.name}`}
           aria-describedby={counterId}
@@ -140,16 +147,18 @@ export function TagCombobox({
           showTrigger={false}
           autoFocus
         />
-        {query.length >= COUNTER_THRESHOLD && (
+        {queryLength >= TAG_COUNTER_THRESHOLD && (
           <span
             id={counterId}
             className={`text-label tabular-nums ${
-              query.length >= MAX_TAG_LENGTH
-                ? "text-foreground"
-                : "text-muted-foreground"
+              overLimit
+                ? "text-destructive"
+                : queryLength >= MAX_TAG_LENGTH
+                  ? "text-foreground"
+                  : "text-muted-foreground"
             }`}
           >
-            {query.length}/{MAX_TAG_LENGTH}
+            {queryLength}/{MAX_TAG_LENGTH}
           </span>
         )}
       </div>
@@ -177,7 +186,9 @@ export function TagCombobox({
         <ComboboxEmpty>
           {suggestions.state === "already-on"
             ? `“${suggestions.name}” is already on this artist`
-            : "Type a name to create a tag"}
+            : overLimit
+              ? `Tags can be at most ${MAX_TAG_LENGTH} characters.`
+              : "Type a name to create a tag"}
         </ComboboxEmpty>
       </ComboboxContent>
     </Combobox>

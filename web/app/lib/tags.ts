@@ -1,8 +1,5 @@
 import type { TagRef } from "~/lib/api"
 
-export const MAX_TAG_LENGTH = 32
-export const MAX_TAGS_PER_ARTIST = 10
-
 // normalizeTagKey mirrors the server's identity rule (D-31): trim, collapse
 // any interior whitespace run to one space, fold NFC-decomposed characters
 // to their precomposed form, then lower-case. Applying .normalize("NFC")

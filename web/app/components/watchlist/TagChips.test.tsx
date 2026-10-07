@@ -402,9 +402,9 @@ describe("TagChips — cap hint, refusal toasts, and close focus", () => {
     expect(input).toHaveValue("")
   })
 
-  it("maps a 409 refusal to the cap toast", async () => {
+  it("maps a tag_cap_reached refusal to the cap toast, whatever the message", async () => {
     mockAttachTag.mockRejectedValueOnce(
-      new ApiError(409, "artist already has the maximum of 10 tags")
+      new ApiError(409, "anything", undefined, "tag_cap_reached")
     )
     renderChips()
     const { toast } = await import("sonner")
@@ -419,7 +419,24 @@ describe("TagChips — cap hint, refusal toasts, and close focus", () => {
     )
   })
 
-  it("maps the exact 400 length message to the length toast", async () => {
+  it("maps a tag_name_too_long refusal to the length toast, whatever the message", async () => {
+    mockAttachTag.mockRejectedValueOnce(
+      new ApiError(400, "anything", undefined, "tag_name_too_long")
+    )
+    renderChips()
+    const { toast } = await import("sonner")
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill{Enter}")
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Tags can be at most 32 characters."
+      )
+    )
+  })
+
+  it("does not branch on message text: the old length message without a code gets the generic toast", async () => {
     mockAttachTag.mockRejectedValueOnce(
       new ApiError(400, "tag name must be at most 32 characters")
     )
@@ -431,7 +448,7 @@ describe("TagChips — cap hint, refusal toasts, and close focus", () => {
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        "Tags can be at most 32 characters."
+        "Couldn't add “drill” to Drake — try again."
       )
     )
   })

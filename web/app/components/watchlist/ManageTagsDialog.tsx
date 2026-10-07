@@ -22,6 +22,11 @@ import {
   type TagRef,
   type TagSummary,
 } from "~/lib/api"
+import {
+  MAX_TAG_LENGTH,
+  TAG_COUNTER_THRESHOLD,
+  tagNameLength,
+} from "~/lib/limits"
 
 export interface ManageTagsDialogProps {
   open: boolean
@@ -80,6 +85,8 @@ export function ManageTagsDialog({
   const [deleteTarget, setDeleteTarget] = useState<TagSummary | null>(null)
   const [renameTarget, setRenameTarget] = useState<TagSummary | null>(null)
   const [renameValue, setRenameValue] = useState("")
+  const renameLength = tagNameLength(renameValue)
+  const renameOverLimit = renameLength > MAX_TAG_LENGTH
   const [renamePending, setRenamePending] = useState(false)
   const [collisionTarget, setCollisionTarget] =
     useState<CollisionTarget | null>(null)
@@ -194,7 +201,13 @@ export function ManageTagsDialog({
 
   async function handleSaveRename(tag: TagSummary) {
     const trimmed = renameValue.trim()
-    if (renamePending || trimmed === "" || trimmed === tag.name) return
+    if (
+      renamePending ||
+      renameOverLimit ||
+      trimmed === "" ||
+      trimmed === tag.name
+    )
+      return
     setRenamePending(true)
     try {
       const result = await renameTag(tag.id, trimmed)
@@ -354,14 +367,19 @@ export function ManageTagsDialog({
                           cancelRename(index)
                         }
                       }}
-                      maxLength={32}
                       readOnly={renamePending}
                       aria-label={`New name for ${tag.name}`}
                       className="h-8 flex-1"
                     />
-                    {renameValue.length >= 25 && (
-                      <span className="shrink-0 text-label text-muted-foreground tabular-nums">
-                        {renameValue.length}/32
+                    {renameLength >= TAG_COUNTER_THRESHOLD && (
+                      <span
+                        className={`shrink-0 text-label tabular-nums ${
+                          renameOverLimit
+                            ? "text-destructive"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {renameLength}/{MAX_TAG_LENGTH}
                       </span>
                     )}
                     <Button
@@ -378,6 +396,7 @@ export function ManageTagsDialog({
                       className="min-w-20"
                       disabled={
                         renamePending ||
+                        renameOverLimit ||
                         renameValue.trim() === "" ||
                         renameValue.trim() === tag.name
                       }
