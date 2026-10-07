@@ -1,0 +1,12 @@
+version: "2"
+# Doc-comment form only: exported identifiers' comments start with their name.
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks: ["ST1020", "ST1021", "ST1022"]
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

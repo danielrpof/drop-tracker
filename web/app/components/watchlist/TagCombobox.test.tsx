@@ -116,6 +116,35 @@ describe("TagCombobox", () => {
     expect(screen.getByText("32/32")).toHaveClass("text-foreground")
   })
 
+  it("counts code points: 32 emoji reads 32/32 and can be created", async () => {
+    const { onCommit } = renderCombobox()
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+    expect(input).not.toHaveAttribute("maxlength")
+
+    await userEvent.click(input)
+    await userEvent.paste("🎵".repeat(32))
+
+    expect(screen.getByText("32/32")).toBeInTheDocument()
+    await userEvent.keyboard("{Enter}")
+    expect(onCommit).toHaveBeenCalledWith("🎵".repeat(32))
+  })
+
+  it("blocks creating a 33-code-point name: destructive counter, over-limit empty text, Enter commits nothing", async () => {
+    const { onCommit } = renderCombobox()
+    const input = screen.getByRole("combobox", { name: "Add tag to Drake" })
+
+    await userEvent.click(input)
+    await userEvent.paste("🎵".repeat(33))
+
+    expect(screen.getByText("33/32")).toHaveClass("text-destructive")
+    expect(screen.queryByText(/Create/)).toBeNull()
+    expect(
+      screen.getByText("Tags can be at most 32 characters.")
+    ).toBeInTheDocument()
+    await userEvent.keyboard("{Enter}")
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
   it("does not show a counter below 25 characters", async () => {
     renderCombobox()
     const input = screen.getByRole("combobox", { name: "Add tag to Drake" })

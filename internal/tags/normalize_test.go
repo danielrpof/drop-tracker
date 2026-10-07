@@ -1,12 +1,11 @@
 package tags_test
 
-// Whitebox-adjacent: NormalizeName is exported, but this file lives beside
-// service_test.go's package tags_test convention (internal/watchlist's
-// normalize_test.go precedent is whitebox because normalizeSet is
-// unexported; NormalizeName here is exported, so package tags_test is fine).
+// External test package: NormalizeName is exported, so no whitebox access is
+// needed (unlike internal/watchlist's normalizeSet tests).
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -46,5 +45,14 @@ func TestNormalizeName(t *testing.T) {
 				t.Fatalf("NormalizeName(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLimitSentinelsEmbedTheirConstants(t *testing.T) {
+	if !strings.Contains(tags.ErrNameTooLong.Error(), strconv.Itoa(tags.MaxNameRunes)) {
+		t.Fatalf("ErrNameTooLong = %q, want it to contain %d", tags.ErrNameTooLong, tags.MaxNameRunes)
+	}
+	if !strings.Contains(tags.ErrTagCapReached.Error(), strconv.Itoa(tags.MaxTagsPerArtist)) {
+		t.Fatalf("ErrTagCapReached = %q, want it to contain %d", tags.ErrTagCapReached, tags.MaxTagsPerArtist)
 	}
 }

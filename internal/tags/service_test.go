@@ -14,10 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// seedEntry inserts a fresh artist + watchlist row, deriving both the mbid
-// and the test-name-scoped suffix from t.Name() plus name so multiple
-// entries within one test never collide. Raw inserts only -- this package's
-// own Service is what's under test.
+// seedEntry inserts an artist + watchlist row via raw SQL, deriving the mbid
+// from t.Name() plus name so entries within one test never collide.
 func seedEntry(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name string) (entryID, artistID int64) {
 	t.Helper()
 	sum := sha256.Sum256([]byte(t.Name() + "|" + name))
@@ -222,7 +220,7 @@ func TestService_Detach_UnknownEntryReturnsErrEntryNotFound(t *testing.T) {
 	}
 }
 
-// --- Task 1: List (GET /tags) ---
+// --- List ---
 
 func TestService_List_EmptyVocabularyReturnsNonNilEmptySlice(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
@@ -241,9 +239,8 @@ func TestService_List_EmptyVocabularyReturnsNonNilEmptySlice(t *testing.T) {
 	}
 }
 
-// TestService_List_CarrierCountsIncludeZeroAndRemoved proves D-11 (watched
-// carriers only), D-12 (a zero-link tag still surfaces), and D-13 (a tag
-// whose only link belongs to a removed artist still surfaces, uncounted).
+// TestService_List_CarrierCountsIncludeZeroAndRemoved: counts are watched
+// carriers only; zero-link and removed-artist-only tags still list (D-11).
 func TestService_List_CarrierCountsIncludeZeroAndRemoved(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
 	ctx := context.Background()
@@ -343,7 +340,7 @@ func TestService_List_OrderedByLowerNameThenID(t *testing.T) {
 	}
 }
 
-// --- Task 2: Rename (409 collision) and Delete ---
+// --- Rename (409 collision) and Delete ---
 
 func countArtistTagsByTagID(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tagID int64) int {
 	t.Helper()
@@ -414,10 +411,9 @@ func TestService_Rename_CaseOnlySameTagIsPlainRename(t *testing.T) {
 	}
 }
 
-// TestService_Rename_CollisionReturnsCollisionErrorAndChangesNothing proves
-// D-09/D-22: a rename onto a different existing tag's normalized name
-// returns *CollisionError naming the target's stored casing and the
-// post-merge union count, and changes nothing about the source tag.
+// TestService_Rename_CollisionReturnsCollisionErrorAndChangesNothing: a rename
+// onto another tag returns *CollisionError with the target's casing and the
+// post-merge count, leaving the source unchanged (D-22).
 func TestService_Rename_CollisionReturnsCollisionErrorAndChangesNothing(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
 	ctx := context.Background()
@@ -509,10 +505,8 @@ func TestService_Rename_MissingIDReturnsErrTagNotFound(t *testing.T) {
 	}
 }
 
-// TestService_Delete_RemovesEverywhereAndReturnsWatchedCount proves TAG-06,
-// D-11, SC4: the watched-carrier count is reported, every link is removed
-// (including the removed artist's), and the watchlist rows themselves are
-// untouched.
+// TestService_Delete_RemovesEverywhereAndReturnsWatchedCount: the watched count
+// is reported, every link goes (removed artists' too), watchlist rows stay (TAG-06).
 func TestService_Delete_RemovesEverywhereAndReturnsWatchedCount(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")
 	ctx := context.Background()
@@ -595,7 +589,7 @@ func TestService_Delete_TwiceReturnsErrTagNotFoundSecondTime(t *testing.T) {
 	}
 }
 
-// --- Task 3: Merge ---
+// --- Merge ---
 
 func TestService_Merge_UnionsMembershipsAndDeletesSource(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_service_test")

@@ -7,11 +7,13 @@ package httpserver_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -121,9 +123,40 @@ func TestTags_AttachEndToEnd(t *testing.T) {
 	if len(untaggedEntry.Tags) != 0 {
 		t.Fatalf("untagged entry tags = %+v, want []", untaggedEntry.Tags)
 	}
+
+	attachURL := ts.URL + "/watchlist/" + strconv.FormatInt(tagged.ID, 10) + "/tags"
+
+	tooLong := `{"name":"` + strings.Repeat("a", tags.MaxNameRunes+1) + `"}`
+	longResp, err := http.Post(attachURL, "application/json", strings.NewReader(tooLong))
+	if err != nil {
+		t.Fatalf("POST too-long name: %v", err)
+	}
+	defer func() { _ = longResp.Body.Close() }()
+	if longResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("too-long status = %d, want 400", longResp.StatusCode)
+	}
+	var longBody struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(longResp.Body).Decode(&longBody); err != nil {
+		t.Fatalf("decode too-long body: %v", err)
+	}
+	if longBody.Code != "tag_name_too_long" {
+		t.Fatalf("too-long code = %q, want tag_name_too_long", longBody.Code)
+	}
+
+	emoji := `{"name":"` + strings.Repeat("🎵", tags.MaxNameRunes) + `"}`
+	emojiResp, err := http.Post(attachURL, "application/json", strings.NewReader(emoji))
+	if err != nil {
+		t.Fatalf("POST emoji name: %v", err)
+	}
+	defer func() { _ = emojiResp.Body.Close() }()
+	if emojiResp.StatusCode != http.StatusCreated {
+		t.Fatalf("32-emoji status = %d, want 201", emojiResp.StatusCode)
+	}
 }
 
-// --- Task 1: GET /tags (vocabulary list) ---
+// --- GET /tags (vocabulary list) ---
 
 // tagSummaryWire is the JSON shape of a single GET /tags entry.
 type tagSummaryWire struct {
@@ -132,11 +165,9 @@ type tagSummaryWire struct {
 	CarrierCount int64  `json:"carrier_count"`
 }
 
-// TestTags_ListEndToEnd is the tracer for the vocabulary routes: an empty
-// isolated schema proves GET /tags answers a literal "[]" (never null,
-// never omitted), then a seeded vocabulary proves watched-only carrier
-// counts (D-11), a zero-link tag surfacing (D-12), and a removed-artist-only
-// link still surfacing uncounted (D-13), all in the DB's lower(name) order.
+// TestTags_ListEndToEnd is the vocabulary tracer: an empty schema answers a
+// literal "[]", then a seeded one proves watched-only counts, zero-link and
+// removed-artist-only tags still listed, in lower(name) order (D-11).
 func TestTags_ListEndToEnd(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_http_list_test")
 	ctx := context.Background()
@@ -244,7 +275,7 @@ func TestTags_List_ServiceUnavailableWhenStoreOmitted(t *testing.T) {
 	}
 }
 
-// --- Task 2: Rename (409 collision), Delete ---
+// --- Rename (409 collision), Delete ---
 
 func TestTags_Rename_Success200(t *testing.T) {
 	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameFunc: func(_ context.Context, id int64, name string) (tags.Tag, error) {
@@ -327,51 +358,6 @@ func TestTags_Rename_NotFoundReturns404(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
-	}
-}
-
-func TestTags_Rename_BlankNameReturns400(t *testing.T) {
-	var calls int32
-	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameCalls: &calls}})
-
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/tags/1", strings.NewReader(`{"name":"   "}`))
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("PATCH: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-	if got := atomic.LoadInt32(&calls); got != 0 {
-		t.Fatalf("store.Rename called %d times, want 0 (fail-fast before the store call)", got)
-	}
-}
-
-func TestTags_Rename_TooLongNameReturns400(t *testing.T) {
-	var calls int32
-	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameCalls: &calls}})
-
-	body := `{"name":"` + strings.Repeat("a", 33) + `"}`
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/tags/1", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("PATCH: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-	if got := atomic.LoadInt32(&calls); got != 0 {
-		t.Fatalf("store.Rename called %d times, want 0", got)
 	}
 }
 
@@ -534,9 +520,8 @@ func TestTags_RenameEndToEnd_AppliesToWatchlist(t *testing.T) {
 	}
 }
 
-// TestTags_DeleteEndToEnd_LeavesWatchlistUntouched proves TAG-06/D-11/SC4
-// against real Postgres: DELETE reports the watched count and every
-// watchlist row's preferences and note stay byte-identical.
+// TestTags_DeleteEndToEnd_LeavesWatchlistUntouched proves DELETE reports the
+// watched count and leaves every watchlist row byte-identical (TAG-06).
 func TestTags_DeleteEndToEnd_LeavesWatchlistUntouched(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_http_delete_test")
 	ctx := context.Background()
@@ -602,12 +587,10 @@ func TestTags_DeleteEndToEnd_LeavesWatchlistUntouched(t *testing.T) {
 	}
 }
 
-// --- Task 3: error mapping, concurrency, gate/CSRF ---
+// --- Error mapping, concurrency, gate/CSRF ---
 
-// fakeTagStore is a file-local double for httpserver.TagStore, mirroring
-// fakeSettingsStore's func-field shape. attachCalls/detachCalls, when
-// non-nil, count invocations so "store never called" is a direct
-// observation.
+// fakeTagStore is a func-field double for httpserver.TagStore, like
+// fakeSettingsStore; non-nil attachCalls/detachCalls count invocations.
 type fakeTagStore struct {
 	attachFunc  func(ctx context.Context, entryID int64, name string) (tags.AttachResult, error)
 	detachFunc  func(ctx context.Context, entryID, tagID int64) error
@@ -725,41 +708,6 @@ func TestTags_Attach_UnknownEntryReturns404(t *testing.T) {
 	}
 }
 
-func TestTags_Attach_TooLongNameReturns400(t *testing.T) {
-	var calls int32
-	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{attachCalls: &calls}})
-
-	body := `{"name":"` + strings.Repeat("a", 33) + `"}`
-	resp, err := http.Post(ts.URL+"/watchlist/1/tags", "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-	if got := atomic.LoadInt32(&calls); got != 0 {
-		t.Fatalf("store.Attach called %d times, want 0 (fail-fast before the store call)", got)
-	}
-}
-
-func TestTags_Attach_BlankNameReturns400(t *testing.T) {
-	var calls int32
-	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{attachCalls: &calls}})
-
-	resp, err := http.Post(ts.URL+"/watchlist/1/tags", "application/json", strings.NewReader(`{"name":"   "}`))
-	if err != nil {
-		t.Fatalf("POST: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-	if got := atomic.LoadInt32(&calls); got != 0 {
-		t.Fatalf("store.Attach called %d times, want 0 (fail-fast before the store call)", got)
-	}
-}
-
 func TestTags_Attach_AtCapReturns409(t *testing.T) {
 	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{attachFunc: func(context.Context, int64, string) (tags.AttachResult, error) {
 		return tags.AttachResult{}, tags.ErrTagCapReached
@@ -869,11 +817,9 @@ func postTag(t *testing.T, ts *httptest.Server, entryID int64, name string) int 
 	return resp.StatusCode
 }
 
-// TestTags_Attach_ConcurrentCapRace is ADR 0004 required test 1 at the HTTP
-// layer: two concurrent POSTs of two different new names against an artist
-// at 9 links yield exactly one 201 and one 409, and the artist ends with
-// exactly 10 links. Looped with fresh names each iteration -- an unforced
-// race can pass by luck on a single run.
+// TestTags_Attach_ConcurrentCapRace (ADR 0004): two concurrent POSTs of
+// different new names at 9 links yield one 201 and one 409. Looped, since an
+// unforced race can pass by luck once.
 func TestTags_Attach_ConcurrentCapRace(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_http_race_test")
 	ctx := context.Background()
@@ -1058,7 +1004,7 @@ func TestTags_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
 	}
 }
 
-// --- 24-02 Task 3: Merge, and gate/CSRF coverage for all four vocabulary routes ---
+// --- Merge, and gate/CSRF coverage for the vocabulary routes ---
 
 func TestTags_Merge_Success200(t *testing.T) {
 	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{mergeFunc: func(_ context.Context, sourceID, targetID int64) (tags.Summary, error) {
@@ -1172,10 +1118,8 @@ func TestTags_Merge_NonNumericIDReturns400(t *testing.T) {
 	}
 }
 
-// TestTags_MergeEndToEnd proves a real merge against Postgres: the target's
-// carrier count unions both tags' watched artists, the source tag is gone,
-// and a 10-tag artist carrying only the source still merges (ADR test 3, at
-// the HTTP layer).
+// TestTags_MergeEndToEnd: the target's count unions both tags' watched
+// artists, the source is gone, and a 10-tag artist still merges (ADR 0004).
 func TestTags_MergeEndToEnd(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "tags_http_merge_test")
 	ctx := context.Background()
@@ -1277,12 +1221,9 @@ func TestTags_Vocabulary_Gated401NoCookie(t *testing.T) {
 	}
 }
 
-// TestTags_Vocabulary_GatedForbiddenWithoutCSRFHeader proves the three
-// vocabulary write routes answer 403 and never reach the store without
-// X-Requested-With, even with a valid session cookie. GET /tags is a read
-// verb, so it is not part of this check (the CSRF-header requirement is a
-// no-op for it, mirroring TestTags_Gated401NoCookie's own /status
-// precedent).
+// TestTags_Vocabulary_GatedForbiddenWithoutCSRFHeader: the three write routes
+// answer 403 without X-Requested-With and never reach the store. GET /tags is
+// a read verb, so the CSRF requirement does not apply.
 func TestTags_Vocabulary_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
 	var renameCalls, mergeCalls, deleteCalls int32
 	store := fakeTagStore{renameCalls: &renameCalls, mergeCalls: &mergeCalls, deleteCalls: &deleteCalls}
@@ -1333,4 +1274,106 @@ func TestTags_Vocabulary_GatedForbiddenWithoutCSRFHeader(t *testing.T) {
 	if got := atomic.LoadInt32(&deleteCalls); got != 0 {
 		t.Fatalf("store.Delete called %d times, want 0", got)
 	}
+}
+
+// TestTags_ErrorContract pins status + code + body text for every tags
+// sentinel on every route that can return it, and the uncoded 500 fallback.
+func TestTags_ErrorContract(t *testing.T) {
+	type route struct {
+		name   string
+		method string
+		path   string
+		body   string
+		store  func(err error) fakeTagStore
+	}
+	routes := []route{
+		{"attach", http.MethodPost, "/watchlist/1/tags", `{"name":"rap"}`, func(err error) fakeTagStore {
+			return fakeTagStore{attachFunc: func(context.Context, int64, string) (tags.AttachResult, error) { return tags.AttachResult{}, err }}
+		}},
+		{"rename", http.MethodPatch, "/tags/1", `{"name":"rap"}`, func(err error) fakeTagStore {
+			return fakeTagStore{renameFunc: func(context.Context, int64, string) (tags.Tag, error) { return tags.Tag{}, err }}
+		}},
+		{"merge", http.MethodPost, "/tags/1/merge", `{"into":2}`, func(err error) fakeTagStore {
+			return fakeTagStore{mergeFunc: func(context.Context, int64, int64) (tags.Summary, error) { return tags.Summary{}, err }}
+		}},
+		{"delete", http.MethodDelete, "/tags/1", "", func(err error) fakeTagStore {
+			return fakeTagStore{deleteFunc: func(context.Context, int64) (int64, error) { return 0, err }}
+		}},
+		{"detach", http.MethodDelete, "/watchlist/1/tags/2", "", func(err error) fakeTagStore {
+			return fakeTagStore{detachFunc: func(context.Context, int64, int64) error { return err }}
+		}},
+	}
+	cases := []struct {
+		routes     []string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{[]string{"attach", "rename"}, tags.ErrNameRequired, http.StatusBadRequest, "tag_name_required"},
+		{[]string{"attach", "rename"}, tags.ErrNameTooLong, http.StatusBadRequest, "tag_name_too_long"},
+		{[]string{"attach", "rename"}, tags.ErrNameInvalid, http.StatusBadRequest, "tag_name_invalid"},
+		{[]string{"attach"}, tags.ErrTagCapReached, http.StatusConflict, "tag_cap_reached"},
+		{[]string{"attach", "detach"}, tags.ErrEntryNotFound, http.StatusNotFound, "watchlist_entry_not_found"},
+		{[]string{"rename", "merge", "delete"}, tags.ErrTagNotFound, http.StatusNotFound, "tag_not_found"},
+		{[]string{"merge"}, tags.ErrMergeIntoSelf, http.StatusBadRequest, "tag_merge_into_self"},
+	}
+	for _, tc := range cases {
+		for _, rt := range routes {
+			if !slices.Contains(tc.routes, rt.name) {
+				continue
+			}
+			t.Run(rt.name+"/"+tc.wantCode, func(t *testing.T) {
+				ts := newTagsServer(t, tagsServerOpts{store: rt.store(tc.err)})
+				status, body := doTagsRequest(t, ts, rt.method, rt.path, rt.body)
+				if status != tc.wantStatus {
+					t.Fatalf("status = %d, want %d", status, tc.wantStatus)
+				}
+				if body["code"] != tc.wantCode || body["error"] != tc.err.Error() {
+					t.Fatalf("body = %v, want code %q error %q", body, tc.wantCode, tc.err.Error())
+				}
+			})
+		}
+	}
+
+	for _, rt := range routes {
+		t.Run(rt.name+"/unknown error is uncoded 500", func(t *testing.T) {
+			ts := newTagsServer(t, tagsServerOpts{store: rt.store(errors.New("boom"))})
+			status, body := doTagsRequest(t, ts, rt.method, rt.path, rt.body)
+			if status != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500", status)
+			}
+			if _, ok := body["code"]; ok || body["error"] != "internal error" {
+				t.Fatalf("body = %v, want only error \"internal error\"", body)
+			}
+		})
+	}
+}
+
+func TestTags_Rename_CollisionBodyHasCode(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{renameFunc: func(context.Context, int64, string) (tags.Tag, error) {
+		return tags.Tag{}, &tags.CollisionError{Target: tags.Tag{ID: 3, Name: "trap"}, CarrierCountAfterMerge: 3}
+	}}})
+	status, body := doTagsRequest(t, ts, http.MethodPatch, "/tags/9", `{"name":"TRAP"}`)
+	if status != http.StatusConflict || body["code"] != "tag_name_taken" || body["error"] != "tag name already exists" {
+		t.Fatalf("status = %d body = %v, want 409 tag_name_taken with the fixed text", status, body)
+	}
+}
+
+func doTagsRequest(t *testing.T, ts *httptest.Server, method, path, body string) (int, map[string]any) {
+	t.Helper()
+	req, err := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return resp.StatusCode, out
 }

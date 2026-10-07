@@ -15,10 +15,40 @@ import (
 	"github.com/danielrpof/drop-tracker/internal/tags"
 )
 
-// maxTagBodyBytes bounds the attach request body (T-24-05); a tag name is
-// capped at 32 runes before any query, so a request this small is never a
-// legitimate large payload.
+// maxTagBodyBytes bounds tag request bodies (T-24-05); a name is capped at
+// tags.MaxNameRunes, so a body this small is never legitimate large input.
 const maxTagBodyBytes = 4096
+
+const (
+	codeTagNameRequired  = "tag_name_required"
+	codeTagNameTooLong   = "tag_name_too_long"
+	codeTagNameInvalid   = "tag_name_invalid"
+	codeTagCapReached    = "tag_cap_reached"
+	codeTagNameTaken     = "tag_name_taken"
+	codeTagNotFound      = "tag_not_found"
+	codeTagMergeIntoSelf = "tag_merge_into_self"
+	codeEntryNotFound    = "watchlist_entry_not_found"
+)
+
+// tagErrors is the one error -> (status, code) table for every tags route.
+var tagErrors = []domainError{
+	{tags.ErrNameRequired, http.StatusBadRequest, codeTagNameRequired},
+	{tags.ErrNameTooLong, http.StatusBadRequest, codeTagNameTooLong},
+	{tags.ErrNameInvalid, http.StatusBadRequest, codeTagNameInvalid},
+	{tags.ErrTagCapReached, http.StatusConflict, codeTagCapReached},
+	{tags.ErrTagNotFound, http.StatusNotFound, codeTagNotFound},
+	{tags.ErrMergeIntoSelf, http.StatusBadRequest, codeTagMergeIntoSelf},
+	{tags.ErrEntryNotFound, http.StatusNotFound, codeEntryNotFound},
+}
+
+// writeTagError writes the mapped tags error, or logs and answers 500.
+func writeTagError(w http.ResponseWriter, r *http.Request, err error) {
+	if writeDomainError(w, tagErrors, err) {
+		return
+	}
+	httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
+	writeError(w, http.StatusInternalServerError, "internal error")
+}
 
 // TagStore is the minimal surface internal/httpserver needs from the tags
 // domain -- narrower than *tags.Service so a stub can implement it in
@@ -32,20 +62,17 @@ type TagStore interface {
 	Merge(ctx context.Context, sourceID, targetID int64) (tags.Summary, error)
 }
 
-// WithTags supplies the tags domain dependency backing POST
-// /watchlist/{id}/tags and DELETE /watchlist/{id}/tags/{tag_id}. Absent,
-// the handlers answer 503 with the shared fixed error body, mirroring
-// WithSettings/WithStatus; a cmd/server binary always wires it.
+// WithTags supplies the tags store backing every tag route: attach/detach
+// under /watchlist/{id}/tags and the /tags list, rename, merge and delete
+// routes. Absent, they all answer 503, like WithSettings/WithStatus.
 func WithTags(store TagStore) Option {
 	return func(c *serverConfig) {
 		c.tags = store
 	}
 }
 
-// parseTagID reads and validates a tag-id path segment named param the same
-// way parseWatchlistID validates {id} -- tags.id is BIGSERIAL, so 0 and
-// negatives are never valid. param is "tag_id" on the watchlist-scoped
-// attach/detach routes and "id" on the /tags/{id} vocabulary routes.
+// parseTagID validates a tag-id path segment like parseWatchlistID; param is
+// "tag_id" on the watchlist-scoped routes and "id" on /tags/{id}.
 func parseTagID(r *http.Request, param string) (int64, error) {
 	raw := chi.URLParam(r, param)
 	id, err := strconv.ParseInt(raw, 10, 64)
@@ -55,9 +82,8 @@ func parseTagID(r *http.Request, param string) (int64, error) {
 	return id, nil
 }
 
-// attachTagRequest is the request DTO for POST /watchlist/{id}/tags. It
-// carries only the client-suppliable field -- id is server-derived from the
-// path, so an over-posted id is rejected by DisallowUnknownFields.
+// attachTagRequest is the request DTO for POST /watchlist/{id}/tags; the id
+// comes from the path, so an over-posted one fails DisallowUnknownFields.
 type attachTagRequest struct {
 	Name string `json:"name"`
 }
@@ -68,9 +94,7 @@ type tagResponse struct {
 	Name string `json:"name"`
 }
 
-// handleAttachTag implements POST /watchlist/{id}/tags (TAG-01, D-20, D-21).
-// The client-facing normalization check is a fail-fast convenience -- the
-// service re-validates non-bypassably (three-layer validation).
+// handleAttachTag implements POST /watchlist/{id}/tags (TAG-01).
 func (s *Server) handleAttachTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -90,27 +114,9 @@ func (s *Server) handleAttachTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fail-fast, non-bypassable check happens again inside Attach -- this
-	// call only avoids a round trip for the common client-side typo case.
-	if _, err := tags.NormalizeName(req.Name); err != nil {
-		writeError(w, http.StatusBadRequest, tagNameErrorMessage(err))
-		return
-	}
-
 	result, err := s.tags.Attach(r.Context(), id, req.Name)
-	switch {
-	case errors.Is(err, tags.ErrNameRequired), errors.Is(err, tags.ErrNameTooLong), errors.Is(err, tags.ErrNameInvalid):
-		writeError(w, http.StatusBadRequest, tagNameErrorMessage(err))
-		return
-	case errors.Is(err, tags.ErrEntryNotFound):
-		writeError(w, http.StatusNotFound, "watchlist entry not found")
-		return
-	case errors.Is(err, tags.ErrTagCapReached):
-		writeError(w, http.StatusConflict, "artist already has the maximum of 10 tags")
-		return
-	case err != nil:
-		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
-		writeError(w, http.StatusInternalServerError, "internal error")
+	if err != nil {
+		writeTagError(w, r, err)
 		return
 	}
 
@@ -123,9 +129,8 @@ func (s *Server) handleAttachTag(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(tagResponse{ID: result.Tag.ID, Name: result.Tag.Name})
 }
 
-// handleDetachTag implements DELETE /watchlist/{id}/tags/{tag_id} (TAG-02,
-// D-20, D-21). Any outcome short of "watchlist entry not found" is 204 --
-// detaching a link that never existed is idempotent success, never 404.
+// handleDetachTag implements DELETE /watchlist/{id}/tags/{tag_id}. Only an
+// unknown entry is 404; a missing link is idempotent 204 (D-21).
 func (s *Server) handleDetachTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -143,14 +148,8 @@ func (s *Server) handleDetachTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.tags.Detach(r.Context(), id, tagID)
-	switch {
-	case errors.Is(err, tags.ErrEntryNotFound):
-		writeError(w, http.StatusNotFound, "watchlist entry not found")
-		return
-	case err != nil:
-		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
-		writeError(w, http.StatusInternalServerError, "internal error")
+	if err := s.tags.Detach(r.Context(), id, tagID); err != nil {
+		writeTagError(w, r, err)
 		return
 	}
 
@@ -158,10 +157,8 @@ func (s *Server) handleDetachTag(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleListTags implements GET /tags (TAG-05, D-11, D-13, D-30): the whole
-// vocabulary with watched-only carrier counts, in the stable lower(name)
-// order the DB query already guarantees. Also the autocomplete source
-// (D-30) and Manage tags' list (D-22).
+// handleListTags implements GET /tags (TAG-05): the whole vocabulary with
+// watched-only carrier counts, also the autocomplete source.
 func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -170,12 +167,8 @@ func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 
 	summaries, err := s.tags.List(r.Context())
 	if err != nil {
-		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeTagError(w, r, err)
 		return
-	}
-	if summaries == nil {
-		summaries = []tags.Summary{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -188,11 +181,11 @@ type renameTagRequest struct {
 	Name string `json:"name"`
 }
 
-// tagCollisionResponse is the 409 body for a rename whose normalized name
-// collides with a different existing tag (D-22): everything the merge
-// confirm dialog needs, verbatim (24-UI-SPEC.md Copywriting).
+// tagCollisionResponse is the 409 body for a rename collision: everything
+// the merge confirm dialog needs (D-22).
 type tagCollisionResponse struct {
 	Error                  string   `json:"error"`
+	Code                   string   `json:"code"`
 	Target                 tags.Tag `json:"target"`
 	CarrierCountAfterMerge int64    `json:"carrier_count_after_merge"`
 }
@@ -203,9 +196,7 @@ type deleteTagResponse struct {
 	CarrierCount int64 `json:"carrier_count"`
 }
 
-// handleRenameTag implements PATCH /tags/{id} (TAG-05, D-09, D-22, D-23).
-// The client-facing normalization check is a fail-fast convenience -- the
-// service re-validates non-bypassably, same as attach.
+// handleRenameTag implements PATCH /tags/{id} (TAG-05).
 func (s *Server) handleRenameTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -225,32 +216,22 @@ func (s *Server) handleRenameTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := tags.NormalizeName(req.Name); err != nil {
-		writeError(w, http.StatusBadRequest, tagNameErrorMessage(err))
-		return
-	}
-
 	renamed, err := s.tags.Rename(r.Context(), id, req.Name)
 	var collision *tags.CollisionError
-	switch {
-	case errors.As(err, &collision):
+	if errors.As(err, &collision) {
+		// Fixed text: CollisionError.Error() embeds the stored tag name.
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(tagCollisionResponse{
 			Error:                  "tag name already exists",
+			Code:                   codeTagNameTaken,
 			Target:                 collision.Target,
 			CarrierCountAfterMerge: collision.CarrierCountAfterMerge,
 		})
 		return
-	case errors.Is(err, tags.ErrTagNotFound):
-		writeError(w, http.StatusNotFound, "tag not found")
-		return
-	case errors.Is(err, tags.ErrNameRequired), errors.Is(err, tags.ErrNameTooLong), errors.Is(err, tags.ErrNameInvalid):
-		writeError(w, http.StatusBadRequest, tagNameErrorMessage(err))
-		return
-	case err != nil:
-		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
-		writeError(w, http.StatusInternalServerError, "internal error")
+	}
+	if err != nil {
+		writeTagError(w, r, err)
 		return
 	}
 
@@ -259,10 +240,8 @@ func (s *Server) handleRenameTag(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(tagResponse{ID: renamed.ID, Name: renamed.Name})
 }
 
-// handleDeleteTag implements DELETE /tags/{id} (TAG-06, D-11, SC4): removes
-// the tag from every artist (including removed ones) and reports the
-// watched-carrier count. Unlike detach, a missing tag id is a genuine 404 --
-// deleting a tag that never existed is not an idempotent no-op.
+// handleDeleteTag implements DELETE /tags/{id} (TAG-06). Unlike detach, an
+// unknown tag id is a genuine 404.
 func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -276,13 +255,8 @@ func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	count, err := s.tags.Delete(r.Context(), id)
-	switch {
-	case errors.Is(err, tags.ErrTagNotFound):
-		writeError(w, http.StatusNotFound, "tag not found")
-		return
-	case err != nil:
-		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
-		writeError(w, http.StatusInternalServerError, "internal error")
+	if err != nil {
+		writeTagError(w, r, err)
 		return
 	}
 
@@ -296,9 +270,8 @@ type mergeTagRequest struct {
 	Into int64 `json:"into"`
 }
 
-// handleMergeTag implements POST /tags/{id}/merge (TAG-05, D-19, D-22,
-// D-23): the confirmed-merge counterpart to a 409 rename collision. {id} is
-// the source tag; into is the target.
+// handleMergeTag implements POST /tags/{id}/merge (D-19), the confirmed
+// counterpart to a 409 rename collision. {id} is the source; into the target.
 func (s *Server) handleMergeTag(w http.ResponseWriter, r *http.Request) {
 	if s.tags == nil {
 		writeError(w, http.StatusServiceUnavailable, "tags not available")
@@ -323,35 +296,12 @@ func (s *Server) handleMergeTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	summary, err := s.tags.Merge(r.Context(), id, req.Into)
-	switch {
-	case errors.Is(err, tags.ErrMergeIntoSelf):
-		writeError(w, http.StatusBadRequest, "cannot merge a tag into itself")
-		return
-	case errors.Is(err, tags.ErrTagNotFound):
-		writeError(w, http.StatusNotFound, "tag not found")
-		return
-	case err != nil:
-		httplog.SetAttrs(r.Context(), slog.String("tags_error", err.Error()))
-		writeError(w, http.StatusInternalServerError, "internal error")
+	if err != nil {
+		writeTagError(w, r, err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(summary)
-}
-
-// tagNameErrorMessage maps a tags name-validation sentinel to its fixed,
-// operator-authored 400 body -- never the submitted name (T-24-07).
-func tagNameErrorMessage(err error) string {
-	switch {
-	case errors.Is(err, tags.ErrNameRequired):
-		return "tag name is required"
-	case errors.Is(err, tags.ErrNameTooLong):
-		return "tag name must be at most 32 characters"
-	case errors.Is(err, tags.ErrNameInvalid):
-		return "tag name contains invalid characters"
-	default:
-		return "invalid tag name"
-	}
 }

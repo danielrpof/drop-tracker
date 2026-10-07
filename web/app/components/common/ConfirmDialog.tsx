@@ -23,15 +23,9 @@ export interface ConfirmDialogProps {
   finalFocus?: RefObject<HTMLElement | null>
 }
 
-// ConfirmDialog (D-16) is the one reusable confirm dialog for merge and
-// delete -- built on the vendored AlertDialog, Phase 26's bulk remove reuses
-// it too. Cancel renders before the action button in DOM order, which is
-// what gives it base-ui's default initial focus (the first tabbable
-// element) without an explicit ref -- the safe default for a destructive or
-// one-way action. While onConfirm runs, both buttons disable and the action
-// shows pendingLabel at a fixed width so nothing shifts. The caller owns
-// toasts: this component only needs to know the attempt is over (resolved
-// or rejected) so it can close itself.
+// ConfirmDialog (D-16) is the shared confirm dialog for merge and delete.
+// Cancel renders first so base-ui's default initial focus lands on the safe
+// action. While onConfirm runs both buttons disable; the caller owns toasts.
 export function ConfirmDialog({
   open,
   onOpenChange,
@@ -50,9 +44,7 @@ export function ConfirmDialog({
     try {
       await onConfirm()
     } catch {
-      // The caller is responsible for reporting failures (toast +
-      // re-fetch); this component only needs to close once the attempt
-      // is over.
+      // The caller reports failures; this only closes once the attempt ends.
     } finally {
       setPending(false)
       onOpenChange(false)

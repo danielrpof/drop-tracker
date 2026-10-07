@@ -2,15 +2,18 @@ import { useState } from "react"
 
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   ApiError,
   attachTag,
   detachTag,
+  listTags,
   type TagRef,
   type WatchlistEntry,
 } from "~/lib/api"
+
+import { TagVocabularyProvider } from "~/lib/useTagVocabulary"
 
 import { TagChips, type TagActions } from "./TagChips"
 
@@ -21,11 +24,18 @@ vi.mock("~/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/api")>()),
   attachTag: vi.fn(),
   detachTag: vi.fn(),
+  listTags: vi.fn(),
 }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const mockDetachTag = vi.mocked(detachTag)
 const mockAttachTag = vi.mocked(attachTag)
+const mockListTags = vi.mocked(listTags)
+
+// A never-settling vocabulary load keeps the vocabulary null, as the old inert stub did.
+beforeEach(() => {
+  mockListTags.mockReturnValue(new Promise(() => {}))
+})
 
 const entry: WatchlistEntry = {
   id: 42,
@@ -46,30 +56,18 @@ const entry: WatchlistEntry = {
   note: null,
 }
 
-// baseTagActions stubs the vocabulary/loadVocabulary/rememberTag seam
-// TagChips also drives (D-30) -- these tests exercise the chip row itself,
-// not the "+ tag" combobox, so the stubs stay inert.
-function baseTagActions(): Pick<
-  TagActions,
-  "vocabulary" | "loadVocabulary" | "rememberTag"
-> {
-  return {
-    vocabulary: null,
-    loadVocabulary: vi.fn(),
-    rememberTag: vi.fn(),
-  }
-}
-
 function renderChips() {
   const addTag = vi.fn()
   const removeTag = vi.fn()
   const announce = vi.fn()
   render(
-    <TagChips
-      entry={entry}
-      actions={{ addTag, removeTag, ...baseTagActions() }}
-      announce={announce}
-    />
+    <TagVocabularyProvider>
+      <TagChips
+        entry={entry}
+        actions={{ addTag, removeTag }}
+        announce={announce}
+      />
+    </TagVocabularyProvider>
   )
   return { addTag, removeTag, announce }
 }
@@ -85,11 +83,13 @@ describe("TagChips", () => {
 
   it("renders only the '+ tag' trigger when the entry has no tags -- no empty-row gap (D-02)", () => {
     render(
-      <TagChips
-        entry={{ ...entry, tags: [] }}
-        actions={{ addTag: vi.fn(), removeTag: vi.fn(), ...baseTagActions() }}
-        announce={vi.fn()}
-      />
+      <TagVocabularyProvider>
+        <TagChips
+          entry={{ ...entry, tags: [] }}
+          actions={{ addTag: vi.fn(), removeTag: vi.fn() }}
+          announce={vi.fn()}
+        />
+      </TagVocabularyProvider>
     )
 
     expect(
@@ -137,10 +137,8 @@ describe("TagChips", () => {
   })
 })
 
-// Harness mirrors watchlist.tsx's real addTag/removeTag functional updaters
-// (D-24) so a click's optimistic removal actually re-renders TagChips with
-// a shrunk entry.tags -- the focus-management behaviors below depend on a
-// real DOM removal, not a mocked no-op.
+// Harness mirrors the route's addTag/removeTag updaters (D-24) so removals
+// update entry.tags; the focus tests below need a real DOM removal.
 function Harness({
   initialEntry,
   onAnnounce,
@@ -170,10 +168,13 @@ function Harness({
           : e
       )
     },
-    ...baseTagActions(),
   }
 
-  return <TagChips entry={entry} actions={actions} announce={onAnnounce} />
+  return (
+    <TagVocabularyProvider>
+      <TagChips entry={entry} actions={actions} announce={onAnnounce} />
+    </TagVocabularyProvider>
+  )
 }
 
 function tagRefs(names: string[]): TagRef[] {
@@ -402,9 +403,9 @@ describe("TagChips — cap hint, refusal toasts, and close focus", () => {
     expect(input).toHaveValue("")
   })
 
-  it("maps a 409 refusal to the cap toast", async () => {
+  it("maps a tag_cap_reached refusal to the cap toast, whatever the message", async () => {
     mockAttachTag.mockRejectedValueOnce(
-      new ApiError(409, "artist already has the maximum of 10 tags")
+      new ApiError(409, "anything", undefined, "tag_cap_reached")
     )
     renderChips()
     const { toast } = await import("sonner")
@@ -419,7 +420,24 @@ describe("TagChips — cap hint, refusal toasts, and close focus", () => {
     )
   })
 
-  it("maps the exact 400 length message to the length toast", async () => {
+  it("maps a tag_name_too_long refusal to the length toast, whatever the message", async () => {
+    mockAttachTag.mockRejectedValueOnce(
+      new ApiError(400, "anything", undefined, "tag_name_too_long")
+    )
+    renderChips()
+    const { toast } = await import("sonner")
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill{Enter}")
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Tags can be at most 32 characters."
+      )
+    )
+  })
+
+  it("does not branch on message text: the old length message without a code gets the generic toast", async () => {
     mockAttachTag.mockRejectedValueOnce(
       new ApiError(400, "tag name must be at most 32 characters")
     )
@@ -431,7 +449,7 @@ describe("TagChips — cap hint, refusal toasts, and close focus", () => {
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        "Tags can be at most 32 characters."
+        "Couldn't add “drill” to Drake — try again."
       )
     )
   })

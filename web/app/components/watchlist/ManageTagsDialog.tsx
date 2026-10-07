@@ -14,22 +14,17 @@ import {
 } from "~/components/ui/dialog"
 import { Input } from "~/components/ui/input"
 import { Skeleton } from "~/components/ui/skeleton"
+import type { TagRef, TagSummary } from "~/lib/api"
 import {
-  deleteTag,
-  listTags,
-  mergeTag,
-  renameTag,
-  type TagRef,
-  type TagSummary,
-} from "~/lib/api"
+  MAX_TAG_LENGTH,
+  TAG_COUNTER_THRESHOLD,
+  tagNameLength,
+} from "~/lib/limits"
+import { useTagVocabulary } from "~/lib/useTagVocabulary"
 
 export interface ManageTagsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onLoaded: (tags: TagSummary[]) => void
-  onDeleted: (tagId: number) => void
-  onRenamed: (tag: TagRef) => void
-  onMerged: (sourceId: number, target: TagSummary) => void
 }
 
 // CollisionTarget is set when renameTag resolves a collision (D-09): the
@@ -42,16 +37,7 @@ interface CollisionTarget {
   carrierCountAfterMerge: number
 }
 
-type Status = "loading" | "loaded" | "error"
-
-function sortTags(tags: TagSummary[]): TagSummary[] {
-  return [...tags].sort((a, b) => {
-    const cmp = a.name.localeCompare(b.name, undefined, {
-      sensitivity: "base",
-    })
-    return cmp !== 0 ? cmp : a.id - b.id
-  })
-}
+const NO_TAGS: TagSummary[] = []
 
 function pluralize(n: number): string {
   return n === 1 ? "artist" : "artists"
@@ -59,87 +45,65 @@ function pluralize(n: number): string {
 
 // FocusRequest is a single pending "move focus once the list re-renders"
 // instruction (UI-SPEC focus table row (d)), consumed by the layout effect
-// below -- mirrors TagChips' FocusRequest pattern.
-type FocusRequest = { kind: "row"; index: number } | { kind: "close" } | null
+// below. Delete waits until the removed row is gone from the list.
+type FocusRequest =
+  | { kind: "tag"; id: number }
+  | { kind: "after-delete"; id: number; index: number }
+  | null
 
-// ManageTagsDialog (D-07, D-08) is the global tag-management surface opened
-// from the Watchlist header. It re-fetches the vocabulary on every open
-// (D-30) and lets the user delete a tag through a count-stating
-// ConfirmDialog rendered inside its own React tree (so base-ui registers it
-// as a nested dialog). Task 2/3 add rename and merge on top of this.
+// ManageTagsDialog (D-07) is the global tag-management surface (rename,
+// merge, delete), reloading the vocabulary on every open. Its ConfirmDialog
+// renders inside this tree so base-ui registers it as a nested dialog.
 export function ManageTagsDialog({
   open,
   onOpenChange,
-  onLoaded,
-  onDeleted,
-  onRenamed,
-  onMerged,
 }: ManageTagsDialogProps) {
-  const [status, setStatus] = useState<Status>("loading")
-  const [tags, setTags] = useState<TagSummary[]>([])
+  const { vocabulary, status, reload, rename, merge, remove } =
+    useTagVocabulary()
+  const tags = vocabulary ?? NO_TAGS
+  const [focusRequest, setFocusRequest] = useState<FocusRequest>(null)
   const [deleteTarget, setDeleteTarget] = useState<TagSummary | null>(null)
   const [renameTarget, setRenameTarget] = useState<TagSummary | null>(null)
   const [renameValue, setRenameValue] = useState("")
+  const renameLength = tagNameLength(renameValue)
+  const renameOverLimit = renameLength > MAX_TAG_LENGTH
   const [renamePending, setRenamePending] = useState(false)
   const [collisionTarget, setCollisionTarget] =
     useState<CollisionTarget | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
-  const focusRequestRef = useRef<FocusRequest>(null)
   const cancelFocusIndexRef = useRef<number | null>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const renameSaveRef = useRef<HTMLButtonElement>(null)
-  // Drops a GET /tags that a newer load or a successful mutation superseded (WR-08).
-  const loadGen = useRef(0)
-  const loadInFlight = useRef(false)
   const initialFocusPendingRef = useRef(false)
-
-  function load() {
-    const gen = ++loadGen.current
-    loadInFlight.current = true
-    setStatus("loading")
-    listTags()
-      .then((result) => {
-        if (gen !== loadGen.current) return
-        loadInFlight.current = false
-        const sorted = sortTags(result)
-        setTags(sorted)
-        setStatus("loaded")
-        onLoaded(sorted)
-      })
-      .catch(() => {
-        if (gen !== loadGen.current) return
-        loadInFlight.current = false
-        setStatus("error")
-      })
-  }
-
-  // A mutation supersedes any in-flight load; refetch so the dialog never
-  // strands on its skeleton after that response is dropped.
-  function invalidateLoad() {
-    loadGen.current++
-    if (loadInFlight.current) load()
-  }
 
   useEffect(() => {
     initialFocusPendingRef.current = open
-    if (open) load()
+    if (open) reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   useLayoutEffect(() => {
-    const req = focusRequestRef.current
-    if (!req) return
-    focusRequestRef.current = null
-    if (req.kind === "close") {
-      document
-        .querySelector<HTMLButtonElement>('[data-slot="dialog-close"]')
+    const req = focusRequest
+    if (!req || status !== "loaded") return
+    const rows = listRef.current?.querySelectorAll<HTMLLIElement>("li")
+    if (req.kind === "after-delete") {
+      if (tags.some((t) => t.id === req.id)) return
+      setFocusRequest(null)
+      if (tags.length === 0) {
+        document
+          .querySelector<HTMLButtonElement>('[data-slot="dialog-close"]')
+          ?.focus()
+        return
+      }
+      rows?.[Math.min(req.index, tags.length - 1)]
+        ?.querySelector<HTMLButtonElement>("button")
         ?.focus()
       return
     }
-    const row =
-      listRef.current?.querySelectorAll<HTMLLIElement>("li")[req.index]
-    row?.querySelector<HTMLButtonElement>("button")?.focus()
-  }, [tags])
+    setFocusRequest(null)
+    const index = tags.findIndex((t) => t.id === req.id)
+    rows?.[index]?.querySelector<HTMLButtonElement>("button")?.focus()
+  }, [tags, status, focusRequest])
 
   // The first load of each open hands focus to row 1's Rename (G-24-10);
   // later reloads, and focus the user already moved, are left alone.
@@ -194,31 +158,25 @@ export function ManageTagsDialog({
 
   async function handleSaveRename(tag: TagSummary) {
     const trimmed = renameValue.trim()
-    if (renamePending || trimmed === "" || trimmed === tag.name) return
+    if (
+      renamePending ||
+      renameOverLimit ||
+      trimmed === "" ||
+      trimmed === tag.name
+    )
+      return
     setRenamePending(true)
     try {
-      const result = await renameTag(tag.id, trimmed)
+      const result = await rename(tag.id, trimmed)
       if (result.kind === "renamed") {
-        invalidateLoad()
-        setTags((prev) => {
-          const updated = prev.map((t) =>
-            t.id === tag.id ? { ...t, name: result.tag.name } : t
-          )
-          const sorted = sortTags(updated)
-          const newIndex = sorted.findIndex((t) => t.id === tag.id)
-          focusRequestRef.current = { kind: "row", index: newIndex }
-          return sorted
-        })
+        setFocusRequest({ kind: "tag", id: tag.id })
         setRenameTarget(null)
         setRenameValue("")
         setRenamePending(false)
-        onRenamed(result.tag)
         toast.success(`Renamed “${tag.name}” to “${result.tag.name}”.`)
       } else {
-        // A collision opens the merge ConfirmDialog (D-09); rename mode
-        // stays open with its typed text until the user confirms or
-        // cancels the merge. No merge request is ever sent without that
-        // confirmation.
+        // A collision opens the merge ConfirmDialog (D-09); rename mode stays
+        // open, and no merge is sent without confirmation.
         setRenamePending(false)
         setCollisionTarget({
           sourceId: tag.id,
@@ -237,23 +195,10 @@ export function ManageTagsDialog({
     if (!collisionTarget) return
     const { sourceId, sourceName, target } = collisionTarget
     try {
-      const merged = await mergeTag(sourceId, target.id)
-      invalidateLoad()
-      setTags((prev) => {
-        const withoutSource = prev.filter((t) => t.id !== sourceId)
-        const updated = withoutSource.map((t) =>
-          t.id === target.id
-            ? { ...t, name: merged.name, carrier_count: merged.carrier_count }
-            : t
-        )
-        const sorted = sortTags(updated)
-        const newIndex = sorted.findIndex((t) => t.id === target.id)
-        focusRequestRef.current = { kind: "row", index: newIndex }
-        return sorted
-      })
+      const merged = await merge(sourceId, target.id)
+      setFocusRequest({ kind: "tag", id: target.id })
       setRenameTarget(null)
       setRenameValue("")
-      onMerged(sourceId, merged)
       toast.success(
         `Merged “${sourceName}” into “${merged.name}” — ${merged.carrier_count} ${pluralize(merged.carrier_count)} now carry it.`
       )
@@ -261,7 +206,6 @@ export function ManageTagsDialog({
       toast.error(
         `Couldn't merge “${sourceName}” into “${target.name}” — try again.`
       )
-      load()
     }
   }
 
@@ -270,17 +214,8 @@ export function ManageTagsDialog({
     const tag = deleteTarget
     const index = tags.findIndex((t) => t.id === tag.id)
     try {
-      const { carrier_count } = await deleteTag(tag.id)
-      invalidateLoad()
-      setTags((prev) => {
-        const remaining = prev.filter((t) => t.id !== tag.id)
-        focusRequestRef.current =
-          remaining.length === 0
-            ? { kind: "close" }
-            : { kind: "row", index: Math.min(index, remaining.length - 1) }
-        return remaining
-      })
-      onDeleted(tag.id)
+      const { carrier_count } = await remove(tag.id)
+      setFocusRequest({ kind: "after-delete", id: tag.id, index })
       toast.success(
         carrier_count === 0
           ? `Deleted “${tag.name}”.`
@@ -288,7 +223,6 @@ export function ManageTagsDialog({
       )
     } catch {
       toast.error(`Couldn't delete “${tag.name}” — try again.`)
-      load()
     }
   }
 
@@ -304,7 +238,7 @@ export function ManageTagsDialog({
             </DialogDescription>
           </DialogHeader>
 
-          {status === "loading" && (
+          {(status === "idle" || status === "loading") && (
             <div className="flex flex-col gap-2">
               {[0, 1, 2].map((i) => (
                 <Skeleton key={i} className="h-10 w-full" />
@@ -317,7 +251,7 @@ export function ManageTagsDialog({
               heading="Couldn't load tags."
               body="Please try again."
               action={
-                <Button variant="secondary" onClick={load}>
+                <Button variant="secondary" onClick={reload}>
                   Retry
                 </Button>
               }
@@ -354,14 +288,19 @@ export function ManageTagsDialog({
                           cancelRename(index)
                         }
                       }}
-                      maxLength={32}
                       readOnly={renamePending}
                       aria-label={`New name for ${tag.name}`}
                       className="h-8 flex-1"
                     />
-                    {renameValue.length >= 25 && (
-                      <span className="shrink-0 text-label text-muted-foreground tabular-nums">
-                        {renameValue.length}/32
+                    {renameLength >= TAG_COUNTER_THRESHOLD && (
+                      <span
+                        className={`shrink-0 text-label tabular-nums ${
+                          renameOverLimit
+                            ? "text-destructive"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {renameLength}/{MAX_TAG_LENGTH}
                       </span>
                     )}
                     <Button
@@ -378,6 +317,7 @@ export function ManageTagsDialog({
                       className="min-w-20"
                       disabled={
                         renamePending ||
+                        renameOverLimit ||
                         renameValue.trim() === "" ||
                         renameValue.trim() === tag.name
                       }

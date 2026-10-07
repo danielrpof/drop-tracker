@@ -1593,12 +1593,9 @@ func artistIDs(artists []sqlc.Artist) []int64 {
 	return ids
 }
 
-// TestService_Remove_LeavesArtistTagsIntact mirrors
-// TestService_Remove_LeavesArtistRowIntact for tag links (TAG-07, D-10):
-// removing a watchlist entry must never delete its artist_tags rows, and a
-// re-add must show the same tags via the shared List projection, in
-// lower(name) order. Tag links are seeded with raw SQL -- this package must
-// not import internal/tags.
+// TestService_Remove_LeavesArtistTagsIntact: removing an entry keeps its
+// artist_tags rows and a re-add lists them in lower(name) order (TAG-07).
+// Links are seeded with raw SQL; this package must not import internal/tags.
 func TestService_Remove_LeavesArtistTagsIntact(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "watchlist_tags_test")
 	ctx := context.Background()
@@ -2079,14 +2076,12 @@ func TestService_Add_ArtistArt_ActivityGateReleasedEvenIfMatchPanics(t *testing.
 	}
 }
 
-// --- Plan 24-03 Task 1: notes ---
+// --- Notes ---
 
 func ptr(s string) *string { return &s }
 
-// TestNormalizeNote pins D-25's pure normalization rules: nil stays nil,
-// leading/trailing whitespace (including a newline) trims, an all-whitespace
-// or empty string normalizes to nil, and internal line breaks are kept
-// (notes are prose, not a single-line field).
+// TestNormalizeNote pins D-25: nil stays nil, outer whitespace trims, blank
+// becomes nil, and interior line breaks are kept (notes are prose).
 func TestNormalizeNote(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -2171,7 +2166,7 @@ func TestService_Note_UpdateExistingReturnsEntryWithNoteAndTags(t *testing.T) {
 		t.Fatalf("Tags = %+v, want %+v", updated.Tags, wantTags)
 	}
 
-	// Clearing with an all-whitespace note stores NULL (D-25, D-06).
+	// An all-whitespace note clears to NULL (D-25).
 	cleared, err := svc.UpdateNote(ctx, entry.ID, ptr("   "))
 	if err != nil {
 		t.Fatalf("UpdateNote (clear): %v", err)
@@ -2181,11 +2176,8 @@ func TestService_Note_UpdateExistingReturnsEntryWithNoteAndTags(t *testing.T) {
 	}
 }
 
-// TestService_Note_TooLongReturnsErrNoteTooLong proves the CHECK-constraint
-// mapping fires even though NormalizeNote already rejects a too-long note --
-// this is the non-bypassable-backstop leg of the three-layer validation
-// (T-24-21), reached only if a caller other than UpdateNote's own
-// NormalizeNote call somehow got a too-long value past it.
+// TestService_Note_TooLongReturnsErrNoteTooLong exercises the CHECK-constraint
+// backstop that fires if a too-long note bypasses NormalizeNote (T-24-21).
 func TestService_Note_TooLongReturnsErrNoteTooLong(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
 	ctx := context.Background()
@@ -2203,11 +2195,10 @@ func TestService_Note_TooLongReturnsErrNoteTooLong(t *testing.T) {
 	}
 }
 
-// --- Plan 24-03 Task 2: POST note + shared projection ---
+// --- POST note + shared projection ---
 
-// TestService_Add_WithNoteReturnsNormalizedNote proves Add stores and
-// returns a trimmed note through the same projection every other route uses
-// (D-26, D-27).
+// TestService_Add_WithNoteReturnsNormalizedNote: Add stores and returns the
+// trimmed note (D-27).
 func TestService_Add_WithNoteReturnsNormalizedNote(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
 	ctx := context.Background()
@@ -2223,9 +2214,8 @@ func TestService_Add_WithNoteReturnsNormalizedNote(t *testing.T) {
 	}
 }
 
-// TestService_Add_WithTooLongNoteLeavesNoArtistsRow proves a rejected note
-// leaves no artists row behind, mirroring the existing preference-validation
-// rule (D-05, D-08, D-11, D-27).
+// TestService_Add_WithTooLongNoteLeavesNoArtistsRow: a rejected note leaves
+// no artists row, like preference validation (D-27).
 func TestService_Add_WithTooLongNoteLeavesNoArtistsRow(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
 	ctx := context.Background()
@@ -2246,9 +2236,8 @@ func TestService_Add_WithTooLongNoteLeavesNoArtistsRow(t *testing.T) {
 	}
 }
 
-// TestService_Add_ReAddReturnsSurvivingTags proves TAG-07/D-10/D-26: a
-// removed artist's tags survive on artists.id, and Add's response reflects
-// them through the shared projection with no note (a plain re-add).
+// TestService_Add_ReAddReturnsSurvivingTags: a removed artist's tags survive
+// on artists.id and a plain re-add returns them with no note (TAG-07).
 func TestService_Add_ReAddReturnsSurvivingTags(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
 	ctx := context.Background()
@@ -2313,10 +2302,8 @@ func TestService_Add_ReAddRestoresNote(t *testing.T) {
 	}
 }
 
-// TestService_UpdatePreferences_ReturnsTagsAndNote proves D-26: the
-// preferences update route now answers through the same shared projection
-// GET/PUT-note/POST use, so tags and any existing note come back accurate
-// rather than the prior hand-built (always-empty) placeholder.
+// TestService_UpdatePreferences_ReturnsTagsAndNote: the update answers through
+// the shared projection, so tags and any existing note come back (D-26).
 func TestService_UpdatePreferences_ReturnsTagsAndNote(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
 	ctx := context.Background()
@@ -2351,10 +2338,8 @@ func TestService_UpdatePreferences_ReturnsTagsAndNote(t *testing.T) {
 	}
 }
 
-// TestService_ProjectionParity proves that Add, UpdatePreferences and
-// UpdateNote each return a value equal to the matching element of List --
-// D-26's "same projection everywhere" guarantee, checked directly rather
-// than by construction.
+// TestService_ProjectionParity: Add, UpdatePreferences and UpdateNote each
+// return a value equal to the matching List element (D-26).
 func TestService_ProjectionParity(t *testing.T) {
 	pool := testutil.NewIsolatedTestPool(t, "watchlist_note_test")
 	ctx := context.Background()

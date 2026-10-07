@@ -86,9 +86,8 @@ export interface WatchlistEntry {
   muted_event_types: string[]
   created_at: string
   updated_at: string
-  // tags/note mirror internal/watchlist.Entry.Tags/Entry.Note (24-01):
-  // tags is sorted by name and never null; note singular, never null
-  // (D-28), null meaning unset.
+  // Mirrors watchlist.Entry: tags sorted by name and never null; note null
+  // when unset (D-28).
   tags: TagRef[]
   note: string | null
 }
@@ -183,28 +182,27 @@ export interface NotificationSettings {
 
 // ---- Error type ---------------------------------------------------------
 
-// ApiError carries the HTTP status and the server's fixed {"error": "..."}
-// message, so callers can branch on status (e.g. 409 vs 500) without
-// re-parsing the response body themselves. body carries the full parsed
-// JSON of a non-2xx response when it was valid JSON (e.g. the rename 409's
-// {target, carrier_count_after_merge}) -- undefined when the body wasn't
-// JSON, so a caller narrows before reading fields off it.
+// ApiError carries the HTTP status and the server's {"error": "..."} message.
+// code is the stable machine-readable code callers branch on; body is the
+// parsed JSON of a non-2xx response (e.g. the rename 409), undefined if not JSON.
 export class ApiError extends Error {
   status: number
   body?: unknown
+  code?: string
 
-  constructor(status: number, message: string, body?: unknown) {
+  constructor(status: number, message: string, body?: unknown, code?: string) {
     super(message)
     this.name = "ApiError"
     this.status = status
     this.body = body
+    this.code = code
   }
 }
 
 // ---- Fetch core ----------------------------------------------------------
 
 // apiFetch is the single fetch path every wrapper below funnels through:
-// it parses a D-13 {"error": "..."} body on failure and throws ApiError, so
+// it parses a D-13 {"error": "...", "code"?: "..."} body on failure and throws ApiError, so
 // every caller gets the same error shape regardless of which endpoint
 // failed.
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -251,17 +249,21 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     let message = res.statusText
     let parsedBody: unknown
+    let code: string | undefined
     try {
-      const body = (await res.json()) as { error?: string }
+      const body = (await res.json()) as { error?: string; code?: unknown }
       parsedBody = body
       if (body.error) {
         message = body.error
+      }
+      if (typeof body.code === "string") {
+        code = body.code
       }
     } catch {
       // Body wasn't valid JSON (or was empty) -- fall back to statusText,
       // set above, and leave parsedBody undefined.
     }
-    throw new ApiError(res.status, message, parsedBody)
+    throw new ApiError(res.status, message, parsedBody, code)
   }
 
   return (await res.json()) as T
@@ -319,11 +321,9 @@ export async function addWatchlist(params: {
   })
 }
 
-// updateNote saves, edits, or clears the note on a watchlist entry (NOTE-01,
-// D-06, D-25) through its own dedicated PUT endpoint -- never PATCH, since a
-// clear (null) is an explicit request the shared updateWatchlistPreferences
-// PATCH's "absent key means untouched" contract cannot express. The note key
-// is always sent, including null.
+// updateNote saves or clears an entry's note (NOTE-01). It has its own PUT
+// because PATCH's absent-key-means-untouched cannot express a clear; the
+// note key is always sent, including null.
 export async function updateNote(
   entryId: number,
   note: string | null
@@ -358,19 +358,16 @@ export async function removeWatchlist(id: number): Promise<void> {
   await apiFetch<void>(`/watchlist/${id}`, { method: "DELETE" })
 }
 
-// detachTag removes one tag from a watchlist entry (TAG-02, D-20, D-21).
-// Detach is idempotent server-side, so a link that's already gone still
-// resolves 204 through the same undefined-on-204 path.
+// detachTag removes one tag from an entry (TAG-02); idempotent server-side,
+// so an already-gone link still resolves 204.
 export async function detachTag(entryId: number, tagId: number): Promise<void> {
   await apiFetch<void>(`/watchlist/${entryId}/tags/${tagId}`, {
     method: "DELETE",
   })
 }
 
-// attachTag creates-or-finds and links one tag to a watchlist entry
-// (TAG-01, D-20, D-29). Resolves the server's stored casing regardless of
-// whether the tag already existed (201) or was newly created (200) -- the
-// caller does not need to branch on status.
+// attachTag creates-or-finds and links a tag (TAG-01), resolving the server's
+// stored casing whether the response was 200 or 201.
 export async function attachTag(
   entryId: number,
   name: string
@@ -382,16 +379,14 @@ export async function attachTag(
   })
 }
 
-// listTags fetches the whole tag vocabulary (TAG-05, D-13, D-30) -- the
-// autocomplete source, loaded lazily on first "+ tag" or Manage tags open,
-// never at Watchlist mount.
+// listTags fetches the whole tag vocabulary (TAG-05), loaded lazily on first
+// "+ tag" or Manage tags open, never at Watchlist mount.
 export async function listTags(): Promise<TagSummary[]> {
   return apiFetch<TagSummary[]>("/tags")
 }
 
-// deleteTag removes a tag from the vocabulary everywhere (TAG-06, D-17,
-// D-22). The response's carrier_count (watched artists only, D-11) is what
-// the Manage tags delete toast reports -- the client never computes it.
+// deleteTag removes a tag everywhere (TAG-06); the server's carrier_count
+// feeds the delete toast and is never computed client-side.
 export async function deleteTag(
   id: number
 ): Promise<{ carrier_count: number }> {
@@ -400,20 +395,15 @@ export async function deleteTag(
   })
 }
 
-// RenameTagResult is renameTag's closed result: a plain rename (including a
-// case-only one) resolves "renamed"; a collision with a different tag
-// resolves "collision" with the server's target (in its stored casing,
-// D-23) and the post-merge union count -- never computed client-side.
+// RenameTagResult is renameTag's closed result: "renamed", or "collision"
+// with the server's target and post-merge count (D-23).
 export type RenameTagResult =
   | { kind: "renamed"; tag: TagRef }
   | { kind: "collision"; target: TagRef; carrierCountAfterMerge: number }
 
-// renameTag applies a rename (TAG-05, D-09, D-22). The collision case is
-// detected purely from the server's 409 body (never a client pre-check,
-// D-22): only an ApiError with status 409 and a body carrying `target` is
-// mapped to the collision result -- any other rejection (404 tag gone, 500,
-// a non-JSON body) rethrows unchanged so the caller's generic failure path
-// handles it.
+// renameTag applies a rename. A collision comes only from the 409
+// body carrying `target`, never a client pre-check (D-22); anything else
+// rethrows unchanged.
 export async function renameTag(
   id: number,
   name: string
@@ -443,10 +433,8 @@ export async function renameTag(
   }
 }
 
-// mergeTag confirms a rename collision (TAG-05, D-09, D-19, D-22): it merges
-// by id, never by name, so a target renamed since a prior 409 is still
-// merged correctly. Resolves the target's post-merge {id, name,
-// carrier_count} -- the count the Manage tags merge toast reports.
+// mergeTag confirms a rename collision. It merges by id, so a target
+// renamed since the 409 still merges (D-19), and resolves the post-merge summary.
 export async function mergeTag(id: number, into: number): Promise<TagSummary> {
   return apiFetch<TagSummary>(`/tags/${id}/merge`, {
     method: "POST",

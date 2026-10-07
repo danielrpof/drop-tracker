@@ -7,6 +7,7 @@ package watchlist
 import (
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -65,5 +66,11 @@ func TestNormalizeSet(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestErrNoteTooLongEmbedsMaxNoteRunes(t *testing.T) {
+	if !strings.Contains(ErrNoteTooLong.Error(), strconv.Itoa(MaxNoteRunes)) {
+		t.Fatalf("ErrNoteTooLong = %q, want it to contain %d", ErrNoteTooLong, MaxNoteRunes)
 	}
 }

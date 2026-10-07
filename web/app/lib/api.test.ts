@@ -34,6 +34,28 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     vi.unstubAllGlobals()
   })
 
+  it("exposes a string code from the error body on ApiError.code, and leaves it undefined otherwise", async () => {
+    const reject = async (body: unknown) => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify(body), { status: 409 })
+      )
+      return (await listEvents().then(
+        () => {
+          throw new Error("expected listEvents() to reject")
+        },
+        (e: unknown) => e
+      )) as ApiError
+    }
+
+    const coded = await reject({ error: "x", code: "tag_cap_reached" })
+    expect(coded.code).toBe("tag_cap_reached")
+    expect(coded.message).toBe("x")
+    expect(coded.status).toBe(409)
+
+    expect((await reject({ error: "x" })).code).toBeUndefined()
+    expect((await reject({ error: "x", code: 42 })).code).toBeUndefined()
+  })
+
   it("throws ApiError carrying the HTTP status and the server's error message for a non-OK JSON body", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "artist not found" }), {

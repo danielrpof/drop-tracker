@@ -32,11 +32,8 @@ import Watchlist from "./watchlist"
 // D-06 / TEST-02: bare vi.mock at the top of the file, no factory, no
 // passthrough -- no real apiFetch can ever reach the runtime's own fetch.
 vi.mock("~/lib/api")
-// renderRoute stubs Watchlist directly, so root.tsx's <Toaster/> is never
-// mounted -- a real sonner toast() call is already a silent no-op in these
-// tests. Mocking it just makes the Undo action's onClick reachable for the
-// plan 24-07 Task 2 Undo case below (D-27), with no behavior change for any
-// existing test in this file.
+// Toaster is never mounted here, so toast() is already a no-op; mocking it
+// only makes the Undo action's onClick reachable (D-27).
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const mockListWatchlist = vi.mocked(listWatchlist)
@@ -260,6 +257,49 @@ describe("Watchlist route", () => {
 
     expect(mockAttachTag).toHaveBeenCalledWith(42, "Reggaeton")
     await screen.findByText("reggaeton")
+  })
+
+  it("a tag created while the first vocabulary load is in flight survives that load", async () => {
+    const second: WatchlistEntry = { ...entry, id: 43, name: "Rihanna" }
+    mockListWatchlist.mockResolvedValue([entry, second])
+    const first = deferred<TagSummary[]>()
+    mockListTags
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValue([{ id: 9, name: "dembow", carrier_count: 1 }])
+    mockAttachTag.mockResolvedValue({ id: 9, name: "dembow" })
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Drake" })
+    )
+    await userEvent.type(
+      screen.getByRole("combobox", { name: "Add tag to Drake" }),
+      "dembow{Enter}"
+    )
+    await screen.findByText("dembow")
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add tag to Drake" })
+      ).toBeInTheDocument()
+    )
+
+    await act(async () => {
+      first.resolve([])
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add tag to Rihanna" })
+    )
+    await userEvent.type(
+      screen.getByRole("combobox", { name: "Add tag to Rihanna" }),
+      "dem"
+    )
+
+    await screen.findByRole("option", { name: "dembow" })
+    expect(mockListTags).toHaveBeenCalledTimes(2)
   })
 
   it("still lets Enter attach via Create when listTags rejects", async () => {
@@ -771,8 +811,7 @@ describe("Watchlist route", () => {
     expect(mockListWatchlist).toHaveBeenCalledTimes(1)
   })
 
-  // plan 24-07 Task 2: the remove toast's Undo restores the entry's note
-  // (D-27) -- Undo must never silently drop it.
+  // The remove toast's Undo must restore the entry's note (D-27).
   function undoAction() {
     const call = vi.mocked(toast.success).mock.calls[0] as [
       string,

@@ -49,20 +49,54 @@ const (
 	maxImageURLRunes       = 2048
 )
 
-// errorResponse is the single D-13 error-body shape for every watchlist
-// handler: {"error": "message"}.
+// errorResponse is the D-13 error-body shape: {"error": "message"}, plus a
+// stable machine-readable "code" only where the SPA branches on it.
 type errorResponse struct {
 	Error string `json:"error"`
+	Code  string `json:"code,omitempty"`
 }
 
-// writeError writes a D-13 {"error": "..."} JSON body with the given
-// status code. msg is always an operator-authored fixed string -- never raw
-// error text from a downstream dependency, which could leak internals
-// (T-02-03).
+// writeError writes an error body; msg is a fixed or sentinel string, never
+// raw downstream error text (T-02-03).
 func writeError(w http.ResponseWriter, status int, msg string) {
+	writeErrorCode(w, status, "", msg)
+}
+
+// writeErrorCode is writeError plus a stable code; an empty code is omitted.
+func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errorResponse{Error: msg})
+	_ = json.NewEncoder(w).Encode(errorResponse{Error: msg, Code: code})
+}
+
+// domainError maps a domain sentinel to its HTTP status and wire code.
+type domainError struct {
+	err    error
+	status int
+	code   string
+}
+
+// writeDomainError writes the first table row matching err, using the row
+// sentinel's own text so a wrapped err never leaks into the body. It reports
+// whether a row matched.
+func writeDomainError(w http.ResponseWriter, table []domainError, err error) bool {
+	for _, row := range table {
+		if errors.Is(err, row.err) {
+			writeErrorCode(w, row.status, row.code, row.err.Error())
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	codeNoteTooLong = "note_too_long"
+	codeNoteInvalid = "note_invalid"
+)
+
+var noteErrors = []domainError{
+	{watchlist.ErrNoteTooLong, http.StatusBadRequest, codeNoteTooLong},
+	{watchlist.ErrNoteInvalid, http.StatusBadRequest, codeNoteInvalid},
 }
 
 // decodeJSONBody is the one shared decode path for every watchlist JSON
@@ -133,10 +167,8 @@ type addWatchlistRequest struct {
 	ImageURL        *string   `json:"image_url"`
 	ReleaseTypes    *[]string `json:"release_types"`
 	MutedEventTypes *[]string `json:"muted_event_types"`
-	// Note is optional (D-27): the SPA's remove-toast Undo re-adds it so a
-	// restored artist does not silently lose the note D-10 would otherwise
-	// drop. Subject to the same trim / empty-to-null / 500-rune rules as PUT
-	// /watchlist/{id}/note.
+	// Note is optional (D-27): the remove-toast Undo re-adds it. Validated by
+	// watchlist.Service, same as PUT /watchlist/{id}/note.
 	Note *string `json:"note"`
 }
 
@@ -226,26 +258,13 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// D-27: fail-fast the same way PUT /watchlist/{id}/note's rules apply,
-	// before ever calling the store -- Service.Add's own NormalizeNote call
-	// is the non-bypassable backstop for any other caller of Add.
-	note, err := watchlist.NormalizeNote(req.Note)
-	switch {
-	case errors.Is(err, watchlist.ErrNoteTooLong):
-		writeError(w, http.StatusBadRequest, "note must be at most 500 characters")
-		return
-	case errors.Is(err, watchlist.ErrNoteInvalid):
-		writeError(w, http.StatusBadRequest, "note contains invalid characters")
-		return
-	}
-
 	params := watchlist.AddParams{
 		MBID:           mbid,
 		Name:           name,
 		DeezerID:       req.DeezerID,
 		Disambiguation: req.Disambiguation,
 		ImageURL:       req.ImageURL,
-		Note:           note,
+		Note:           req.Note,
 	}
 	if req.ReleaseTypes != nil {
 		params.ReleaseTypes = *req.ReleaseTypes
@@ -255,6 +274,9 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entry, err := s.watchlist.Add(r.Context(), params)
+	if err != nil && writeDomainError(w, noteErrors, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, watchlist.ErrDuplicate):
 		writeError(w, http.StatusConflict, "artist already on watchlist")
@@ -263,12 +285,6 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 		// These sentinels wrap only the offending value, which came from
 		// the client, so echoing err.Error() leaks nothing.
 		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	case errors.Is(err, watchlist.ErrNoteTooLong):
-		writeError(w, http.StatusBadRequest, "note must be at most 500 characters")
-		return
-	case errors.Is(err, watchlist.ErrNoteInvalid):
-		writeError(w, http.StatusBadRequest, "note contains invalid characters")
 		return
 	case err != nil:
 		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
@@ -365,19 +381,14 @@ func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(entry)
 }
 
-// updateNoteRequest is the request DTO for PUT /watchlist/{id}/note. Note is
-// json.RawMessage, not *string, so the handler can distinguish an absent key
-// (len == 0, rejected) from an explicit JSON null (valid, clears the note)
-// before ever unmarshalling into a *string (D-25).
+// updateNoteRequest is the PUT /watchlist/{id}/note DTO. Note is RawMessage
+// so an absent key (rejected) differs from an explicit null (clears) (D-25).
 type updateNoteRequest struct {
 	Note json.RawMessage `json:"note"`
 }
 
-// handleUpdateNote implements PUT /watchlist/{id}/note (D-25, NOTE-01):
-// trim, empty-to-null, and a 500-rune cap, applied by watchlist.NormalizeNote
-// before the store call so a rejected note never reaches the database. 200
-// on success with the full updated entry, on the same tags + note
-// projection every other route uses (D-26).
+// handleUpdateNote implements PUT /watchlist/{id}/note (NOTE-01); 200 returns
+// the full updated entry.
 func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	id, err := parseWatchlistID(r)
 	if err != nil {
@@ -404,19 +415,15 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entry, err := s.watchlist.UpdateNote(r.Context(), id, note)
+	if err != nil && writeDomainError(w, noteErrors, err) {
+		return
+	}
 	switch {
-	case errors.Is(err, watchlist.ErrNoteTooLong):
-		writeError(w, http.StatusBadRequest, "note must be at most 500 characters")
-		return
-	case errors.Is(err, watchlist.ErrNoteInvalid):
-		writeError(w, http.StatusBadRequest, "note contains invalid characters")
-		return
 	case errors.Is(err, watchlist.ErrNotFound):
 		writeError(w, http.StatusNotFound, "watchlist entry not found")
 		return
 	case err != nil:
-		// Note text must never reach a log (T-24-20) -- err.Error() here is
-		// always a wrapped driver/query error, never the note itself.
+		// Note text must never reach a log (T-24-20); err is a driver error.
 		httplog.SetAttrs(r.Context(), slog.String("watchlist_error", err.Error()))
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return

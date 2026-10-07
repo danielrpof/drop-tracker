@@ -1,14 +1,7 @@
 import type { TagRef } from "~/lib/api"
 
-export const MAX_TAG_LENGTH = 32
-export const MAX_TAGS_PER_ARTIST = 10
-
-// normalizeTagKey mirrors the server's identity rule (D-31): trim, collapse
-// any interior whitespace run to one space, fold NFC-decomposed characters
-// to their precomposed form, then lower-case. Applying .normalize("NFC")
-// before .toLowerCase() is what keeps the client's exact-match pinning in
-// agreement with Postgres's collation-driven lower() (24-01 confirmed
-// en_US.utf8 live).
+// normalizeTagKey mirrors the server's identity rule (D-31). NFC before
+// lower-casing keeps client pinning in agreement with Postgres lower().
 export function normalizeTagKey(s: string): string {
   return s.trim().replace(/\s+/g, " ").normalize("NFC").toLowerCase()
 }
@@ -22,12 +15,9 @@ export type SuggestionState =
   | { state: "empty-vocabulary" }
   | { state: "items"; items: TagSuggestion[] }
 
-// buildTagSuggestions is the pure ordering rule behind the "+ tag"
-// combobox (UI-SPEC "Tag autocomplete", D-13, D-30). vocabulary is the
-// whole vocabulary or null when not yet loaded/failed; onArtist and
-// pendingNames are subtracted from candidates and checked for an
-// already-on match (D-24: a pending chip counts as "on" before the
-// server confirms it).
+// buildTagSuggestions is the pure ordering rule behind the "+ tag" combobox.
+// Only onArtist tags are removed from candidates; a query matching an
+// onArtist or pending name returns already-on (D-24).
 export function buildTagSuggestions({
   query,
   vocabulary,

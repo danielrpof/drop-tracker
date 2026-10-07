@@ -308,8 +308,8 @@ func run(ctx context.Context) error {
 			PollInterval: cfg.PollInterval,
 		}),
 		httpserver.WithSettings(settingsStore),
-		// tags.NewService(pool) backs POST /watchlist/{id}/tags (TAG-01);
-		// without this option every tag route answers 503.
+		// tags.NewService(pool) backs every tag route (attach/detach and the
+		// /tags vocabulary routes); without it they answer 503.
 		httpserver.WithTags(tags.NewService(pool)),
 	)
 	// Close stops the gate's per-IP limiter-map sweeper goroutine (plan 14-02);

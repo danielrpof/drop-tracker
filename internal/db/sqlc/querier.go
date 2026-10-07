@@ -57,34 +57,26 @@ type Querier interface {
 	// new_release row's own track_count that the removed write query mutated,
 	// so this statement reads exactly the value the old pair wrote.
 	AdvanceGroupTrackCountBaseline(ctx context.Context, arg AdvanceGroupTrackCountBaselineParams) ([]*int32, error)
-	// Rows affected: 1 = new link, 0 = the artist already carried this tag
-	// (D-21 idempotent attach). The artist_tags_cap_trigger (migration 000010)
-	// enforces the 10-tag cap; this statement never counts anything itself.
+	// 1 row = new link, 0 = already linked (D-21). The cap trigger enforces the
+	// 10-tag limit; this statement never counts.
 	AttachTag(ctx context.Context, arg AttachTagParams) (int64, error)
-	// Watched carriers of one tag (D-11), used to report the merge target's
-	// post-merge count.
+	// Watched carriers of one tag, for the merge target's post-merge count.
 	CountCarriers(ctx context.Context, tagID int64) (int64, error)
-	// Watched carriers across one or more tags, each artist counted once even
-	// when it carries more than one of the given tags (union count, D-19/SC3).
+	// Watched carriers across the given tags, each artist counted once (D-19).
 	CountCarriersForTags(ctx context.Context, tagIds []int64) (int64, error)
 	// Backs GET /status watchlist_size (STAT-01). A count(*), not len(ListWatchlist)
 	// in Go -- ListWatchlist JOINs artists and returns every row's full projection,
 	// so counting its result would pull every row just to discard it.
 	CountWatchlist(ctx context.Context) (int64, error)
-	// note (D-27): stays positional -- sqlc rejects mixing $n with
-	// sqlc.arg/sqlc.narg in one query -- and stays nullable, so the generated
-	// Note param is a *string; nil is a plain add, a caller-supplied value is
-	// Undo restoring what D-10 would otherwise drop.
+	// note stays positional and nullable: sqlc rejects mixing $n with
+	// sqlc.arg/narg, and a nil *string is a plain add (D-27).
 	CreateWatchlistEntry(ctx context.Context, arg CreateWatchlistEntryParams) (Watchlist, error)
-	// Removes the source's links for artists that already carry the target --
-	// these would otherwise become duplicate (artist_id, target) rows once
-	// RepointSourceLinks runs.
+	// Drops source links for artists already carrying the target, which would
+	// otherwise duplicate once RepointSourceLinks runs.
 	DeleteDuplicateSourceLinks(ctx context.Context, arg DeleteDuplicateSourceLinksParams) (int64, error)
 	DeleteTag(ctx context.Context, id int64) (int64, error)
-	// Both CTEs read the same pre-statement snapshot (Postgres WITH semantics):
-	// counted's SELECT never sees deleted's cascade removal of artist_tags, so
-	// the reported count is exactly the watched-carrier count the delete
-	// removed (TAG-06). Zero rows means the tag did not exist.
+	// Both CTEs share one snapshot, so counted never sees deleted's cascade and
+	// reports the carriers the delete removed (TAG-06). Zero rows = no such tag.
 	DeleteTagCountingCarriers(ctx context.Context, tagID int64) (DeleteTagCountingCarriersRow, error)
 	// :execrows returns the affected row count in one round trip, which is what
 	// lets the service distinguish "deleted" from "there was nothing to delete"
@@ -94,27 +86,18 @@ type Querier interface {
 	// row-level lock on this single statement is what makes the split
 	// deterministic under concurrency (T-02-15).
 	DeleteWatchlistEntry(ctx context.Context, id int64) (int64, error)
-	// Any affected count is success (D-21): 0 rows means the link was already
-	// gone, which is not an error for an idempotent detach.
+	// Any affected count is success; 0 rows means the link was already gone (D-21).
 	DetachTag(ctx context.Context, arg DetachTagParams) (int64, error)
 	GetNotificationSettings(ctx context.Context) (NotificationSetting, error)
-	// One statement, no fallback SELECT (D-29): the no-op DO UPDATE is what
-	// makes RETURNING yield the existing row on a collision, preserving the
-	// first-entered casing (TAG-03). Conflict target is the tags_name_lower_idx
-	// expression index from migration 000010.
+	// No fallback SELECT (D-29): the no-op DO UPDATE makes RETURNING yield the
+	// existing row on a collision, keeping its first-entered casing.
 	GetOrCreateTag(ctx context.Context, name string) (GetOrCreateTagRow, error)
-	// Used only *after* a tags_name_lower_idx violation, to identify the
-	// collider (D-22) -- never a pre-check.
+	// Only after a tags_name_lower_idx violation, to identify the collider (D-22).
 	GetTagByName(ctx context.Context, lower string) (GetTagByNameRow, error)
-	// Resolves the artist a watchlist entry belongs to, so attach/detach can
-	// address artist_tags (which keys on artists.id, TAG-07) through the same
-	// entry id every other watchlist route uses (D-20).
+	// Resolves a watchlist entry's artist; artist_tags keys on artists.id (TAG-07).
 	GetWatchlistArtistID(ctx context.Context, id int64) (int64, error)
-	// Byte-for-byte ListWatchlist's select list and joins, narrowed to one row
-	// (D-26): the Go struct conversion in watchlist.Service.get only compiles
-	// while the two projections stay identical, which is what enforces the
-	// "same projection everywhere" guarantee at build time rather than by
-	// convention.
+	// ListWatchlist's select list narrowed to one row (D-26); Service.get only
+	// compiles while the projections stay identical.
 	GetWatchlistEntry(ctx context.Context, id int64) (GetWatchlistEntryRow, error)
 	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
 	// existing event rows for this artist+source means seed mode.
@@ -221,12 +204,9 @@ type Querier interface {
 	// map[string]struct{} from this result and skips any externally-fetched
 	// id already present.
 	ListExternalIDs(ctx context.Context, arg ListExternalIDsParams) ([]string, error)
-	// Watched-only carrier count (D-11): count(w.id) counts a row only when the
-	// LEFT JOIN watchlist actually matched, so a tag whose only links belong to
-	// removed artists (or no links at all) still surfaces with count 0 (D-12,
-	// D-13) instead of being dropped by an inner join. Ordered by lower(name)
-	// then id: tags_name_lower_idx makes lower(name) unique, so this is a
-	// total, repeatable order (TAG-05).
+	// count(w.id) counts only matched watchlist rows, so tags carried solely by
+	// removed artists, or by none, still list with 0 instead of being dropped by
+	// an inner join (D-11). lower(name) is unique, so the order is total.
 	ListTags(ctx context.Context) ([]ListTagsRow, error)
 	// D-11's Phase 5 groundwork: SELECT WHERE notified_at IS NULL, ORDER BY
 	// created_at ASC, id ASC for a deterministic total order (a plain
@@ -242,20 +222,13 @@ type Querier interface {
 	// it, two equally-named artists would come back in whatever order the
 	// planner happens to choose, which is non-deterministic across runs.
 	//
-	// tag_ids/tag_names (D-26, D-30, single query): two parallel ARRAY(...)
-	// subqueries, never json_agg (sqlc-dev/sqlc#3438 emits interface{} under
-	// pgx/v5). ARRAY(subquery) is already {} for no rows, not NULL, so no
-	// COALESCE is needed. Both subqueries share FROM/JOIN/WHERE/ORDER BY byte
-	// for byte, differing only in the aggregated column -- watchlist.zipTags
-	// pairs them index-for-index, and a future edit to one without the other
-	// would silently mispair ids with names (24-RESEARCH.md Pitfall 4).
+	// tag_ids/tag_names (D-26): parallel ARRAY(...) subqueries, not json_agg
+	// (sqlc#3438 emits interface{}). They must stay identical but for the column,
+	// or zipTags would mispair ids and names.
 	ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
-	// Merge (D-19, ADR 0004): delete duplicate source links, repoint the rest,
-	// delete the source tag -- never insert, so a 10-tag artist merging in a
-	// tag it already carries never transiently holds 11 links.
-	// ORDER BY id FOR UPDATE takes both tag locks in id order so two concurrent
-	// merges sharing a tag cannot deadlock; the lock also parks a concurrent
-	// attach/rename of either tag until this transaction commits.
+	// Merge statement order and why it never inserts: ADR 0004.
+	// Locks both tags in id order so concurrent merges cannot deadlock; it also
+	// parks a concurrent attach/rename until commit.
 	LockTagsForMerge(ctx context.Context, ids []int64) ([]LockTagsForMergeRow, error)
 	// Precondition: only ever called after discord.Client.Send has confirmed a
 	// 204 for this row (D-09) -- never before. The AND notified_at IS NULL
@@ -273,15 +246,10 @@ type Querier interface {
 	// fields to write), but the attempt itself still needs to be recorded so
 	// the read query's cooldown predicate above has something to check.
 	RecordArtMatchAttempt(ctx context.Context, mbid string) error
-	// A plain rename by id. A collision is never checked here -- it surfaces as
-	// a tags_name_lower_idx unique violation, which Service.Rename maps to
-	// *CollisionError (D-09, D-22). A case-only rename of the same row cannot
-	// conflict with its own index entry.
+	// No collision pre-check: a tags_name_lower_idx unique violation is mapped
+	// to *CollisionError by Service.Rename (D-22).
 	RenameTag(ctx context.Context, arg RenameTagParams) (RenameTagRow, error)
-	// Rewrites the source's remaining links to the target via UPDATE, never
-	// INSERT (D-19) -- an UPDATE never fires the cap trigger's BEFORE INSERT
-	// check, which is why this is the only statement shape that cannot
-	// transiently exceed the cap.
+	// Repoints the remaining links via UPDATE, never INSERT (ADR 0004).
 	RepointSourceLinks(ctx context.Context, arg RepointSourceLinksParams) (int64, error)
 	// Full-object PUT semantics (no partial-update ambiguity to resolve), and the
 	// fixed id = 1 predicate is what makes replaying the same body a no-op.
@@ -293,10 +261,8 @@ type Querier interface {
 	// list's right-hand side evaluates against the row as it was before this
 	// statement), which is exactly what the re-anchor decision needs.
 	UpdateNotificationSettings(ctx context.Context, arg UpdateNotificationSettingsParams) (NotificationSetting, error)
-	// :execrows distinguishes "updated" from "no such id" without a preceding
-	// existence SELECT, mirroring DeleteWatchlistEntry's idiom. The response
-	// entry itself comes from a follow-up GetWatchlistEntry call
-	// (Service.UpdateNote), not from this statement's own return.
+	// :execrows tells "updated" from "no such id" without an existence SELECT;
+	// Service.UpdateNote re-reads the entry via GetWatchlistEntry.
 	UpdateWatchlistNote(ctx context.Context, arg UpdateWatchlistNoteParams) (int64, error)
 	// The partial-update merge happens inside this statement, not in Go: each
 	// axis is resolved by a CASE whose ELSE names the column itself, so the

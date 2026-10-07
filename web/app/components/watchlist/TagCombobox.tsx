@@ -12,14 +12,11 @@ import {
 } from "~/components/ui/combobox"
 import type { TagRef, WatchlistEntry } from "~/lib/api"
 import {
-  buildTagSuggestions,
   MAX_TAG_LENGTH,
-  type TagSuggestion,
-} from "~/lib/tags"
-
-// COUNTER_THRESHOLD is where the "{n}/32" counter and its screen-reader
-// crossing announcement first appear (D-15).
-const COUNTER_THRESHOLD = 25
+  TAG_COUNTER_THRESHOLD,
+  tagNameLength,
+} from "~/lib/limits"
+import { buildTagSuggestions, type TagSuggestion } from "~/lib/tags"
 
 export interface TagComboboxProps {
   entry: WatchlistEntry
@@ -36,12 +33,8 @@ function itemLabel(item: TagSuggestion): string {
   return item.kind === "create" ? item.name : item.tag.name
 }
 
-// DISMISS_REASONS is the base-ui close reasons that mean "the user wants
-// the editor gone" (Esc, an outside click, focus leaving). base-ui also
-// closes its popup with reason "none" when Enter is pressed and nothing is
-// selectable (e.g. the already-on state) -- that must NOT close the whole
-// "+ tag" editor, only leave the input as-is (UI-SPEC "Enter does
-// nothing").
+// DISMISS_REASONS are the base-ui close reasons that mean the user wants the
+// editor gone. Reason "none" (Enter with nothing selectable) must not close it.
 const DISMISS_REASONS = new Set([
   "escape-key",
   "outside-press",
@@ -49,11 +42,8 @@ const DISMISS_REASONS = new Set([
   "input-blur",
 ])
 
-// TagCombobox is the "+ tag" editor (TAG-01, D-02, D-15): a single-value,
-// creatable base-ui Combobox. Suggestion ordering, pinning, and the
-// already-on/empty-vocabulary states all come from the pure
-// buildTagSuggestions helper (D-13, D-30, D-31) -- this component only
-// renders what it returns.
+// TagCombobox is the "+ tag" editor (TAG-01): a creatable base-ui Combobox
+// that only renders what buildTagSuggestions returns.
 export function TagCombobox({
   entry,
   vocabulary,
@@ -66,10 +56,8 @@ export function TagCombobox({
   const [popupOpen, setPopupOpen] = useState(true)
   const [liveMessage, setLiveMessage] = useState("")
   const counterId = useId()
-  // base-ui echoes the just-picked item's label back through
-  // onInputValueChange right after a commit (its own "fill" behavior) --
-  // one tick after we've already cleared the input. Suppress exactly that
-  // echo so the cleared input actually stays cleared.
+  // base-ui echoes the picked label through onInputValueChange right after
+  // a commit; suppress that echo so the cleared input stays cleared.
   const suppressEchoRef = useRef<string | null>(null)
 
   const suggestions = buildTagSuggestions({
@@ -78,7 +66,14 @@ export function TagCombobox({
     onArtist,
     pendingNames,
   })
-  const items = suggestions.state === "items" ? suggestions.items : []
+  const queryLength = tagNameLength(query)
+  const overLimit = queryLength > MAX_TAG_LENGTH
+  // An over-limit new name can't be created, so Enter must not commit it;
+  // existing tags stay pickable.
+  const items =
+    suggestions.state === "items"
+      ? suggestions.items.filter((i) => !(overLimit && i.kind === "create"))
+      : []
 
   function commit(item: TagSuggestion) {
     const label = itemLabel(item)
@@ -87,22 +82,25 @@ export function TagCombobox({
     setQuery("")
   }
 
-  // handleInputValueChange announces the 25/32 threshold crossings exactly
-  // once each (D-15, UI-SPEC [R6]) -- query still holds the pre-change
-  // value here, so this compares old vs. new length synchronously.
+  // Announces each 25/32 threshold crossing once (D-15); query still holds
+  // the pre-change value here, so old vs. new length compares synchronously.
   function handleInputValueChange(value: string) {
     if (suppressEchoRef.current !== null) {
       const suppressed = suppressEchoRef.current
       suppressEchoRef.current = null
       if (value === suppressed) return
     }
-    if (query.length < MAX_TAG_LENGTH && value.length >= MAX_TAG_LENGTH) {
+    const prevLength = tagNameLength(query)
+    const nextLength = tagNameLength(value)
+    if (prevLength < MAX_TAG_LENGTH && nextLength >= MAX_TAG_LENGTH) {
       setLiveMessage(`Tag name limit reached — ${MAX_TAG_LENGTH} characters.`)
     } else if (
-      query.length < COUNTER_THRESHOLD &&
-      value.length >= COUNTER_THRESHOLD
+      prevLength < TAG_COUNTER_THRESHOLD &&
+      nextLength >= TAG_COUNTER_THRESHOLD
     ) {
-      setLiveMessage(`${MAX_TAG_LENGTH - COUNTER_THRESHOLD} characters left.`)
+      setLiveMessage(
+        `${MAX_TAG_LENGTH - TAG_COUNTER_THRESHOLD} characters left.`
+      )
     }
     setQuery(value)
   }
@@ -132,7 +130,6 @@ export function TagCombobox({
     >
       <div className="flex items-center gap-1">
         <ComboboxInput
-          maxLength={MAX_TAG_LENGTH}
           placeholder="Tag name"
           aria-label={`Add tag to ${entry.name}`}
           aria-describedby={counterId}
@@ -140,16 +137,18 @@ export function TagCombobox({
           showTrigger={false}
           autoFocus
         />
-        {query.length >= COUNTER_THRESHOLD && (
+        {queryLength >= TAG_COUNTER_THRESHOLD && (
           <span
             id={counterId}
             className={`text-label tabular-nums ${
-              query.length >= MAX_TAG_LENGTH
-                ? "text-foreground"
-                : "text-muted-foreground"
+              overLimit
+                ? "text-destructive"
+                : queryLength >= MAX_TAG_LENGTH
+                  ? "text-foreground"
+                  : "text-muted-foreground"
             }`}
           >
-            {query.length}/{MAX_TAG_LENGTH}
+            {queryLength}/{MAX_TAG_LENGTH}
           </span>
         )}
       </div>
@@ -177,7 +176,9 @@ export function TagCombobox({
         <ComboboxEmpty>
           {suggestions.state === "already-on"
             ? `“${suggestions.name}” is already on this artist`
-            : "Type a name to create a tag"}
+            : overLimit
+              ? `Tags can be at most ${MAX_TAG_LENGTH} characters.`
+              : "Type a name to create a tag"}
         </ComboboxEmpty>
       </ComboboxContent>
     </Combobox>
