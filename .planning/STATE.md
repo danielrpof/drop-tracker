@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 Phase: 25 — Find & Filter — Watchlist and History
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-07 - Completed quick task 261007-ka1: Tag and note error contract
+Last activity: 2026-10-07 - Completed quick task 261007-kt1: Single owner for the tag vocabulary on the web
 
 ## Performance Metrics
 
@@ -445,6 +445,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 261005-ezu | Apply Phase 25 UI-SPEC review fixes: align wording with grill overrides G1–G7 and the Upcoming line; add Router & sticky-state rules (preventScrollReset helper, sticky set survives refresh(), adds are sticky, URL tag-id validation on first load only); WLVW-03 excludes upcoming dates. Docs only. | 2026-10-05 | 2b448b5 | [261005-ezu-apply-phase-25-ui-spec-review-fixes](./quick/261005-ezu-apply-phase-25-ui-spec-review-fixes/) |
 | 31 | Fix trivy-fs: override transitive web CVEs, expiring ignore for unfixable braces CVE | 2026-10-06 | 43f00c1 | — |
 | 261007-ka1 | Tag and note error contract: services are the single validation point, coded error envelope, single limits module, code-point length checks (Phase 24 review candidates 2+3) | 2026-10-07 | 71d3bb1 | [261007-ka1-tag-and-note-error-contract-single-valid](./quick/261007-ka1-tag-and-note-error-contract-single-valid/) |
+| 261007-kt1 | Single owner for the tag vocabulary on the web: useTagVocabulary provider with one stale-response rule, fixes rememberTag race (Phase 24 review candidate 1) | 2026-10-07 | 7455c40 | [261007-kt1-single-owner-for-the-tag-vocabulary-on-t](./quick/261007-kt1-single-owner-for-the-tag-vocabulary-on-t/) |
 
 ### Roadmap Evolution
 
