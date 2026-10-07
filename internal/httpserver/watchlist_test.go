@@ -92,6 +92,7 @@ var _ watchlist.Store = stubStore{}
 // name.
 type errorBody struct {
 	Error string `json:"error"`
+	Code  string `json:"code"`
 }
 
 // watchlistEntryBody mirrors the fields of watchlist.Entry this test
@@ -1698,8 +1699,8 @@ func TestWatchlist_NoteEndToEnd(t *testing.T) {
 	if err := json.Unmarshal(data, &eb); err != nil {
 		t.Fatalf("decode error body: %v", err)
 	}
-	if eb.Error != "note must be at most 500 characters" {
-		t.Fatalf("error = %q, want %q", eb.Error, "note must be at most 500 characters")
+	if eb.Error != watchlist.ErrNoteTooLong.Error() || eb.Code != "note_too_long" {
+		t.Fatalf("error = %q code = %q, want %q / note_too_long", eb.Error, eb.Code, watchlist.ErrNoteTooLong.Error())
 	}
 
 	// PUT against a missing id -> 404.
@@ -1822,20 +1823,62 @@ func TestWatchlist_Add_WithNoteEndToEnd(t *testing.T) {
 	}
 }
 
-// TestWatchlist_Add_WithTooLongNoteReturns400 proves the handler's fail-fast
-// note validation rejects an oversized note before the store is ever called
-// (D-27).
-func TestWatchlist_Add_WithTooLongNoteReturns400(t *testing.T) {
-	called := false
-	stub := stubStore{addFunc: func(context.Context, watchlist.AddParams) (watchlist.Entry, error) {
-		called = true
-		return watchlist.Entry{}, nil
-	}}
-	srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
+// TestWatchlist_Add_NoteErrorsMapToCodes proves the handler forwards the raw
+// note to the store and maps each note sentinel to its status, code and own
+// text (D-27).
+func TestWatchlist_Add_NoteErrorsMapToCodes(t *testing.T) {
+	cases := []struct {
+		name     string
+		sentinel error
+		wantCode string
+	}{
+		{"too long", watchlist.ErrNoteTooLong, "note_too_long"},
+		{"invalid", watchlist.ErrNoteInvalid, "note_invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen *string
+			stub := stubStore{addFunc: func(_ context.Context, p watchlist.AddParams) (watchlist.Entry, error) {
+				seen = p.Note
+				return watchlist.Entry{}, tc.sentinel
+			}}
+			srv := httpserver.New(noopPinger{}, stub, stubEventsStore{}, nil, discardLogger())
+			ts := httptest.NewServer(srv.Router())
+			defer ts.Close()
+
+			const raw = "  raw note  "
+			body := `{"mbid":"x","name":"y","note":"` + raw + `"}`
+			resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
+			if err != nil {
+				t.Fatalf("POST /watchlist: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+			var eb errorBody
+			if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+				t.Fatalf("decode response body: %v", err)
+			}
+			if eb.Error != tc.sentinel.Error() || eb.Code != tc.wantCode {
+				t.Fatalf("error = %q code = %q, want %q / %q", eb.Error, eb.Code, tc.sentinel.Error(), tc.wantCode)
+			}
+			if seen == nil || *seen != raw {
+				t.Fatalf("store saw note %v, want the raw %q", seen, raw)
+			}
+		})
+	}
+}
+
+// TestWatchlist_Add_RealServiceTooLongNoteReturns400 proves the real service
+// is the validation point for POST /watchlist's note.
+func TestWatchlist_Add_RealServiceTooLongNoteReturns400(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_add_note_http_test")
+	srv := httpserver.New(pool, watchlist.NewService(sqlc.New(pool)), stubEventsStore{}, nil, discardLogger())
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
-	body := `{"mbid":"x","name":"y","note":"` + strings.Repeat("a", 501) + `"}`
+	body := `{"mbid":"` + testMBID(t) + `","name":"Long Note","note":"` + strings.Repeat("a", 501) + `"}`
 	resp, err := http.Post(ts.URL+"/watchlist", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST /watchlist: %v", err)
@@ -1848,11 +1891,36 @@ func TestWatchlist_Add_WithTooLongNoteReturns400(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
 		t.Fatalf("decode response body: %v", err)
 	}
-	if eb.Error != "note must be at most 500 characters" {
-		t.Fatalf("error = %q, want %q", eb.Error, "note must be at most 500 characters")
+	if eb.Code != "note_too_long" {
+		t.Fatalf("code = %q, want note_too_long", eb.Code)
 	}
-	if called {
-		t.Fatal("addFunc was called for a body with an oversized note")
+}
+
+// TestWatchlist_UncodedErrorHasNoCodeKey pins that errors outside the
+// tag/note tables keep the original {"error": ...} body.
+func TestWatchlist_UncodedErrorHasNoCodeKey(t *testing.T) {
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/watchlist/abc", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	var raw map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if _, ok := raw["code"]; ok {
+		t.Fatalf("body %v has a code key, want none", raw)
 	}
 }
 

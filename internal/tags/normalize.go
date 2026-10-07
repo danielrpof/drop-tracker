@@ -5,6 +5,7 @@ package tags
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -20,7 +21,7 @@ var (
 	// ErrNameRequired is returned for an empty or whitespace-only name.
 	ErrNameRequired = errors.New("tag name is required")
 	// ErrNameTooLong is returned when NormalizeName exceeds MaxNameRunes.
-	ErrNameTooLong = errors.New("tag name too long")
+	ErrNameTooLong = fmt.Errorf("tag name must be at most %d characters", MaxNameRunes)
 	// ErrNameInvalid is returned when a name contains a control character.
 	ErrNameInvalid = errors.New("tag name contains invalid characters")
 )

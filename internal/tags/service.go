@@ -11,10 +11,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// tagCapConstraint is the check_violation constraint name migration 000010's
-// trigger raises at 10 links (ADR 0004, D-18). Kept as a const next to the
-// mapping below so the literal never drifts from the migration.
-const tagCapConstraint = "artist_tags_max_per_artist"
+// Constraint names the package matches; each literal lives only here.
+const (
+	tagCapConstraint     = "artist_tags_max_per_artist"
+	tagNameLengthCheck   = "tags_name_length"
+	tagNameTrimmedCheck  = "tags_name_trimmed"
+	tagNameLowerUniqueIx = "tags_name_lower_idx"
+)
 
 var (
 	// ErrEntryNotFound is returned when the watchlist entry id does not
@@ -25,16 +28,13 @@ var (
 	ErrTagNotFound = errors.New("tag not found")
 	// ErrTagCapReached is returned when an attach would exceed
 	// MaxTagsPerArtist (TAG-04, ADR 0004).
-	ErrTagCapReached = errors.New("artist already has the maximum of 10 tags")
+	ErrTagCapReached = fmt.Errorf("artist already has the maximum of %d tags", MaxTagsPerArtist)
 	// ErrMergeIntoSelf is returned when Merge's source and target ids are
 	// the same.
 	ErrMergeIntoSelf = errors.New("cannot merge a tag into itself")
 )
 
-// MaxTagsPerArtist mirrors the artist_tags_cap_trigger's cap (migration
-// 000010) -- the Go-side constant documenting the same number the database
-// enforces, not a second source of truth (the trigger is non-bypassable
-// regardless of what this side believes).
+// MaxTagsPerArtist mirrors the trigger's literal cap in migration 000010 (ADR 0004).
 const MaxTagsPerArtist = 10
 
 // Tag is the API-facing shape of a tags row.
@@ -188,7 +188,7 @@ func (s *Service) Rename(ctx context.Context, id int64, name string) (Tag, error
 	}
 
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != pgerrcode.UniqueViolation || pgErr.ConstraintName != "tags_name_lower_idx" {
+	if !errors.As(err, &pgErr) || pgErr.Code != pgerrcode.UniqueViolation || pgErr.ConstraintName != tagNameLowerUniqueIx {
 		return Tag{}, mapTagError(err)
 	}
 
@@ -306,9 +306,9 @@ func mapTagError(err error) error {
 	switch {
 	case pgErr.Code == pgerrcode.CheckViolation && pgErr.ConstraintName == tagCapConstraint:
 		return ErrTagCapReached
-	case pgErr.Code == pgerrcode.CheckViolation && pgErr.ConstraintName == "tags_name_length":
+	case pgErr.Code == pgerrcode.CheckViolation && pgErr.ConstraintName == tagNameLengthCheck:
 		return ErrNameTooLong
-	case pgErr.Code == pgerrcode.CheckViolation && pgErr.ConstraintName == "tags_name_trimmed":
+	case pgErr.Code == pgerrcode.CheckViolation && pgErr.ConstraintName == tagNameTrimmedCheck:
 		return ErrNameInvalid
 	default:
 		return fmt.Errorf("tag operation: %w", err)

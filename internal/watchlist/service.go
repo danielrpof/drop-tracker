@@ -21,9 +21,14 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// MaxNoteRunes mirrors the watchlist_note_length CHECK (migration 000010,
-// D-25) -- the single Go-side source of truth for the note length cap.
+// MaxNoteRunes mirrors the watchlist_note_length CHECK (migration 000010, D-25).
 const MaxNoteRunes = 500
+
+// Constraint names the package matches; each literal lives only here.
+const (
+	noteLengthCheck       = "watchlist_note_length"
+	watchlistArtistUnique = "watchlist_artist_id_key"
+)
 
 // matchTimeout bounds the add-time artist-art match attempt Service.Add
 // makes when a caller supplies no ImageURL (D-06). This bound is
@@ -63,7 +68,7 @@ var (
 	ErrNoPreferencesSupplied = errors.New("no preferences supplied")
 	// ErrNoteTooLong is returned when a note exceeds MaxNoteRunes after
 	// trimming (D-25, NOTE-01).
-	ErrNoteTooLong = errors.New("note must be at most 500 characters")
+	ErrNoteTooLong = fmt.Errorf("note must be at most %d characters", MaxNoteRunes)
 	// ErrNoteInvalid is returned when a note contains a character Postgres
 	// text cannot store (U+0000) -- Postgres itself would reject the write,
 	// so this is caught before ever reaching the database.
@@ -306,7 +311,7 @@ func (s *Service) Add(ctx context.Context, p AddParams) (Entry, error) {
 		// watchlist row itself is left exactly as it was -- no fallthrough
 		// to an update, retry, or delete-and-reinsert.
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation && pgErr.ConstraintName == "watchlist_artist_id_key" {
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation && pgErr.ConstraintName == watchlistArtistUnique {
 			return Entry{}, ErrDuplicate
 		}
 		return Entry{}, fmt.Errorf("create watchlist entry: %w", err)
@@ -381,10 +386,8 @@ func (s *Service) get(ctx context.Context, id int64) (Entry, error) {
 
 // NormalizeNote applies D-25's trim / empty-to-null / length-cap rules
 // before any database write, shared by PUT /watchlist/{id}/note and POST
-// /watchlist's optional note (D-27). nil in means "no note supplied" and
-// stays nil; the DB layer applies the identical rules again via
-// watchlist_note_length/watchlist_note_not_blank as the non-bypassable
-// backstop (three-layer validation, Phase 02/20 pattern).
+// /watchlist's optional note (D-27). nil in means "no note supplied"; the
+// watchlist_note_length CHECK is the backstop.
 func NormalizeNote(raw *string) (*string, error) {
 	if raw == nil {
 		return nil, nil
@@ -514,8 +517,7 @@ func (s *Service) Remove(ctx context.Context, id int64) error {
 // first (trim, empty-to-null, length cap) so a rejected note never touches
 // the database, then write and re-read through get so the response carries
 // the same tags + note projection every other route does (D-26). The
-// watchlist_note_length/watchlist_note_not_blank CHECKs are the
-// non-bypassable backstop for a caller other than this method (T-24-21).
+// watchlist_note_length CHECK is the backstop (T-24-21).
 func (s *Service) UpdateNote(ctx context.Context, id int64, note *string) (Entry, error) {
 	normalized, err := NormalizeNote(note)
 	if err != nil {
@@ -525,13 +527,8 @@ func (s *Service) UpdateNote(ctx context.Context, id int64, note *string) (Entry
 	affected, err := s.q.UpdateWatchlistNote(ctx, sqlc.UpdateWatchlistNoteParams{ID: id, Note: normalized})
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.CheckViolation {
-			switch pgErr.ConstraintName {
-			case "watchlist_note_length":
-				return Entry{}, ErrNoteTooLong
-			case "watchlist_note_not_blank":
-				return Entry{}, ErrNoteInvalid
-			}
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.CheckViolation && pgErr.ConstraintName == noteLengthCheck {
+			return Entry{}, ErrNoteTooLong
 		}
 		return Entry{}, fmt.Errorf("update watchlist note: %w", err)
 	}

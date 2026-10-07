@@ -7,6 +7,7 @@ package tags_test
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -46,5 +47,14 @@ func TestNormalizeName(t *testing.T) {
 				t.Fatalf("NormalizeName(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLimitSentinelsEmbedTheirConstants(t *testing.T) {
+	if !strings.Contains(tags.ErrNameTooLong.Error(), strconv.Itoa(tags.MaxNameRunes)) {
+		t.Fatalf("ErrNameTooLong = %q, want it to contain %d", tags.ErrNameTooLong, tags.MaxNameRunes)
+	}
+	if !strings.Contains(tags.ErrTagCapReached.Error(), strconv.Itoa(tags.MaxTagsPerArtist)) {
+		t.Fatalf("ErrTagCapReached = %q, want it to contain %d", tags.ErrTagCapReached, tags.MaxTagsPerArtist)
 	}
 }
