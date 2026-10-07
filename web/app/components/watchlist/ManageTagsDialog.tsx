@@ -51,11 +51,9 @@ type FocusRequest =
   | { kind: "after-delete"; id: number; index: number }
   | null
 
-// ManageTagsDialog (D-07, D-08) is the global tag-management surface opened
-// from the Watchlist header. It reloads the vocabulary on every open
-// (D-30) and lets the user delete a tag through a count-stating
-// ConfirmDialog rendered inside its own React tree (so base-ui registers it
-// as a nested dialog). Task 2/3 add rename and merge on top of this.
+// ManageTagsDialog (D-07) is the global tag-management surface (rename,
+// merge, delete), reloading the vocabulary on every open. Its ConfirmDialog
+// renders inside this tree so base-ui registers it as a nested dialog.
 export function ManageTagsDialog({
   open,
   onOpenChange,
@@ -177,10 +175,8 @@ export function ManageTagsDialog({
         setRenamePending(false)
         toast.success(`Renamed “${tag.name}” to “${result.tag.name}”.`)
       } else {
-        // A collision opens the merge ConfirmDialog (D-09); rename mode
-        // stays open with its typed text until the user confirms or
-        // cancels the merge. No merge request is ever sent without that
-        // confirmation.
+        // A collision opens the merge ConfirmDialog (D-09); rename mode stays
+        // open, and no merge is sent without confirmation.
         setRenamePending(false)
         setCollisionTarget({
           sourceId: tag.id,

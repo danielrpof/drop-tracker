@@ -33,12 +33,8 @@ function itemLabel(item: TagSuggestion): string {
   return item.kind === "create" ? item.name : item.tag.name
 }
 
-// DISMISS_REASONS is the base-ui close reasons that mean "the user wants
-// the editor gone" (Esc, an outside click, focus leaving). base-ui also
-// closes its popup with reason "none" when Enter is pressed and nothing is
-// selectable (e.g. the already-on state) -- that must NOT close the whole
-// "+ tag" editor, only leave the input as-is (UI-SPEC "Enter does
-// nothing").
+// DISMISS_REASONS are the base-ui close reasons that mean the user wants the
+// editor gone. Reason "none" (Enter with nothing selectable) must not close it.
 const DISMISS_REASONS = new Set([
   "escape-key",
   "outside-press",
@@ -46,11 +42,8 @@ const DISMISS_REASONS = new Set([
   "input-blur",
 ])
 
-// TagCombobox is the "+ tag" editor (TAG-01, D-02, D-15): a single-value,
-// creatable base-ui Combobox. Suggestion ordering, pinning, and the
-// already-on/empty-vocabulary states all come from the pure
-// buildTagSuggestions helper (D-13, D-30, D-31) -- this component only
-// renders what it returns.
+// TagCombobox is the "+ tag" editor (TAG-01): a creatable base-ui Combobox
+// that only renders what buildTagSuggestions returns.
 export function TagCombobox({
   entry,
   vocabulary,
@@ -63,10 +56,8 @@ export function TagCombobox({
   const [popupOpen, setPopupOpen] = useState(true)
   const [liveMessage, setLiveMessage] = useState("")
   const counterId = useId()
-  // base-ui echoes the just-picked item's label back through
-  // onInputValueChange right after a commit (its own "fill" behavior) --
-  // one tick after we've already cleared the input. Suppress exactly that
-  // echo so the cleared input actually stays cleared.
+  // base-ui echoes the picked label through onInputValueChange right after
+  // a commit; suppress that echo so the cleared input stays cleared.
   const suppressEchoRef = useRef<string | null>(null)
 
   const suggestions = buildTagSuggestions({
@@ -91,9 +82,8 @@ export function TagCombobox({
     setQuery("")
   }
 
-  // handleInputValueChange announces the 25/32 threshold crossings exactly
-  // once each (D-15, UI-SPEC [R6]) -- query still holds the pre-change
-  // value here, so this compares old vs. new length synchronously.
+  // Announces each 25/32 threshold crossing once (D-15); query still holds
+  // the pre-change value here, so old vs. new length compares synchronously.
   function handleInputValueChange(value: string) {
     if (suppressEchoRef.current !== null) {
       const suppressed = suppressEchoRef.current

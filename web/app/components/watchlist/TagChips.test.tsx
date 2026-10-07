@@ -137,10 +137,8 @@ describe("TagChips", () => {
   })
 })
 
-// Harness mirrors watchlist.tsx's real addTag/removeTag functional updaters
-// (D-24) so a click's optimistic removal actually re-renders TagChips with
-// a shrunk entry.tags -- the focus-management behaviors below depend on a
-// real DOM removal, not a mocked no-op.
+// Harness mirrors the route's addTag/removeTag updaters (D-24) so removals
+// really shrink entry.tags; the focus tests below need a real DOM removal.
 function Harness({
   initialEntry,
   onAnnounce,

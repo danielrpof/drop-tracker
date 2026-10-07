@@ -103,8 +103,8 @@ export function TagVocabularyProvider({
   const [status, setStatusState] = useState<VocabularyStatus>("idle")
   const vocabularyRef = useRef<TagSummary[] | null>(null)
   const statusRef = useRef<VocabularyStatus>("idle")
-  // Every local change bumps the generation so a GET /tags that settles
-  // afterwards is dropped (WR-06, WR-08).
+  // Every local change bumps the generation so a later-settling GET /tags
+  // is dropped (WR-06).
   const genRef = useRef(0)
   const inFlightRef = useRef(false)
   const onChangeRef = useRef(onChange)

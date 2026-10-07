@@ -17,18 +17,14 @@ import { useTagVocabulary } from "~/lib/useTagVocabulary"
 
 import { TagCombobox } from "./TagCombobox"
 
-// TagActions is the route-level functional-updater pair TagChips drives
-// (D-24, amends D-03): each call touches only its own tag, never a
-// whole-array snapshot, so concurrent removals on one row can't clobber
-// each other.
+// TagActions is the route-level functional-updater pair TagChips drives;
+// each touches only its own tag so concurrent changes don't clobber (D-24).
 export interface TagActions {
   addTag(entryId: number, tag: TagRef, index?: number): void
   removeTag(entryId: number, tagId: number): void
 }
 
-// pendingIdCounter backs the module-level temp-id sequence for optimistic
-// chips (D-24): a per-row pending set keyed by a temporary id, never wiped
-// by a concurrent refresh().
+// pendingIdCounter backs the temp ids of optimistic chips (D-24).
 let pendingIdCounter = 0
 function nextPendingId(): string {
   pendingIdCounter += 1
@@ -46,38 +42,32 @@ interface PendingTag {
   name: string
 }
 
-// FocusRequest is a single pending "move focus once the DOM catches up"
-// instruction (UI-SPEC focus table rows a/b), consumed by the two layout
-// effects below. "chip"/"grow" depend on entry.tags actually changing;
-// "add-button" depends on the trailing slot re-rendering as "+ tag".
+// FocusRequest is a pending "move focus once the DOM catches up" request.
+// "chip"/"grow" wait for entry.tags to change; "add-button" for "+ tag".
 type FocusRequest =
   | { kind: "chip"; index: number }
   | { kind: "grow" }
   | { kind: "add-button" }
   | null
 
-// TagChips renders entry.tags as neutral Badge chips under the artist name
-// (D-01, D-04, UI-SPEC [R1]). A tag name is plain JSX text only -- never
-// raw HTML -- so an HTML-looking name renders literally (Phase 06 XSS
-// posture). The row always renders -- it holds at least the "+ tag"
-// trigger, never an empty gap (D-02).
+// TagChips renders entry.tags as Badge chips (D-01). A tag name is plain JSX
+// text only, never raw HTML, so an HTML-looking name renders literally.
 export function TagChips({ entry, actions, announce }: TagChipsProps) {
   const { vocabulary, ensureLoaded, remember } = useTagVocabulary()
   const containerRef = useRef<HTMLDivElement>(null)
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const focusRequestRef = useRef<FocusRequest>(null)
   const prevTagCountRef = useRef(entry.tags.length)
-  // Optimistic chips keyed by a temp id (D-24): survive a concurrent
-  // refresh() because they live here, not in entry.tags.
+  // Optimistic chips live here, not in entry.tags, so a concurrent
+  // refresh() can't wipe them (D-24).
   const [pending, setPending] = useState<PendingTag[]>([])
   const [editorOpen, setEditorOpen] = useState(false)
 
   const count = entry.tags.length + pending.length
   const atCap = count >= MAX_TAGS_PER_ARTIST
 
-  // Chip removal/grow focus: entry.tags is the source of truth for "which
-  // chip's × comes next" once the DOM has actually shrunk or grown to
-  // match (UI-SPEC focus table rows a/b).
+  // Chip removal/grow focus: entry.tags says which chip's × comes next once
+  // the DOM has shrunk or grown to match.
   useLayoutEffect(() => {
     const changed = entry.tags.length !== prevTagCountRef.current
     prevTagCountRef.current = entry.tags.length
@@ -143,13 +133,9 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
     return `Couldn't add “${name}” to ${entry.name} — try again.`
   }
 
-  // handleCommit is TagCombobox's onCommit (both a picked existing tag and
-  // a typed new name land here -- the combobox already resolved which).
-  // The pending chip shows the typed casing immediately; on success it is
-  // replaced by the real chip carrying the server's stored casing (TAG-03).
-  // The pick that reaches the cap closes the editor immediately (the
-  // pending item already counts toward it) and focuses the new chip's ×
-  // once it lands, or "+ tag" again if the attach fails.
+  // The pending chip shows the typed casing until the real chip replaces it
+  // with the server's casing (TAG-03). A pick reaching the cap closes the
+  // editor and focuses the new chip's ×, or "+ tag" if the attach fails.
   function handleCommit(name: string) {
     const reachesCap = count + 1 >= MAX_TAGS_PER_ARTIST
     const tempId = nextPendingId()
@@ -217,9 +203,8 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
           >
             {item.name}
           </span>
-          {/* aria-disabled, not disabled: a native-disabled button loses
-              focusability, breaking the "10th pick focuses the new chip's
-              ×" contract once this chip resolves (see plan objective). */}
+          {/* aria-disabled, not disabled, keeps the chip focusable for the
+              cap-pick focus move. */}
           <Button
             variant="ghost"
             size="icon-xs"

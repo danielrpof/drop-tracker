@@ -73,13 +73,9 @@ export default function Watchlist() {
     )
   }
 
-  // addTag/removeTag are the D-24 functional per-item updaters TagChips
-  // drives directly (not a whole-array snapshot): each only ever touches
-  // its own entry's tags array, so concurrent chip add/remove on one row
-  // can never clobber each other. addTag is a no-op when the tag is
-  // already present (idempotent attach, D-21) and inserts at a clamped
-  // index so a failed-remove rollback restores the chip's original
-  // position.
+  // Functional per-entry updaters so concurrent chip changes on one row
+  // don't clobber each other (D-24). addTag is idempotent and restores the
+  // chip's position on rollback.
   function addTag(entryId: number, tag: TagRef, index?: number) {
     setEntries((rows) =>
       rows

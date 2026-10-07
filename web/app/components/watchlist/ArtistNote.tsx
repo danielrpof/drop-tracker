@@ -17,13 +17,9 @@ export interface ArtistNoteProps {
   announce: (message: string) => void
 }
 
-// FocusRequest is a single pending "move focus once the editor closes"
-// instruction, consumed by the layout effect below (mirrors TagChips'
-// FocusRequest pattern). hasNote decides pencil vs "add note": on
-// cancel/Esc it comes from entry.note (nothing changed), on a successful
-// save it comes from the fresh server response -- not from the entry prop,
-// which the parent may not have re-rendered with yet by the time this
-// effect runs.
+// FocusRequest is a pending "move focus once the editor closes" request.
+// On save, hasNote comes from the server response because the entry prop may
+// not have re-rendered yet when the effect runs.
 type FocusRequest = { hasNote: boolean } | null
 
 function saveErrorMessage(err: unknown): string {
@@ -33,13 +29,9 @@ function saveErrorMessage(err: unknown): string {
   return "Couldn't save the note — your text is still here. Try again."
 }
 
-// ArtistNote renders the D-05/D-06 note block under the tag chip row: a
-// clamped display with an edit pencil when a note exists, an "add note"
-// trigger when it doesn't, and an in-place editor that saves through the
-// dedicated PUT /watchlist/{id}/note endpoint -- never PATCH (D-25), since
-// clearing a note is an explicit request, not the "leave this axis
-// untouched" an absent PATCH key means. Note text renders as a plain JSX
-// text node only (T-24-37) -- never raw HTML.
+// ArtistNote is the note block under the chip row: clamped display, "add
+// note" trigger and in-place editor. It saves through its own PUT, never
+// PATCH (D-25). Note text is a plain JSX text node, never raw HTML.
 export function ArtistNote({
   entry,
   onEntryChange,

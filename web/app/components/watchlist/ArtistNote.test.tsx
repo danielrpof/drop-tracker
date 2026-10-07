@@ -157,11 +157,8 @@ describe("ArtistNote", () => {
     expect(mockUpdateNote).not.toHaveBeenCalled()
   })
 
-  // Wrapper mimics the real Watchlist route: onEntryChange feeds straight
-  // back into the entry prop, the way handleEntryChange/setEntries does at
-  // the route level, so a post-save re-render sees the fresh note and the
-  // pencil/"add note" focus target that depends on it actually exists in
-  // the DOM.
+  // Feeds onEntryChange back into the entry prop like the route does, so the
+  // post-save re-render has the fresh note and its focus target.
   function Wrapper(props: {
     initial: WatchlistEntry
     announce: ArtistNoteProps["announce"]
