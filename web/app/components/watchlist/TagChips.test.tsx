@@ -138,7 +138,7 @@ describe("TagChips", () => {
 })
 
 // Harness mirrors the route's addTag/removeTag updaters (D-24) so removals
-// really shrink entry.tags; the focus tests below need a real DOM removal.
+// update entry.tags; the focus tests below need a real DOM removal.
 function Harness({
   initialEntry,
   onAnnounce,
