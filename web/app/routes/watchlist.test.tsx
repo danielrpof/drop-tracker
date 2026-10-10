@@ -1399,40 +1399,55 @@ describe("Watchlist sort (WLVW-02, WLVW-03)", () => {
     }
   )
 
-  it("announces the sort immediately with no count message after it", async () => {
+  // RTL's asyncWrapper awaits a real setTimeout, so shouldAdvanceTime is
+  // required; the extra advance after the pick is what trips the 500 ms timer.
+  async function pickSortWithFakeTimers(typed: string | null) {
     mockListWatchlist.mockResolvedValue(sortEntries)
-
     renderRoute(Watchlist, "/")
     await screen.findByText("Alpha")
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
-    await userEvent.click(
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    if (typed !== null) {
+      await user.type(
+        screen.getByRole("textbox", { name: "Filter watchlist" }),
+        typed
+      )
+    }
+    await user.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await user.click(
       await screen.findByRole("option", { name: "Date added (newest)" })
     )
+  }
 
-    expect(status()).toHaveTextContent("Sorted by Date added (newest).")
-    await new Promise((r) => setTimeout(r, 700))
-    expect(status()).toHaveTextContent("Sorted by Date added (newest).")
-    expect(status()).not.toHaveTextContent("Showing")
+  it("announces the sort immediately with no count message after it", async () => {
+    try {
+      await pickSortWithFakeTimers(null)
+
+      expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+      expect(status()).not.toHaveTextContent("Showing")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("cancels a pending count announcement when the sort changes", async () => {
-    mockListWatchlist.mockResolvedValue(sortEntries)
+    try {
+      await pickSortWithFakeTimers("a")
 
-    renderRoute(Watchlist, "/")
-    await screen.findByText("Alpha")
-
-    await userEvent.type(
-      screen.getByRole("textbox", { name: "Filter watchlist" }),
-      "a"
-    )
-    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
-    await userEvent.click(
-      await screen.findByRole("option", { name: "Date added (newest)" })
-    )
-    await new Promise((r) => setTimeout(r, 700))
-
-    expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+      expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+      expect(status()).not.toHaveTextContent("Showing")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("keeps the sort when Clear filters runs", async () => {
