@@ -7,6 +7,14 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "~/components/ui/input-group"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select"
+import { SORT_OPTIONS, type SortKey } from "~/lib/watchlistView"
 
 export interface WatchlistToolbarProps {
   query: string
@@ -14,6 +22,8 @@ export interface WatchlistToolbarProps {
   filterInputRef: React.RefObject<HTMLInputElement | null>
   showClear: boolean
   onClearFilters(): void
+  sort: SortKey
+  onSortChange(next: SortKey): void
 }
 
 export function WatchlistToolbar({
@@ -22,6 +32,8 @@ export function WatchlistToolbar({
   filterInputRef,
   showClear,
   onClearFilters,
+  sort,
+  onSortChange,
 }: WatchlistToolbarProps) {
   return (
     <div
@@ -67,6 +79,33 @@ export function WatchlistToolbar({
           )}
         </InputGroup>
       </label>
+      <div className="flex flex-col gap-1 sm:w-56">
+        <span
+          id="watchlist-sort-label"
+          className="text-label text-muted-foreground"
+        >
+          Sort by
+        </span>
+        <Select value={sort} onValueChange={(v) => onSortChange(v as SortKey)}>
+          <SelectTrigger
+            aria-labelledby="watchlist-sort-label"
+            className="w-full"
+          >
+            <SelectValue>
+              {(value: SortKey) =>
+                SORT_OPTIONS.find((o) => o.value === value)?.label
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       {showClear && (
         <Button
           variant="ghost"

@@ -1303,3 +1303,71 @@ describe("Watchlist filtered state (WLVW-06)", () => {
     ).not.toBeInTheDocument()
   })
 })
+
+describe("Watchlist sort (WLVW-02, WLVW-03)", () => {
+  const sortEntries = [
+    makeEntry({
+      id: 1,
+      name: "Alpha",
+      latest_release_date: "2023-01-01",
+      created_at: "2026-03-01T00:00:00Z",
+    }),
+    makeEntry({
+      id: 2,
+      name: "Bravo",
+      latest_release_date: null,
+      created_at: "2026-02-01T00:00:00Z",
+    }),
+    makeEntry({
+      id: 3,
+      name: "Charlie",
+      latest_release_date: "2025-06-01",
+      created_at: "2026-01-01T00:00:00Z",
+    }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const names = () =>
+    screen
+      .getAllByRole("listitem")
+      .map((li) => li.querySelector("span[title]")?.getAttribute("title"))
+
+  it("reorders the cards and writes the URL when a sort is chosen, without refetching", async () => {
+    mockListWatchlist.mockResolvedValue(sortEntries)
+
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Alpha")
+    expect(names()).toEqual(["Alpha", "Bravo", "Charlie"])
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Latest release (newest)" })
+    )
+
+    await waitFor(() => expect(names()).toEqual(["Charlie", "Alpha", "Bravo"]))
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      /^\?sort=latest-desc$/
+    )
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders the order from the URL on reload", async () => {
+    mockListWatchlist.mockResolvedValue(sortEntries)
+
+    renderRoute(Watchlist, "/", "/?sort=added-asc")
+
+    await screen.findByText("Alpha")
+    expect(names()).toEqual(["Charlie", "Bravo", "Alpha"])
+    expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveTextContent(
+      "Date added (oldest)"
+    )
+  })
+})

@@ -48,20 +48,28 @@ describe("selectVisible", () => {
     makeEntry({ id: 3, name: "Badmómó" }),
   ]
 
-  it("keeps input order", () => {
-    const ids = selectVisible(entries, { q: "bad" }, new Set()).map((e) => e.id)
+  it("keeps matches in sort order", () => {
+    const ids = selectVisible(
+      entries,
+      { q: "bad", sort: "name-asc" },
+      new Set()
+    ).map((e) => e.id)
     expect(ids).toEqual([1, 3])
   })
 
   it("unions sticky ids with matches", () => {
-    const ids = selectVisible(entries, { q: "bad" }, new Set([2])).map(
-      (e) => e.id
-    )
-    expect(ids).toEqual([1, 2, 3])
+    const ids = selectVisible(
+      entries,
+      { q: "bad", sort: "name-asc" },
+      new Set([2])
+    ).map((e) => e.id)
+    expect(ids).toEqual([1, 3, 2])
   })
 
   it("returns an empty list for no entries", () => {
-    expect(selectVisible([], { q: "x" }, new Set([1]))).toEqual([])
+    expect(
+      selectVisible([], { q: "x", sort: "name-asc" }, new Set([1]))
+    ).toEqual([])
   })
 })
 

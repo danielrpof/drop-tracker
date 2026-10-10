@@ -15,6 +15,8 @@ function setup(query: string) {
       filterInputRef={filterInputRef}
       showClear={false}
       onClearFilters={() => {}}
+      sort="name-asc"
+      onSortChange={() => {}}
     />
   )
   return { onQueryChange, input: screen.getByRole("textbox") }

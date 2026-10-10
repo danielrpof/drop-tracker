@@ -24,10 +24,12 @@ import { isAddableSource } from "~/lib/sources"
 import { useUrlParams } from "~/lib/useUrlParams"
 import {
   CLEAR_FILTER_KEYS,
+  DEFAULT_SORT,
   formatArtistCount,
   isFiltered,
   parseWatchlistParams,
   selectVisible,
+  type SortKey,
 } from "~/lib/watchlistView"
 import {
   rewriteTags,
@@ -319,6 +321,14 @@ export default function Watchlist() {
     : []
   countRef.current = { n: visible.length, m: entries?.length ?? 0 }
 
+  function handleSortChange(next: SortKey) {
+    write((p) => {
+      if (next === DEFAULT_SORT) p.delete("sort")
+      else p.set("sort", next)
+    })
+    clearSticky()
+  }
+
   function clearFilters() {
     if (qTimer.current) clearTimeout(qTimer.current)
     if (countTimer.current) clearTimeout(countTimer.current)
@@ -413,6 +423,8 @@ export default function Watchlist() {
                 isFiltered({ ...view, q: query }) && visible.length > 0
               }
               onClearFilters={clearFilters}
+              sort={view.sort}
+              onSortChange={handleSortChange}
             />
             {visible.length === 0 ? (
               <EmptyState
