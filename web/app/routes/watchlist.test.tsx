@@ -1731,8 +1731,41 @@ describe("Watchlist tag filter consistency (D-13)", () => {
       screen.getByRole("button", { name: "history back", hidden: true })
     )
 
-    await waitFor(() => expect(search()).toBe("?tags=9"))
+    // Back lands on ?tags=5, whose only id is retired, so it is dropped.
+    await waitFor(() => expect(search()).toBe(""))
     expect(filterChip("rap")).not.toBeInTheDocument()
+  })
+
+  it("swaps a merged-away tag again when Back brings it into the URL", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: trap,
+      carrierCountAfterMerge: 3,
+    })
+    mockMergeTag.mockResolvedValueOnce({ ...trap, carrier_count: 3 })
+
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(screen.getByLabelText("Filter by tags, any of"))
+    await userEvent.click(await screen.findByRole("option", { name: /^rap/ }))
+    await userEvent.click(await screen.findByRole("option", { name: /^trap/ }))
+    await userEvent.keyboard("{Escape}")
+
+    await openManageTags()
+    await mergeRapIntoTrap()
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    await userEvent.keyboard("{Escape}")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "history back", hidden: true })
+    )
+
+    // Back lands on ?tags=5, which swaps to the merge target.
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    expect(filterChip("trap")).toBeInTheDocument()
   })
 
   it("keeps the filter, its chip, and the card when the last carrier is detached in-session", async () => {

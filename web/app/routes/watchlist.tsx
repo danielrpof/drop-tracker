@@ -76,6 +76,9 @@ export default function Watchlist() {
 
   // Last known name per tag id, so a chip survives its last carrier leaving.
   const tagNamesRef = useRef(new Map<number, string>())
+  // Deleted -> null, merged -> target id; maps a Back-resurrected id (D-13).
+  const retiredTagIdsRef = useRef(new Map<number, number | null>())
+  const tagIdsValidatedRef = useRef(false)
 
   function markSticky(id: number) {
     setStickyIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
@@ -83,6 +86,26 @@ export default function Watchlist() {
 
   function clearSticky() {
     setStickyIds((prev) => (prev.size === 0 ? prev : new Set()))
+  }
+
+  function settleTagIds(ids: number[]): number[] {
+    const out = new Set<number>()
+    for (const id of ids) {
+      const retired = retiredTagIdsRef.current
+      const next = retired.has(id) ? retired.get(id) : id
+      if (next != null && tagNamesRef.current.has(next)) out.add(next)
+    }
+    return [...out].sort((a, b) => a - b)
+  }
+
+  function writeTagIds(ids: number[]) {
+    write(
+      (p) => {
+        if (ids.length === 0) p.delete("tags")
+        else p.set("tags", ids.join(","))
+      },
+      { replace: true }
+    )
   }
 
   function scheduleCountAnnouncement() {
@@ -125,10 +148,15 @@ export default function Watchlist() {
     }
   }, [view.q])
 
-  // Drop an unknown or default sort and malformed tag ids from the URL
-  // without a history entry.
+  // Drop an unknown or default sort and bad tag ids from the URL without a
+  // history entry. Once validated, retired and unknown tag ids go too.
   useEffect(() => {
     const canonical = canonicalWatchlistParams(params)
+    if (tagIdsValidatedRef.current) {
+      const settled = settleTagIds(parseWatchlistParams(canonical).tagIds)
+      if (settled.length === 0) canonical.delete("tags")
+      else canonical.set("tags", settled.join(","))
+    }
     if (canonical.toString() === params.toString()) return
     write(
       (p) => {
@@ -140,6 +168,7 @@ export default function Watchlist() {
       },
       { replace: true }
     )
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- settleTagIds only reads refs
   }, [params, write])
 
   useEffect(() => {
@@ -166,6 +195,16 @@ export default function Watchlist() {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // Runs once on the first successful load; later refreshes never prune (D-13).
+  useEffect(() => {
+    if (!entries || tagIdsValidatedRef.current) return
+    tagIdsValidatedRef.current = true
+    const carried = new Set(entries.flatMap((r) => r.tags.map((t) => t.id)))
+    const kept = view.tagIds.filter((id) => carried.has(id))
+    if (kept.length !== view.tagIds.length) writeTagIds(kept)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- first load only
+  }, [entries])
 
   // handleEntryChange is passed down to PreferenceToggles (via
   // WatchlistRow) so its optimistic-update-then-rollback logic writes
@@ -219,8 +258,33 @@ export default function Watchlist() {
     )
   }
 
+  // Swap or drop one selected tag id, de-duplicated and ascending.
+  function replaceSelectedTag(from: number, to: number | null) {
+    write(
+      (p) => {
+        const ids = parseWatchlistParams(p).tagIds
+        if (!ids.includes(from)) return
+        const next = new Set(ids.filter((id) => id !== from))
+        if (to !== null) next.add(to)
+        if (next.size === 0) p.delete("tags")
+        else p.set("tags", [...next].sort((a, b) => a - b).join(","))
+      },
+      { replace: true }
+    )
+  }
+
   // The only place rows' tags change for a Manage tags rename/merge/delete.
   function applyTagChange(change: TagChange) {
+    if (change.kind === "renamed") {
+      tagNamesRef.current.set(change.tag.id, change.tag.name)
+    } else if (change.kind === "deleted") {
+      retiredTagIdsRef.current.set(change.tagId, null)
+      replaceSelectedTag(change.tagId, null)
+    } else {
+      retiredTagIdsRef.current.set(change.sourceId, change.target.id)
+      tagNamesRef.current.set(change.target.id, change.target.name)
+      replaceSelectedTag(change.sourceId, change.target.id)
+    }
     setEntries((rows) =>
       rows
         ? rows.map((r) => {
