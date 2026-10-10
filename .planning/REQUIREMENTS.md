@@ -22,7 +22,7 @@
 
 ### Watchlist View
 
-- [ ] **WLVW-01**: User can search the watchlist by artist name
+- [x] **WLVW-01**: User can search the watchlist by artist name
 - [x] **WLVW-02**: User can sort by name (A–Z/Z–A) or date added (newest/oldest), with a stable tie-break
 - [x] **WLVW-03**: User can sort by latest release (the artist's newest own `new_release` event date that is not upcoming); artists with none sort last in both directions
 - [x] **WLVW-04**: User can filter the watchlist by one or more tags
@@ -89,7 +89,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TAG-06 | Phase 24 | Complete |
 | TAG-07 | Phase 24 | Complete |
 | NOTE-01 | Phase 24 | Complete |
-| WLVW-01 | Phase 25 | Pending |
+| WLVW-01 | Phase 25 | Complete |
 | WLVW-02 | Phase 25 | Complete |
 | WLVW-03 | Phase 25 | Complete |
 | WLVW-04 | Phase 25 | Complete |
