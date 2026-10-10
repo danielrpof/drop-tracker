@@ -23,7 +23,9 @@ import {
 import { isAddableSource } from "~/lib/sources"
 import { useUrlParams } from "~/lib/useUrlParams"
 import {
+  CLEAR_FILTER_KEYS,
   formatArtistCount,
+  isFiltered,
   parseWatchlistParams,
   selectVisible,
 } from "~/lib/watchlistView"
@@ -42,7 +44,7 @@ import {
 // post-add refresh) never flashes the loading skeletons over an already-
 // populated list -- only the very first mount renders them.
 const Q_WRITE_DEBOUNCE_MS = 300
-const NO_STICKY: ReadonlySet<number> = new Set()
+const COUNT_ANNOUNCE_DEBOUNCE_MS = 500
 
 export default function Watchlist() {
   const [entries, setEntries] = useState<WatchlistEntry[] | null>(null)
@@ -59,11 +61,38 @@ export default function Watchlist() {
   const lastWrittenQ = useRef(view.q)
   const qTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const filterInputRef = useRef<HTMLInputElement | null>(null)
-  const stickyIds = NO_STICKY
+  const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const countRef = useRef({ n: 0, m: 0 })
+  // Cards the user just touched or added stay visible past a filter (G4).
+  const [stickyIds, setStickyIds] = useState<ReadonlySet<number>>(
+    () => new Set()
+  )
+
+  function markSticky(id: number) {
+    setStickyIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+  }
+
+  function clearSticky() {
+    setStickyIds((prev) => (prev.size === 0 ? prev : new Set()))
+  }
+
+  function scheduleCountAnnouncement() {
+    if (countTimer.current) clearTimeout(countTimer.current)
+    countTimer.current = setTimeout(() => {
+      const { n, m } = countRef.current
+      announce(
+        n > 0
+          ? `Showing ${formatArtistCount(n, m)}.`
+          : "No artists match these filters."
+      )
+    }, COUNT_ANNOUNCE_DEBOUNCE_MS)
+  }
 
   // Filtering uses the local value; the URL only follows, debounced (D-12).
   function handleQueryChange(next: string) {
     setQuery(next)
+    clearSticky()
+    scheduleCountAnnouncement()
     if (qTimer.current) clearTimeout(qTimer.current)
     qTimer.current = setTimeout(() => {
       lastWrittenQ.current = next
@@ -90,14 +119,22 @@ export default function Watchlist() {
   useEffect(() => {
     return () => {
       if (qTimer.current) clearTimeout(qTimer.current)
+      if (countTimer.current) clearTimeout(countTimer.current)
     }
   }, [])
 
+  // Resolves with the loaded rows (null on failure); never touches stickyIds.
   const refresh = useCallback(() => {
     setError(false)
-    listWatchlist()
-      .then((rows) => setEntries(rows))
-      .catch(() => setError(true))
+    return listWatchlist()
+      .then((rows) => {
+        setEntries(rows)
+        return rows
+      })
+      .catch(() => {
+        setError(true)
+        return null
+      })
   }, [])
 
   useEffect(() => {
@@ -114,6 +151,7 @@ export default function Watchlist() {
   // concurrent single-axis PATCHes must never let one axis's response
   // clobber the other axis's already-applied value.
   function handleEntryChange(id: number, patch: Partial<WatchlistEntry>) {
+    markSticky(id)
     setEntries((rows) =>
       rows ? rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) : rows
     )
@@ -123,6 +161,7 @@ export default function Watchlist() {
   // don't clobber each other (D-24). addTag is idempotent and restores the
   // chip's position on rollback.
   function addTag(entryId: number, tag: TagRef, index?: number) {
+    markSticky(entryId)
     setEntries((rows) =>
       rows
         ? rows.map((r) => {
@@ -142,6 +181,7 @@ export default function Watchlist() {
   }
 
   function removeTag(entryId: number, tagId: number) {
+    markSticky(entryId)
     setEntries((rows) =>
       rows
         ? rows.map((r) =>
@@ -205,17 +245,20 @@ export default function Watchlist() {
       return
     }
     try {
-      await addWatchlist({
+      const added = await addWatchlist({
         mbid: result.id,
         name: result.name,
         imageUrl: result.image_url ?? undefined,
         disambiguation: result.disambiguation ?? undefined,
         deezerId: undefined,
       })
+      markSticky(added.id)
       refresh()
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        refresh()
+        const rows = await refresh()
+        const existing = rows?.find((r) => r.mbid === result.id)
+        if (existing) markSticky(existing.id)
         return
       }
       toast.error("Couldn't add this artist. Try again in a moment.")
@@ -257,7 +300,10 @@ export default function Watchlist() {
             imageUrl: entry.image_url ?? undefined,
             note: entry.note ?? undefined,
           })
-            .then(refresh)
+            .then((restored) => {
+              markSticky(restored.id)
+              return refresh()
+            })
             .catch(() => {
               toast.error(
                 `Couldn't restore ${entry.name}. Try adding it again.`
@@ -271,6 +317,21 @@ export default function Watchlist() {
   const visible = entries
     ? selectVisible(entries, { ...view, q: query }, stickyIds)
     : []
+  countRef.current = { n: visible.length, m: entries?.length ?? 0 }
+
+  function clearFilters() {
+    if (qTimer.current) clearTimeout(qTimer.current)
+    if (countTimer.current) clearTimeout(countTimer.current)
+    setQuery("")
+    lastWrittenQ.current = ""
+    write((p) => {
+      for (const key of CLEAR_FILTER_KEYS) p.delete(key)
+    })
+    clearSticky()
+    filterInputRef.current?.focus()
+    const m = entries?.length ?? 0
+    announce(`Filters cleared. Showing ${formatArtistCount(m, m)}.`)
+  }
 
   return (
     <TagVocabularyProvider onChange={applyTagChange}>
@@ -348,21 +409,31 @@ export default function Watchlist() {
               query={query}
               onQueryChange={handleQueryChange}
               filterInputRef={filterInputRef}
-              showClear={false}
-              onClearFilters={() => {}}
+              showClear={
+                isFiltered({ ...view, q: query }) && visible.length > 0
+              }
+              onClearFilters={clearFilters}
             />
-            <ul className="flex flex-col gap-4">
-              {visible.map((entry) => (
-                <WatchlistRow
-                  key={entry.id}
-                  entry={entry}
-                  onEntryChange={handleEntryChange}
-                  onRemove={handleRemove}
-                  tagActions={{ addTag, removeTag }}
-                  announce={announce}
-                />
-              ))}
-            </ul>
+            {visible.length === 0 ? (
+              <EmptyState
+                heading="No artists match these filters"
+                body={`Try a different name or fewer filters, or clear them to see all ${entries.length} artist${entries.length === 1 ? "" : "s"}.`}
+                action={<Button onClick={clearFilters}>Clear filters</Button>}
+              />
+            ) : (
+              <ul className="flex flex-col gap-4">
+                {visible.map((entry) => (
+                  <WatchlistRow
+                    key={entry.id}
+                    entry={entry}
+                    onEntryChange={handleEntryChange}
+                    onRemove={handleRemove}
+                    tagActions={{ addTag, removeTag }}
+                    announce={announce}
+                  />
+                ))}
+              </ul>
+            )}
           </section>
         )}
       </div>

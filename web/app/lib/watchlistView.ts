@@ -39,6 +39,13 @@ export function selectVisible(
   )
 }
 
+export function isFiltered(view: WatchlistView): boolean {
+  return view.q.trim() !== ""
+}
+
+// What Clear filters deletes; sort is deliberately absent (D-10).
+export const CLEAR_FILTER_KEYS = ["q", "tags", "muted", "custom"] as const
+
 export function formatArtistCount(n: number, m: number): string {
   return `${n} of ${m} artist${m === 1 ? "" : "s"}`
 }

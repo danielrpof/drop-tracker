@@ -1085,8 +1085,13 @@ describe("Watchlist filtered state (WLVW-06)", () => {
     )
   }
 
+  // LocationProbe's <output> is also an implicit status role.
   function status() {
-    return screen.getByRole("status")
+    const region = screen
+      .getAllByRole("status")
+      .find((el) => el.getAttribute("aria-atomic") === "true")
+    if (!region) throw new Error("route status region not found")
+    return region
   }
 
   function lastUndo() {

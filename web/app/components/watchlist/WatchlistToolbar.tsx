@@ -1,5 +1,6 @@
-import { ListFilter, X } from "lucide-react"
+import { FilterX, ListFilter, X } from "lucide-react"
 
+import { Button } from "~/components/ui/button"
 import {
   InputGroup,
   InputGroupAddon,
@@ -19,6 +20,8 @@ export function WatchlistToolbar({
   query,
   onQueryChange,
   filterInputRef,
+  showClear,
+  onClearFilters,
 }: WatchlistToolbarProps) {
   return (
     <div
@@ -64,6 +67,16 @@ export function WatchlistToolbar({
           )}
         </InputGroup>
       </label>
+      {showClear && (
+        <Button
+          variant="ghost"
+          className="h-9 text-muted-foreground hover:text-foreground"
+          onClick={onClearFilters}
+        >
+          <FilterX aria-hidden="true" />
+          Clear filters
+        </Button>
+      )}
     </div>
   )
 }
