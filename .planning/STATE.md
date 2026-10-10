@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
 status: executing
-stopped_at: Completed 25-06-PLAN.md
-last_updated: "2026-10-10T16:50:36.266Z"
+stopped_at: Completed 25-05-PLAN.md
+last_updated: "2026-10-10T16:56:55.031Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 25 execution started
-state_head: f8ae71f4399c73cc47429db4ba342c051242c2b7
+state_head: 5fad3d0cf2a0ad663ca1b6301075daa1e30472b1
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 24
-  completed_plans: 19
+  completed_plans: 20
   percent: 20
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
-Plan: 6 of 10
+Plan: 7 of 10
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 25 execution started
 
@@ -167,6 +167,7 @@ Last activity: 2026-10-10 — Phase 25 execution started
 | Phase 25 P02 | 25min | 2 tasks | 5 files |
 | Phase 25 P04 | 18 min | 3 tasks | 9 files |
 | Phase 25 P06 | 14 min | 3 tasks | 8 files |
+| Phase 25 P05 | 5 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -399,6 +400,7 @@ Recent decisions affecting current work:
 - [Phase 25]: 25-04: Watchlist q filters from local state per keystroke, URL write debounced 300ms with replace; input resyncs only when URL differs from last own write — Avoids history flooding and echo loops (Pitfall 6)
 - [Phase 25]: 25-04: refresh() resolves with loaded rows so the 409 add path can mark the existing artist sticky; sticky set cleared only by search change or Clear filters — G4: add/Undo never succeed invisibly under a filter
 - [Phase 25]: 25-06: History Tag degraded trigger labels apply only when a tag is selected — With no selection a failed GET /tags still reads All tags; matches the plan behavior block
+- [Phase 25]: 25-05: Latest-release sort compares raw text (2024 before 2024-05), nulls last in both directions, artist_id ascending tie-break in every mode
 
 ### Pending Todos
 
@@ -492,8 +494,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T16:50:36.183Z
-Stopped at: Completed 25-06-PLAN.md
+Last session: 2026-10-10T16:56:54.941Z
+Stopped at: Completed 25-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
