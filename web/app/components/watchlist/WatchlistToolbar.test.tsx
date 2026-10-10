@@ -20,6 +20,10 @@ function setup(query: string) {
       tagOptions={[]}
       selectedTags={[]}
       onSelectedTagsChange={() => {}}
+      muted={false}
+      onMutedChange={() => {}}
+      custom={false}
+      onCustomChange={() => {}}
     />
   )
   return { onQueryChange, input: screen.getByRole("textbox") }
@@ -93,6 +97,10 @@ describe("WatchlistToolbar sort", () => {
         tagOptions={[]}
         selectedTags={[]}
         onSelectedTagsChange={() => {}}
+        muted={false}
+        onMutedChange={() => {}}
+        custom={false}
+        onCustomChange={() => {}}
       />
     )
 
@@ -113,5 +121,69 @@ describe("WatchlistToolbar sort", () => {
       screen.getByRole("option", { name: "Date added (oldest)" })
     )
     expect(onSortChange).toHaveBeenCalledWith("added-asc")
+  })
+})
+
+describe("WatchlistToolbar Show only", () => {
+  function renderToggles(muted: boolean, custom: boolean) {
+    const onMutedChange = vi.fn()
+    const onCustomChange = vi.fn()
+    render(
+      <WatchlistToolbar
+        query=""
+        onQueryChange={() => {}}
+        filterInputRef={createRef<HTMLInputElement>()}
+        showClear={false}
+        onClearFilters={() => {}}
+        sort="name-asc"
+        onSortChange={() => {}}
+        tagOptions={[]}
+        selectedTags={[]}
+        onSelectedTagsChange={() => {}}
+        muted={muted}
+        onMutedChange={onMutedChange}
+        custom={custom}
+        onCustomChange={onCustomChange}
+      />
+    )
+    return { onMutedChange, onCustomChange }
+  }
+
+  it("renders the legend and two unpressed toggles with no Check", () => {
+    renderToggles(false, false)
+
+    expect(screen.getByText("Show only")).toBeInTheDocument()
+    for (const name of ["Has muted events", "Custom release types"]) {
+      const button = screen.getByRole("button", { name })
+      expect(button).toHaveAttribute("aria-pressed", "false")
+      expect(button.querySelector("svg")).toBeNull()
+    }
+  })
+
+  it("shows aria-pressed and a Check only on the active toggle", () => {
+    renderToggles(true, false)
+
+    const on = screen.getByRole("button", { name: "Has muted events" })
+    expect(on).toHaveAttribute("aria-pressed", "true")
+    expect(on.querySelector("svg")).toHaveAttribute("aria-hidden", "true")
+    expect(
+      screen
+        .getByRole("button", { name: "Custom release types" })
+        .querySelector("svg")
+    ).toBeNull()
+  })
+
+  it("reports the flipped value and keeps focus on the clicked button", async () => {
+    const { onMutedChange, onCustomChange } = renderToggles(true, false)
+    const custom = screen.getByRole("button", { name: "Custom release types" })
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Has muted events" })
+    )
+    await userEvent.click(custom)
+
+    expect(onMutedChange).toHaveBeenCalledWith(false)
+    expect(onCustomChange).toHaveBeenCalledWith(true)
+    expect(custom).toHaveFocus()
   })
 })

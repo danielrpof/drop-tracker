@@ -48,7 +48,17 @@ export interface WatchlistView {
   q: string
   sort: SortKey
   tagIds: number[]
+  muted: boolean
+  custom: boolean
 }
+
+// Mirrors ReleaseTypes in internal/watchlist/service.go.
+export const DEFAULT_RELEASE_TYPES = [
+  "album",
+  "single",
+  "ep",
+  "deluxe",
+] as const
 
 const MAX_TAG_TOKENS = 200
 
@@ -70,6 +80,8 @@ export function parseWatchlistParams(params: URLSearchParams): WatchlistView {
     q: params.get("q") ?? "",
     sort: isSortKey(sort) ? sort : DEFAULT_SORT,
     tagIds: parseTagIds(params.get("tags")),
+    muted: params.get("muted") === "1",
+    custom: params.get("custom") === "1",
   }
 }
 
@@ -79,11 +91,15 @@ export function canonicalWatchlistParams(
   params: URLSearchParams
 ): URLSearchParams {
   const next = new URLSearchParams(params)
-  const { sort, tagIds } = parseWatchlistParams(params)
+  const { sort, tagIds, muted, custom } = parseWatchlistParams(params)
   if (sort === DEFAULT_SORT) next.delete("sort")
   else next.set("sort", sort)
   if (tagIds.length === 0) next.delete("tags")
   else next.set("tags", tagIds.join(","))
+  if (muted) next.set("muted", "1")
+  else next.delete("muted")
+  if (custom) next.set("custom", "1")
+  else next.delete("custom")
   return next
 }
 
@@ -154,6 +170,19 @@ export function tagFilterOptions(entries: WatchlistEntry[]): TagFilterOption[] {
   return sortTagsByName([...byId.values()])
 }
 
+export function hasMutedEvents(entry: WatchlistEntry): boolean {
+  return entry.muted_event_types.length > 0
+}
+
+// Set comparison: order and duplicates are ignored; an empty set is custom.
+export function hasCustomReleaseTypes(entry: WatchlistEntry): boolean {
+  const types = new Set(entry.release_types)
+  return !(
+    types.size === DEFAULT_RELEASE_TYPES.length &&
+    DEFAULT_RELEASE_TYPES.every((t) => types.has(t))
+  )
+}
+
 // An entry is visible when it matches every active axis or is sticky (G4).
 export function selectVisible(
   entries: WatchlistEntry[],
@@ -164,13 +193,18 @@ export function selectVisible(
     .filter(
       (entry) =>
         stickyIds.has(entry.id) ||
-        (matchesName(entry.name, view.q) && matchesAnyTag(entry, view.tagIds))
+        (matchesName(entry.name, view.q) &&
+          matchesAnyTag(entry, view.tagIds) &&
+          (!view.muted || hasMutedEvents(entry)) &&
+          (!view.custom || hasCustomReleaseTypes(entry)))
     )
     .sort(compareForSort(view.sort))
 }
 
 export function isFiltered(view: WatchlistView): boolean {
-  return view.q.trim() !== "" || view.tagIds.length > 0
+  return (
+    view.q.trim() !== "" || view.tagIds.length > 0 || view.muted || view.custom
+  )
 }
 
 // What Clear filters deletes; sort is deliberately absent (D-10).

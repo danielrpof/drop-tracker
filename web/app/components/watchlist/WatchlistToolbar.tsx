@@ -1,4 +1,4 @@
-import { FilterX, ListFilter, X } from "lucide-react"
+import { Check, FilterX, ListFilter, X } from "lucide-react"
 
 import { Button } from "~/components/ui/button"
 import {
@@ -32,6 +32,31 @@ export interface WatchlistToolbarProps {
   tagOptions: TagFilterOption[]
   selectedTags: TagFilterOption[]
   onSelectedTagsChange(ids: number[]): void
+  muted: boolean
+  onMutedChange(next: boolean): void
+  custom: boolean
+  onCustomChange(next: boolean): void
+}
+
+function ShowOnlyToggle({
+  on,
+  label,
+  onToggle,
+}: {
+  on: boolean
+  label: string
+  onToggle(next: boolean): void
+}) {
+  return (
+    <Button
+      variant={on ? "secondary" : "outline"}
+      aria-pressed={on}
+      onClick={() => onToggle(!on)}
+    >
+      {on && <Check aria-hidden="true" className="size-4" />}
+      {label}
+    </Button>
+  )
 }
 
 export function WatchlistToolbar({
@@ -45,6 +70,10 @@ export function WatchlistToolbar({
   tagOptions,
   selectedTags,
   onSelectedTagsChange,
+  muted,
+  onMutedChange,
+  custom,
+  onCustomChange,
 }: WatchlistToolbarProps) {
   return (
     <div
@@ -130,6 +159,21 @@ export function WatchlistToolbar({
           onChange={onSelectedTagsChange}
         />
       </div>
+      <fieldset className="flex flex-col gap-1">
+        <legend className="text-label text-muted-foreground">Show only</legend>
+        <div className="flex flex-wrap gap-2">
+          <ShowOnlyToggle
+            on={muted}
+            label="Has muted events"
+            onToggle={onMutedChange}
+          />
+          <ShowOnlyToggle
+            on={custom}
+            label="Custom release types"
+            onToggle={onCustomChange}
+          />
+        </div>
+      </fieldset>
       {showClear && (
         <Button
           variant="ghost"

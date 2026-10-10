@@ -148,8 +148,8 @@ export default function Watchlist() {
     }
   }, [view.q])
 
-  // Drop an unknown or default sort and bad tag ids from the URL without a
-  // history entry. Once validated, retired and unknown tag ids go too.
+  // Drop an unknown or default sort, bad tag ids, and non-"1" flags from the
+  // URL without a history entry. Once validated, retired and unknown tag ids go too.
   useEffect(() => {
     const canonical = canonicalWatchlistParams(params)
     if (tagIdsValidatedRef.current) {
@@ -160,7 +160,7 @@ export default function Watchlist() {
     if (canonical.toString() === params.toString()) return
     write(
       (p) => {
-        for (const key of ["sort", "tags"]) {
+        for (const key of ["sort", "tags", "muted", "custom"]) {
           const value = canonical.get(key)
           if (value === null) p.delete(key)
           else p.set(key, value)
@@ -434,6 +434,15 @@ export default function Watchlist() {
     scheduleCountAnnouncement()
   }
 
+  function handleFlagChange(key: "muted" | "custom", next: boolean) {
+    write((p) => {
+      if (next) p.set(key, "1")
+      else p.delete(key)
+    })
+    clearSticky()
+    scheduleCountAnnouncement()
+  }
+
   function handleSortChange(next: SortKey) {
     write((p) => {
       if (next === DEFAULT_SORT) p.delete("sort")
@@ -544,6 +553,10 @@ export default function Watchlist() {
               tagOptions={tagOptions}
               selectedTags={selectedTags}
               onSelectedTagsChange={handleTagsChange}
+              muted={view.muted}
+              onMutedChange={(next) => handleFlagChange("muted", next)}
+              custom={view.custom}
+              onCustomChange={(next) => handleFlagChange("custom", next)}
             />
             {visible.length === 0 ? (
               <EmptyState

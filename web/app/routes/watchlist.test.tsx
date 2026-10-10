@@ -27,6 +27,7 @@ import {
   searchArtists,
   type TagSummary,
   type WatchlistEntry,
+  updateWatchlistPreferences,
 } from "~/lib/api"
 import { makeEntry } from "~/lib/test/fixtures"
 import { LocationProbe, renderRoute } from "~/lib/test/routeStub"
@@ -1827,5 +1828,148 @@ describe("Watchlist tag filter consistency (D-13)", () => {
     expect(filterChip("rap")).toBeInTheDocument()
     expect(shown()).toEqual(["Bad Bunny", "Drizzy"])
     expect(mockListWatchlist).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("Watchlist preference toggles (WLVW-05)", () => {
+  const rap = { id: 3, name: "rap" }
+  const mutedTypes = ["guest_feature"]
+  const rows = [
+    makeEntry({
+      id: 1,
+      name: "Bad Bunny",
+      tags: [rap],
+      muted_event_types: mutedTypes,
+      release_types: ["album"],
+    }),
+    makeEntry({
+      id: 2,
+      name: "Bad Two",
+      tags: [rap],
+      muted_event_types: mutedTypes,
+    }),
+    makeEntry({
+      id: 3,
+      name: "Bad Three",
+      tags: [rap],
+      release_types: ["album"],
+    }),
+    makeEntry({
+      id: 4,
+      name: "Drake",
+      muted_event_types: mutedTypes,
+      release_types: ["album"],
+    }),
+    makeEntry({ id: 5, name: "Eminem" }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", { name: /^Remove .* from watchlist$/ })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+  const search = () => screen.getByTestId("location-search").textContent
+  const mutedToggle = () =>
+    screen.getByRole("button", { name: "Has muted events" })
+  const customToggle = () =>
+    screen.getByRole("button", { name: "Custom release types" })
+
+  it("narrows to muted artists, updates count and URL, and keeps focus on the button", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(mutedToggle())
+
+    expect(shown()).toEqual(["Bad Bunny", "Bad Two", "Drake"])
+    expect(screen.getByText("3 of 5 artists")).toBeInTheDocument()
+    expect(search()).toBe("?muted=1")
+    expect(mutedToggle()).toHaveAttribute("aria-pressed", "true")
+    expect(mutedToggle()).toHaveFocus()
+
+    await userEvent.click(mutedToggle())
+
+    expect(shown()).toHaveLength(5)
+    expect(search()).toBe("")
+  })
+
+  it("narrows to custom release types independently of the mute toggle", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(customToggle())
+
+    expect(shown()).toEqual(["Bad Bunny", "Bad Three", "Drake"])
+    expect(search()).toBe("?custom=1")
+  })
+
+  it("composes name, tag, muted and custom with AND", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?q=b&tags=3&muted=1&custom=1")
+    await screen.findByText("Bad Bunny")
+
+    expect(shown()).toEqual(["Bad Bunny"])
+    expect(screen.getByText("1 of 5 artists")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Clear filters" })
+    ).toBeInTheDocument()
+  })
+
+  it("shows Clear filters for a lone toggle and Clear filters resets both", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?muted=1&custom=1")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+
+    expect(search()).toBe("")
+    expect(mutedToggle()).toHaveAttribute("aria-pressed", "false")
+    expect(customToggle()).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("keeps a card whose last mute was just unchecked until the next filter change", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    vi.mocked(updateWatchlistPreferences).mockResolvedValue({
+      ...rows[0],
+      muted_event_types: [],
+    })
+    renderRoute(WatchlistWithProbe, "/", "/?muted=1")
+    await screen.findByText("Bad Bunny")
+    expect(shown()).toEqual(["Bad Bunny", "Bad Two", "Drake"])
+
+    const card = screen.getByText("Bad Bunny").closest("li")!
+    await userEvent.click(
+      within(card).getByRole("checkbox", { name: /^Mute guest feature alerts/ })
+    )
+
+    await waitFor(() =>
+      expect(updateWatchlistPreferences).toHaveBeenCalledWith(1, {
+        mutedEventTypes: [],
+      })
+    )
+    expect(shown()).toEqual(["Bad Bunny", "Bad Two", "Drake"])
+    expect(screen.getByText("3 of 5 artists")).toBeInTheDocument()
+
+    await userEvent.click(customToggle())
+
+    expect(shown()).toEqual(["Drake"])
+  })
+
+  it("drops an invalid muted or custom param with replace", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?muted=yes&custom=2&q=b")
+    await screen.findByText("Bad Bunny")
+
+    await waitFor(() => expect(search()).toBe("?q=b"))
+    expect(mutedToggle()).toHaveAttribute("aria-pressed", "false")
   })
 })

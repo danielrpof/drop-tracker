@@ -7,6 +7,8 @@ import {
   compareForSort,
   foldName,
   formatArtistCount,
+  hasCustomReleaseTypes,
+  hasMutedEvents,
   isFiltered,
   matchesAnyTag,
   matchesName,
@@ -58,7 +60,7 @@ describe("selectVisible", () => {
   it("keeps matches in sort order", () => {
     const ids = selectVisible(
       entries,
-      { q: "bad", sort: "name-asc", tagIds: [] },
+      { q: "bad", sort: "name-asc", tagIds: [], muted: false, custom: false },
       new Set()
     ).map((e) => e.id)
     expect(ids).toEqual([1, 3])
@@ -67,7 +69,7 @@ describe("selectVisible", () => {
   it("unions sticky ids with matches", () => {
     const ids = selectVisible(
       entries,
-      { q: "bad", sort: "name-asc", tagIds: [] },
+      { q: "bad", sort: "name-asc", tagIds: [], muted: false, custom: false },
       new Set([2])
     ).map((e) => e.id)
     expect(ids).toEqual([1, 3, 2])
@@ -75,7 +77,11 @@ describe("selectVisible", () => {
 
   it("returns an empty list for no entries", () => {
     expect(
-      selectVisible([], { q: "x", sort: "name-asc", tagIds: [] }, new Set([1]))
+      selectVisible(
+        [],
+        { q: "x", sort: "name-asc", tagIds: [], muted: false, custom: false },
+        new Set([1])
+      )
     ).toEqual([])
   })
 })
@@ -222,7 +228,7 @@ describe("compareForSort", () => {
     ]
     const ids = selectVisible(
       list,
-      { q: "bad", sort: "name-asc", tagIds: [] },
+      { q: "bad", sort: "name-asc", tagIds: [], muted: false, custom: false },
       new Set([2])
     ).map((e) => e.id)
     expect(ids).toEqual([2, 3, 1])
@@ -295,7 +301,13 @@ describe("tag axis", () => {
     const a = makeEntry({ id: 1, name: "Alpha", tags: [rap] })
     const b = makeEntry({ id: 2, name: "Alpine", tags: [trap] })
     const c = makeEntry({ id: 3, name: "Bravo", tags: [rap] })
-    const view = { q: "alp", sort: "name-asc" as const, tagIds: [3] }
+    const view = {
+      q: "alp",
+      sort: "name-asc" as const,
+      tagIds: [3],
+      muted: false,
+      custom: false,
+    }
     expect(selectVisible([a, b, c], view, new Set()).map((e) => e.id)).toEqual([
       1,
     ])
@@ -305,8 +317,24 @@ describe("tag axis", () => {
   })
 
   it("isFiltered counts a tag selection", () => {
-    expect(isFiltered({ q: "", sort: "name-asc", tagIds: [3] })).toBe(true)
-    expect(isFiltered({ q: " ", sort: "name-asc", tagIds: [] })).toBe(false)
+    expect(
+      isFiltered({
+        q: "",
+        sort: "name-asc",
+        tagIds: [3],
+        muted: false,
+        custom: false,
+      })
+    ).toBe(true)
+    expect(
+      isFiltered({
+        q: " ",
+        sort: "name-asc",
+        tagIds: [],
+        muted: false,
+        custom: false,
+      })
+    ).toBe(false)
   })
 
   it("tagFilterOptions unions tags with carrier counts, ordered by collator then id", () => {
@@ -333,5 +361,100 @@ describe("tag axis", () => {
       { id: 4, name: "Ángel", count: 1 },
       { id: 9, name: "Zed", count: 2 },
     ])
+  })
+})
+
+describe("muted and custom axes", () => {
+  it.each([
+    [["deluxe", "ep", "single", "album"], false],
+    [["album", "album", "single", "ep", "deluxe"], false],
+    [["album"], true],
+    [[], true],
+    [["album", "single", "ep"], true],
+  ])("hasCustomReleaseTypes(%j) is %s", (release_types, expected) => {
+    expect(
+      hasCustomReleaseTypes(makeEntry({ id: 1, name: "A", release_types }))
+    ).toBe(expected)
+  })
+
+  it("hasMutedEvents is true only for a non-empty mute list", () => {
+    expect(hasMutedEvents(makeEntry({ id: 1, name: "A" }))).toBe(false)
+    expect(
+      hasMutedEvents(
+        makeEntry({ id: 1, name: "A", muted_event_types: ["new_release"] })
+      )
+    ).toBe(true)
+  })
+
+  it("selectVisible ANDs name, tags, muted and custom", () => {
+    const tag = { id: 3, name: "rap" }
+    const all = makeEntry({
+      id: 1,
+      name: "Bad Bunny",
+      tags: [tag],
+      muted_event_types: ["guest_feature"],
+      release_types: ["album"],
+    })
+    const noCustom = makeEntry({
+      id: 2,
+      name: "Bad Two",
+      tags: [tag],
+      muted_event_types: ["guest_feature"],
+    })
+    const noMute = makeEntry({
+      id: 3,
+      name: "Bad Three",
+      tags: [tag],
+      release_types: ["album"],
+    })
+    const noTag = makeEntry({
+      id: 4,
+      name: "Bad Four",
+      muted_event_types: ["guest_feature"],
+      release_types: ["album"],
+    })
+    const view = {
+      q: "bad",
+      sort: "name-asc" as const,
+      tagIds: [3],
+      muted: true,
+      custom: true,
+    }
+    expect(
+      selectVisible([all, noCustom, noMute, noTag], view, new Set()).map(
+        (e) => e.id
+      )
+    ).toEqual([1])
+    expect(
+      selectVisible([all, noCustom, noMute, noTag], view, new Set([3])).map(
+        (e) => e.id
+      )
+    ).toEqual([1, 3])
+  })
+
+  it("parses only 1 as on and canonicalization drops anything else", () => {
+    expect(parseWatchlistParams(new URLSearchParams("muted=yes")).muted).toBe(
+      false
+    )
+    const on = parseWatchlistParams(new URLSearchParams("muted=1&custom=1"))
+    expect([on.muted, on.custom]).toEqual([true, true])
+    const next = canonicalWatchlistParams(
+      new URLSearchParams("muted=yes&custom=1&other=x")
+    )
+    expect(next.has("muted")).toBe(false)
+    expect(next.get("custom")).toBe("1")
+    expect(next.get("other")).toBe("x")
+  })
+
+  it("isFiltered counts either toggle", () => {
+    const base = {
+      q: "",
+      sort: "name-asc" as const,
+      tagIds: [],
+      muted: false,
+      custom: false,
+    }
+    expect(isFiltered({ ...base, muted: true })).toBe(true)
+    expect(isFiltered({ ...base, custom: true })).toBe(true)
   })
 })
