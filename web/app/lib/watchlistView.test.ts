@@ -7,9 +7,12 @@ import {
   compareForSort,
   foldName,
   formatArtistCount,
+  isFiltered,
+  matchesAnyTag,
   matchesName,
   parseWatchlistParams,
   selectVisible,
+  tagFilterOptions,
   type SortKey,
 } from "~/lib/watchlistView"
 
@@ -247,5 +250,88 @@ describe("canonicalWatchlistParams", () => {
     const input = new URLSearchParams("sort=bogus")
     canonicalWatchlistParams(input)
     expect(input.toString()).toBe("sort=bogus")
+  })
+})
+
+describe("tag axis", () => {
+  const rap = { id: 3, name: "rap" }
+  const trap = { id: 7, name: "trap" }
+
+  it("parses tags to ascending de-duplicated positive ids", () => {
+    const view = parseWatchlistParams(
+      new URLSearchParams("tags=7,3,3,abc,0,-1")
+    )
+    expect(view.tagIds).toEqual([3, 7])
+  })
+
+  it("reads at most 200 tokens", () => {
+    const junk = Array(200).fill("x").join(",")
+    expect(
+      parseWatchlistParams(new URLSearchParams(`tags=${junk},5`)).tagIds
+    ).toEqual([])
+    const many = Array.from({ length: 200 }, (_, i) => i + 1).join(",")
+    expect(
+      parseWatchlistParams(new URLSearchParams(`tags=${many},999`)).tagIds
+    ).toHaveLength(200)
+  })
+
+  it("canonicalizes tags and drops the param when nothing valid remains", () => {
+    expect(
+      canonicalWatchlistParams(new URLSearchParams("tags=7,3,3,x")).get("tags")
+    ).toBe("3,7")
+    expect(
+      canonicalWatchlistParams(new URLSearchParams("tags=x,0")).has("tags")
+    ).toBe(false)
+  })
+
+  it("matchesAnyTag is true for an empty selection and any-of otherwise", () => {
+    const entry = makeEntry({ id: 1, name: "A", tags: [rap] })
+    expect(matchesAnyTag(entry, [])).toBe(true)
+    expect(matchesAnyTag(entry, [3, 7])).toBe(true)
+    expect(matchesAnyTag(entry, [7])).toBe(false)
+  })
+
+  it("selectVisible ANDs the tag axis with the name axis and honors sticky", () => {
+    const a = makeEntry({ id: 1, name: "Alpha", tags: [rap] })
+    const b = makeEntry({ id: 2, name: "Alpine", tags: [trap] })
+    const c = makeEntry({ id: 3, name: "Bravo", tags: [rap] })
+    const view = { q: "alp", sort: "name-asc" as const, tagIds: [3] }
+    expect(selectVisible([a, b, c], view, new Set()).map((e) => e.id)).toEqual([
+      1,
+    ])
+    expect(
+      selectVisible([a, b, c], view, new Set([2])).map((e) => e.id)
+    ).toEqual([1, 2])
+  })
+
+  it("isFiltered counts a tag selection", () => {
+    expect(isFiltered({ q: "", sort: "name-asc", tagIds: [3] })).toBe(true)
+    expect(isFiltered({ q: " ", sort: "name-asc", tagIds: [] })).toBe(false)
+  })
+
+  it("tagFilterOptions unions tags with carrier counts, ordered by collator then id", () => {
+    const entries = [
+      makeEntry({
+        id: 1,
+        name: "A",
+        tags: [
+          { id: 9, name: "Zed" },
+          { id: 4, name: "Ángel" },
+        ],
+      }),
+      makeEntry({
+        id: 2,
+        name: "B",
+        tags: [
+          { id: 2, name: "angel" },
+          { id: 9, name: "Zed" },
+        ],
+      }),
+    ]
+    expect(tagFilterOptions(entries)).toEqual([
+      { id: 2, name: "angel", count: 1 },
+      { id: 4, name: "Ángel", count: 1 },
+      { id: 9, name: "Zed", count: 2 },
+    ])
   })
 })
