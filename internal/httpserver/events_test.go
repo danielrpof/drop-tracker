@@ -1328,3 +1328,101 @@ func TestListEvents_HasOlderEventsRespectsFilters(t *testing.T) {
 		t.Fatal("HasOlderEvents = true, want false for artist_id=B, who has only in-window events -- the query must apply its own artist_id filter, not answer a table-wide question")
 	}
 }
+
+func insertTestTag(t *testing.T, pool *pgxpool.Pool, name string) int64 {
+	t.Helper()
+	var id int64
+	row := pool.QueryRow(context.Background(), `INSERT INTO tags (name) VALUES ($1) RETURNING id`, name)
+	if err := row.Scan(&id); err != nil {
+		t.Fatalf("insert test tag: %v", err)
+	}
+	return id
+}
+
+func linkTestTag(t *testing.T, pool *pgxpool.Pool, artistID, tagID int64) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO artist_tags (artist_id, tag_id) VALUES ($1, $2)`, artistID, tagID); err != nil {
+		t.Fatalf("link test tag: %v", err)
+	}
+}
+
+// getEventsBody GETs rawURL and decodes the events envelope, failing on non-200.
+func getEventsBody(t *testing.T, rawURL string) eventsResponseBody {
+	t.Helper()
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		t.Fatalf("GET %s: %v", rawURL, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s: status = %d, want %d", rawURL, resp.StatusCode, http.StatusOK)
+	}
+	var body eventsResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	return body
+}
+
+func eventIDs(evs []events.Event) []int64 {
+	ids := make([]int64, 0, len(evs))
+	for _, e := range evs {
+		ids = append(ids, e.ID)
+	}
+	return ids
+}
+
+func sameIDs(got, want []int64) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestListEvents_TagFilter is the HIST-02 tracer: tag_id narrows the feed to
+// the tag's artists, and neither artist has a watchlist row (removed-artist shape).
+func TestListEvents_TagFilter(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	base := testMBID(t)
+	mbidTagged, mbidOther := base+"-tagged", base+"-other"
+
+	tagged := insertTestArtist(t, pool, mbidTagged)
+	other := insertTestArtist(t, pool, mbidOther)
+	tagA := insertTestTag(t, pool, base+"-tag-a")
+	tagB := insertTestTag(t, pool, base+"-tag-b")
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := pool.Exec(ctx, "DELETE FROM artists WHERE mbid = ANY($1)", []string{mbidTagged, mbidOther}); err != nil {
+			t.Fatalf("cleanup: delete artists: %v", err)
+		}
+		if _, err := pool.Exec(ctx, "DELETE FROM tags WHERE id = ANY($1)", []int64{tagA, tagB}); err != nil {
+			t.Fatalf("cleanup: delete tags: %v", err)
+		}
+	})
+	linkTestTag(t, pool, tagged, tagA)
+	linkTestTag(t, pool, other, tagB)
+
+	first := insertTestEvent(t, pool, tagged, mbidTagged+"-1")
+	second := insertTestEvent(t, pool, tagged, mbidTagged+"-2")
+	otherEv := insertTestEvent(t, pool, other, mbidOther+"-1")
+
+	svc := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(pool, stubStore{}, svc, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	got := getEventsBody(t, fmt.Sprintf("%s/events?tag_id=%d", ts.URL, tagA))
+	if want := []int64{second, first}; !sameIDs(eventIDs(got.Events), want) {
+		t.Fatalf("tag A ids = %v, want %v", eventIDs(got.Events), want)
+	}
+	got = getEventsBody(t, fmt.Sprintf("%s/events?tag_id=%d", ts.URL, tagB))
+	if want := []int64{otherEv}; !sameIDs(eventIDs(got.Events), want) {
+		t.Fatalf("tag B ids = %v, want %v", eventIDs(got.Events), want)
+	}
+}

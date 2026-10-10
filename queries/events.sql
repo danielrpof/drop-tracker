@@ -147,6 +147,8 @@ SELECT id, artist_id, source, event_type, external_id, release_group_mbid,
 FROM events
 WHERE (sqlc.narg('artist_id')::bigint IS NULL OR artist_id = sqlc.narg('artist_id')::bigint)
   AND (sqlc.narg('event_type')::text IS NULL OR event_type = sqlc.narg('event_type')::text)
+  -- HIST-02: tag filter lives in this retention-aware query, never a separate one (PITFALLS #9).
+  AND (sqlc.narg('tag_id')::bigint IS NULL OR EXISTS (SELECT 1 FROM artist_tags link WHERE link.artist_id = events.artist_id AND link.tag_id = sqlc.narg('tag_id')::bigint))
   AND (
         sqlc.narg('cursor_id')::bigint IS NULL
         OR CASE
@@ -183,5 +185,6 @@ SELECT EXISTS(
     SELECT 1 FROM events
     WHERE (sqlc.narg('artist_id')::bigint IS NULL OR artist_id = sqlc.narg('artist_id')::bigint)
       AND (sqlc.narg('event_type')::text IS NULL OR event_type = sqlc.narg('event_type')::text)
+      AND (sqlc.narg('tag_id')::bigint IS NULL OR EXISTS (SELECT 1 FROM artist_tags link WHERE link.artist_id = events.artist_id AND link.tag_id = sqlc.narg('tag_id')::bigint))
       AND created_at < sqlc.arg('cutoff')::timestamptz
 ) AS has_older;

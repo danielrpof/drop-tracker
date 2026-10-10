@@ -57,6 +57,7 @@ type Event struct {
 type ListParams struct {
 	ArtistID  *int64
 	EventType *string
+	TagID     *int64 // nil means no tag filter
 	Cursor    *Cursor
 	PageSize  int32
 }
@@ -143,6 +144,7 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 	rows, err := s.q.ListEvents(ctx, sqlc.ListEventsParams{
 		ArtistID:          p.ArtistID,
 		EventType:         p.EventType,
+		TagID:             p.TagID,
 		CursorID:          cursorID,
 		CursorReleaseDate: cursorReleaseDate,
 		Cutoff:            cutoffParam,
@@ -160,6 +162,7 @@ func (s *Service) List(ctx context.Context, p ListParams) (Page, error) {
 	hasOlderEvents, err := s.q.HasOlderEvents(ctx, sqlc.HasOlderEventsParams{
 		ArtistID:  p.ArtistID,
 		EventType: p.EventType,
+		TagID:     p.TagID,
 		Cutoff:    cutoffParam,
 	})
 	if err != nil {
