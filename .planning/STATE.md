@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
 status: executing
-stopped_at: Completed 25-07-PLAN.md
-last_updated: "2026-10-10T17:10:52.264Z"
+stopped_at: Completed 25-08-PLAN.md
+last_updated: "2026-10-10T17:19:42.160Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 25 execution started
-state_head: 139429c8c6f1298280f7e9fa31930cbe1069beb1
+state_head: 88b6b4039e6433364806895bd3e5894d4f228f9e
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 24
-  completed_plans: 22
+  completed_plans: 23
   percent: 20
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
-Plan: 9 of 10
+Plan: 10 of 10
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 25 execution started
 
@@ -170,6 +170,7 @@ Last activity: 2026-10-10 — Phase 25 execution started
 | Phase 25 P05 | 5 min | 2 tasks | 6 files |
 | Phase 25 P09 | 4 min | 2 tasks | 6 files |
 | Phase 25 P07 | 40 min | 3 tasks | 9 files |
+| Phase 25 P08 | 25 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -405,6 +406,7 @@ Recent decisions affecting current work:
 - [Phase 25]: 25-05: Latest-release sort compares raw text (2024 before 2024-05), nulls last in both directions, artist_id ascending tie-break in every mode
 - [Phase 25]: 25-09: History stale artist/tag ids are checked once per source per mount, only after a successful load; a failed fetch keeps the filter and the trigger reads Artist unavailable / Tag unavailable — A failed fetch is not proof an id is stale (UI-SPEC History Tag filter)
 - [Phase 25]: 25-07: Esc on a closed tag-filter popup is cancelled (escape-key reason) so it cannot clear every chip; tags URL param serializes commas as %2C
+- [Phase 25]: 25-08: Custom release types is a set comparison against the default four; chip label click reuses handleTagsChange and the x remains the only detach
 
 ### Pending Todos
 
@@ -498,8 +500,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T17:10:52.181Z
-Stopped at: Completed 25-07-PLAN.md
+Last session: 2026-10-10T17:19:42.041Z
+Stopped at: Completed 25-08-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

@@ -26,7 +26,7 @@
 - [x] **WLVW-02**: User can sort by name (A–Z/Z–A) or date added (newest/oldest), with a stable tie-break
 - [x] **WLVW-03**: User can sort by latest release (the artist's newest own `new_release` event date that is not upcoming); artists with none sort last in both directions
 - [x] **WLVW-04**: User can filter the watchlist by one or more tags
-- [ ] **WLVW-05**: User can filter to artists with muted event types or non-default release-type filters
+- [x] **WLVW-05**: User can filter to artists with muted event types or non-default release-type filters
 - [x] **WLVW-06**: Search, sort, and filters combine; the view shows "N of M artists" and an empty state with a clear-filters action
 
 ### History
@@ -93,7 +93,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | WLVW-02 | Phase 25 | Complete |
 | WLVW-03 | Phase 25 | Complete |
 | WLVW-04 | Phase 25 | Complete |
-| WLVW-05 | Phase 25 | Pending |
+| WLVW-05 | Phase 25 | Complete |
 | WLVW-06 | Phase 25 | Complete |
 | HIST-02 | Phase 25 | Complete |
 | BULK-01 | Phase 26 | Pending |
