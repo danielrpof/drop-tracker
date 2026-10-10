@@ -1973,3 +1973,78 @@ describe("Watchlist preference toggles (WLVW-05)", () => {
     expect(mutedToggle()).toHaveAttribute("aria-pressed", "false")
   })
 })
+
+describe("Watchlist card chip click-to-filter (D-08)", () => {
+  const reggaeton = { id: 3, name: "reggaeton" }
+  const trap = { id: 7, name: "trap" }
+  const rows = [
+    makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton] }),
+    makeEntry({ id: 2, name: "Daddy Yankee", tags: [reggaeton] }),
+    makeEntry({ id: 3, name: "Travis Scott", tags: [trap] }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", { name: /^Remove .* from watchlist$/ })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+  const search = () => screen.getByTestId("location-search").textContent
+  const firstLabel = () =>
+    screen.getAllByRole("button", { name: "Filter by reggaeton" })[0]
+
+  it("filters to the tag's carriers, mirrors it in the toolbar, and keeps focus on the label", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    const label = firstLabel()
+    await userEvent.click(label)
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+    expect(search()).toBe("?tags=3")
+    expect(
+      screen.getByRole("button", { name: "Remove reggaeton from tag filter" })
+    ).toBeInTheDocument()
+    expect(firstLabel()).toBe(label)
+    expect(label).toHaveFocus()
+    expect(label).toHaveAttribute("aria-pressed", "true")
+    expect(mockAttachTag).not.toHaveBeenCalled()
+    expect(mockDetachTag).not.toHaveBeenCalled()
+  })
+
+  it("clears the filter when the active label is clicked again", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3")
+    await screen.findByText("Bad Bunny")
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+
+    await userEvent.click(firstLabel())
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+    expect(search()).toBe("")
+  })
+
+  it("keeps detaching through the x and never changes the tags param", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockDetachTag.mockResolvedValue(undefined)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Remove tag reggaeton from Bad Bunny",
+      })
+    )
+
+    expect(mockDetachTag).toHaveBeenCalledWith(1, 3)
+    expect(search()).toBe("?tags=3")
+  })
+})

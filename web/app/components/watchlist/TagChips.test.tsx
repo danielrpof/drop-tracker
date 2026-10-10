@@ -513,3 +513,93 @@ describe("TagChips — cap hint, refusal toasts, and close focus", () => {
     expect(mockAttachTag).not.toHaveBeenCalled()
   })
 })
+
+describe("TagChips — chip label filter toggle (D-08)", () => {
+  const dr = { ...entry, tags: [{ id: 3, name: "reggaeton" }] }
+
+  function renderFilterable(filterTagIds: ReadonlySet<number> = new Set()) {
+    const toggleFilterTag = vi.fn()
+    render(
+      <TagVocabularyProvider>
+        <TagChips
+          entry={dr}
+          actions={{
+            addTag: vi.fn(),
+            removeTag: vi.fn(),
+            filterTagIds,
+            toggleFilterTag,
+          }}
+          announce={vi.fn()}
+        />
+      </TagVocabularyProvider>
+    )
+    return { toggleFilterTag }
+  }
+
+  it("renders a Filter by button and the unchanged remove button per chip", () => {
+    renderFilterable()
+
+    expect(
+      screen.getByRole("button", { name: "Filter by reggaeton" })
+    ).toHaveAttribute("aria-pressed", "false")
+    expect(chipRemoveButton("reggaeton")).toBeInTheDocument()
+  })
+
+  it("clicking the label toggles the filter and never attaches or detaches", async () => {
+    const { toggleFilterTag } = renderFilterable()
+    const label = screen.getByRole("button", { name: "Filter by reggaeton" })
+
+    await userEvent.click(label)
+
+    expect(toggleFilterTag).toHaveBeenCalledWith({ id: 3, name: "reggaeton" })
+    expect(mockAttachTag).not.toHaveBeenCalled()
+    expect(mockDetachTag).not.toHaveBeenCalled()
+    expect(label).toHaveFocus()
+  })
+
+  it("shows the active state with aria-pressed, a Check, and an inset ring", () => {
+    renderFilterable(new Set([3]))
+
+    const label = screen.getByRole("button", { name: "Filter by reggaeton" })
+    expect(label).toHaveAttribute("aria-pressed", "true")
+    expect(label.querySelector("svg")).toHaveAttribute("aria-hidden", "true")
+    expect(label.closest("[data-slot=badge]")?.className).toContain(
+      "ring-1 ring-inset ring-foreground/30"
+    )
+  })
+
+  it("leaves inactive chips without a Check or ring", () => {
+    renderFilterable()
+
+    const label = screen.getByRole("button", { name: "Filter by reggaeton" })
+    expect(label.querySelector("svg")).toBeNull()
+    expect(label.closest("[data-slot=badge]")?.className).not.toContain(
+      "ring-inset"
+    )
+  })
+
+  it("renders a pending chip as plain text with no filter button", async () => {
+    mockAttachTag.mockReturnValueOnce(new Promise(() => {}))
+    renderFilterable()
+
+    const input = await openEditor()
+    await userEvent.type(input, "drill{Enter}")
+
+    expect(await screen.findByText("drill")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Filter by drill" })).toBeNull()
+  })
+
+  it("focuses the next chip's × (not a label) after removing the first of three", async () => {
+    mockDetachTag.mockResolvedValueOnce(undefined)
+    render(
+      <Harness
+        initialEntry={{ ...entry, tags: tagRefs(["a", "b", "c"]) }}
+        onAnnounce={vi.fn()}
+      />
+    )
+
+    await userEvent.click(chipRemoveButton("a"))
+
+    await waitFor(() => expect(chipRemoveButton("b")).toHaveFocus())
+  })
+})
