@@ -31,7 +31,7 @@
 
 ### History
 
-- [ ] **HIST-02**: User can filter the History feed by tag, combined with existing filters and respecting event retention
+- [x] **HIST-02**: User can filter the History feed by tag, combined with existing filters and respecting event retention
 
 ### Bulk Edit
 
@@ -95,7 +95,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | WLVW-04 | Phase 25 | Pending |
 | WLVW-05 | Phase 25 | Pending |
 | WLVW-06 | Phase 25 | Pending |
-| HIST-02 | Phase 25 | Pending |
+| HIST-02 | Phase 25 | Complete |
 | BULK-01 | Phase 26 | Pending |
 | BULK-02 | Phase 26 | Pending |
 | BULK-03 | Phase 26 | Pending |
