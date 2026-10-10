@@ -1,5 +1,6 @@
 import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { toast } from "sonner"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -16,6 +17,7 @@ import History from "./history"
 // D-06 / TEST-02: bare vi.mock at the top of the file, no factory, no
 // passthrough -- no real apiFetch can ever reach the runtime's own fetch.
 vi.mock("~/lib/api")
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const mockListEvents = vi.mocked(listEvents)
 // HistoryFilters (rendered by History) calls listWatchlist on mount to
@@ -446,6 +448,142 @@ describe("History URL state (HIST-02)", () => {
       expect(mockListEvents).toHaveBeenCalledWith(
         expect.objectContaining({ artistId: 12, eventType: "deluxe_change" })
       )
+    )
+  })
+})
+
+describe("History stale and malformed params (D-13)", () => {
+  const probe = () => screen.getByTestId("location-search")
+
+  it("drops malformed params with replace and never requests with them", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(
+      HistoryWithProbe,
+      "/history",
+      "/history?artist=abc&type=bogus&tag=0"
+    )
+
+    await waitFor(() => expect(probe()).toBeEmptyDOMElement())
+    for (const [args] of mockListEvents.mock.calls) {
+      expect(args).toEqual(
+        expect.objectContaining({
+          artistId: undefined,
+          eventType: undefined,
+          tagId: undefined,
+        })
+      )
+    }
+  })
+
+  it("drops a tag absent from the loaded tags and refetches unfiltered", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockResolvedValue([
+      { id: 3, name: "reggaeton", carrier_count: 2 },
+    ])
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(HistoryWithProbe, "/history", "/history?tag=99")
+
+    await waitFor(() => expect(probe()).toBeEmptyDOMElement())
+    await waitFor(() =>
+      expect(mockListEvents).toHaveBeenLastCalledWith(
+        expect.objectContaining({ tagId: undefined })
+      )
+    )
+  })
+
+  it("keeps a tag that is in the loaded tags", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockResolvedValue([
+      { id: 3, name: "reggaeton", carrier_count: 2 },
+    ])
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(HistoryWithProbe, "/history", "/history?tag=3")
+
+    await screen.findByRole("heading", { name: "No events for “reggaeton”" })
+    expect(probe()).toHaveTextContent("tag=3")
+  })
+
+  it("keeps the tag filter applied and says so when GET /tags fails", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockRejectedValue(new Error("network down"))
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+    const user = userEvent.setup()
+
+    renderRoute(HistoryWithProbe, "/history", "/history?tag=3")
+
+    const trigger = screen.getByRole("combobox", { name: "Tag" })
+    await waitFor(() => expect(trigger).toHaveTextContent("Tag unavailable"))
+    expect(probe()).toHaveTextContent("tag=3")
+    expect(mockListEvents).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tagId: 3 })
+    )
+    await user.click(trigger)
+    expect(await screen.findAllByRole("option")).toHaveLength(1)
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it("names the empty state 'this tag' while the tag name cannot be resolved", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockRejectedValue(new Error("network down"))
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(HistoryWithProbe, "/history", "/history?tag=3")
+
+    await screen.findByRole("heading", { name: "No events for “this tag”" })
+  })
+
+  it("reads 'Loading tags…' while GET /tags is pending with a tag in the URL", () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockReturnValue(new Promise(() => {}))
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(HistoryWithProbe, "/history", "/history?tag=3")
+
+    expect(screen.getByRole("combobox", { name: "Tag" })).toHaveTextContent(
+      "Loading tags…"
+    )
+  })
+
+  it("drops an artist absent from the loaded watchlist", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(HistoryWithProbe, "/history", "/history?artist=42")
+
+    await waitFor(() => expect(probe()).toBeEmptyDOMElement())
+    await waitFor(() =>
+      expect(mockListEvents).toHaveBeenLastCalledWith(
+        expect.objectContaining({ artistId: undefined })
+      )
+    )
+  })
+
+  it("keeps the artist and says so when the watchlist fetch fails", async () => {
+    mockListWatchlist.mockRejectedValue(new Error("network down"))
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(HistoryWithProbe, "/history", "/history?artist=42")
+
+    const trigger = screen.getByRole("combobox", { name: "Artist" })
+    await waitFor(() => expect(trigger).toHaveTextContent("Artist unavailable"))
+    expect(probe()).toHaveTextContent("artist=42")
+    expect(mockListEvents).toHaveBeenLastCalledWith(
+      expect.objectContaining({ artistId: 42 })
+    )
+  })
+
+  it("reads 'Loading artists…' while the watchlist is pending with an artist in the URL", () => {
+    mockListWatchlist.mockReturnValue(new Promise(() => {}))
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(HistoryWithProbe, "/history", "/history?artist=42")
+
+    expect(screen.getByRole("combobox", { name: "Artist" })).toHaveTextContent(
+      "Loading artists…"
     )
   })
 })

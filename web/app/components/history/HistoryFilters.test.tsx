@@ -1,5 +1,5 @@
 import { createRef } from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -275,6 +275,61 @@ describe("HistoryFilters", () => {
     expect(
       screen.queryByRole("option", { name: "Drake" })
     ).not.toBeInTheDocument()
+  })
+
+  describe("Artist source states", () => {
+    const artistValue: HistoryFiltersValue = { ...emptyValue, artistId: 42 }
+
+    it("reads 'Loading artists…' while the watchlist loads with an artist selected, and 'All artists' with none", () => {
+      mockListWatchlist.mockReturnValue(new Promise(() => {}))
+      const { rerender } = render(
+        <HistoryFilters {...baseProps} value={artistValue} onChange={vi.fn()} />
+      )
+      expect(getArtistSelect()).toHaveTextContent("Loading artists…")
+
+      rerender(
+        <HistoryFilters {...baseProps} value={emptyValue} onChange={vi.fn()} />
+      )
+      expect(getArtistSelect()).toHaveTextContent("All artists")
+    })
+
+    it("reads 'Artist unavailable' after a failed watchlist load with an artist selected", async () => {
+      mockListWatchlist.mockRejectedValue(new Error("network down"))
+      render(
+        <HistoryFilters {...baseProps} value={artistValue} onChange={vi.fn()} />
+      )
+      expect(await screen.findByText("Artist unavailable")).toBeInTheDocument()
+    })
+
+    it("calls onArtistsLoaded once with the entries on success", async () => {
+      mockListWatchlist.mockResolvedValue(artists)
+      const onArtistsLoaded = vi.fn()
+      render(
+        <HistoryFilters
+          {...baseProps}
+          value={emptyValue}
+          onChange={vi.fn()}
+          onArtistsLoaded={onArtistsLoaded}
+        />
+      )
+      await waitFor(() => expect(onArtistsLoaded).toHaveBeenCalledTimes(1))
+      expect(onArtistsLoaded).toHaveBeenCalledWith(artists)
+    })
+
+    it("never calls onArtistsLoaded when the watchlist fetch fails", async () => {
+      mockListWatchlist.mockRejectedValue(new Error("network down"))
+      const onArtistsLoaded = vi.fn()
+      render(
+        <HistoryFilters
+          {...baseProps}
+          value={artistValue}
+          onChange={vi.fn()}
+          onArtistsLoaded={onArtistsLoaded}
+        />
+      )
+      await screen.findByText("Artist unavailable")
+      expect(onArtistsLoaded).not.toHaveBeenCalled()
+    })
   })
 
   describe("Tag control", () => {
