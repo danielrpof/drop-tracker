@@ -4,17 +4,17 @@ milestone: v1.6
 milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
-status: planning
-stopped_at: Phase 24 complete, ready to plan Phase 25
-last_updated: "2026-10-06T21:40:10.711Z"
-last_activity: 2026-10-06
-last_activity_desc: Phase 24 complete, transitioned to Phase 25
-state_head: 43f00c104424775675eecba8545aeb3045255c0f
+status: executing
+stopped_at: Completed 25-01-PLAN.md
+last_updated: "2026-10-10T16:22:28.176Z"
+last_activity: 2026-10-10
+last_activity_desc: Phase 25 execution started
+state_head: a20968dd9c4fca15a77dc061c4f41d8c3c05b0a3
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 24
-  completed_plans: 14
+  completed_plans: 15
   percent: 20
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 
 ## Current Position
 
-Phase: 25 — Find & Filter — Watchlist and History
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-07 - Completed quick task 261007-lc4: Phase 24 comment cleanup
+Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
+Plan: 2 of 10
+Status: Ready to execute
+Last activity: 2026-10-10 — Phase 25 execution started
 
 ## Performance Metrics
 
@@ -162,6 +162,7 @@ Last activity: 2026-10-07 - Completed quick task 261007-lc4: Phase 24 comment cl
 | Phase 24 P12 | 6 min | 3 tasks | 4 files |
 | Phase 24 P13 | 7 min | 2 tasks | 4 files |
 | Phase 24 P14 | 20 min | 3 tasks | 5 files |
+| Phase 25 P01 | 25 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -389,6 +390,7 @@ Recent decisions affecting current work:
 - [Phase 24]: 24-12: ManageTagsDialog guards load() with a generation ref; invalidateLoad() on delete/rename/merge success bumps it and refetches only when a load was in flight (no skeleton strand)
 - [Phase 24]: 24-13: wrap-anywhere on ConfirmDialog title/description (not break-word) so unspaced 32-char tag names wrap in the centered header grid (G-24-5)
 - [Phase 24]: 24-14: overflow latch via dependency-plus-early-return in ArtistNote; Manage tags hand-off consumed only by a successful load (G-24-9..11)
+- [Phase 25]: 25-01: ListWatchlist keeps zero-arg signature; latest/next release dates need no retention setting (G1)
 
 ### Pending Todos
 
@@ -482,8 +484,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-06T21:45:00Z
-Stopped at: Phase 24 complete, ready to plan Phase 25
+Last session: 2026-10-10T16:22:28.103Z
+Stopped at: Completed 25-01-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
