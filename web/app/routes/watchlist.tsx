@@ -24,6 +24,8 @@ import { isAddableSource } from "~/lib/sources"
 import { useUrlParams } from "~/lib/useUrlParams"
 import {
   CLEAR_FILTER_KEYS,
+  SORT_OPTIONS,
+  canonicalWatchlistParams,
   DEFAULT_SORT,
   formatArtistCount,
   isFiltered,
@@ -117,6 +119,20 @@ export default function Watchlist() {
       setQuery(view.q)
     }
   }, [view.q])
+
+  // Drop an unknown or default sort from the URL without a history entry.
+  useEffect(() => {
+    const canonical = canonicalWatchlistParams(params)
+    if (canonical.toString() === params.toString()) return
+    write(
+      (p) => {
+        const sort = canonical.get("sort")
+        if (sort === null) p.delete("sort")
+        else p.set("sort", sort)
+      },
+      { replace: true }
+    )
+  }, [params, write])
 
   useEffect(() => {
     return () => {
@@ -327,6 +343,9 @@ export default function Watchlist() {
       else p.set("sort", next)
     })
     clearSticky()
+    if (countTimer.current) clearTimeout(countTimer.current)
+    const label = SORT_OPTIONS.find((o) => o.value === next)!.label
+    announce(`Sorted by ${label}.`)
   }
 
   function clearFilters() {

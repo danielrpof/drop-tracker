@@ -56,6 +56,18 @@ export function parseWatchlistParams(params: URLSearchParams): WatchlistView {
   }
 }
 
+// Rewrites the keys this view owns to their canonical form (D-13); other
+// keys pass through untouched.
+export function canonicalWatchlistParams(
+  params: URLSearchParams
+): URLSearchParams {
+  const next = new URLSearchParams(params)
+  const { sort } = parseWatchlistParams(params)
+  if (sort === DEFAULT_SORT) next.delete("sort")
+  else next.set("sort", sort)
+  return next
+}
+
 const nameCollator = new Intl.Collator(undefined, { sensitivity: "base" })
 
 type Comparator = (a: WatchlistEntry, b: WatchlistEntry) => number
