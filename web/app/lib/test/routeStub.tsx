@@ -7,9 +7,18 @@
 import type { ComponentType } from "react"
 
 import { render } from "@testing-library/react"
-import { createRoutesStub } from "react-router"
+import { createRoutesStub, useLocation } from "react-router"
 
-export function renderRoute(Component: ComponentType, path: string) {
+export function renderRoute(
+  Component: ComponentType,
+  path: string,
+  initialEntry: string = path
+) {
   const Stub = createRoutesStub([{ path, Component }])
-  return render(<Stub initialEntries={[path]} />)
+  return render(<Stub initialEntries={[initialEntry]} />)
+}
+
+// Exposes the current query string so tests can assert URL writes.
+export function LocationProbe() {
+  return <output data-testid="location-search">{useLocation().search}</output>
 }

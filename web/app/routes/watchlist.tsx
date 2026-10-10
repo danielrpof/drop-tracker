@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Tags } from "lucide-react"
 import { toast } from "sonner"
 
@@ -9,6 +9,7 @@ import { ManageTagsDialog } from "~/components/watchlist/ManageTagsDialog"
 import { SearchBox } from "~/components/watchlist/SearchBox"
 import { SearchResultsColumns } from "~/components/watchlist/SearchResultsColumns"
 import { WatchlistRow } from "~/components/watchlist/WatchlistRow"
+import { WatchlistToolbar } from "~/components/watchlist/WatchlistToolbar"
 import {
   ApiError,
   type SearchArtist,
@@ -20,6 +21,12 @@ import {
   removeWatchlist,
 } from "~/lib/api"
 import { isAddableSource } from "~/lib/sources"
+import { useUrlParams } from "~/lib/useUrlParams"
+import {
+  formatArtistCount,
+  parseWatchlistParams,
+  selectVisible,
+} from "~/lib/watchlistView"
 import {
   rewriteTags,
   TagVocabularyProvider,
@@ -34,6 +41,9 @@ import {
 // so a background re-sync (task 2's post-mutation refresh, plan 06-04's
 // post-add refresh) never flashes the loading skeletons over an already-
 // populated list -- only the very first mount renders them.
+const Q_WRITE_DEBOUNCE_MS = 300
+const NO_STICKY: ReadonlySet<number> = new Set()
+
 export default function Watchlist() {
   const [entries, setEntries] = useState<WatchlistEntry[] | null>(null)
   const [error, setError] = useState(false)
@@ -42,6 +52,46 @@ export default function Watchlist() {
   )
   const [statusMessage, setStatusMessage] = useState("")
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
+
+  const { params, write } = useUrlParams()
+  const view = parseWatchlistParams(params)
+  const [query, setQuery] = useState(view.q)
+  const lastWrittenQ = useRef(view.q)
+  const qTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const filterInputRef = useRef<HTMLInputElement | null>(null)
+  const stickyIds = NO_STICKY
+
+  // Filtering uses the local value; the URL only follows, debounced (D-12).
+  function handleQueryChange(next: string) {
+    setQuery(next)
+    if (qTimer.current) clearTimeout(qTimer.current)
+    qTimer.current = setTimeout(() => {
+      lastWrittenQ.current = next
+      write(
+        (p) => {
+          if (next === "") p.delete("q")
+          else p.set("q", next)
+        },
+        { replace: true }
+      )
+    }, Q_WRITE_DEBOUNCE_MS)
+  }
+
+  // Re-sync the input only for Back/forward or external URL changes, never
+  // for an echo of our own write.
+  useEffect(() => {
+    if (view.q !== lastWrittenQ.current) {
+      if (qTimer.current) clearTimeout(qTimer.current)
+      lastWrittenQ.current = view.q
+      setQuery(view.q)
+    }
+  }, [view.q])
+
+  useEffect(() => {
+    return () => {
+      if (qTimer.current) clearTimeout(qTimer.current)
+    }
+  }, [])
 
   const refresh = useCallback(() => {
     setError(false)
@@ -218,6 +268,10 @@ export default function Watchlist() {
     })
   }
 
+  const visible = entries
+    ? selectVisible(entries, { ...view, q: query }, stickyIds)
+    : []
+
   return (
     <TagVocabularyProvider onChange={applyTagChange}>
       <div className="flex flex-col gap-6 p-8">
@@ -275,18 +329,41 @@ export default function Watchlist() {
         )}
 
         {!error && entries !== null && entries.length > 0 && (
-          <ul className="flex flex-col gap-4">
-            {entries.map((entry) => (
-              <WatchlistRow
-                key={entry.id}
-                entry={entry}
-                onEntryChange={handleEntryChange}
-                onRemove={handleRemove}
-                tagActions={{ addTag, removeTag }}
-                announce={announce}
-              />
-            ))}
-          </ul>
+          <section
+            aria-labelledby="watchlist-artists-heading"
+            className="flex flex-col gap-4"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2
+                id="watchlist-artists-heading"
+                className="text-heading font-semibold text-foreground outline-none"
+              >
+                Your artists
+              </h2>
+              <p className="text-label text-muted-foreground tabular-nums">
+                {formatArtistCount(visible.length, entries.length)}
+              </p>
+            </div>
+            <WatchlistToolbar
+              query={query}
+              onQueryChange={handleQueryChange}
+              filterInputRef={filterInputRef}
+              showClear={false}
+              onClearFilters={() => {}}
+            />
+            <ul className="flex flex-col gap-4">
+              {visible.map((entry) => (
+                <WatchlistRow
+                  key={entry.id}
+                  entry={entry}
+                  onEntryChange={handleEntryChange}
+                  onRemove={handleRemove}
+                  tagActions={{ addTag, removeTag }}
+                  announce={announce}
+                />
+              ))}
+            </ul>
+          </section>
         )}
       </div>
     </TagVocabularyProvider>

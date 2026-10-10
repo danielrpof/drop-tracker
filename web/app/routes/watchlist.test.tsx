@@ -18,6 +18,7 @@ import {
   attachTag,
   deleteTag,
   detachTag,
+  listEvents,
   listTags,
   listWatchlist,
   mergeTag,
@@ -27,7 +28,7 @@ import {
   type WatchlistEntry,
 } from "~/lib/api"
 import { makeEntry } from "~/lib/test/fixtures"
-import { renderRoute } from "~/lib/test/routeStub"
+import { LocationProbe, renderRoute } from "~/lib/test/routeStub"
 
 import Watchlist from "./watchlist"
 
@@ -981,5 +982,86 @@ describe("Watchlist route under the passphrase gate (GATE-05 / UI-SPEC E6)", () 
       within(card).getByText("Latest release: <b>2024</b>")
     ).toBeInTheDocument()
     expect(card.querySelector("b")).toBeNull()
+  })
+})
+
+describe("Watchlist name filter (WLVW-01)", () => {
+  const filterEntries = [
+    makeEntry({ id: 1, name: "Bad Bunny" }),
+    makeEntry({ id: 2, name: "Beyoncé", disambiguation: "bad influence" }),
+    makeEntry({ id: 3, name: "A$AP Rocky" }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  it("narrows the list on every keystroke, ignores disambiguation, and keeps the count in step", async () => {
+    mockListWatchlist.mockResolvedValue(filterEntries)
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Bad Bunny")
+    expect(screen.getByText("3 of 3 artists")).toBeInTheDocument()
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Filter watchlist" }),
+      "bad"
+    )
+
+    expect(screen.getByText("Bad Bunny")).toBeInTheDocument()
+    expect(screen.queryByText("Beyoncé")).not.toBeInTheDocument()
+    expect(screen.queryByText("A$AP Rocky")).not.toBeInTheDocument()
+    expect(screen.getByText("1 of 3 artists")).toBeInTheDocument()
+  })
+
+  it("writes q to the URL after the debounce", async () => {
+    mockListWatchlist.mockResolvedValue(filterEntries)
+
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Filter watchlist" }),
+      "bad"
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent("?q=bad")
+    )
+  })
+
+  it("reproduces the filtered view from ?q= on load, with the input pre-filled", async () => {
+    mockListWatchlist.mockResolvedValue(filterEntries)
+
+    renderRoute(Watchlist, "/", "/?q=bey")
+
+    await screen.findByText("Beyoncé")
+    expect(screen.queryByText("Bad Bunny")).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("textbox", { name: "Filter watchlist" })
+    ).toHaveValue("bey")
+  })
+
+  it("issues exactly one GET /watchlist while filtering and never asks for tags or events (SC5)", async () => {
+    mockListWatchlist.mockResolvedValue(filterEntries)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Filter watchlist" }),
+      "beyonce"
+    )
+
+    expect(screen.getByText("Beyoncé")).toBeInTheDocument()
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(listTags)).not.toHaveBeenCalled()
+    expect(vi.mocked(listEvents)).not.toHaveBeenCalled()
   })
 })
