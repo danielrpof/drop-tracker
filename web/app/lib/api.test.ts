@@ -410,6 +410,12 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
         "/events?artist_id=7&event_type=new_release&cursor=eyJpIjo0Mn0"
       )
     })
+
+    it("sends tagId as tag_id", async () => {
+      await listEvents({ tagId: 3 })
+
+      expect(fetchMock.mock.calls[0][0]).toBe("/events?tag_id=3")
+    })
   })
 })
 

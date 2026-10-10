@@ -48,7 +48,13 @@ const artists: WatchlistEntry[] = [
   },
 ]
 
-const emptyValue: HistoryFiltersValue = { artistId: null, eventType: null }
+const emptyValue: HistoryFiltersValue = {
+  artistId: null,
+  eventType: null,
+  tagId: null,
+}
+
+const baseProps = { tags: [], tagsStatus: "loaded" as const }
 
 // getArtistSelect / getEventTypeSelect return the trigger button (D-13: a
 // hand-rolled combobox, not a native <select> -- see HistoryFilters.tsx's
@@ -80,7 +86,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     await user.click(getArtistSelect())
 
     expect(
@@ -96,7 +104,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
 
     await chooseOption(user, getArtistSelect(), "Drake")
 
@@ -108,8 +118,17 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    const selectedValue: HistoryFiltersValue = { artistId: 10, eventType: null }
-    render(<HistoryFilters value={selectedValue} onChange={onChange} />)
+    const selectedValue: HistoryFiltersValue = {
+      ...emptyValue,
+      artistId: 10,
+    }
+    render(
+      <HistoryFilters
+        {...baseProps}
+        value={selectedValue}
+        onChange={onChange}
+      />
+    )
 
     await chooseOption(user, getArtistSelect(), "All artists")
 
@@ -124,7 +143,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
 
     await chooseOption(user, getEventTypeSelect(), "New release")
 
@@ -140,10 +161,16 @@ describe("HistoryFilters", () => {
     const user = userEvent.setup()
 
     const selectedValue: HistoryFiltersValue = {
-      artistId: null,
+      ...emptyValue,
       eventType: "new_release",
     }
-    render(<HistoryFilters value={selectedValue} onChange={onChange} />)
+    render(
+      <HistoryFilters
+        {...baseProps}
+        value={selectedValue}
+        onChange={onChange}
+      />
+    )
 
     await chooseOption(user, getEventTypeSelect(), "All event types")
 
@@ -161,7 +188,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     const trigger = getArtistSelect()
 
     await user.click(trigger)
@@ -179,7 +208,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     const trigger = getEventTypeSelect()
     trigger.focus()
 
@@ -205,7 +236,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     const trigger = getEventTypeSelect()
 
     await user.click(trigger)
@@ -225,7 +258,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     await user.click(getArtistSelect())
 
     expect(

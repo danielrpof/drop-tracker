@@ -9,7 +9,12 @@ import {
 import { EventCard } from "~/components/history/EventCard"
 import { Button } from "~/components/ui/button"
 import { Skeleton } from "~/components/ui/skeleton"
-import { listEvents, type EventItem } from "~/lib/api"
+import {
+  listEvents,
+  listTags,
+  type EventItem,
+  type TagSummary,
+} from "~/lib/api"
 
 // EventCardSkeleton is the loading placeholder for one card: a hero-art
 // block plus text bars (UI-SPEC "loading/History feed" backstop). Rendered
@@ -63,6 +68,7 @@ function fetchHistoryPage(filters: HistoryFiltersValue, cursor: string | null) {
   return listEvents({
     artistId: filters.artistId ?? undefined,
     eventType: filters.eventType ?? undefined,
+    tagId: filters.tagId ?? undefined,
     cursor: cursor ?? undefined,
   })
 }
@@ -75,7 +81,12 @@ export default function History() {
   const [filters, setFilters] = useState<HistoryFiltersValue>({
     artistId: null,
     eventType: null,
+    tagId: null,
   })
+  const [tagsState, setTagsState] = useState<{
+    status: "loading" | "loaded" | "error"
+    tags: TagSummary[]
+  }>({ status: "loading", tags: [] })
   const [events, setEvents] = useState<EventItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   // hasOlderEvents (DATA-02, D-06) distinguishes "no release activity ever"
@@ -91,6 +102,21 @@ export default function History() {
   // reloadToken bumps to re-run the initial-fetch effect on Retry without
   // changing the filters themselves -- re-issuing the exact same request.
   const [reloadToken, setReloadToken] = useState(0)
+
+  // One GET /tags per mount; a failure degrades the Tag menu silently.
+  useEffect(() => {
+    let cancelled = false
+    listTags()
+      .then((tags) => {
+        if (!cancelled) setTagsState({ status: "loaded", tags })
+      })
+      .catch(() => {
+        if (!cancelled) setTagsState({ status: "error", tags: [] })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // On mount and on any filter change, reset the accumulated page list and
   // fetch page one -- appending filtered results onto unfiltered ones would
@@ -122,7 +148,7 @@ export default function History() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.artistId, filters.eventType, reloadToken])
+  }, [filters.artistId, filters.eventType, filters.tagId, reloadToken])
 
   const handleLoadMore = () => {
     if (nextCursor == null || appendLoading) return
@@ -160,7 +186,12 @@ export default function History() {
     <div className="flex flex-col gap-6 p-8">
       <h1 className="text-display font-semibold text-foreground">History</h1>
 
-      <HistoryFilters value={filters} onChange={setFilters} />
+      <HistoryFilters
+        value={filters}
+        onChange={setFilters}
+        tags={tagsState.tags}
+        tagsStatus={tagsState.status}
+      />
 
       {error && (
         <EmptyState

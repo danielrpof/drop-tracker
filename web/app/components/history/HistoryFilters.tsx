@@ -1,17 +1,27 @@
 import { useEffect, useId, useRef, useState } from "react"
 
-import { listWatchlist, type EventItem, type WatchlistEntry } from "~/lib/api"
+import {
+  listWatchlist,
+  type EventItem,
+  type TagSummary,
+  type WatchlistEntry,
+} from "~/lib/api"
+import { sortTagsByName } from "~/lib/tags"
 
-// HistoryFiltersValue carries both filter axes -- null means "all" on that
-// axis (HIST-01, D-06). Both axes are independent and compose.
+// HistoryFiltersValue carries every filter axis -- null means "all" on that
+// axis (HIST-01, HIST-02, D-06). The axes are independent and compose.
 export interface HistoryFiltersValue {
   artistId: number | null
   eventType: EventItem["event_type"] | null
+  tagId: number | null
 }
 
 export interface HistoryFiltersProps {
   value: HistoryFiltersValue
   onChange: (value: HistoryFiltersValue) => void
+  tags: TagSummary[]
+  tagsStatus: "loading" | "loaded" | "error"
+  tagTriggerRef?: React.RefObject<HTMLButtonElement | null>
 }
 
 // EVENT_TYPE_OPTIONS populates the event-type control from the three fixed
@@ -189,7 +199,13 @@ function Combobox<TValue extends string>({
 // no cross-tab state is shared. Changing either control reports the full
 // new value upward; history.tsx resets the accumulated page list and
 // refetches from the first page on any change.
-export function HistoryFilters({ value, onChange }: HistoryFiltersProps) {
+export function HistoryFilters({
+  value,
+  onChange,
+  tags,
+  tagsStatus,
+  tagTriggerRef,
+}: HistoryFiltersProps) {
   const [artists, setArtists] = useState<WatchlistEntry[]>([])
 
   useEffect(() => {
@@ -222,6 +238,14 @@ export function HistoryFilters({ value, onChange }: HistoryFiltersProps) {
     ...EVENT_TYPE_OPTIONS,
   ]
 
+  const tagOptions: ComboboxOption<string>[] = [
+    { value: "", label: "All tags" },
+    ...sortTagsByName(tags).map((tag) => ({
+      value: String(tag.id),
+      label: tag.name,
+    })),
+  ]
+
   return (
     <div className="flex flex-wrap gap-4">
       <label className="flex flex-col gap-1 text-label text-muted-foreground">
@@ -243,6 +267,18 @@ export function HistoryFilters({ value, onChange }: HistoryFiltersProps) {
           options={eventTypeOptions}
           value={value.eventType}
           onSelect={(raw) => onChange({ ...value, eventType: raw })}
+        />
+      </label>
+
+      <label className="flex flex-col gap-1 text-label text-muted-foreground">
+        Tag
+        <Combobox
+          label="Tag"
+          options={tagOptions}
+          value={value.tagId === null ? null : String(value.tagId)}
+          onSelect={(raw) =>
+            onChange({ ...value, tagId: raw === null ? null : Number(raw) })
+          }
         />
       </label>
     </div>

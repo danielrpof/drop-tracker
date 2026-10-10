@@ -1,9 +1,10 @@
 import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   listEvents,
+  listTags,
   listWatchlist,
   type EventItem,
   type EventsPage,
@@ -21,6 +22,13 @@ const mockListEvents = vi.mocked(listEvents)
 // populate the artist select -- it must resolve or its unhandled effect
 // promise breaks every case below, not just the ones that touch filters.
 const mockListWatchlist = vi.mocked(listWatchlist)
+// The automock returns undefined, which would break History's mount-time
+// listTags().then(); every case needs a resolved default.
+const mockListTags = vi.mocked(listTags)
+
+beforeEach(() => {
+  mockListTags.mockResolvedValue([])
+})
 
 function makeEvent(overrides: Partial<EventItem> = {}): EventItem {
   return {
@@ -238,5 +246,53 @@ describe("History route", () => {
     expect(
       screen.queryByRole("heading", { name: "No matching events" })
     ).not.toBeInTheDocument()
+  })
+
+  it("lists tags from GET /tags once, sorted by name, and a picked tag narrows the feed and survives Load more", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockResolvedValue([
+      { id: 5, name: "Afrobeats", carrier_count: 1 },
+      { id: 3, name: "reggaeton", carrier_count: 2 },
+    ])
+    mockListEvents.mockResolvedValue({
+      events: [makeEvent({ id: 1, title: "Event Alpha" })],
+      next_cursor: null,
+      has_older_events: false,
+    })
+
+    renderRoute(History, "/history")
+    await screen.findByText("Event Alpha")
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Tag" }))
+    const options = await screen.findAllByRole("option")
+    expect(options.map((o) => o.textContent)).toEqual([
+      "All tags",
+      "Afrobeats",
+      "reggaeton",
+    ])
+
+    const narrowed = "eyJkIjoiMjAyNi0wMS0wMSIsImkiOjEwMH0" // gitleaks:allow
+    mockListEvents.mockResolvedValueOnce({
+      events: [makeEvent({ id: 2, title: "Tagged One" })],
+      next_cursor: narrowed,
+      has_older_events: false,
+    })
+    await userEvent.click(screen.getByRole("option", { name: "reggaeton" }))
+    await screen.findByText("Tagged One")
+    expect(mockListEvents).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tagId: 3 })
+    )
+
+    mockListEvents.mockResolvedValueOnce({
+      events: [makeEvent({ id: 3, title: "Tagged Two" })],
+      next_cursor: null,
+      has_older_events: false,
+    })
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }))
+    await screen.findByText("Tagged Two")
+    expect(mockListEvents).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tagId: 3, cursor: narrowed })
+    )
+    expect(mockListTags).toHaveBeenCalledTimes(1)
   })
 })
