@@ -24,6 +24,7 @@ import {
   mergeTag,
   removeWatchlist,
   renameTag,
+  searchArtists,
   type TagSummary,
   type WatchlistEntry,
 } from "~/lib/api"
@@ -1063,5 +1064,237 @@ describe("Watchlist name filter (WLVW-01)", () => {
     expect(mockListWatchlist).toHaveBeenCalledTimes(1)
     expect(vi.mocked(listTags)).not.toHaveBeenCalled()
     expect(vi.mocked(listEvents)).not.toHaveBeenCalled()
+  })
+})
+
+describe("Watchlist filtered state (WLVW-06)", () => {
+  const three = [
+    makeEntry({ id: 1, name: "Bad Bunny" }),
+    makeEntry({ id: 2, name: "Beyoncé" }),
+    makeEntry({ id: 3, name: "A$AP Rocky" }),
+  ]
+  const filterBox = () =>
+    screen.getByRole("textbox", { name: "Filter watchlist" })
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  function status() {
+    return screen.getByRole("status")
+  }
+
+  function lastUndo() {
+    const calls = vi.mocked(toast.success).mock.calls
+    const call = calls[calls.length - 1] as [
+      string,
+      { action?: { onClick: () => void } },
+    ]
+    return call[1].action
+  }
+
+  it("replaces the list with the filtered-to-zero state and clears everything but sort", async () => {
+    mockListWatchlist.mockResolvedValue(three)
+
+    renderRoute(WatchlistWithProbe, "/", "/?q=zzz&sort=latest-desc")
+
+    await screen.findByRole("heading", {
+      name: "No artists match these filters",
+    })
+    expect(
+      screen.getByText(
+        "Try a different name or fewer filters, or clear them to see all 3 artists."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("0 of 3 artists")).toBeInTheDocument()
+    expect(screen.queryByRole("list")).not.toBeInTheDocument()
+    const clearButtons = screen.getAllByRole("button", {
+      name: "Clear filters",
+    })
+    expect(clearButtons).toHaveLength(1)
+
+    await userEvent.click(clearButtons[0])
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        /^\?sort=latest-desc$/
+      )
+    )
+    expect(filterBox()).toHaveValue("")
+    expect(filterBox()).toHaveFocus()
+    expect(status()).toHaveTextContent(
+      "Filters cleared. Showing 3 of 3 artists."
+    )
+    expect(screen.getByText("Bad Bunny")).toBeInTheDocument()
+  })
+
+  it("shows the toolbar Clear filters only for a non-blank query with results", async () => {
+    mockListWatchlist.mockResolvedValue(three)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Bad Bunny")
+    const clear = () =>
+      screen.queryAllByRole("button", { name: "Clear filters" })
+    expect(clear()).toHaveLength(0)
+
+    await userEvent.type(filterBox(), "   ")
+    expect(clear()).toHaveLength(0)
+
+    await userEvent.clear(filterBox())
+    await userEvent.type(filterBox(), "bad")
+    expect(clear()).toHaveLength(1)
+    expect(screen.getByText("Bad Bunny")).toBeInTheDocument()
+
+    await userEvent.type(filterBox(), "zzz")
+    await screen.findByRole("heading", {
+      name: "No artists match these filters",
+    })
+    expect(clear()).toHaveLength(1)
+    expect(
+      clear()[0].closest("[aria-label='Filter and sort artists']")
+    ).toBeNull()
+  })
+
+  it("announces the count 500ms after the last keystroke", async () => {
+    mockListWatchlist.mockResolvedValue(three)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Bad Bunny")
+    expect(status()).toHaveTextContent("")
+
+    await userEvent.type(filterBox(), "bad")
+    await waitFor(
+      () => expect(status()).toHaveTextContent("Showing 1 of 3 artists."),
+      { timeout: 2000 }
+    )
+  })
+
+  it("announces when nothing matches", async () => {
+    mockListWatchlist.mockResolvedValue(three)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.type(filterBox(), "zzz")
+    await waitFor(
+      () =>
+        expect(status()).toHaveTextContent("No artists match these filters."),
+      { timeout: 2000 }
+    )
+  })
+
+  it("keeps an artist added from search visible under an active filter, until the search text changes", async () => {
+    const drizzy = makeEntry({ id: 99, name: "Drizzy", mbid: "mbid-99" })
+    mockListWatchlist
+      .mockResolvedValueOnce([three[0], three[1]])
+      .mockResolvedValueOnce([three[0], three[1], drizzy])
+    vi.mocked(searchArtists).mockResolvedValue({
+      query: "Drizzy",
+      sources: {
+        musicbrainz: {
+          status: "ok",
+          artists: [
+            {
+              source: "musicbrainz",
+              id: "mbid-99",
+              name: "Drizzy",
+              disambiguation: null,
+              country: null,
+              type: "Person",
+              image_url: null,
+            },
+          ],
+        },
+      },
+    })
+    mockAddWatchlist.mockResolvedValue(drizzy)
+
+    renderRoute(Watchlist, "/", "/?q=bad")
+    await screen.findByText("Bad Bunny")
+    expect(screen.queryByText("Beyoncé")).not.toBeInTheDocument()
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Search artists" }),
+      "Drizzy"
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add to Watchlist" })
+    )
+
+    await screen.findByRole("button", { name: "Remove Drizzy from watchlist" })
+    expect(screen.getByText("2 of 3 artists")).toBeInTheDocument()
+
+    await userEvent.type(filterBox(), "x")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Remove Drizzy from watchlist" })
+      ).not.toBeInTheDocument()
+    )
+  })
+
+  it("keeps an Undo-restored artist visible under an active filter", async () => {
+    const bunny = three[0]
+    const restored = makeEntry({ id: 77, name: "Bad Bunny", mbid: bunny.mbid })
+    mockListWatchlist
+      .mockResolvedValueOnce([bunny, three[1]])
+      .mockResolvedValueOnce([three[1], restored])
+    mockRemoveWatchlist.mockResolvedValueOnce(undefined)
+    mockAddWatchlist.mockResolvedValue(restored)
+
+    renderRoute(Watchlist, "/", "/?q=bad")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Bad Bunny from watchlist" })
+    )
+    await waitFor(() => expect(mockRemoveWatchlist).toHaveBeenCalled())
+    await userEvent.type(filterBox(), "x")
+
+    lastUndo()?.onClick()
+
+    await screen.findByRole("button", {
+      name: "Remove Bad Bunny from watchlist",
+    })
+    expect(screen.getByText("1 of 2 artists")).toBeInTheDocument()
+  })
+
+  it("renders no section or toolbar while loading or with no artists", async () => {
+    const pending = deferred<WatchlistEntry[]>()
+    mockListWatchlist.mockReturnValueOnce(pending.promise)
+
+    const view = renderRoute(Watchlist, "/")
+    expect(
+      screen.queryByRole("textbox", { name: "Filter watchlist" })
+    ).not.toBeInTheDocument()
+    expect(view.container.querySelectorAll(".h-24")).toHaveLength(3)
+
+    await act(async () => {
+      pending.resolve([])
+    })
+    await screen.findByRole("heading", { name: "No artists yet" })
+    expect(
+      screen.queryByRole("heading", { name: "Your artists" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("textbox", { name: "Filter watchlist" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows no toolbar when the load fails", async () => {
+    mockListWatchlist.mockRejectedValueOnce(new Error("down"))
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByRole("heading", {
+      name: "Couldn't load your watchlist.",
+    })
+    expect(
+      screen.queryByRole("textbox", { name: "Filter watchlist" })
+    ).not.toBeInTheDocument()
   })
 })
