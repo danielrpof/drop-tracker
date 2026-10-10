@@ -420,6 +420,7 @@ export default function Watchlist() {
     })
   )
 
+  const filterTagIds = new Set(view.tagIds)
   const visible = entries
     ? selectVisible(entries, { ...view, q: query }, stickyIds)
     : []
@@ -441,6 +442,13 @@ export default function Watchlist() {
     })
     clearSticky()
     scheduleCountAnnouncement()
+  }
+
+  function toggleFilterTag(tag: TagRef) {
+    tagNamesRef.current.set(tag.id, tag.name)
+    const ids = new Set(view.tagIds)
+    if (!ids.delete(tag.id)) ids.add(tag.id)
+    handleTagsChange([...ids].sort((a, b) => a - b))
   }
 
   function handleSortChange(next: SortKey) {
@@ -572,7 +580,12 @@ export default function Watchlist() {
                     entry={entry}
                     onEntryChange={handleEntryChange}
                     onRemove={handleRemove}
-                    tagActions={{ addTag, removeTag }}
+                    tagActions={{
+                      addTag,
+                      removeTag,
+                      filterTagIds,
+                      toggleFilterTag,
+                    }}
                     announce={announce}
                   />
                 ))}

@@ -22,6 +22,8 @@ import { TagCombobox } from "./TagCombobox"
 export interface TagActions {
   addTag(entryId: number, tag: TagRef, index?: number): void
   removeTag(entryId: number, tagId: number): void
+  filterTagIds: ReadonlySet<number>
+  toggleFilterTag(tag: TagRef): void
 }
 
 // pendingIdCounter backs the temp ids of optimistic chips (D-24).
@@ -75,9 +77,11 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
     if (!changed || !req || req.kind === "add-button") return
     focusRequestRef.current = null
     const index = req.kind === "grow" ? entry.tags.length - 1 : req.index
-    const buttons =
-      containerRef.current?.querySelectorAll<HTMLButtonElement>("button")
-    buttons?.[index]?.focus()
+    const removes =
+      containerRef.current?.querySelectorAll<HTMLButtonElement>(
+        "[data-chip-remove]"
+      )
+    removes?.[index]?.focus()
   }, [entry.tags])
 
   // "+ tag" focus: fires once the trailing slot actually re-renders as the
@@ -184,6 +188,7 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
             variant="ghost"
             size="icon-xs"
             className="-ml-1 text-muted-foreground hover:text-foreground"
+            data-chip-remove
             aria-label={`Remove tag ${tag.name} from ${entry.name}`}
             onClick={() => handleRemove(tag, index)}
           >
@@ -209,6 +214,7 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
             variant="ghost"
             size="icon-xs"
             className="-ml-1 text-muted-foreground hover:text-foreground"
+            data-chip-remove
             aria-label={`Remove tag ${item.name} from ${entry.name}`}
             aria-disabled="true"
           >

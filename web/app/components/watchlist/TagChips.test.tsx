@@ -58,6 +58,11 @@ const entry: WatchlistEntry = {
   next_release_date: null,
 }
 
+const noFilter = {
+  filterTagIds: new Set<number>(),
+  toggleFilterTag: vi.fn(),
+}
+
 function renderChips() {
   const addTag = vi.fn()
   const removeTag = vi.fn()
@@ -66,7 +71,7 @@ function renderChips() {
     <TagVocabularyProvider>
       <TagChips
         entry={entry}
-        actions={{ addTag, removeTag }}
+        actions={{ ...noFilter, addTag, removeTag }}
         announce={announce}
       />
     </TagVocabularyProvider>
@@ -88,7 +93,7 @@ describe("TagChips", () => {
       <TagVocabularyProvider>
         <TagChips
           entry={{ ...entry, tags: [] }}
-          actions={{ addTag: vi.fn(), removeTag: vi.fn() }}
+          actions={{ ...noFilter, addTag: vi.fn(), removeTag: vi.fn() }}
           announce={vi.fn()}
         />
       </TagVocabularyProvider>
@@ -151,6 +156,7 @@ function Harness({
   const [entry, setEntry] = useState(initialEntry)
 
   const actions: TagActions = {
+    ...noFilter,
     addTag(entryId, tag, index) {
       setEntry((e) => {
         if (e.id !== entryId || e.tags.some((t) => t.id === tag.id)) return e
