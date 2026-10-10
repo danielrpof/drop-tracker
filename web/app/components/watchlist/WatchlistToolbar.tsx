@@ -1,8 +1,9 @@
-import { ListFilter } from "lucide-react"
+import { ListFilter, X } from "lucide-react"
 
 import {
   InputGroup,
   InputGroupAddon,
+  InputGroupButton,
   InputGroupInput,
 } from "~/components/ui/input-group"
 
@@ -40,7 +41,27 @@ export function WatchlistToolbar({
             spellCheck={false}
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query !== "") {
+                e.preventDefault()
+                onQueryChange("")
+              }
+            }}
           />
+          {query !== "" && (
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                size="icon-xs"
+                aria-label="Clear name filter"
+                onClick={() => {
+                  onQueryChange("")
+                  filterInputRef.current?.focus()
+                }}
+              >
+                <X aria-hidden="true" />
+              </InputGroupButton>
+            </InputGroupAddon>
+          )}
         </InputGroup>
       </label>
     </div>
