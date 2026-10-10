@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -294,5 +294,88 @@ describe("History route", () => {
       expect.objectContaining({ tagId: 3, cursor: narrowed })
     )
     expect(mockListTags).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("History tag empty state", () => {
+  const emptyPage = {
+    events: [],
+    next_cursor: null,
+    has_older_events: false,
+  }
+
+  async function renderWithTagPicked(hasOlder = false) {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockResolvedValue([
+      { id: 3, name: "reggaeton", carrier_count: 2 },
+    ])
+    mockListEvents.mockResolvedValue({
+      ...emptyPage,
+      has_older_events: hasOlder,
+    })
+    renderRoute(History, "/history")
+    await screen.findByRole("heading", { level: 2 })
+    await userEvent.click(screen.getByRole("combobox", { name: "Tag" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "reggaeton" })
+    )
+  }
+
+  it("explains a tag-only empty feed and offers Show all tags", async () => {
+    await renderWithTagPicked()
+
+    await screen.findByRole("heading", { name: "No events for “reggaeton”" })
+    expect(
+      screen.getByText(
+        "None of the artists tagged “reggaeton” have release activity in your retention window."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Show all tags" })
+    ).toBeInTheDocument()
+  })
+
+  it("uses the combined-filter body when an event type is also active", async () => {
+    await renderWithTagPicked()
+    await userEvent.click(screen.getByRole("combobox", { name: "Event type" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "New release" })
+    )
+
+    await screen.findByText(
+      "Nothing matches “reggaeton” with the current artist and event-type filters."
+    )
+  })
+
+  it("keeps the retention copy over the tag copy when has_older_events is true", async () => {
+    await renderWithTagPicked(true)
+
+    await screen.findByRole("heading", {
+      name: "Older than your retention window",
+    })
+    expect(
+      screen.queryByRole("button", { name: "Show all tags" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("Show all tags clears only the tag, keeps the event type, and refocuses the Tag trigger", async () => {
+    await renderWithTagPicked()
+    await userEvent.click(screen.getByRole("combobox", { name: "Event type" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "New release" })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Show all tags" })
+    )
+
+    await waitFor(() =>
+      expect(mockListEvents).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          tagId: undefined,
+          eventType: "new_release",
+        })
+      )
+    )
+    expect(screen.getByRole("combobox", { name: "Tag" })).toHaveFocus()
   })
 })
