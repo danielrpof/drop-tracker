@@ -1370,4 +1370,132 @@ describe("Watchlist sort (WLVW-02, WLVW-03)", () => {
       "Date added (oldest)"
     )
   })
+
+  // LocationProbe's <output> is also an implicit status role.
+  function status() {
+    const region = screen
+      .getAllByRole("status")
+      .find((el) => el.getAttribute("aria-atomic") === "true")
+    if (!region) throw new Error("route status region not found")
+    return region
+  }
+
+  it.each(["bogus", "name-asc"])(
+    "drops sort=%s from the URL and renders Name (A-Z)",
+    async (value) => {
+      mockListWatchlist.mockResolvedValue(sortEntries)
+
+      renderRoute(WatchlistWithProbe, "/", `/?sort=${value}`)
+
+      await screen.findByText("Alpha")
+      await waitFor(() =>
+        expect(screen.getByTestId("location-search")).toHaveTextContent(/^$/)
+      )
+      expect(names()).toEqual(["Alpha", "Bravo", "Charlie"])
+      expect(
+        screen.getByRole("combobox", { name: "Sort by" })
+      ).toHaveTextContent("Name (A–Z)")
+    }
+  )
+
+  it("announces the sort immediately with no count message after it", async () => {
+    mockListWatchlist.mockResolvedValue(sortEntries)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Alpha")
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Date added (newest)" })
+    )
+
+    expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+    await new Promise((r) => setTimeout(r, 700))
+    expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+    expect(status()).not.toHaveTextContent("Showing")
+  })
+
+  it("cancels a pending count announcement when the sort changes", async () => {
+    mockListWatchlist.mockResolvedValue(sortEntries)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Alpha")
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Filter watchlist" }),
+      "a"
+    )
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Date added (newest)" })
+    )
+    await new Promise((r) => setTimeout(r, 700))
+
+    expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+  })
+
+  it("keeps the sort when Clear filters runs", async () => {
+    mockListWatchlist.mockResolvedValue(sortEntries)
+
+    renderRoute(WatchlistWithProbe, "/", "/?q=alp&sort=latest-desc")
+    await screen.findByText("Alpha")
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        /^\?sort=latest-desc$/
+      )
+    )
+  })
+
+  it("drops a sticky card when the sort changes", async () => {
+    const drizzy = makeEntry({ id: 99, name: "Drizzy", mbid: "mbid-99" })
+    mockListWatchlist
+      .mockResolvedValueOnce(sortEntries)
+      .mockResolvedValueOnce([...sortEntries, drizzy])
+    vi.mocked(searchArtists).mockResolvedValue({
+      query: "Drizzy",
+      sources: {
+        musicbrainz: {
+          status: "ok",
+          artists: [
+            {
+              source: "musicbrainz",
+              id: "mbid-99",
+              name: "Drizzy",
+              disambiguation: null,
+              country: null,
+              type: "Person",
+              image_url: null,
+            },
+          ],
+        },
+      },
+    })
+    mockAddWatchlist.mockResolvedValue(drizzy)
+
+    renderRoute(Watchlist, "/", "/?q=alp")
+    await screen.findByText("Alpha")
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Search artists" }),
+      "Drizzy"
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add to Watchlist" })
+    )
+    await screen.findByRole("button", { name: "Remove Drizzy from watchlist" })
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Date added (newest)" })
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Remove Drizzy from watchlist" })
+      ).not.toBeInTheDocument()
+    )
+  })
 })

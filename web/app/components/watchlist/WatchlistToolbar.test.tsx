@@ -74,3 +74,38 @@ describe("WatchlistToolbar name filter", () => {
     expect(onQueryChange).not.toHaveBeenCalled()
   })
 })
+
+describe("WatchlistToolbar sort", () => {
+  it("lists the six options in order and reports the chosen key", async () => {
+    const onSortChange = vi.fn()
+    render(
+      <WatchlistToolbar
+        query=""
+        onQueryChange={() => {}}
+        filterInputRef={createRef<HTMLInputElement>()}
+        showClear={false}
+        onClearFilters={() => {}}
+        sort="name-asc"
+        onSortChange={onSortChange}
+      />
+    )
+
+    const trigger = screen.getByRole("combobox", { name: "Sort by" })
+    expect(trigger).toHaveTextContent("Name (A–Z)")
+    await userEvent.click(trigger)
+    const options = await screen.findAllByRole("option")
+    expect(options.map((o) => o.textContent)).toEqual([
+      "Name (A–Z)",
+      "Name (Z–A)",
+      "Date added (newest)",
+      "Date added (oldest)",
+      "Latest release (newest)",
+      "Latest release (oldest)",
+    ])
+
+    await userEvent.click(
+      screen.getByRole("option", { name: "Date added (oldest)" })
+    )
+    expect(onSortChange).toHaveBeenCalledWith("added-asc")
+  })
+})
