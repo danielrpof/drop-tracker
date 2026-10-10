@@ -26,6 +26,7 @@ import {
   type TagSummary,
   type WatchlistEntry,
 } from "~/lib/api"
+import { makeEntry } from "~/lib/test/fixtures"
 import { renderRoute } from "~/lib/test/routeStub"
 
 import Watchlist from "./watchlist"
@@ -952,5 +953,33 @@ describe("Watchlist route under the passphrase gate (GATE-05 / UI-SPEC E6)", () 
     expect(within(drake).getByText("Upcoming: 2027")).toBeInTheDocument()
     expect(within(kendrick).getByText("No releases yet")).toBeInTheDocument()
     expect(within(kendrick).queryByText(/Upcoming:/)).not.toBeInTheDocument()
+  })
+
+  it("shows Upcoming alongside No releases yet when only next_release_date is set", async () => {
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake", next_release_date: "2026-11" }),
+    ])
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    const card = screen.getByRole("listitem")
+    expect(within(card).getByText("No releases yet")).toBeInTheDocument()
+    expect(within(card).getByText("Upcoming: Nov 2026")).toBeInTheDocument()
+  })
+
+  it("renders a release date containing markup as literal text (T-25-09)", async () => {
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake", latest_release_date: "<b>2024</b>" }),
+    ])
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    const card = screen.getByRole("listitem")
+    expect(
+      within(card).getByText("Latest release: <b>2024</b>")
+    ).toBeInTheDocument()
+    expect(card.querySelector("b")).toBeNull()
   })
 })

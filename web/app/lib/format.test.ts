@@ -7,6 +7,7 @@ import {
   formatIsoTitle,
   formatPollInterval,
   formatRelativeTime,
+  formatReleaseDate,
 } from "~/lib/format"
 
 const EM_DASH = "—"
@@ -115,4 +116,24 @@ describe("formatPollInterval", () => {
   ])("renders %i seconds as %s", (seconds, expected) => {
     expect(formatPollInterval(seconds)).toBe(expected)
   })
+})
+
+describe("formatReleaseDate", () => {
+  it.each([
+    ["2024", "2024"],
+    ["2024-01", "Jan 2024"],
+    ["2024-09", "Sep 2024"], // fixed table, never ICU "Sept"
+    ["2024-12", "Dec 2024"],
+    ["2024-05-17", "17 May 2024"],
+    ["2024-05-01", "1 May 2024"], // no leading zero on the day
+  ])("renders %s as %s", (raw, expected) => {
+    expect(formatReleaseDate(raw)).toBe(expected)
+  })
+
+  it.each(["2024-13", "2024-5", "", "May 2024", "2024-05-17T00:00:00Z"])(
+    "returns malformed input %j unchanged",
+    (raw) => {
+      expect(formatReleaseDate(raw)).toBe(raw)
+    }
+  )
 })

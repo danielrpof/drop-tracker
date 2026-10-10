@@ -26,13 +26,9 @@ import {
   type TagChange,
 } from "~/lib/useTagVocabulary"
 
-// Watchlist renders the UI-02 management surface: fetches listWatchlist()
-// on mount and renders the entries in exactly the order the server
-// returned them -- ListWatchlist already orders by artist name then artist
-// id, a deterministic total order even for two artists sharing a name, so
-// this route never re-sorts client-side. Per D-03/D-04 this tab is a pure
-// management list with no cross-reference to History-tab state; every
-// release-activity signal lives on the History tab only.
+// Watchlist renders the UI-02 management surface: loads GET /watchlist once
+// on mount. Phase 25 D-02/D-03 add client-side find/sort over that list and
+// a latest-release line on each card.
 //
 // `refresh` re-issues the fetch without resetting `entries` to null first,
 // so a background re-sync (task 2's post-mutation refresh, plan 06-04's
