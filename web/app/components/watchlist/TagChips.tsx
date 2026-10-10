@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react"
 
-import { Plus, X } from "lucide-react"
+import { Check, Plus, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "~/components/ui/badge"
@@ -13,6 +13,7 @@ import {
   type WatchlistEntry,
 } from "~/lib/api"
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_ARTIST } from "~/lib/limits"
+import { cn } from "~/lib/utils"
 import { useTagVocabulary } from "~/lib/useTagVocabulary"
 
 import { TagCombobox } from "./TagCombobox"
@@ -172,30 +173,48 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
 
   return (
     <div ref={containerRef} className="mt-1 flex flex-wrap items-center gap-2">
-      {entry.tags.map((tag, index) => (
-        <Badge
-          key={tag.id}
-          variant="secondary"
-          className="group/chip h-6 max-w-full gap-1 pr-0 pl-2 text-label font-normal focus-within:h-auto focus-within:min-h-6 focus-within:py-0.5"
-        >
-          <span
-            className="min-w-0 truncate group-focus-within/chip:break-all group-focus-within/chip:whitespace-normal"
-            title={tag.name}
+      {entry.tags.map((tag, index) => {
+        const active = actions.filterTagIds.has(tag.id)
+        return (
+          <Badge
+            key={tag.id}
+            variant="secondary"
+            className={cn(
+              "group/chip h-6 max-w-full gap-1 pr-0 pl-2 text-label font-normal focus-within:h-auto focus-within:min-h-6 focus-within:py-0.5",
+              active && "ring-1 ring-foreground/30 ring-inset"
+            )}
           >
-            {tag.name}
-          </span>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="-ml-1 text-muted-foreground hover:text-foreground"
-            data-chip-remove
-            aria-label={`Remove tag ${tag.name} from ${entry.name}`}
-            onClick={() => handleRemove(tag, index)}
-          >
-            <X aria-hidden="true" className="size-3" />
-          </Button>
-        </Badge>
-      ))}
+            {/* Filter toggle only; the x beside it is the sole detach (D-08). */}
+            <button
+              type="button"
+              aria-pressed={active}
+              aria-label={`Filter by ${tag.name}`}
+              className="-ml-2 flex h-6 min-w-0 cursor-pointer items-center gap-1 rounded-4xl pr-1 pl-2 hover:bg-foreground/10 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+              onClick={() => actions.toggleFilterTag(tag)}
+            >
+              {active && (
+                <Check aria-hidden="true" className="size-3 shrink-0" />
+              )}
+              <span
+                className="min-w-0 truncate group-focus-within/chip:break-all group-focus-within/chip:whitespace-normal"
+                title={tag.name}
+              >
+                {tag.name}
+              </span>
+            </button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="-ml-1 text-muted-foreground hover:text-foreground"
+              data-chip-remove
+              aria-label={`Remove tag ${tag.name} from ${entry.name}`}
+              onClick={() => handleRemove(tag, index)}
+            >
+              <X aria-hidden="true" className="size-3" />
+            </Button>
+          </Badge>
+        )
+      })}
       {pending.map((item) => (
         <Badge
           key={item.tempId}

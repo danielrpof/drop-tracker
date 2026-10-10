@@ -563,9 +563,10 @@ describe("TagChips — chip label filter toggle (D-08)", () => {
     const label = screen.getByRole("button", { name: "Filter by reggaeton" })
     expect(label).toHaveAttribute("aria-pressed", "true")
     expect(label.querySelector("svg")).toHaveAttribute("aria-hidden", "true")
-    expect(label.closest("[data-slot=badge]")?.className).toContain(
-      "ring-1 ring-inset ring-foreground/30"
-    )
+    const classes = label.closest("[data-slot=badge]")?.classList
+    for (const c of ["ring-1", "ring-inset", "ring-foreground/30"]) {
+      expect(classes).toContain(c)
+    }
   })
 
   it("leaves inactive chips without a Check or ring", () => {
