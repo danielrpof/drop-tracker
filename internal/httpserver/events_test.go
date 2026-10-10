@@ -194,7 +194,8 @@ func TestHandleListEvents_StoreErrorReturns500WithFixedMessage(t *testing.T) {
 // cannot observe that clamp.
 type recordingQuerier struct {
 	sqlc.Querier
-	gotParams sqlc.ListEventsParams
+	gotParams      sqlc.ListEventsParams
+	gotOlderParams sqlc.HasOlderEventsParams
 }
 
 func (q *recordingQuerier) ListEvents(_ context.Context, arg sqlc.ListEventsParams) ([]sqlc.ListEventsRow, error) {
@@ -208,7 +209,8 @@ func (q *recordingQuerier) ListEvents(_ context.Context, arg sqlc.ListEventsPara
 // nil-panic at runtime the moment it's called through -- go build cannot
 // catch this, only a test run can (see this file's header comment and
 // 10-02-PLAN.md's corrections-carried-forward note).
-func (q *recordingQuerier) HasOlderEvents(_ context.Context, _ sqlc.HasOlderEventsParams) (bool, error) {
+func (q *recordingQuerier) HasOlderEvents(_ context.Context, arg sqlc.HasOlderEventsParams) (bool, error) {
+	q.gotOlderParams = arg
 	return false, nil
 }
 
@@ -228,6 +230,9 @@ func TestHandleListEvents_Validation(t *testing.T) {
 			{"artist_id non-numeric", "artist_id=abc"},
 			{"artist_id zero", "artist_id=0"},
 			{"artist_id negative", "artist_id=-3"},
+			{"tag_id non-numeric", "tag_id=abc"},
+			{"tag_id zero", "tag_id=0"},
+			{"tag_id negative", "tag_id=-1"},
 			{"cursor non-numeric", "cursor=abc"},
 			{"cursor zero", "cursor=0"},
 			{"event_type not allow-listed", "event_type=bogus"},
@@ -302,6 +307,70 @@ func TestHandleListEvents_Validation(t *testing.T) {
 		}
 	})
 
+	t.Run("malformed tag_id gets the fixed message", func(t *testing.T) {
+		srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, nil, discardLogger())
+		ts := httptest.NewServer(srv.Router())
+		defer ts.Close()
+
+		resp, err := http.Get(ts.URL + "/events?tag_id=abc")
+		if err != nil {
+			t.Fatalf("GET /events?tag_id=abc: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var eb errorBody
+		if err := json.NewDecoder(resp.Body).Decode(&eb); err != nil {
+			t.Fatalf("decode response body: %v", err)
+		}
+		if resp.StatusCode != http.StatusBadRequest || eb.Error != "invalid tag_id" {
+			t.Fatalf("got %d %q, want 400 %q", resp.StatusCode, eb.Error, "invalid tag_id")
+		}
+	})
+
+	t.Run("empty tag_id is treated as absent, not malformed", func(t *testing.T) {
+		called := false
+		stub := stubEventsStore{listFunc: func(_ context.Context, p events.ListParams) (events.Page, error) {
+			called = true
+			if p.TagID != nil {
+				t.Fatalf("TagID = %v, want nil for an empty tag_id param", *p.TagID)
+			}
+			return events.Page{}, nil
+		}}
+		srv := httpserver.New(noopPinger{}, stubStore{}, stub, nil, discardLogger())
+		ts := httptest.NewServer(srv.Router())
+		defer ts.Close()
+
+		resp, err := http.Get(ts.URL + "/events?tag_id=")
+		if err != nil {
+			t.Fatalf("GET /events?tag_id=: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK || !called {
+			t.Fatalf("status = %d, called = %v, want 200 and the store called", resp.StatusCode, called)
+		}
+	})
+
+	t.Run("tag_id reaches both ListEvents and HasOlderEvents", func(t *testing.T) {
+		rq := &recordingQuerier{}
+		srv := httpserver.New(noopPinger{}, stubStore{}, events.NewService(rq, 90), nil, discardLogger())
+		ts := httptest.NewServer(srv.Router())
+		defer ts.Close()
+
+		resp, err := http.Get(ts.URL + "/events?tag_id=7")
+		if err != nil {
+			t.Fatalf("GET /events?tag_id=7: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		if rq.gotParams.TagID == nil || *rq.gotParams.TagID != 7 {
+			t.Fatalf("ListEventsParams.TagID = %v, want 7", rq.gotParams.TagID)
+		}
+		if rq.gotOlderParams.TagID == nil || *rq.gotOlderParams.TagID != 7 {
+			t.Fatalf("HasOlderEventsParams.TagID = %v, want 7", rq.gotOlderParams.TagID)
+		}
+	})
+
 	t.Run("artist_id and event_type filters both populate ListParams", func(t *testing.T) {
 		var got events.ListParams
 		stub := stubEventsStore{listFunc: func(_ context.Context, p events.ListParams) (events.Page, error) {
@@ -312,7 +381,7 @@ func TestHandleListEvents_Validation(t *testing.T) {
 		ts := httptest.NewServer(srv.Router())
 		defer ts.Close()
 
-		resp, err := http.Get(ts.URL + "/events?artist_id=7&event_type=new_release")
+		resp, err := http.Get(ts.URL + "/events?artist_id=7&event_type=new_release&tag_id=5")
 		if err != nil {
 			t.Fatalf("GET /events: %v", err)
 		}
@@ -325,6 +394,9 @@ func TestHandleListEvents_Validation(t *testing.T) {
 		}
 		if got.EventType == nil || *got.EventType != "new_release" {
 			t.Fatalf("EventType = %v, want new_release", got.EventType)
+		}
+		if got.TagID == nil || *got.TagID != 5 {
+			t.Fatalf("TagID = %v, want 5", got.TagID)
 		}
 	})
 
@@ -1424,5 +1496,138 @@ func TestListEvents_TagFilter(t *testing.T) {
 	got = getEventsBody(t, fmt.Sprintf("%s/events?tag_id=%d", ts.URL, tagB))
 	if want := []int64{otherEv}; !sameIDs(eventIDs(got.Events), want) {
 		t.Fatalf("tag B ids = %v, want %v", eventIDs(got.Events), want)
+	}
+}
+
+// TestRetention_TagFilterComposesWithCutoff pins SC4: under a tag filter no
+// aged-out event appears on the first page, any cursor page, or has_older_events.
+func TestRetention_TagFilterComposesWithCutoff(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	base := testMBID(t)
+	mbidT, mbidT2, mbidU := base+"-t", base+"-t2", base+"-u"
+
+	artistT := insertTestArtist(t, pool, mbidT)
+	artistT2 := insertTestArtist(t, pool, mbidT2)
+	artistU := insertTestArtist(t, pool, mbidU)
+	tagT := insertTestTag(t, pool, base+"-tag-t")
+	tagT2 := insertTestTag(t, pool, base+"-tag-t2")
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := pool.Exec(ctx, "DELETE FROM artists WHERE mbid = ANY($1)", []string{mbidT, mbidT2, mbidU}); err != nil {
+			t.Fatalf("cleanup: delete artists: %v", err)
+		}
+		if _, err := pool.Exec(ctx, "DELETE FROM tags WHERE id = ANY($1)", []int64{tagT, tagT2}); err != nil {
+			t.Fatalf("cleanup: delete tags: %v", err)
+		}
+	})
+	linkTestTag(t, pool, artistT, tagT)
+	linkTestTag(t, pool, artistT2, tagT2)
+
+	now := time.Now()
+	agedT := insertTestEventAt(t, pool, artistT, mbidT+"-aged", now.AddDate(0, 0, -120))
+	newer := insertTestEventAt(t, pool, artistT, mbidT+"-1d", now.AddDate(0, 0, -1))
+	older := insertTestEventAt(t, pool, artistT, mbidT+"-2d", now.AddDate(0, 0, -2))
+	insertTestEventAt(t, pool, artistU, mbidU+"-aged", now.AddDate(0, 0, -120))
+	insertTestEventAt(t, pool, artistT2, mbidT2+"-1d", now.AddDate(0, 0, -1))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(pool, stubStore{}, svc, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	first := getEventsBody(t, fmt.Sprintf("%s/events?tag_id=%d", ts.URL, tagT))
+	// Undated rows order by id DESC, so the later-inserted 2-day-old row leads.
+	if want := []int64{older, newer}; !sameIDs(eventIDs(first.Events), want) {
+		t.Fatalf("first page ids = %v, want %v", eventIDs(first.Events), want)
+	}
+	if !first.HasOlderEvents {
+		t.Fatal("has_older_events = false, want true (tag T's artist has an aged-out event)")
+	}
+
+	var collected []int64
+	cursor := ""
+	done := false
+	for page := 0; page < 5 && !done; page++ {
+		u := fmt.Sprintf("%s/events?tag_id=%d&limit=1", ts.URL, tagT)
+		if cursor != "" {
+			u += "&cursor=" + url.QueryEscape(cursor)
+		}
+		body := getEventsBody(t, u)
+		collected = append(collected, eventIDs(body.Events)...)
+		if body.NextCursor == nil {
+			done = true
+		} else {
+			cursor = *body.NextCursor
+		}
+	}
+	if !done {
+		t.Fatal("cursor paging did not terminate within 5 pages")
+	}
+	for _, id := range collected {
+		if id == agedT {
+			t.Fatalf("cursor pages returned aged-out event %d: %v", agedT, collected)
+		}
+	}
+	if want := []int64{older, newer}; !sameIDs(collected, want) {
+		t.Fatalf("cursor-paged ids = %v, want %v", collected, want)
+	}
+
+	t2 := getEventsBody(t, fmt.Sprintf("%s/events?tag_id=%d", ts.URL, tagT2))
+	if len(t2.Events) != 1 {
+		t.Fatalf("tag T2 events = %v, want exactly 1", eventIDs(t2.Events))
+	}
+	if t2.HasOlderEvents {
+		t.Fatal("tag T2 has_older_events = true, want false (the untagged artist's aged event must not count)")
+	}
+}
+
+// TestListEvents_TagFilterComposesWithOtherFilters pins AND composition with
+// artist_id/event_type and the empty-page contract for an unknown tag id.
+func TestListEvents_TagFilterComposesWithOtherFilters(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	base := testMBID(t)
+	mbidT, mbidU := base+"-t", base+"-u"
+
+	artistT := insertTestArtist(t, pool, mbidT)
+	artistU := insertTestArtist(t, pool, mbidU)
+	tagT := insertTestTag(t, pool, base+"-tag-t")
+	goneTag := insertTestTag(t, pool, base+"-tag-gone")
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := pool.Exec(ctx, "DELETE FROM artists WHERE mbid = ANY($1)", []string{mbidT, mbidU}); err != nil {
+			t.Fatalf("cleanup: delete artists: %v", err)
+		}
+		if _, err := pool.Exec(ctx, "DELETE FROM tags WHERE id = ANY($1)", []int64{tagT, goneTag}); err != nil {
+			t.Fatalf("cleanup: delete tags: %v", err)
+		}
+	})
+	linkTestTag(t, pool, artistT, tagT)
+
+	insertTestEventTyped(t, pool, artistT, mbidT+"-rel", "new_release")
+	guest := insertTestEventTyped(t, pool, artistT, mbidT+"-guest", "guest_feature")
+	insertTestEventTyped(t, pool, artistU, mbidU+"-rel", "new_release")
+
+	if _, err := pool.Exec(context.Background(), "DELETE FROM tags WHERE id = $1", goneTag); err != nil {
+		t.Fatalf("delete tag: %v", err)
+	}
+
+	svc := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(pool, stubStore{}, svc, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	got := getEventsBody(t, fmt.Sprintf("%s/events?tag_id=%d&artist_id=%d", ts.URL, tagT, artistU))
+	if len(got.Events) != 0 {
+		t.Fatalf("tag + other artist ids = %v, want none", eventIDs(got.Events))
+	}
+
+	got = getEventsBody(t, fmt.Sprintf("%s/events?tag_id=%d&event_type=guest_feature", ts.URL, tagT))
+	if want := []int64{guest}; !sameIDs(eventIDs(got.Events), want) {
+		t.Fatalf("tag + guest_feature ids = %v, want %v", eventIDs(got.Events), want)
+	}
+
+	got = getEventsBody(t, fmt.Sprintf("%s/events?tag_id=%d", ts.URL, goneTag))
+	if got.Events == nil || len(got.Events) != 0 || got.HasOlderEvents {
+		t.Fatalf("unknown tag = %+v, want events [] and has_older_events false", got)
 	}
 }
