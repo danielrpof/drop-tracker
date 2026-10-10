@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -2346,9 +2347,26 @@ func TestService_ProjectionParity(t *testing.T) {
 	svc := watchlist.NewService(sqlc.New(pool))
 
 	mbid := testMBID(t)
+	// Pre-seed the artist and its releases so Add's returned entry already
+	// carries both date fields (Add upserts the existing artist).
+	var artistID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO artists (mbid, name) VALUES ($1, 'Projection Parity Test') RETURNING id`, mbid,
+	).Scan(&artistID); err != nil {
+		t.Fatalf("seed artist: %v", err)
+	}
+	insertReleaseEvent(t, pool, artistID, mbid+"-past", "new_release", ptr("1999-05-17"), time.Now())
+	insertReleaseEvent(t, pool, artistID, mbid+"-next", "new_release", ptr("2999"), time.Now())
+
 	added, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Projection Parity Test", Note: ptr("first")})
 	if err != nil {
 		t.Fatalf("Add: %v", err)
+	}
+	if added.LatestReleaseDate == nil || *added.LatestReleaseDate != "1999-05-17" {
+		t.Fatalf("Add LatestReleaseDate = %v, want 1999-05-17", added.LatestReleaseDate)
+	}
+	if added.NextReleaseDate == nil || *added.NextReleaseDate != "2999" {
+		t.Fatalf("Add NextReleaseDate = %v, want 2999", added.NextReleaseDate)
 	}
 	listAfterAdd, err := svc.List(ctx)
 	if err != nil {
@@ -2381,6 +2399,99 @@ func TestService_ProjectionParity(t *testing.T) {
 	if entry := findEntry(listAfterNote, noted.ID); entry == nil || !reflect.DeepEqual(*entry, noted) {
 		t.Fatalf("List entry after UpdateNote = %+v, want %+v", entry, noted)
 	}
+}
+
+// insertReleaseEvent seeds one events row; externalID must be unique per
+// (event_type, source, external_id).
+func insertReleaseEvent(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID, eventType string, releaseDate *string, createdAt time.Time) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date, created_at)
+		VALUES ($1, 'musicbrainz', $2, $3, 'Title', 'Artist', $4, $5)`,
+		artistID, eventType, externalID, releaseDate, createdAt)
+	if err != nil {
+		t.Fatalf("insert %s event %q: %v", eventType, externalID, err)
+	}
+}
+
+type releaseSeed struct {
+	eventType string
+	date      *string
+	age       time.Duration
+}
+
+// TestService_List_LatestRelease pins G1-G3: latest/next come from new_release
+// events only, at any age, with "upcoming" decided at the date's own precision.
+// Only the year-boundary case reads the clock; fixed far dates cover the rest.
+func TestService_List_LatestRelease(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_release_test")
+	ctx := context.Background()
+	svc := watchlist.NewService(sqlc.New(pool))
+
+	year := time.Now().UTC().Year()
+	thisYear := strconv.Itoa(year)
+	nextYear := strconv.Itoa(year + 1)
+	nr := "new_release"
+
+	tests := []struct {
+		name       string
+		seeds      []releaseSeed
+		wantLatest *string
+		wantNext   *string
+	}{
+		{"only past", []releaseSeed{{nr, ptr("1999"), 0}}, ptr("1999"), nil},
+		{"only upcoming", []releaseSeed{{nr, ptr("2999-05"), 0}}, nil, ptr("2999-05")},
+		{"past mixed precision", []releaseSeed{{nr, ptr("1999"), 0}, {nr, ptr("1999-05-17"), 0}, {nr, ptr("1999-06"), 0}}, ptr("1999-06"), nil},
+		{"upcoming mixed precision", []releaseSeed{{nr, ptr("3000-01"), 0}, {nr, ptr("2999-12-25"), 0}, {nr, ptr("2999"), 0}}, nil, ptr("2999")},
+		{"past and upcoming together", []releaseSeed{{nr, ptr("1999-05-17"), 0}, {nr, ptr("2999"), 0}}, ptr("1999-05-17"), ptr("2999")},
+		{"guest_feature and deluxe_change ignored", []releaseSeed{{"guest_feature", ptr("1999-12-31"), 0}, {"deluxe_change", ptr("1999-12-30"), 0}}, nil, nil},
+		{"null-dated new_release ignored", []releaseSeed{{nr, nil, 0}}, nil, nil},
+		{"old event still counts (no retention)", []releaseSeed{{nr, ptr("1999-01-01"), 400 * 24 * time.Hour}}, ptr("1999-01-01"), nil},
+		{"current UTC year is latest, next year is next", []releaseSeed{{nr, ptr(thisYear), 0}, {nr, ptr(nextYear), 0}}, ptr(thisYear), ptr(nextYear)},
+		{"zero events", nil, nil, nil},
+	}
+
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mbid := testMBID(t)
+			entry, err := svc.Add(ctx, watchlist.AddParams{MBID: mbid, Name: "Release Case " + strconv.Itoa(i)})
+			if err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+			for j, sd := range tc.seeds {
+				insertReleaseEvent(t, pool, entry.ArtistID, mbid+"-"+strconv.Itoa(j), sd.eventType, sd.date, time.Now().Add(-sd.age))
+			}
+
+			list, err := svc.List(ctx)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			got := findEntry(list, entry.ID)
+			if got == nil {
+				t.Fatalf("entry %d missing from List", entry.ID)
+			}
+			assertDate(t, "LatestReleaseDate", got.LatestReleaseDate, tc.wantLatest)
+			assertDate(t, "NextReleaseDate", got.NextReleaseDate, tc.wantNext)
+		})
+	}
+}
+
+func assertDate(t *testing.T, field string, got, want *string) {
+	t.Helper()
+	switch {
+	case got == nil && want == nil:
+	case got == nil || want == nil:
+		t.Errorf("%s = %v, want %v", field, deref(got), deref(want))
+	case *got != *want:
+		t.Errorf("%s = %q, want %q", field, *got, *want)
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
 }
 
 // findEntry returns a pointer to the entry with the given id in entries, or
