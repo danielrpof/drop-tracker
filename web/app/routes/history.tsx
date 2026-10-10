@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { EmptyState } from "~/components/common/EmptyState"
 import {
@@ -35,18 +35,26 @@ function EventCardSkeleton() {
 
 const SKELETON_COUNT = 3
 
-// emptyStateCopy selects the correct one of the three empty-state messages
-// (D-05, D-06). Order is locked by 10-UI-SPEC.md's Trigger condition and
-// supersedes 10-PATTERNS.md's opposite ordering: hasOlderEvents is checked
-// FIRST, ahead of isFiltered, because a filtered-and-retention-hidden view
-// is better explained by retention than by "no matching events." The
-// retention branch never names EVENT_RETENTION_DAYS or a day count -- the
-// API exposes only a boolean, so no configured window length reaches here.
-function emptyStateCopy(hasOlderEvents: boolean, isFiltered: boolean) {
+// emptyStateCopy picks the empty-state message (D-05, D-06, D-10). Order is
+// locked by the UI-SPEC: retention first, since a filtered view that is
+// retention-hidden is better explained by retention than by "no matches".
+function emptyStateCopy(
+  hasOlderEvents: boolean,
+  tag: { name: string } | null,
+  isFiltered: boolean
+) {
   if (hasOlderEvents) {
     return {
       heading: "Older than your retention window",
       body: "There's release history for this view — it's just outside your retention window. Nothing was deleted.",
+    }
+  }
+  if (tag) {
+    return {
+      heading: `No events for “${tag.name}”`,
+      body: isFiltered
+        ? `Nothing matches “${tag.name}” with the current artist and event-type filters.`
+        : `None of the artists tagged “${tag.name}” have release activity in your retention window.`,
     }
   }
   if (isFiltered) {
@@ -102,6 +110,7 @@ export default function History() {
   // reloadToken bumps to re-run the initial-fetch effect on Retry without
   // changing the filters themselves -- re-issuing the exact same request.
   const [reloadToken, setReloadToken] = useState(0)
+  const tagTriggerRef = useRef<HTMLButtonElement>(null)
 
   // One GET /tags per mount; a failure degrades the Tag menu silently.
   useEffect(() => {
@@ -182,6 +191,20 @@ export default function History() {
 
   const isFiltered = filters.artistId != null || filters.eventType != null
 
+  const activeTag =
+    filters.tagId === null
+      ? null
+      : {
+          name:
+            tagsState.tags.find((t) => t.id === filters.tagId)?.name ??
+            "this tag",
+        }
+
+  const showAllTags = () => {
+    setFilters({ ...filters, tagId: null })
+    tagTriggerRef.current?.focus()
+  }
+
   return (
     <div className="flex flex-col gap-6 p-8">
       <h1 className="text-display font-semibold text-foreground">History</h1>
@@ -191,6 +214,7 @@ export default function History() {
         onChange={setFilters}
         tags={tagsState.tags}
         tagsStatus={tagsState.status}
+        tagTriggerRef={tagTriggerRef}
       />
 
       {error && (
@@ -217,8 +241,19 @@ export default function History() {
         !initialLoading &&
         events.length === 0 &&
         (() => {
-          const { heading, body } = emptyStateCopy(hasOlderEvents, isFiltered)
-          return <EmptyState heading={heading} body={body} />
+          const { heading, body } = emptyStateCopy(
+            hasOlderEvents,
+            activeTag,
+            isFiltered
+          )
+          // The tag branch only applies when retention doesn't take over.
+          const action =
+            activeTag && !hasOlderEvents ? (
+              <Button variant="secondary" onClick={showAllTags}>
+                Show all tags
+              </Button>
+            ) : undefined
+          return <EmptyState heading={heading} body={body} action={action} />
         })()}
 
       {!error && !initialLoading && events.length > 0 && (
