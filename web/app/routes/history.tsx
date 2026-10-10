@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { EmptyState } from "~/components/common/EmptyState"
 import {
@@ -15,6 +15,8 @@ import {
   type EventItem,
   type TagSummary,
 } from "~/lib/api"
+import { parseHistoryParams } from "~/lib/historyParams"
+import { useUrlParams } from "~/lib/useUrlParams"
 
 // EventCardSkeleton is the loading placeholder for one card: a hero-art
 // block plus text bars (UI-SPEC "loading/History feed" backstop). Rendered
@@ -34,6 +36,15 @@ function EventCardSkeleton() {
 }
 
 const SKELETON_COUNT = 3
+
+function setOrDelete(
+  p: URLSearchParams,
+  key: string,
+  v: string | number | null
+) {
+  if (v === null) p.delete(key)
+  else p.set(key, String(v))
+}
 
 // emptyStateCopy picks the empty-state message (D-05, D-06, D-10). Order is
 // locked by the UI-SPEC: retention first, since a filtered view that is
@@ -86,11 +97,11 @@ function fetchHistoryPage(filters: HistoryFiltersValue, cursor: string | null) {
 // and a distinct message for every empty/loading/partial/error state
 // (D-05 through D-08, D-16).
 export default function History() {
-  const [filters, setFilters] = useState<HistoryFiltersValue>({
-    artistId: null,
-    eventType: null,
-    tagId: null,
-  })
+  const { params, write } = useUrlParams()
+  const paramsKey = params.toString()
+  // Keyed on the string so the page-one effect deps stay primitive.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const filters = useMemo(() => parseHistoryParams(params), [paramsKey])
   const [tagsState, setTagsState] = useState<{
     status: "loading" | "loaded" | "error"
     tags: TagSummary[]
@@ -200,8 +211,16 @@ export default function History() {
             "this tag",
         }
 
+  const handleFiltersChange = (next: HistoryFiltersValue) => {
+    write((p) => {
+      setOrDelete(p, "artist", next.artistId)
+      setOrDelete(p, "type", next.eventType)
+      setOrDelete(p, "tag", next.tagId)
+    })
+  }
+
   const showAllTags = () => {
-    setFilters({ ...filters, tagId: null })
+    write((p) => p.delete("tag"))
     tagTriggerRef.current?.focus()
   }
 
@@ -211,7 +230,7 @@ export default function History() {
 
       <HistoryFilters
         value={filters}
-        onChange={setFilters}
+        onChange={handleFiltersChange}
         tags={tagsState.tags}
         tagsStatus={tagsState.status}
         tagTriggerRef={tagTriggerRef}

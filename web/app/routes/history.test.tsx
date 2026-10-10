@@ -9,7 +9,7 @@ import {
   type EventItem,
   type EventsPage,
 } from "~/lib/api"
-import { renderRoute } from "~/lib/test/routeStub"
+import { LocationProbe, renderRoute } from "~/lib/test/routeStub"
 
 import History from "./history"
 
@@ -377,5 +377,75 @@ describe("History tag empty state", () => {
       )
     )
     expect(screen.getByRole("combobox", { name: "Tag" })).toHaveFocus()
+  })
+})
+
+function HistoryWithProbe() {
+  return (
+    <>
+      <LocationProbe />
+      <History />
+    </>
+  )
+}
+
+const emptyEventsPage = {
+  events: [],
+  next_cursor: null,
+  has_older_events: false,
+}
+
+describe("History URL state (HIST-02)", () => {
+  it("fetches page one with tag_id from the URL before GET /tags resolves", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockReturnValue(new Promise(() => {}))
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(HistoryWithProbe, "/history", "/history?tag=3")
+
+    await waitFor(() =>
+      expect(mockListEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ tagId: 3 })
+      )
+    )
+  })
+
+  it("keeps tag in the URL when another filter changes", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockResolvedValue([
+      { id: 3, name: "reggaeton", carrier_count: 2 },
+    ])
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(HistoryWithProbe, "/history", "/history?tag=3")
+    await screen.findByRole("heading", { level: 2 })
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Event type" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Guest feature" })
+    )
+
+    const search = screen.getByTestId("location-search")
+    await waitFor(() => {
+      expect(search).toHaveTextContent("tag=3")
+      expect(search).toHaveTextContent("type=guest_feature")
+    })
+  })
+
+  it("reads artist and type from the URL into the request", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListEvents.mockResolvedValue(emptyEventsPage)
+
+    renderRoute(
+      HistoryWithProbe,
+      "/history",
+      "/history?artist=12&type=deluxe_change"
+    )
+
+    await waitFor(() =>
+      expect(mockListEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ artistId: 12, eventType: "deluxe_change" })
+      )
+    )
   })
 })
