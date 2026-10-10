@@ -145,8 +145,18 @@ export default function Watchlist() {
       if (qTimer.current) clearTimeout(qTimer.current)
       lastWrittenQ.current = view.q
       setQuery(view.q)
+      clearSticky()
     }
   }, [view.q])
+
+  // Back/Forward changes filters without going through a handler (G4).
+  const filterKey = `${view.sort}|${view.tagIds.join(",")}|${view.muted}|${view.custom}`
+  const prevFilterKey = useRef(filterKey)
+  useEffect(() => {
+    if (prevFilterKey.current === filterKey) return
+    prevFilterKey.current = filterKey
+    clearSticky()
+  }, [filterKey])
 
   // Drop an unknown or default sort, bad tag ids, and non-"1" flags from the
   // URL without a history entry. Once validated, retired and unknown tag ids go too.

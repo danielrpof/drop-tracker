@@ -1964,6 +1964,39 @@ describe("Watchlist preference toggles (WLVW-05)", () => {
     expect(shown()).toEqual(["Drake"])
   })
 
+  it("drops a sticky card when Back restores a filter it does not match", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    vi.mocked(updateWatchlistPreferences).mockResolvedValue({
+      ...rows[0],
+      muted_event_types: [],
+    })
+    function WithBack() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button onClick={() => navigate(-1)}>history back</button>
+          <WatchlistWithProbe />
+        </>
+      )
+    }
+    renderRoute(WithBack, "/", "/?muted=1")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(customToggle())
+    expect(shown()).toEqual(["Bad Bunny", "Drake"])
+
+    const card = screen.getByText("Bad Bunny").closest("li")!
+    await userEvent.click(
+      within(card).getByRole("checkbox", { name: /^Mute guest feature alerts/ })
+    )
+    await waitFor(() => expect(updateWatchlistPreferences).toHaveBeenCalled())
+    expect(shown()).toEqual(["Bad Bunny", "Drake"])
+
+    await userEvent.click(screen.getByRole("button", { name: "history back" }))
+
+    await waitFor(() => expect(shown()).toEqual(["Bad Two", "Drake"]))
+  })
+
   it("drops an invalid muted or custom param with replace", async () => {
     mockListWatchlist.mockResolvedValue(rows)
     renderRoute(WatchlistWithProbe, "/", "/?muted=yes&custom=2&q=b")
