@@ -193,7 +193,7 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 3/10 plans executed
+**Plans:** 4/10 plans executed
 
 Plans:
 **Wave 1**
@@ -204,7 +204,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 25-02-PLAN.md — GET /events `tag_id` filter inside the retention-aware ListEvents and HasOlderEvents, with retention, paging, and validation tests
-- [ ] 25-04-PLAN.md — Watchlist name filter (accent and `$ø æ ß` folding), "N of M artists", URL state helper, Clear filters and filtered-to-zero state, live announcements, and sticky cards (G4)
+- [x] 25-04-PLAN.md — Watchlist name filter (accent and `$ø æ ß` folding), "N of M artists", URL state helper, Clear filters and filtered-to-zero state, live announcements, and sticky cards (G4)
 - [ ] 25-06-PLAN.md — History Tag control (D-11), `Combobox<T>` hardening, loading/unavailable labels, and the tag empty state with `Show all tags`
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -327,7 +327,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
-| 25. Find & Filter — Watchlist and History | 3/10 | In Progress|  |
+| 25. Find & Filter — Watchlist and History | 4/10 | In Progress|  |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |

@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
 status: executing
-stopped_at: Completed 25-02-PLAN.md
-last_updated: "2026-10-10T16:37:29.600Z"
+stopped_at: Completed 25-04-PLAN.md
+last_updated: "2026-10-10T16:44:37.902Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 25 execution started
-state_head: 00e0ada558885d2ff83a7c713a5cafdbde100b56
+state_head: 48186998ff80f11ca6034379c6e7d05a36071b92
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 24
-  completed_plans: 17
+  completed_plans: 18
   percent: 20
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
-Plan: 4 of 10
+Plan: 5 of 10
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 25 execution started
 
@@ -165,6 +165,7 @@ Last activity: 2026-10-10 — Phase 25 execution started
 | Phase 25 P01 | 25 min | 2 tasks | 6 files |
 | Phase 25 P03 | 8 min | 2 tasks | 14 files |
 | Phase 25 P02 | 25min | 2 tasks | 5 files |
+| Phase 25 P04 | 18 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -394,6 +395,8 @@ Recent decisions affecting current work:
 - [Phase 24]: 24-14: overflow latch via dependency-plus-early-return in ArtistNote; Manage tags hand-off consumed only by a successful load (G-24-9..11)
 - [Phase 25]: 25-01: ListWatchlist keeps zero-arg signature; latest/next release dates need no retention setting (G1)
 - [Phase 25]: Release dates render via string-only formatReleaseDate; malformed values pass through as plain text — No Date construction avoids timezone shifts; server decides upcoming (G2/G3)
+- [Phase 25]: 25-04: Watchlist q filters from local state per keystroke, URL write debounced 300ms with replace; input resyncs only when URL differs from last own write — Avoids history flooding and echo loops (Pitfall 6)
+- [Phase 25]: 25-04: refresh() resolves with loaded rows so the 409 add path can mark the existing artist sticky; sticky set cleared only by search change or Clear filters — G4: add/Undo never succeed invisibly under a filter
 
 ### Pending Todos
 
@@ -487,8 +490,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T16:37:29.528Z
-Stopped at: Completed 25-02-PLAN.md
+Last session: 2026-10-10T16:44:37.827Z
+Stopped at: Completed 25-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
