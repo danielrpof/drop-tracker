@@ -90,31 +90,52 @@ SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
        ARRAY(
          SELECT t.name FROM artist_tags link JOIN tags t ON t.id = link.tag_id
          WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
-       )::text[] AS tag_names
+       )::text[] AS tag_names,
+       latest.release_date AS latest_release_date,
+       upcoming.release_date AS next_release_date
 FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
+LEFT JOIN LATERAL (
+    SELECT e.release_date FROM events e
+    WHERE e.artist_id = a.id AND e.event_type = 'new_release'
+      AND e.release_date IS NOT NULL
+      AND e.release_date <= left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
+    ORDER BY e.release_date DESC LIMIT 1
+) latest ON true
+LEFT JOIN LATERAL (
+    SELECT e.release_date FROM events e
+    WHERE e.artist_id = a.id AND e.event_type = 'new_release'
+      AND e.release_date IS NOT NULL
+      AND e.release_date > left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
+    ORDER BY e.release_date ASC LIMIT 1
+) upcoming ON true
 WHERE w.id = $1
 `
 
 type GetWatchlistEntryRow struct {
-	ID              int64              `json:"id"`
-	ArtistID        int64              `json:"artist_id"`
-	Mbid            string             `json:"mbid"`
-	Name            string             `json:"name"`
-	DeezerID        *string            `json:"deezer_id"`
-	Disambiguation  *string            `json:"disambiguation"`
-	ImageUrl        *string            `json:"image_url"`
-	ReleaseTypes    []string           `json:"release_types"`
-	MutedEventTypes []string           `json:"muted_event_types"`
-	Note            *string            `json:"note"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	TagIds          []int64            `json:"tag_ids"`
-	TagNames        []string           `json:"tag_names"`
+	ID                int64              `json:"id"`
+	ArtistID          int64              `json:"artist_id"`
+	Mbid              string             `json:"mbid"`
+	Name              string             `json:"name"`
+	DeezerID          *string            `json:"deezer_id"`
+	Disambiguation    *string            `json:"disambiguation"`
+	ImageUrl          *string            `json:"image_url"`
+	ReleaseTypes      []string           `json:"release_types"`
+	MutedEventTypes   []string           `json:"muted_event_types"`
+	Note              *string            `json:"note"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	TagIds            []int64            `json:"tag_ids"`
+	TagNames          []string           `json:"tag_names"`
+	LatestReleaseDate *string            `json:"latest_release_date"`
+	NextReleaseDate   *string            `json:"next_release_date"`
 }
 
 // ListWatchlist's select list narrowed to one row (D-26); Service.get only
 // compiles while the projections stay identical.
+// latest/upcoming new_release dates (G1-G3): no retention window; Postgres
+// decides "upcoming" at the date's own precision against UTC today. Plain
+// columns, not aggregates, so sqlc emits *string and no-release artists scan NULL.
 func (q *Queries) GetWatchlistEntry(ctx context.Context, id int64) (GetWatchlistEntryRow, error) {
 	row := q.db.QueryRow(ctx, getWatchlistEntry, id)
 	var i GetWatchlistEntryRow
@@ -133,6 +154,8 @@ func (q *Queries) GetWatchlistEntry(ctx context.Context, id int64) (GetWatchlist
 		&i.UpdatedAt,
 		&i.TagIds,
 		&i.TagNames,
+		&i.LatestReleaseDate,
+		&i.NextReleaseDate,
 	)
 	return i, err
 }
@@ -148,27 +171,45 @@ SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
        ARRAY(
          SELECT t.name FROM artist_tags link JOIN tags t ON t.id = link.tag_id
          WHERE link.artist_id = a.id ORDER BY lower(t.name), t.id
-       )::text[] AS tag_names
+       )::text[] AS tag_names,
+       latest.release_date AS latest_release_date,
+       upcoming.release_date AS next_release_date
 FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
+LEFT JOIN LATERAL (
+    SELECT e.release_date FROM events e
+    WHERE e.artist_id = a.id AND e.event_type = 'new_release'
+      AND e.release_date IS NOT NULL
+      AND e.release_date <= left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
+    ORDER BY e.release_date DESC LIMIT 1
+) latest ON true
+LEFT JOIN LATERAL (
+    SELECT e.release_date FROM events e
+    WHERE e.artist_id = a.id AND e.event_type = 'new_release'
+      AND e.release_date IS NOT NULL
+      AND e.release_date > left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
+    ORDER BY e.release_date ASC LIMIT 1
+) upcoming ON true
 ORDER BY a.name ASC, a.id ASC
 `
 
 type ListWatchlistRow struct {
-	ID              int64              `json:"id"`
-	ArtistID        int64              `json:"artist_id"`
-	Mbid            string             `json:"mbid"`
-	Name            string             `json:"name"`
-	DeezerID        *string            `json:"deezer_id"`
-	Disambiguation  *string            `json:"disambiguation"`
-	ImageUrl        *string            `json:"image_url"`
-	ReleaseTypes    []string           `json:"release_types"`
-	MutedEventTypes []string           `json:"muted_event_types"`
-	Note            *string            `json:"note"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	TagIds          []int64            `json:"tag_ids"`
-	TagNames        []string           `json:"tag_names"`
+	ID                int64              `json:"id"`
+	ArtistID          int64              `json:"artist_id"`
+	Mbid              string             `json:"mbid"`
+	Name              string             `json:"name"`
+	DeezerID          *string            `json:"deezer_id"`
+	Disambiguation    *string            `json:"disambiguation"`
+	ImageUrl          *string            `json:"image_url"`
+	ReleaseTypes      []string           `json:"release_types"`
+	MutedEventTypes   []string           `json:"muted_event_types"`
+	Note              *string            `json:"note"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	TagIds            []int64            `json:"tag_ids"`
+	TagNames          []string           `json:"tag_names"`
+	LatestReleaseDate *string            `json:"latest_release_date"`
+	NextReleaseDate   *string            `json:"next_release_date"`
 }
 
 // Both watchlist and artists have a column named id -- every selected
@@ -182,6 +223,9 @@ type ListWatchlistRow struct {
 // tag_ids/tag_names (D-26): parallel ARRAY(...) subqueries, not json_agg
 // (sqlc#3438 emits interface{}). They must stay identical but for the column,
 // or zipTags would mispair ids and names.
+// latest/upcoming new_release dates (G1-G3): no retention window; Postgres
+// decides "upcoming" at the date's own precision against UTC today. Plain
+// columns, not aggregates, so sqlc emits *string and no-release artists scan NULL.
 func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error) {
 	rows, err := q.db.Query(ctx, listWatchlist)
 	if err != nil {
@@ -206,6 +250,8 @@ func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 			&i.UpdatedAt,
 			&i.TagIds,
 			&i.TagNames,
+			&i.LatestReleaseDate,
+			&i.NextReleaseDate,
 		); err != nil {
 			return nil, err
 		}
