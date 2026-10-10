@@ -127,6 +127,9 @@ export default function History() {
   const artistIdChecked = useRef(false)
   const filtersRef = useRef(filters)
   filtersRef.current = filters
+  // Identifies the active feed so a stale Load more response can be dropped.
+  const feedKeyRef = useRef("")
+  feedKeyRef.current = `${filters.artistId}|${filters.eventType}|${filters.tagId}|${reloadToken}`
 
   // D-13: malformed params are rewritten away with replace.
   useEffect(() => {
@@ -190,6 +193,7 @@ export default function History() {
     setInitialLoading(true)
     setError(null)
     setAppendError(null)
+    setAppendLoading(false)
     setEvents([])
     setNextCursor(null)
     setHasOlderEvents(false)
@@ -216,11 +220,13 @@ export default function History() {
 
   const handleLoadMore = () => {
     if (nextCursor == null || appendLoading) return
+    const issuedFor = feedKeyRef.current
     setAppendLoading(true)
     setAppendError(null)
 
     fetchHistoryPage(filters, nextCursor)
       .then((page) => {
+        if (feedKeyRef.current !== issuedFor) return
         // Append, never replace -- and de-dupe defensively by id so a
         // double-fired request (should the disabled-button guard above
         // ever be bypassed) can never render the same event twice.
@@ -233,10 +239,12 @@ export default function History() {
         setHasOlderEvents(page.has_older_events)
       })
       .catch(() => {
-        setAppendError("Couldn't load release history.")
+        if (feedKeyRef.current === issuedFor) {
+          setAppendError("Couldn't load release history.")
+        }
       })
       .finally(() => {
-        setAppendLoading(false)
+        if (feedKeyRef.current === issuedFor) setAppendLoading(false)
       })
   }
 

@@ -297,6 +297,51 @@ describe("History route", () => {
     )
     expect(mockListTags).toHaveBeenCalledTimes(1)
   })
+
+  it("drops a Load more response that lands after the filter changed", async () => {
+    mockListWatchlist.mockResolvedValue([])
+    mockListTags.mockResolvedValue([
+      { id: 3, name: "reggaeton", carrier_count: 1 },
+    ])
+    const cursor = "eyJkIjoiMjAyNi0wMS0wMSIsImkiOjEwMH0" // gitleaks:allow
+    mockListEvents.mockResolvedValueOnce({
+      events: [makeEvent({ id: 1, title: "Unfiltered One" })],
+      next_cursor: cursor,
+      has_older_events: false,
+    })
+
+    renderRoute(History, "/history")
+    await screen.findByText("Unfiltered One")
+
+    let resolveStale!: (page: EventsPage) => void
+    mockListEvents.mockReturnValueOnce(
+      new Promise<EventsPage>((resolve) => {
+        resolveStale = resolve
+      })
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }))
+
+    mockListEvents.mockResolvedValueOnce({
+      events: [makeEvent({ id: 2, title: "Tagged One" })],
+      next_cursor: null,
+      has_older_events: false,
+    })
+    await userEvent.click(screen.getByRole("combobox", { name: "Tag" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "reggaeton" })
+    )
+    await screen.findByText("Tagged One")
+
+    resolveStale({
+      events: [makeEvent({ id: 9, title: "Stale Leak" })],
+      next_cursor: null,
+      has_older_events: false,
+    })
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(screen.queryByText("Stale Leak")).not.toBeInTheDocument()
+    expect(screen.getByText("Tagged One")).toBeInTheDocument()
+  })
 })
 
 describe("History tag empty state", () => {
