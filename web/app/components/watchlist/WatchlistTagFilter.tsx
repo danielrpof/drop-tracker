@@ -1,3 +1,5 @@
+import { useState } from "react"
+
 import {
   Combobox,
   ComboboxChip,
@@ -24,15 +26,25 @@ export function WatchlistTagFilter({
   onChange,
 }: WatchlistTagFilterProps) {
   const anchor = useComboboxAnchor()
+  const [query, setQuery] = useState("")
 
   return (
     <Combobox
       multiple
       items={options}
       value={selected}
-      onValueChange={(next) =>
+      onValueChange={(next, details) => {
+        // Esc on a closed popup would otherwise clear every chip.
+        if (details.reason === "escape-key") {
+          details.cancel()
+          return
+        }
         onChange(next.map((t) => t.id).sort((a, b) => a - b))
-      }
+      }}
+      onOpenChange={(open, details) => {
+        if (!open && details.reason === "item-press") details.cancel()
+      }}
+      onInputValueChange={setQuery}
       isItemEqualToValue={(a, b) => a.id === b.id}
       itemToStringLabel={(t) => t.name}
     >
@@ -55,6 +67,11 @@ export function WatchlistTagFilter({
         />
       </ComboboxChips>
       <ComboboxContent anchor={anchor}>
+        <ComboboxEmpty>
+          {options.length === 0
+            ? "No tags yet — add one with “+ tag” on any artist's card."
+            : `No tags match “${query}”`}
+        </ComboboxEmpty>
         <ComboboxList>
           {(tag: TagFilterOption) => (
             <ComboboxItem key={tag.id} value={tag}>
