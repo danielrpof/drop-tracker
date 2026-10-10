@@ -14,8 +14,9 @@ import {
   listTags,
   type EventItem,
   type TagSummary,
+  type WatchlistEntry,
 } from "~/lib/api"
-import { parseHistoryParams } from "~/lib/historyParams"
+import { canonicalHistoryParams, parseHistoryParams } from "~/lib/historyParams"
 import { useUrlParams } from "~/lib/useUrlParams"
 
 // EventCardSkeleton is the loading placeholder for one card: a hero-art
@@ -122,6 +123,49 @@ export default function History() {
   // changing the filters themselves -- re-issuing the exact same request.
   const [reloadToken, setReloadToken] = useState(0)
   const tagTriggerRef = useRef<HTMLButtonElement>(null)
+  const tagIdChecked = useRef(false)
+  const artistIdChecked = useRef(false)
+  const filtersRef = useRef(filters)
+  filtersRef.current = filters
+
+  // D-13: malformed params are rewritten away with replace.
+  useEffect(() => {
+    const canonical = canonicalHistoryParams(params)
+    if (canonical.toString() === paramsKey) return
+    write(
+      (p) => {
+        for (const key of ["artist", "type", "tag"]) {
+          const v = canonical.get(key)
+          if (v === null) p.delete(key)
+          else p.set(key, v)
+        }
+      },
+      { replace: true }
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramsKey, write])
+
+  // Once per source: a failed GET /tags is not proof the tag id is stale.
+  useEffect(() => {
+    if (tagsState.status !== "loaded" || tagIdChecked.current) return
+    tagIdChecked.current = true
+    if (
+      filters.tagId !== null &&
+      !tagsState.tags.some((t) => t.id === filters.tagId)
+    ) {
+      write((p) => p.delete("tag"), { replace: true })
+    }
+  }, [tagsState, filters.tagId, write])
+
+  // Same rule for the artist id, checked when HistoryFilters' watchlist loads.
+  const handleArtistsLoaded = (artists: WatchlistEntry[]) => {
+    if (artistIdChecked.current) return
+    artistIdChecked.current = true
+    const id = filtersRef.current.artistId
+    if (id !== null && !artists.some((a) => a.artist_id === id)) {
+      write((p) => p.delete("artist"), { replace: true })
+    }
+  }
 
   // One GET /tags per mount; a failure degrades the Tag menu silently.
   useEffect(() => {
@@ -234,6 +278,7 @@ export default function History() {
         tags={tagsState.tags}
         tagsStatus={tagsState.status}
         tagTriggerRef={tagTriggerRef}
+        onArtistsLoaded={handleArtistsLoaded}
       />
 
       {error && (

@@ -22,6 +22,7 @@ export interface HistoryFiltersProps {
   tags: TagSummary[]
   tagsStatus: "loading" | "loaded" | "error"
   tagTriggerRef?: React.RefObject<HTMLButtonElement | null>
+  onArtistsLoaded?: (artists: WatchlistEntry[]) => void
 }
 
 // EVENT_TYPE_OPTIONS populates the event-type control from the three fixed
@@ -222,20 +223,30 @@ export function HistoryFilters({
   tags,
   tagsStatus,
   tagTriggerRef,
+  onArtistsLoaded,
 }: HistoryFiltersProps) {
   const [artists, setArtists] = useState<WatchlistEntry[]>([])
+  const [artistsStatus, setArtistsStatus] = useState<
+    "loading" | "loaded" | "error"
+  >("loading")
+  const onArtistsLoadedRef = useRef(onArtistsLoaded)
+  onArtistsLoadedRef.current = onArtistsLoaded
 
   useEffect(() => {
     let cancelled = false
     listWatchlist()
       .then((entries) => {
-        if (!cancelled) setArtists(entries)
+        if (cancelled) return
+        setArtists(entries)
+        setArtistsStatus("loaded")
+        onArtistsLoadedRef.current?.(entries)
       })
       .catch(() => {
-        // The artist filter is a convenience control, not the primary
-        // feed -- a failed watchlist fetch just leaves the "All artists"
-        // option as the only choice rather than erroring the whole page.
-        if (!cancelled) setArtists([])
+        // A failed fetch leaves only "All artists" and must not look like
+        // proof that a selected artist is stale.
+        if (cancelled) return
+        setArtists([])
+        setArtistsStatus("error")
       })
     return () => {
       cancelled = true
@@ -249,6 +260,13 @@ export function HistoryFilters({
       label: artist.name,
     })),
   ]
+
+  // Never show a silent "All artists" while a selected artist can't be named.
+  let artistTriggerLabel: string | undefined
+  if (value.artistId !== null && artistsStatus === "loading")
+    artistTriggerLabel = "Loading artists…"
+  else if (value.artistId !== null && artistsStatus === "error")
+    artistTriggerLabel = "Artist unavailable"
 
   const eventTypeOptions: ComboboxOption<EventItem["event_type"]>[] = [
     { value: "", label: "All event types" },
@@ -278,6 +296,7 @@ export function HistoryFilters({
           label="Artist"
           options={artistOptions}
           value={value.artistId === null ? null : String(value.artistId)}
+          triggerLabel={artistTriggerLabel}
           onSelect={(raw) =>
             onChange({ ...value, artistId: raw === null ? null : Number(raw) })
           }
