@@ -1,6 +1,7 @@
+import { createRef } from "react"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { HistoryFilters, type HistoryFiltersValue } from "./HistoryFilters"
 import { listWatchlist, type WatchlistEntry } from "~/lib/api"
@@ -81,6 +82,11 @@ async function chooseOption(
 }
 
 describe("HistoryFilters", () => {
+  // jsdom has no scrollIntoView, and mockReset clears stubs between tests.
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn()
+  })
+
   it("populates the artist combobox from listWatchlist", async () => {
     mockListWatchlist.mockResolvedValue(artists)
     const onChange = vi.fn()
@@ -269,5 +275,120 @@ describe("HistoryFilters", () => {
     expect(
       screen.queryByRole("option", { name: "Drake" })
     ).not.toBeInTheDocument()
+  })
+
+  describe("Tag control", () => {
+    const tagValue: HistoryFiltersValue = { ...emptyValue, tagId: 3 }
+    const getTagSelect = () => screen.getByRole("combobox", { name: "Tag" })
+
+    it("reads 'Loading tags…' while tags load with a tag selected, and 'All tags' with none", () => {
+      mockListWatchlist.mockResolvedValue([])
+      const { rerender } = render(
+        <HistoryFilters
+          value={tagValue}
+          onChange={vi.fn()}
+          tags={[]}
+          tagsStatus="loading"
+        />
+      )
+      expect(getTagSelect()).toHaveTextContent("Loading tags…")
+
+      rerender(
+        <HistoryFilters
+          value={emptyValue}
+          onChange={vi.fn()}
+          tags={[]}
+          tagsStatus="loading"
+        />
+      )
+      expect(getTagSelect()).toHaveTextContent("All tags")
+    })
+
+    it("reads 'Tag unavailable' after a failed load with a tag selected, and 'All tags' with none", async () => {
+      mockListWatchlist.mockResolvedValue([])
+      const user = userEvent.setup()
+      const { rerender } = render(
+        <HistoryFilters
+          value={tagValue}
+          onChange={vi.fn()}
+          tags={[]}
+          tagsStatus="error"
+        />
+      )
+      expect(getTagSelect()).toHaveTextContent("Tag unavailable")
+
+      rerender(
+        <HistoryFilters
+          value={emptyValue}
+          onChange={vi.fn()}
+          tags={[]}
+          tagsStatus="error"
+        />
+      )
+      expect(getTagSelect()).toHaveTextContent("All tags")
+
+      await user.click(getTagSelect())
+      expect(await screen.findAllByRole("option")).toHaveLength(1)
+    })
+
+    it("points a supplied tagTriggerRef at the Tag trigger", () => {
+      mockListWatchlist.mockResolvedValue([])
+      const ref = createRef<HTMLButtonElement>()
+      render(
+        <HistoryFilters
+          {...baseProps}
+          value={emptyValue}
+          onChange={vi.fn()}
+          tagTriggerRef={ref}
+        />
+      )
+      expect(ref.current).toBe(getTagSelect())
+    })
+
+    it("sets a title and truncation on the trigger label, and caps the trigger width", () => {
+      mockListWatchlist.mockResolvedValue([])
+      const longName = "x".repeat(32)
+      render(
+        <HistoryFilters
+          value={tagValue}
+          onChange={vi.fn()}
+          tags={[{ id: 3, name: longName, carrier_count: 1 }]}
+          tagsStatus="loaded"
+        />
+      )
+      const label = screen.getByTitle(longName)
+      expect(label).toHaveClass("truncate")
+      expect(getTagSelect()).toHaveClass("max-w-64")
+    })
+  })
+
+  describe("listbox hardening", () => {
+    it("caps every listbox height and scrolls on overflow", async () => {
+      mockListWatchlist.mockResolvedValue(artists)
+      const user = userEvent.setup()
+      render(
+        <HistoryFilters {...baseProps} value={emptyValue} onChange={vi.fn()} />
+      )
+
+      await user.click(getEventTypeSelect())
+      const listbox = screen.getByRole("listbox", { name: "Event type" })
+      expect(listbox).toHaveClass("max-h-72", "overflow-y-auto")
+    })
+
+    it("scrolls the newly highlighted option into view on ArrowDown", async () => {
+      mockListWatchlist.mockResolvedValue(artists)
+      const user = userEvent.setup()
+      render(
+        <HistoryFilters {...baseProps} value={emptyValue} onChange={vi.fn()} />
+      )
+
+      await user.click(getEventTypeSelect())
+      await user.keyboard("{ArrowDown}")
+
+      const highlighted = screen.getByRole("option", { name: "New release" })
+      const scroll = vi.mocked(Element.prototype.scrollIntoView)
+      expect(scroll).toHaveBeenCalledWith({ block: "nearest" })
+      expect(scroll.mock.contexts).toContain(highlighted)
+    })
   })
 })

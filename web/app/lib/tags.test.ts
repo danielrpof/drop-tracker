@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { TagRef } from "~/lib/api"
 
-import { buildTagSuggestions, normalizeTagKey } from "./tags"
+import { buildTagSuggestions, normalizeTagKey, sortTagsByName } from "./tags"
 
 function refs(names: string[]): TagRef[] {
   return names.map((name, i) => ({ id: i + 1, name }))
@@ -132,5 +132,19 @@ describe("buildTagSuggestions", () => {
         { kind: "existing", tag: vocabulary[0] }, // reggaeton only
       ],
     })
+  })
+})
+
+describe("sortTagsByName", () => {
+  it("orders by base collation and breaks equal names by id without mutating the input", () => {
+    const input = [
+      { id: 9, name: "Zed" },
+      { id: 7, name: "angel" },
+      { id: 2, name: "Ángel" },
+    ]
+    const sorted = sortTagsByName(input)
+
+    expect(sorted.map((t) => t.id)).toEqual([2, 7, 9])
+    expect(input.map((t) => t.id)).toEqual([9, 7, 2])
   })
 })
