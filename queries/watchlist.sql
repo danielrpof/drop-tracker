@@ -33,19 +33,22 @@ SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
 FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
 -- latest/upcoming new_release dates (G1-G3): no retention window; Postgres
--- decides "upcoming" at the date's own precision against UTC today. Plain
+-- decides "upcoming" at the date's own precision against UTC today; malformed
+-- or placeholder dates (e.g. 0000-00-00) are skipped. Plain
 -- columns, not aggregates, so sqlc emits *string and no-release artists scan NULL.
 LEFT JOIN LATERAL (
     SELECT e.release_date FROM events e
     WHERE e.artist_id = a.id AND e.event_type = 'new_release'
-      AND e.release_date IS NOT NULL
+      AND e.release_date ~ '^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$'
+      AND e.release_date >= '0001'
       AND e.release_date <= left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
     ORDER BY e.release_date DESC LIMIT 1
 ) latest ON true
 LEFT JOIN LATERAL (
     SELECT e.release_date FROM events e
     WHERE e.artist_id = a.id AND e.event_type = 'new_release'
-      AND e.release_date IS NOT NULL
+      AND e.release_date ~ '^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$'
+      AND e.release_date >= '0001'
       AND e.release_date > left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
     ORDER BY e.release_date ASC LIMIT 1
 ) upcoming ON true
@@ -70,19 +73,22 @@ SELECT w.id AS id, a.id AS artist_id, a.mbid, a.name, a.deezer_id,
 FROM watchlist w
 JOIN artists a ON a.id = w.artist_id
 -- latest/upcoming new_release dates (G1-G3): no retention window; Postgres
--- decides "upcoming" at the date's own precision against UTC today. Plain
+-- decides "upcoming" at the date's own precision against UTC today; malformed
+-- or placeholder dates (e.g. 0000-00-00) are skipped. Plain
 -- columns, not aggregates, so sqlc emits *string and no-release artists scan NULL.
 LEFT JOIN LATERAL (
     SELECT e.release_date FROM events e
     WHERE e.artist_id = a.id AND e.event_type = 'new_release'
-      AND e.release_date IS NOT NULL
+      AND e.release_date ~ '^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$'
+      AND e.release_date >= '0001'
       AND e.release_date <= left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
     ORDER BY e.release_date DESC LIMIT 1
 ) latest ON true
 LEFT JOIN LATERAL (
     SELECT e.release_date FROM events e
     WHERE e.artist_id = a.id AND e.event_type = 'new_release'
-      AND e.release_date IS NOT NULL
+      AND e.release_date ~ '^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$'
+      AND e.release_date >= '0001'
       AND e.release_date > left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
     ORDER BY e.release_date ASC LIMIT 1
 ) upcoming ON true

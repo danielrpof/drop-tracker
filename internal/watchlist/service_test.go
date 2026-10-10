@@ -2448,6 +2448,8 @@ func TestService_List_LatestRelease(t *testing.T) {
 		{"null-dated new_release ignored", []releaseSeed{{nr, nil, 0}}, nil, nil},
 		{"old event still counts (no retention)", []releaseSeed{{nr, ptr("1999-01-01"), 400 * 24 * time.Hour}}, ptr("1999-01-01"), nil},
 		{"current UTC year is latest, next year is next", []releaseSeed{{nr, ptr(thisYear), 0}, {nr, ptr(nextYear), 0}}, ptr(thisYear), ptr(nextYear)},
+		{"placeholder and malformed dates ignored", []releaseSeed{{nr, ptr("0000-00-00"), 0}, {nr, ptr("0000"), 0}, {nr, ptr("2020-13"), 0}, {nr, ptr("TBA"), 0}}, nil, nil},
+		{"malformed date never beats a real one", []releaseSeed{{nr, ptr("1999-05-17"), 0}, {nr, ptr("0000-00-00"), 0}}, ptr("1999-05-17"), nil},
 		{"zero events", nil, nil, nil},
 	}
 

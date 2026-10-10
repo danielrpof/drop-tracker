@@ -98,14 +98,16 @@ JOIN artists a ON a.id = w.artist_id
 LEFT JOIN LATERAL (
     SELECT e.release_date FROM events e
     WHERE e.artist_id = a.id AND e.event_type = 'new_release'
-      AND e.release_date IS NOT NULL
+      AND e.release_date ~ '^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$'
+      AND e.release_date >= '0001'
       AND e.release_date <= left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
     ORDER BY e.release_date DESC LIMIT 1
 ) latest ON true
 LEFT JOIN LATERAL (
     SELECT e.release_date FROM events e
     WHERE e.artist_id = a.id AND e.event_type = 'new_release'
-      AND e.release_date IS NOT NULL
+      AND e.release_date ~ '^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$'
+      AND e.release_date >= '0001'
       AND e.release_date > left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
     ORDER BY e.release_date ASC LIMIT 1
 ) upcoming ON true
@@ -134,7 +136,8 @@ type GetWatchlistEntryRow struct {
 // ListWatchlist's select list narrowed to one row (D-26); Service.get only
 // compiles while the projections stay identical.
 // latest/upcoming new_release dates (G1-G3): no retention window; Postgres
-// decides "upcoming" at the date's own precision against UTC today. Plain
+// decides "upcoming" at the date's own precision against UTC today; malformed
+// or placeholder dates (e.g. 0000-00-00) are skipped. Plain
 // columns, not aggregates, so sqlc emits *string and no-release artists scan NULL.
 func (q *Queries) GetWatchlistEntry(ctx context.Context, id int64) (GetWatchlistEntryRow, error) {
 	row := q.db.QueryRow(ctx, getWatchlistEntry, id)
@@ -179,14 +182,16 @@ JOIN artists a ON a.id = w.artist_id
 LEFT JOIN LATERAL (
     SELECT e.release_date FROM events e
     WHERE e.artist_id = a.id AND e.event_type = 'new_release'
-      AND e.release_date IS NOT NULL
+      AND e.release_date ~ '^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$'
+      AND e.release_date >= '0001'
       AND e.release_date <= left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
     ORDER BY e.release_date DESC LIMIT 1
 ) latest ON true
 LEFT JOIN LATERAL (
     SELECT e.release_date FROM events e
     WHERE e.artist_id = a.id AND e.event_type = 'new_release'
-      AND e.release_date IS NOT NULL
+      AND e.release_date ~ '^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$'
+      AND e.release_date >= '0001'
       AND e.release_date > left(to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), length(e.release_date))
     ORDER BY e.release_date ASC LIMIT 1
 ) upcoming ON true
@@ -224,7 +229,8 @@ type ListWatchlistRow struct {
 // (sqlc#3438 emits interface{}). They must stay identical but for the column,
 // or zipTags would mispair ids and names.
 // latest/upcoming new_release dates (G1-G3): no retention window; Postgres
-// decides "upcoming" at the date's own precision against UTC today. Plain
+// decides "upcoming" at the date's own precision against UTC today; malformed
+// or placeholder dates (e.g. 0000-00-00) are skipped. Plain
 // columns, not aggregates, so sqlc emits *string and no-release artists scan NULL.
 func (q *Queries) ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error) {
 	rows, err := q.db.Query(ctx, listWatchlist)
