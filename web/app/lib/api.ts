@@ -90,6 +90,10 @@ export interface WatchlistEntry {
   // when unset (D-28).
   tags: TagRef[]
   note: string | null
+  // Server-computed (G2/G3): the client only formats these, never compares
+  // them to today.
+  latest_release_date: string | null
+  next_release_date: string | null
 }
 
 // SearchArtist mirrors internal/httpserver/search.go's SearchArtist.

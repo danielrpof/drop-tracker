@@ -26,6 +26,8 @@ const artists: WatchlistEntry[] = [
     updated_at: "2026-01-01T00:00:00Z",
     tags: [],
     note: null,
+    latest_release_date: null,
+    next_release_date: null,
   },
   {
     id: 2,
@@ -41,6 +43,8 @@ const artists: WatchlistEntry[] = [
     updated_at: "2026-01-02T00:00:00Z",
     tags: [],
     note: null,
+    latest_release_date: null,
+    next_release_date: null,
   },
 ]
 

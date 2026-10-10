@@ -294,6 +294,8 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
       updated_at: "2026-01-01T00:00:00Z",
       tags: [],
       note: "crate digger",
+      latest_release_date: null,
+      next_release_date: null,
     }
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify(updatedEntry), {

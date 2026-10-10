@@ -3,6 +3,7 @@ import { X } from "lucide-react"
 import { CoverArt } from "~/components/common/CoverArt"
 import { Button } from "~/components/ui/button"
 import type { WatchlistEntry } from "~/lib/api"
+import { formatReleaseDate } from "~/lib/format"
 
 import { ArtistNote } from "./ArtistNote"
 import { PreferenceToggles } from "./PreferenceToggles"
@@ -49,6 +50,21 @@ export function WatchlistRow({
             {entry.disambiguation}
           </span>
         )}
+        <p className="flex flex-wrap gap-x-2 text-label text-muted-foreground">
+          <span>
+            {entry.latest_release_date !== null
+              ? `Latest release: ${formatReleaseDate(entry.latest_release_date)}`
+              : "No releases yet"}
+          </span>
+          {entry.next_release_date !== null && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>
+                Upcoming: {formatReleaseDate(entry.next_release_date)}
+              </span>
+            </>
+          )}
+        </p>
         <TagChips entry={entry} actions={tagActions} announce={announce} />
         <ArtistNote
           entry={entry}

@@ -54,6 +54,8 @@ const entry: WatchlistEntry = {
     { id: 2, name: "<img src=x onerror=alert(1)>" },
   ],
   note: null,
+  latest_release_date: null,
+  next_release_date: null,
 }
 
 function renderChips() {

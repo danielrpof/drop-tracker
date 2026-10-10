@@ -4,6 +4,7 @@ import {
   screen,
   waitFor,
   waitForElementToBeRemoved,
+  within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createRoutesStub } from "react-router"
@@ -60,6 +61,8 @@ const entry: WatchlistEntry = {
   updated_at: "2026-01-01T00:00:00Z",
   tags: [],
   note: null,
+  latest_release_date: null,
+  next_release_date: null,
 }
 
 // Lets a test hold a mocked request open and settle it at a chosen moment.
@@ -924,5 +927,30 @@ describe("Watchlist route under the passphrase gate (GATE-05 / UI-SPEC E6)", () 
     await screen.findByRole("heading", {
       name: "Enter the instance passphrase",
     })
+  })
+
+  it("renders each card's latest release and a conditional Upcoming segment (D-03)", async () => {
+    mockListWatchlist.mockResolvedValue([
+      {
+        ...entry,
+        id: 1,
+        name: "Drake",
+        latest_release_date: "2024-05-17",
+        next_release_date: "2027",
+      },
+      { ...entry, id: 2, name: "Kendrick" },
+    ])
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    const [drake, kendrick] = screen.getAllByRole("listitem")
+
+    expect(
+      within(drake).getByText("Latest release: 17 May 2024")
+    ).toBeInTheDocument()
+    expect(within(drake).getByText("Upcoming: 2027")).toBeInTheDocument()
+    expect(within(kendrick).getByText("No releases yet")).toBeInTheDocument()
+    expect(within(kendrick).queryByText(/Upcoming:/)).not.toBeInTheDocument()
   })
 })
