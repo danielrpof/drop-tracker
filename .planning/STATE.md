@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
 status: executing
-stopped_at: Completed 25-05-PLAN.md
-last_updated: "2026-10-10T16:56:55.031Z"
+stopped_at: Completed 25-09-PLAN.md
+last_updated: "2026-10-10T17:01:19.940Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 25 execution started
-state_head: 5fad3d0cf2a0ad663ca1b6301075daa1e30472b1
+state_head: 8de52e3c5100c7e13690e4bf4ae236942bf4f1a7
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 24
-  completed_plans: 20
+  completed_plans: 21
   percent: 20
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
-Plan: 7 of 10
+Plan: 8 of 10
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 25 execution started
 
@@ -168,6 +168,7 @@ Last activity: 2026-10-10 — Phase 25 execution started
 | Phase 25 P04 | 18 min | 3 tasks | 9 files |
 | Phase 25 P06 | 14 min | 3 tasks | 8 files |
 | Phase 25 P05 | 5 min | 2 tasks | 6 files |
+| Phase 25 P09 | 4 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -401,6 +402,7 @@ Recent decisions affecting current work:
 - [Phase 25]: 25-04: refresh() resolves with loaded rows so the 409 add path can mark the existing artist sticky; sticky set cleared only by search change or Clear filters — G4: add/Undo never succeed invisibly under a filter
 - [Phase 25]: 25-06: History Tag degraded trigger labels apply only when a tag is selected — With no selection a failed GET /tags still reads All tags; matches the plan behavior block
 - [Phase 25]: 25-05: Latest-release sort compares raw text (2024 before 2024-05), nulls last in both directions, artist_id ascending tie-break in every mode
+- [Phase 25]: 25-09: History stale artist/tag ids are checked once per source per mount, only after a successful load; a failed fetch keeps the filter and the trigger reads Artist unavailable / Tag unavailable — A failed fetch is not proof an id is stale (UI-SPEC History Tag filter)
 
 ### Pending Todos
 
@@ -494,8 +496,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T16:56:54.941Z
-Stopped at: Completed 25-05-PLAN.md
+Last session: 2026-10-10T17:01:19.856Z
+Stopped at: Completed 25-09-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
