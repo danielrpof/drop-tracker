@@ -14,7 +14,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select"
-import { SORT_OPTIONS, type SortKey } from "~/lib/watchlistView"
+import { WatchlistTagFilter } from "~/components/watchlist/WatchlistTagFilter"
+import {
+  SORT_OPTIONS,
+  type SortKey,
+  type TagFilterOption,
+} from "~/lib/watchlistView"
 
 export interface WatchlistToolbarProps {
   query: string
@@ -24,6 +29,9 @@ export interface WatchlistToolbarProps {
   onClearFilters(): void
   sort: SortKey
   onSortChange(next: SortKey): void
+  tagOptions: TagFilterOption[]
+  selectedTags: TagFilterOption[]
+  onSelectedTagsChange(ids: number[]): void
 }
 
 export function WatchlistToolbar({
@@ -34,6 +42,9 @@ export function WatchlistToolbar({
   onClearFilters,
   sort,
   onSortChange,
+  tagOptions,
+  selectedTags,
+  onSelectedTagsChange,
 }: WatchlistToolbarProps) {
   return (
     <div
@@ -105,6 +116,19 @@ export function WatchlistToolbar({
             ))}
           </SelectContent>
         </Select>
+      </div>
+      <div className="flex flex-col gap-1 sm:max-w-md sm:min-w-60 sm:flex-1">
+        <span
+          id="watchlist-tags-label"
+          className="text-label text-muted-foreground"
+        >
+          Tags: any of
+        </span>
+        <WatchlistTagFilter
+          options={tagOptions}
+          selected={selectedTags}
+          onChange={onSelectedTagsChange}
+        />
       </div>
       {showClear && (
         <Button

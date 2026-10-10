@@ -1499,3 +1499,65 @@ describe("Watchlist sort (WLVW-02, WLVW-03)", () => {
     )
   })
 })
+
+describe("Watchlist tag filter (WLVW-04)", () => {
+  const reggaeton = { id: 3, name: "reggaeton" }
+  const trap = { id: 7, name: "trap" }
+  const tagEntries = [
+    makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton] }),
+    makeEntry({ id: 2, name: "Daddy Yankee", tags: [reggaeton] }),
+    makeEntry({ id: 3, name: "Travis Scott", tags: [trap] }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", {
+        name: /^Remove .* from watchlist$/,
+        hidden: true,
+      })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+
+  const tagInput = () => screen.getByLabelText("Filter by tags, any of")
+
+  it("narrows to the carriers of a picked tag, keeps count and URL in step, and never asks for tags", async () => {
+    mockListWatchlist.mockResolvedValue(tagEntries)
+
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(tagInput())
+    await userEvent.click(
+      await screen.findByRole("option", { name: /reggaeton/ })
+    )
+
+    await waitFor(() => expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"]))
+    expect(screen.getByText("2 of 3 artists")).toBeInTheDocument()
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      /^\?tags=3$/
+    )
+    expect(mockListTags).not.toHaveBeenCalled()
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("reproduces a multi-tag selection from the URL with any-of semantics", async () => {
+    mockListWatchlist.mockResolvedValue(tagEntries)
+
+    renderRoute(Watchlist, "/", "/?tags=3,7")
+    await screen.findByText("Bad Bunny")
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+    expect(
+      screen.getByRole("button", { name: "Remove trap from tag filter" })
+    ).toBeInTheDocument()
+    expect(mockListTags).not.toHaveBeenCalled()
+  })
+})

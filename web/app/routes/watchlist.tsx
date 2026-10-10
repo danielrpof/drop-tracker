@@ -31,8 +31,10 @@ import {
   isFiltered,
   parseWatchlistParams,
   selectVisible,
+  tagFilterOptions,
   type SortKey,
 } from "~/lib/watchlistView"
+import { sortTagsByName } from "~/lib/tags"
 import {
   rewriteTags,
   TagVocabularyProvider,
@@ -71,6 +73,9 @@ export default function Watchlist() {
   const [stickyIds, setStickyIds] = useState<ReadonlySet<number>>(
     () => new Set()
   )
+
+  // Last known name per tag id, so a chip survives its last carrier leaving.
+  const tagNamesRef = useRef(new Map<number, string>())
 
   function markSticky(id: number) {
     setStickyIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
@@ -120,15 +125,18 @@ export default function Watchlist() {
     }
   }, [view.q])
 
-  // Drop an unknown or default sort from the URL without a history entry.
+  // Drop an unknown or default sort and malformed tag ids from the URL
+  // without a history entry.
   useEffect(() => {
     const canonical = canonicalWatchlistParams(params)
     if (canonical.toString() === params.toString()) return
     write(
       (p) => {
-        const sort = canonical.get("sort")
-        if (sort === null) p.delete("sort")
-        else p.set("sort", sort)
+        for (const key of ["sort", "tags"]) {
+          const value = canonical.get(key)
+          if (value === null) p.delete(key)
+          else p.set(key, value)
+        }
       },
       { replace: true }
     )
@@ -332,10 +340,35 @@ export default function Watchlist() {
     })
   }
 
+  if (entries) {
+    for (const r of entries) {
+      for (const t of r.tags) tagNamesRef.current.set(t.id, t.name)
+    }
+  }
+  const tagOptions = entries ? tagFilterOptions(entries) : []
+  const selectedTags = sortTagsByName(
+    view.tagIds.flatMap((id) => {
+      const name = tagNamesRef.current.get(id)
+      if (name === undefined) return []
+      return [
+        { id, name, count: tagOptions.find((o) => o.id === id)?.count ?? 0 },
+      ]
+    })
+  )
+
   const visible = entries
     ? selectVisible(entries, { ...view, q: query }, stickyIds)
     : []
   countRef.current = { n: visible.length, m: entries?.length ?? 0 }
+
+  function handleTagsChange(ids: number[]) {
+    write((p) => {
+      if (ids.length === 0) p.delete("tags")
+      else p.set("tags", ids.join(","))
+    })
+    clearSticky()
+    scheduleCountAnnouncement()
+  }
 
   function handleSortChange(next: SortKey) {
     write((p) => {
@@ -444,6 +477,9 @@ export default function Watchlist() {
               onClearFilters={clearFilters}
               sort={view.sort}
               onSortChange={handleSortChange}
+              tagOptions={tagOptions}
+              selectedTags={selectedTags}
+              onSelectedTagsChange={handleTagsChange}
             />
             {visible.length === 0 ? (
               <EmptyState

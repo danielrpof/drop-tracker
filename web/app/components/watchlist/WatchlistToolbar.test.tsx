@@ -17,6 +17,9 @@ function setup(query: string) {
       onClearFilters={() => {}}
       sort="name-asc"
       onSortChange={() => {}}
+      tagOptions={[]}
+      selectedTags={[]}
+      onSelectedTagsChange={() => {}}
     />
   )
   return { onQueryChange, input: screen.getByRole("textbox") }
@@ -87,6 +90,9 @@ describe("WatchlistToolbar sort", () => {
         onClearFilters={() => {}}
         sort="name-asc"
         onSortChange={onSortChange}
+        tagOptions={[]}
+        selectedTags={[]}
+        onSelectedTagsChange={() => {}}
       />
     )
 

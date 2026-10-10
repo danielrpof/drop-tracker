@@ -1,4 +1,5 @@
 import type { WatchlistEntry } from "~/lib/api"
+import { sortTagsByName } from "~/lib/tags"
 
 // Pure view-model: never import runtime values from ~/lib/api here, route
 // tests automock that module.
@@ -46,6 +47,21 @@ function isSortKey(v: string | null): v is SortKey {
 export interface WatchlistView {
   q: string
   sort: SortKey
+  tagIds: number[]
+}
+
+const MAX_TAG_TOKENS = 200
+
+// Positive ids only, de-duplicated and ascending; at most 200 tokens read (T-25-20).
+function parseTagIds(raw: string | null): number[] {
+  if (!raw) return []
+  const ids = new Set<number>()
+  for (const token of raw.split(",").slice(0, MAX_TAG_TOKENS)) {
+    if (!/^[1-9]\d*$/.test(token)) continue
+    const id = Number(token)
+    if (Number.isSafeInteger(id)) ids.add(id)
+  }
+  return [...ids].sort((a, b) => a - b)
 }
 
 export function parseWatchlistParams(params: URLSearchParams): WatchlistView {
@@ -53,6 +69,7 @@ export function parseWatchlistParams(params: URLSearchParams): WatchlistView {
   return {
     q: params.get("q") ?? "",
     sort: isSortKey(sort) ? sort : DEFAULT_SORT,
+    tagIds: parseTagIds(params.get("tags")),
   }
 }
 
@@ -62,9 +79,11 @@ export function canonicalWatchlistParams(
   params: URLSearchParams
 ): URLSearchParams {
   const next = new URLSearchParams(params)
-  const { sort } = parseWatchlistParams(params)
+  const { sort, tagIds } = parseWatchlistParams(params)
   if (sort === DEFAULT_SORT) next.delete("sort")
   else next.set("sort", sort)
+  if (tagIds.length === 0) next.delete("tags")
+  else next.set("tags", tagIds.join(","))
   return next
 }
 
@@ -109,6 +128,32 @@ export function compareForSort(sort: SortKey): Comparator {
   }
 }
 
+export function matchesAnyTag(
+  entry: WatchlistEntry,
+  tagIds: readonly number[]
+): boolean {
+  return tagIds.length === 0 || entry.tags.some((t) => tagIds.includes(t.id))
+}
+
+export interface TagFilterOption {
+  id: number
+  name: string
+  count: number
+}
+
+// The union of tags on the loaded artists with carrier counts (D-07).
+export function tagFilterOptions(entries: WatchlistEntry[]): TagFilterOption[] {
+  const byId = new Map<number, TagFilterOption>()
+  for (const entry of entries) {
+    for (const tag of entry.tags) {
+      const option = byId.get(tag.id)
+      if (option) option.count += 1
+      else byId.set(tag.id, { id: tag.id, name: tag.name, count: 1 })
+    }
+  }
+  return sortTagsByName([...byId.values()])
+}
+
 // An entry is visible when it matches every active axis or is sticky (G4).
 export function selectVisible(
   entries: WatchlistEntry[],
@@ -117,13 +162,15 @@ export function selectVisible(
 ): WatchlistEntry[] {
   return entries
     .filter(
-      (entry) => stickyIds.has(entry.id) || matchesName(entry.name, view.q)
+      (entry) =>
+        stickyIds.has(entry.id) ||
+        (matchesName(entry.name, view.q) && matchesAnyTag(entry, view.tagIds))
     )
     .sort(compareForSort(view.sort))
 }
 
 export function isFiltered(view: WatchlistView): boolean {
-  return view.q.trim() !== ""
+  return view.q.trim() !== "" || view.tagIds.length > 0
 }
 
 // What Clear filters deletes; sort is deliberately absent (D-10).

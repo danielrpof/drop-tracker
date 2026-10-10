@@ -55,7 +55,7 @@ describe("selectVisible", () => {
   it("keeps matches in sort order", () => {
     const ids = selectVisible(
       entries,
-      { q: "bad", sort: "name-asc" },
+      { q: "bad", sort: "name-asc", tagIds: [] },
       new Set()
     ).map((e) => e.id)
     expect(ids).toEqual([1, 3])
@@ -64,7 +64,7 @@ describe("selectVisible", () => {
   it("unions sticky ids with matches", () => {
     const ids = selectVisible(
       entries,
-      { q: "bad", sort: "name-asc" },
+      { q: "bad", sort: "name-asc", tagIds: [] },
       new Set([2])
     ).map((e) => e.id)
     expect(ids).toEqual([1, 3, 2])
@@ -72,7 +72,7 @@ describe("selectVisible", () => {
 
   it("returns an empty list for no entries", () => {
     expect(
-      selectVisible([], { q: "x", sort: "name-asc" }, new Set([1]))
+      selectVisible([], { q: "x", sort: "name-asc", tagIds: [] }, new Set([1]))
     ).toEqual([])
   })
 })
@@ -219,7 +219,7 @@ describe("compareForSort", () => {
     ]
     const ids = selectVisible(
       list,
-      { q: "bad", sort: "name-asc" },
+      { q: "bad", sort: "name-asc", tagIds: [] },
       new Set([2])
     ).map((e) => e.id)
     expect(ids).toEqual([2, 3, 1])
