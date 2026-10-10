@@ -193,13 +193,13 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 1/10 plans executed
+**Plans:** 2/10 plans executed
 
 Plans:
 **Wave 1**
 
 - [x] 25-01-PLAN.md — GET /watchlist gains `latest_release_date` and `next_release_date` from two lateral joins in its single query (G1–G3), with semantics and projection-parity tests
-- [ ] 25-03-PLAN.md — Cards show `Latest release: {date}` / `No releases yet` and `Upcoming: {date}`, `formatReleaseDate`, and the `makeEntry` fixture builder
+- [x] 25-03-PLAN.md — Cards show `Latest release: {date}` / `No releases yet` and `Upcoming: {date}`, `formatReleaseDate`, and the `makeEntry` fixture builder
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -327,7 +327,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
-| 25. Find & Filter — Watchlist and History | 1/10 | In Progress|  |
+| 25. Find & Filter — Watchlist and History | 2/10 | In Progress|  |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |

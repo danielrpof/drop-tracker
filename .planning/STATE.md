@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
 status: executing
-stopped_at: Completed 25-01-PLAN.md
-last_updated: "2026-10-10T16:22:28.176Z"
+stopped_at: Completed 25-03-PLAN.md
+last_updated: "2026-10-10T16:26:14.453Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 25 execution started
-state_head: a20968dd9c4fca15a77dc061c4f41d8c3c05b0a3
+state_head: 10e454d1501e74bf47a6c81c17847817ab8ce963
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 24
-  completed_plans: 15
+  completed_plans: 16
   percent: 20
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
-Plan: 2 of 10
+Plan: 3 of 10
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 25 execution started
 
@@ -163,6 +163,7 @@ Last activity: 2026-10-10 — Phase 25 execution started
 | Phase 24 P13 | 7 min | 2 tasks | 4 files |
 | Phase 24 P14 | 20 min | 3 tasks | 5 files |
 | Phase 25 P01 | 25 min | 2 tasks | 6 files |
+| Phase 25 P03 | 8 min | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -391,6 +392,7 @@ Recent decisions affecting current work:
 - [Phase 24]: 24-13: wrap-anywhere on ConfirmDialog title/description (not break-word) so unspaced 32-char tag names wrap in the centered header grid (G-24-5)
 - [Phase 24]: 24-14: overflow latch via dependency-plus-early-return in ArtistNote; Manage tags hand-off consumed only by a successful load (G-24-9..11)
 - [Phase 25]: 25-01: ListWatchlist keeps zero-arg signature; latest/next release dates need no retention setting (G1)
+- [Phase 25]: Release dates render via string-only formatReleaseDate; malformed values pass through as plain text — No Date construction avoids timezone shifts; server decides upcoming (G2/G3)
 
 ### Pending Todos
 
@@ -484,8 +486,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T16:22:28.103Z
-Stopped at: Completed 25-01-PLAN.md
+Last session: 2026-10-10T16:26:14.370Z
+Stopped at: Completed 25-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
