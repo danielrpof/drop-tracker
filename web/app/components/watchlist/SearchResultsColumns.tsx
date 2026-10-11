@@ -192,9 +192,10 @@ function SearchResultRow({
           size="sm"
           disabled
           title="This project can't yet match a Deezer artist to its MusicBrainz identity -- search MusicBrainz to add this artist and get release detection."
-          className="shrink-0"
+          className="max-w-[40%] shrink-0 lg:max-w-none"
         >
-          Search MusicBrainz to add
+          {/* G-25-9: cap + truncate so the artist name keeps the row below lg */}
+          <span className="truncate">Search MusicBrainz to add</span>
         </Button>
       ) : (
         <Button
