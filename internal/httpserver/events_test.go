@@ -488,6 +488,21 @@ func insertTestEventWithDate(t *testing.T, pool *pgxpool.Pool, artistID int64, e
 	return id
 }
 
+// insertTestEventDatedAt sets release_date and created_at together; G-25-7
+// needs rows where the two disagree (old release, recent detection).
+func insertTestEventDatedAt(t *testing.T, pool *pgxpool.Pool, artistID int64, externalID string, releaseDate *string, createdAt time.Time) int64 {
+	t.Helper()
+	var id int64
+	row := pool.QueryRow(context.Background(), `
+		INSERT INTO events (artist_id, source, event_type, external_id, title, artist_name, release_date, created_at)
+		VALUES ($1, 'musicbrainz', 'new_release', $2, 'Title', 'Artist', $3, $4)
+		RETURNING id`, artistID, externalID, releaseDate, createdAt)
+	if err := row.Scan(&id); err != nil {
+		t.Fatalf("insert test event dated %v at %v: %v", releaseDate, createdAt, err)
+	}
+	return id
+}
+
 // TestListEvents_UndatedRowsPaginateByIDDesc proves the id-descending
 // tiebreak alone, in isolation: insertTestEvent never sets a release_date,
 // so every row in this fixture is NULL-dated and pagination inside the
@@ -1578,6 +1593,83 @@ func TestRetention_TagFilterComposesWithCutoff(t *testing.T) {
 	}
 	if t2.HasOlderEvents {
 		t.Fatal("tag T2 has_older_events = true, want false (the untagged artist's aged event must not count)")
+	}
+}
+
+// TestRetention_TagFilterKeepsOldReleasesDetectedInWindow pins G-25-7:
+// retention counts from created_at (Phase 10 D-01), not release date.
+func TestRetention_TagFilterKeepsOldReleasesDetectedInWindow(t *testing.T) {
+	pool := testutil.NewTestPool(t)
+	base := testMBID(t)
+	mbidT := base + "-t"
+
+	artistT := insertTestArtist(t, pool, mbidT)
+	tagT := insertTestTag(t, pool, base+"-tag-t")
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := pool.Exec(ctx, "DELETE FROM artists WHERE mbid = $1", mbidT); err != nil {
+			t.Fatalf("cleanup: delete artists: %v", err)
+		}
+		if _, err := pool.Exec(ctx, "DELETE FROM tags WHERE id = $1", tagT); err != nil {
+			t.Fatalf("cleanup: delete tags: %v", err)
+		}
+	})
+	linkTestTag(t, pool, artistT, tagT)
+
+	now := time.Now()
+	const layout = "2006-01-02"
+	fresh := insertTestEventDatedAt(t, pool, artistT, mbidT+"-fresh",
+		datePtr(now.AddDate(0, 0, -3).Format(layout)), now.AddDate(0, 0, -2))
+	backCatalogue := insertTestEventDatedAt(t, pool, artistT, mbidT+"-back",
+		datePtr("2015-04-08"), now.AddDate(0, 0, -1))
+	agedOut := insertTestEventDatedAt(t, pool, artistT, mbidT+"-aged",
+		datePtr(now.Format(layout)), now.AddDate(0, 0, -120))
+
+	svc := events.NewService(sqlc.New(pool), 90)
+	srv := httpserver.New(pool, stubStore{}, svc, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	want := []int64{fresh, backCatalogue}
+	first := getEventsBody(t, fmt.Sprintf("%s/events?tag_id=%d", ts.URL, tagT))
+	if !sameIDs(eventIDs(first.Events), want) {
+		t.Fatalf("first page ids = %v, want %v", eventIDs(first.Events), want)
+	}
+	if !first.HasOlderEvents {
+		t.Fatal("has_older_events = false, want true (the aged-out event is outside the window)")
+	}
+
+	var collected []events.Event
+	cursor := ""
+	done := false
+	for page := 0; page < 5 && !done; page++ {
+		u := fmt.Sprintf("%s/events?tag_id=%d&limit=1", ts.URL, tagT)
+		if cursor != "" {
+			u += "&cursor=" + url.QueryEscape(cursor)
+		}
+		body := getEventsBody(t, u)
+		collected = append(collected, body.Events...)
+		if body.NextCursor == nil {
+			done = true
+		} else {
+			cursor = *body.NextCursor
+		}
+	}
+	if !done {
+		t.Fatal("cursor paging did not terminate within 5 pages")
+	}
+	if !sameIDs(eventIDs(collected), want) {
+		t.Fatalf("cursor-paged ids = %v, want %v (aged-out event is %d)", eventIDs(collected), want, agedOut)
+	}
+
+	cutoff := now.AddDate(0, 0, -90)
+	for _, ev := range collected {
+		if ev.CreatedAt.Before(cutoff) {
+			t.Fatalf("event %d created_at %v is before the 90-day cutoff %v", ev.ID, ev.CreatedAt, cutoff)
+		}
+		if ev.ID == backCatalogue && (ev.ReleaseDate == nil || *ev.ReleaseDate != "2015-04-08") {
+			t.Fatalf("back-catalogue release_date = %v, want 2015-04-08", ev.ReleaseDate)
+		}
 	}
 }
 
