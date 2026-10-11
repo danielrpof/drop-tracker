@@ -175,7 +175,9 @@ function SearchResultRow({
         <span className="truncate text-body font-medium text-foreground">
           {artist.name}
         </span>
-        <span className="text-label text-muted-foreground">{artist.type}</span>
+        <span className="truncate text-label text-muted-foreground">
+          {artist.type}
+        </span>
         {secondaryLabel !== null && (
           <span className="truncate text-label text-muted-foreground">
             {secondaryLabel}
