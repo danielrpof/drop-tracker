@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
 Plan: 5 of 14
 Status: Ready to execute
-Last activity: 2026-10-11 - Completed quick task 261011-gq7: Amend Phase 26 docs with grill decisions
+Last activity: 2026-10-11 - Completed quick task 261011-moj: Amend Phase 26 docs with UI review U1–U4
 
 ## Performance Metrics
 
@@ -473,6 +473,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 261007-kt1 | Single owner for the tag vocabulary on the web: useTagVocabulary provider with one stale-response rule, fixes rememberTag race (Phase 24 review candidate 1) | 2026-10-07 | 7455c40 | [261007-kt1-single-owner-for-the-tag-vocabulary-on-t](./quick/261007-kt1-single-owner-for-the-tag-vocabulary-on-t/) |
 | 261007-lc4 | Phase 24 comment cleanup: comment-only trim to 1-3 line why-notes with one doc ref, fixed inaccurate WithTags/merge-trigger/buildTagSuggestions comments, removed plan narration | 2026-10-07 | be98a62 | [261007-lc4-phase-24-comment-cleanup](./quick/261007-lc4-phase-24-comment-cleanup/) |
 | 261011-gq7 | Amend Phase 26 CONTEXT and UI-SPEC with grill decisions Q1–Q10 (derived selection, outcome-only bulk responses + refresh, ordered-lock bulk tag attach, single-statement remove/preferences, pending-alert disclosure) and add withdraw-pending-events todo | 2026-10-11 | 6408d28 | [261011-gq7-amend-phase-26-docs-with-grill-decisions](./quick/261011-gq7-amend-phase-26-docs-with-grill-decisions/) |
+| 261011-moj | Amend Phase 26 CONTEXT and UI-SPEC with UI review U1–U4 (route-level confirm + close→clear→focus order, scroll-padding focus clearance, one-row phone bar, remove-tag Undo) | 2026-10-11 | 9ac478c | [261011-moj-amend-phase-26-ui-spec-and-context-with-](./quick/261011-moj-amend-phase-26-ui-spec-and-context-with-/) |
 
 ### Roadmap Evolution
 
