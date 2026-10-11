@@ -2160,4 +2160,52 @@ describe("chip click keeps the clicked card on screen (G-25-4)", () => {
     expect(scrollBy).toHaveBeenCalledTimes(1)
     expect(scrollBy).toHaveBeenCalledWith(0, -280)
   })
+
+  it("scrolls the other way after a filter that grows the list", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3")
+    await screen.findByText("Bad Bunny")
+    const label = screen.getAllByRole("button", {
+      name: "Filter by reggaeton",
+    })[0]
+    stubTop(label, 400, 120)
+
+    await userEvent.click(label)
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+    expect(search()).toBe("")
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, 280)
+  })
+
+  it("skips the correction when the clicked card leaves the list", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Bad Bunny")
+    const label = screen.getByRole("button", { name: "Filter by trap" })
+    // The label detaches, so key the rect on read order: 400 first, then 120.
+    let reads = 0
+    vi.spyOn(label, "getBoundingClientRect").mockImplementation(() => {
+      const top = reads++ === 0 ? 400 : 120
+      return {
+        top,
+        bottom: top + 24,
+        left: 0,
+        right: 80,
+        width: 80,
+        height: 24,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }
+    })
+
+    await userEvent.click(label)
+
+    expect(search()).toBe("?tags=3")
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+    expect(scrollBy).not.toHaveBeenCalled()
+  })
 })
