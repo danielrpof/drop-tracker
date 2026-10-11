@@ -9,7 +9,7 @@ import {
 import userEvent from "@testing-library/user-event"
 import { createRoutesStub, useNavigate } from "react-router"
 import { toast } from "sonner"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import App from "~/root"
 import { authStore } from "~/lib/authStore"
@@ -2094,5 +2094,70 @@ describe("Watchlist card chip click-to-filter (D-08)", () => {
 
     expect(mockDetachTag).toHaveBeenCalledWith(1, 3)
     expect(search()).toBe("?tags=3")
+  })
+})
+
+describe("chip click keeps the clicked card on screen (G-25-4)", () => {
+  const reggaeton = { id: 3, name: "reggaeton" }
+  const rows = [
+    makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton] }),
+    makeEntry({ id: 2, name: "Daddy Yankee", tags: [reggaeton] }),
+    makeEntry({ id: 3, name: "Travis Scott", tags: [{ id: 7, name: "trap" }] }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", { name: /^Remove .* from watchlist$/ })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+  const search = () => screen.getByTestId("location-search").textContent
+
+  // Reports a different top while the label is pressed vs not, so the
+  // before/after reads differ however often the DOM is measured.
+  function stubTop(el: HTMLElement, whenOff: number, whenOn: number) {
+    vi.spyOn(el, "getBoundingClientRect").mockImplementation(() => {
+      const top = el.getAttribute("aria-pressed") === "true" ? whenOn : whenOff
+      return {
+        top,
+        bottom: top + 24,
+        left: 0,
+        right: 80,
+        width: 80,
+        height: 24,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }
+    })
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("scrolls by the chip's drift after a filter that shrinks the list", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+    const label = screen.getAllByRole("button", {
+      name: "Filter by reggaeton",
+    })[0]
+    stubTop(label, 400, 120)
+
+    await userEvent.click(label)
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+    expect(search()).toBe("?tags=3")
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -280)
   })
 })
