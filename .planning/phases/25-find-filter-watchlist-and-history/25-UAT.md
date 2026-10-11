@@ -123,3 +123,7 @@ blocked: 0
     - "Re-run test 7 with EVENT_RETENTION_DAYS=45 so there are rows on both sides of the edge"
   decision: "User chose (2026-10-11): keep D-01 (retention counts from detection time) and clarify the UI. Show the detected date on History event cards (or an end-of-feed retention note), add a detected-recently/released-long-ago regression test, and reword UAT test 7 / the verification check to say retention counts from detection."
   debug_session: ".planning/debug/history-load-more-retention-leak.md"
+
+## Execution Waivers
+
+- waiver: "CI-only race (user decision 2026-10-11). The user accepted running the gap-closure integration suite without -race locally, because cgo is disabled on this Windows box. CI's race job remains the gate. Applies to gap-closure plans 25-11..25-14 only."
