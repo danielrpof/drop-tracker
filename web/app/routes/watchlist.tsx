@@ -21,6 +21,7 @@ import {
   removeWatchlist,
 } from "~/lib/api"
 import { isAddableSource } from "~/lib/sources"
+import { useScrollAnchor } from "~/lib/useScrollAnchor"
 import { useUrlParams } from "~/lib/useUrlParams"
 import {
   CLEAR_FILTER_KEYS,
@@ -151,6 +152,7 @@ export default function Watchlist() {
 
   // Back/Forward changes filters without going through a handler (G4).
   const filterKey = `${view.sort}|${view.tagIds.join(",")}|${view.muted}|${view.custom}`
+  const captureScrollAnchor = useScrollAnchor(filterKey)
   const prevFilterKey = useRef(filterKey)
   useEffect(() => {
     if (prevFilterKey.current === filterKey) return
@@ -454,7 +456,8 @@ export default function Watchlist() {
     scheduleCountAnnouncement()
   }
 
-  function toggleFilterTag(tag: TagRef) {
+  function toggleFilterTag(tag: TagRef, anchor?: HTMLElement) {
+    if (anchor) captureScrollAnchor(anchor)
     tagNamesRef.current.set(tag.id, tag.name)
     const ids = new Set(view.tagIds)
     if (!ids.delete(tag.id)) ids.add(tag.id)

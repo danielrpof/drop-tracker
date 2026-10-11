@@ -551,7 +551,10 @@ describe("TagChips — chip label filter toggle (D-08)", () => {
 
     await userEvent.click(label)
 
-    expect(toggleFilterTag).toHaveBeenCalledWith({ id: 3, name: "reggaeton" })
+    expect(toggleFilterTag).toHaveBeenCalledWith(
+      { id: 3, name: "reggaeton" },
+      label
+    )
     expect(mockAttachTag).not.toHaveBeenCalled()
     expect(mockDetachTag).not.toHaveBeenCalled()
     expect(label).toHaveFocus()

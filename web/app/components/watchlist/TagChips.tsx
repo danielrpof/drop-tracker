@@ -24,7 +24,7 @@ export interface TagActions {
   addTag(entryId: number, tag: TagRef, index?: number): void
   removeTag(entryId: number, tagId: number): void
   filterTagIds: ReadonlySet<number>
-  toggleFilterTag(tag: TagRef): void
+  toggleFilterTag(tag: TagRef, anchor?: HTMLElement): void
 }
 
 // pendingIdCounter backs the temp ids of optimistic chips (D-24).
@@ -190,7 +190,7 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
               aria-pressed={active}
               aria-label={`Filter by ${tag.name}`}
               className="-ml-2 flex h-6 min-w-0 cursor-pointer items-center gap-1 rounded-4xl pr-1 pl-2 hover:bg-foreground/10 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-              onClick={() => actions.toggleFilterTag(tag)}
+              onClick={(e) => actions.toggleFilterTag(tag, e.currentTarget)}
             >
               {active && (
                 <Check aria-hidden="true" className="size-3 shrink-0" />
