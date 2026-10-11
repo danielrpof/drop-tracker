@@ -1,6 +1,7 @@
 import { CoverArt } from "~/components/common/CoverArt"
 import { Badge } from "~/components/ui/badge"
 import type { EventItem } from "~/lib/api"
+import { formatDetectedDate, formatIsoTitle } from "~/lib/format"
 
 // EventCard dispatches on event.event_type to one of three bodies defined
 // below in this same file (D-08): all three share the hero CoverArt, the
@@ -50,6 +51,7 @@ export function EventCard({ event }: EventCardProps) {
   // Same rationale as UNKNOWN_EVENT_BADGE above: the lookup falls back
   // rather than dereferencing undefined for an out-of-union event_type.
   const badge = EVENT_BADGE[event.event_type] ?? UNKNOWN_EVENT_BADGE
+  const detected = formatDetectedDate(event.created_at)
 
   return (
     <div className="flex gap-4 rounded-2xl bg-card p-4 ring-1 ring-foreground/10">
@@ -80,6 +82,18 @@ export function EventCard({ event }: EventCardProps) {
         </div>
         <p className="text-body text-muted-foreground">{event.artist_name}</p>
         <EventCardBody event={event} />
+        {/* Retention counts from detection (Phase 10 D-01), so show that date. */}
+        {detected && (
+          <p className="text-label text-muted-foreground">
+            Detected{" "}
+            <time
+              dateTime={event.created_at}
+              title={formatIsoTitle(event.created_at)}
+            >
+              {detected}
+            </time>
+          </p>
+        )}
       </div>
     </div>
   )

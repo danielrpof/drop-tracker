@@ -174,6 +174,14 @@ export function formatReleaseDate(raw: string): string {
   return raw
 }
 
+// formatDetectedDate renders created_at (the date retention counts from) as
+// a local `D Mon YYYY`, matching formatReleaseDate. Unparseable -> null.
+export function formatDetectedDate(iso: string): string | null {
+  const d = new Date(iso)
+  if (!isValidDate(d)) return null
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+}
+
 // formatPollInterval turns poll_interval_seconds (SYS-02, D-06) into human
 // text for the About block's "Every {…}" row and the first-run copy. Returns
 // a bare phrase with no leading preposition -- both call sites supply their
