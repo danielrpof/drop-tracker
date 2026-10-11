@@ -193,7 +193,7 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 10/14 plans executed
+**Plans:** 11/14 plans executed
 
 Plans:
 **Wave 1**
@@ -226,7 +226,7 @@ Plans:
 
 **UAT gap closure — Wave 1** *(from 25-UAT.md gaps G-25-4, G-25-7, G-25-9, with the user's 2026-10-11 decisions)*
 
-- [ ] 25-11-PLAN.md — A chip-label click anchors the clicked card. `useScrollAnchor` records the chip's on-screen position and scrolls by the drift after the filtered re-render, clamped by the browser on short pages. Includes jsdom tests with stubbed layout for both directions and the disconnected case (G-25-4)
+- [x] 25-11-PLAN.md — A chip-label click anchors the clicked card. `useScrollAnchor` records the chip's on-screen position and scrolls by the drift after the filtered re-render, clamped by the browser on short pages. Includes jsdom tests with stubbed layout for both directions and the disconnected case (G-25-4)
 - [ ] 25-12-PLAN.md — History cards show `Detected {date}` from `created_at`, the date retention counts from (D-01 kept), plus an integration test for "detected recently, released long ago" under a tag filter (G-25-7)
 - [ ] 25-13-PLAN.md — The Deezer search-result button is capped at 40% of the row below lg and truncates its label, and the type line truncates, so the artist name stays readable at 375px and 640px (G-25-9)
 
@@ -275,7 +275,7 @@ Plans:
 ### Phase 27: Paste-a-List Bulk Add
 
 **Goal**: The user can paste a list of artist names and add the right artists in one reviewed batch. They see what each line matched and can fix or skip the doubtful ones, and nothing is added until they confirm.
-**Depends on**: Phase 26 (the confirm step reuses its bulk-endpoint conventions: protected route group, per-item outcomes, refresh without reload)
+**Depends on**: Phase 26 (the confirm step reuses its bulk-endpoint conventions: protected route group, bounded id lists, refresh without reload. It may reuse Phase 26's per-id outcome shape, but it isn't committed to: Phase 27 confirms by external id, and its skip reasons differ)
 **Requirements**: IMPT-01, IMPT-02, IMPT-03, IMPT-04, IMPT-05
 **Success Criteria** (what must be TRUE):
 
@@ -337,7 +337,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
-| 25. Find & Filter — Watchlist and History | 10/10 | In Progress|  |
+| 25. Find & Filter — Watchlist and History | 11/14 | In Progress|  |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |

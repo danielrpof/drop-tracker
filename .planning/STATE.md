@@ -4,17 +4,17 @@ milestone: v1.6
 milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
-status: verifying
-stopped_at: Phase 26 context gathered
-last_updated: "2026-10-11T15:18:18.805Z"
-last_activity: 2026-10-10
+status: executing
+stopped_at: Completed 25-11-PLAN.md
+last_updated: "2026-10-11T16:58:41.266Z"
+last_activity: 2026-10-11
 last_activity_desc: Phase 25 execution started
-state_head: 07285211970754b3a0238e70b2a05065be83cee3
+state_head: a0f885bf8c5f4d645cb0c0ea2f6ded91b2a1604a
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 24
-  completed_plans: 24
+  total_plans: 28
+  completed_plans: 25
   percent: 20
 ---
 
@@ -30,9 +30,9 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
-Plan: 10 of 10
-Status: Phase complete — ready for verification
-Last activity: 2026-10-10 — Phase 25 execution started
+Plan: 2 of 14
+Status: Ready to execute
+Last activity: 2026-10-11 — Phase 25 execution started
 
 ## Performance Metrics
 
@@ -172,6 +172,7 @@ Last activity: 2026-10-10 — Phase 25 execution started
 | Phase 25 P07 | 40 min | 3 tasks | 9 files |
 | Phase 25 P08 | 25 min | 2 tasks | 8 files |
 | Phase 25 P10 | 15min | 2 tasks | 1 files |
+| Phase 25 P11 | 5 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -408,6 +409,7 @@ Recent decisions affecting current work:
 - [Phase 25]: 25-09: History stale artist/tag ids are checked once per source per mount, only after a successful load; a failed fetch keeps the filter and the trigger reads Artist unavailable / Tag unavailable — A failed fetch is not proof an id is stale (UI-SPEC History Tag filter)
 - [Phase 25]: 25-07: Esc on a closed tag-filter popup is cancelled (escape-key reason) so it cannot clear every chip; tags URL param serializes commas as %2C
 - [Phase 25]: 25-08: Custom release types is a set comparison against the default four; chip label click reuses handleTagsChange and the x remains the only detach
+- [Phase 25]: 25-11: only the chip-label path anchors scroll (useScrollAnchor); no expiry on unconsumed anchor — Toolbar toggles have no card to keep; a timer or same-key clear would race the router commit
 
 ### Pending Todos
 
@@ -501,9 +503,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-11T15:18:18.732Z
-Stopped at: Phase 26 context gathered
-Resume file: .planning/phases/26-bulk-edit-remove/26-CONTEXT.md
+Last session: 2026-10-11T16:58:41.164Z
+Stopped at: Completed 25-11-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
