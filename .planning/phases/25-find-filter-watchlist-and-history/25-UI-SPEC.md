@@ -185,7 +185,7 @@ This keeps Phase 24 [R1] intact: a tag chip never takes a hue, a tinted fill, or
 <div class="flex flex-col gap-6 p-8">                          (unchanged)
   header: <h1>Watchlist</h1> ……… [Manage tags]                  (unchanged)
   route-level <div role="status" aria-atomic="true" sr-only>    (unchanged, Phase 24 [R6])
-  SearchBox "Search artists" + SearchResultsColumns              (unchanged, D-01)
+  SearchBox "Search artists" + SearchResultsColumns              (unchanged, D-01; one G-25-9 exception: the Deezer row's disabled button is capped at 40% of the row below lg and truncates its label)
   error | skeletons | "No artists yet"                           (unchanged)
   <section aria-labelledby="watchlist-artists-heading" class="flex flex-col gap-4">   NEW, only when M > 0
     heading row
@@ -396,7 +396,7 @@ announcement per change, and all six modes are visible at once.
 
 ### Router & sticky-state rules
 
-- **Scroll reset (D-12):** `web/app/root.tsx:37` mounts `<ScrollRestoration />`, and react-router 7.18.2 calls `window.scrollTo(0, 0)` on every navigation, push or replace, unless it passes `preventScrollReset: true`. Every filter, sort, and typing change is a navigation, so Watchlist and History write params only through one shared helper that always passes `{ preventScrollReset: true }`, plus `replace: true` where this spec says replace. Otherwise a chip click 60 cards down jumps to the top.
+- **Scroll reset and anchoring (D-12, G-25-4):** `web/app/root.tsx:37` mounts `<ScrollRestoration />`, and react-router 7.18.2 calls `window.scrollTo(0, 0)` on every navigation, push or replace, unless it passes `preventScrollReset: true`. Every filter, sort, and typing change is a navigation, so Watchlist and History write params only through one shared helper that always passes `{ preventScrollReset: true }`, plus `replace: true` where this spec says replace. That stops the router from resetting scroll, but a filter that shrinks the list can leave the page shorter than the old `scrollY`, and the browser then clamps it. So a chip-label click also anchors the clicked chip: `useScrollAnchor` records its `getBoundingClientRect().top` before the tags param is written, and a layout effect scrolls by the drift after the re-render. The clicked card keeps its on-screen position, and on a short page the browser clamps it.
 - **Sticky set (G4):** keep an explicit `stickyIds` set. A card is visible when it matches the filters or `stickyIds.has(id)`, and an in-card edit adds its card's id. Only the G4 user actions clear the set (search text, sort, tag selection, a toggle, Clear filters, a chip-click filter, reload). An `entries` change never clears or recomputes it, because `watchlist.tsx` calls `refresh()` (a full `GET /watchlist`) after add-from-search, after an Undo restore, and after a failed remove.
 - **Adds are sticky (G4):** an artist added from search (`handleAddSearchResult`) or restored by Undo joins `stickyIds` (id from the POST response), so an add under an active filter never succeeds invisibly.
 - **Tag-id validation runs once (D-13):** URL tag ids are checked against the payload-derived set only on the first successful payload load. After that the tag filter changes only by user action or the Manage tags `onDeleted`/`onMerged` callbacks; `refresh()` never mutates it.
@@ -411,7 +411,7 @@ announcement per change, and all six modes are visible at once.
   - With no `tag` param, the trigger reads `All tags`.
   - With a `tag` param, it reads `Tag unavailable` and the server-side filter stays applied until the user picks `All tags`. A failed fetch is not proof the id is stale, so it is never dropped silently.
 - **Selection** composes with Artist and Event type (AND). Changing it resets the accumulated pages and refetches page one, the same as the other two. `filters.tagId` joins the effect deps and the `listEvents` params.
-- **Load more** carries the same `tag_id`. Retention is enforced server-side on every page (SC4), so the UI needs no retention logic of its own.
+- **Load more** carries the same `tag_id`. Retention is enforced server-side on every page (SC4), so the UI needs no retention logic of its own. Retention counts from detection (`created_at`, Phase 10 D-01), not the release date. The feed orders by release date, so Load more can reach releases that are years old but were detected inside the window, and each card shows `Detected {date}` so the user can see the date retention uses (G-25-7).
 
 ### Focus management
 
@@ -483,6 +483,7 @@ posture).
 | Latest-release line, no stored release | `No releases yet` (D-03, G1) |
 | Upcoming line (only when `next_release_date` is set) | `Upcoming: {date}` (for example `Upcoming: 12 Dec 2026`, `Upcoming: Nov 2026`, `Upcoming: 2027`) |
 | Chip label button `aria-label` (constant; state carried by `aria-pressed`) | `Filter by {tag}` |
+| History event card, detection line | `Detected {date}` (for example `Detected 11 Oct 2026`), shown in a `<time>` whose `title` is the full local timestamp (G-25-7) |
 | Chip × `aria-label` | `Remove tag {name} from {artist}` (unchanged, Phase 24) |
 
 ### Empty states (three distinct, D-10 / FEATURES.md)
@@ -636,7 +637,7 @@ No third-party registries are declared. `web/components.json` has `registries: {
 - [ ] Reload and Back reproduce the exact view. Holding a key down in the name filter does not trip a browser history-throttling warning.
 - [ ] The toolbar chip × and pressed-toggle Check meet 3:1 against `#27272a`, measured in the running app.
 - [ ] Unchecking a card's last mute under `Has muted events` leaves the card visible (sticky, G4), and the next filter change removes it.
-- [ ] Scrolled far down the Watchlist, clicking a card chip or toggling a filter keeps the scroll position (no jump to the top).
+- [ ] Scrolled far down the Watchlist, clicking a card's chip label keeps the clicked card where it was on screen (clamped by the browser when the filtered page is shorter than the window), and no chip click or toggle makes the router reset scroll.
 - [ ] With `Has muted events` on, adding an artist from search shows its new card.
 - [ ] With a tag selected, the `refresh()` after adding an artist leaves that tag in the filter.
 

@@ -95,8 +95,8 @@ human_verification:
   - test: "Select a tag in `Tags: any of`, then add an artist from search and let the list refresh. With `Has muted events` on, add an artist. Uncheck an artist's last mute under `Has muted events`."
     expected: "Selected tag survives the refresh; the newly added artist is visible under the active toggle; the edited card stays until the next filter change."
     why_human: "Real add/refresh flows (G4) in the running app (25-07/25-08 human-check)."
-  - test: "Scroll far down a 50+ artist Watchlist, click a card's tag chip label, then toggle `Has muted events`."
-    expected: "Scroll position holds on every click (no jump to top)."
+  - test: "Scroll far down a 50+ artist Watchlist, click a card's chip label far down the list, then toggle `Has muted events`."
+    expected: "The router never resets scroll. After the chip-label click far down a 50+ artist list, the clicked card stays where it was on screen, clamped by the browser as far as the page allows when the filtered list is shorter than the window. The muted toggle only promises that the router never resets scroll; a browser clamp on a short filtered list is expected (user decision 2026-10-11)."
     why_human: "Scroll restoration is browser-only (25-08 human-check)."
   - test: "Measure the toolbar chip × and the pressed-toggle Check against the #27272a chip fill."
     expected: "Both meet 3:1 non-text contrast (about 5.8:1 per UI-SPEC)."
@@ -104,8 +104,8 @@ human_verification:
   - test: "At a 375px viewport: a 32-character unbroken tag selected in the Watchlist tag filter, in a card chip label with the Check icon, and in the History Tag trigger; a long artist name in the History Artist trigger; a long query in Filter watchlist; a malformed latest-release date on a card."
     expected: "Everything truncates (title carries the full label) or wraps without overlapping; the clear × never overlaps query text; focus-within un-truncate still works on chip labels."
     why_human: "Held-out backstop visual checks (25-03 W6, 25-04 W1, 25-06 H1, 25-07 W3, 25-08 W7); jsdom cannot assert layout."
-  - test: "On History, pick a tag whose artists have events on both sides of the retention window, press Load more until it disappears, reload, then press Back. Also try changing the Tag while a Load more is in flight (WR-01)."
-    expected: "No event older than the retention window ever appears; reload keeps the tag; Back restores the previous combination. Note whether a mid-flight filter change leaks rows from the previous filter (known advisory WR-01)."
+  - test: "On History with `EVENT_RETENTION_DAYS=45`, pick a tag, press Load more until it disappears, reload, then press Back. Also try changing the Tag while a Load more is in flight (WR-01)."
+    expected: "Retention counts from detection, the card's `Detected` date, not the release date. No card ever shows a Detected date older than the retention window, even when its release date is years old; reload keeps the tag; Back restores the previous combination. Note whether a mid-flight filter change leaks rows from the previous filter (known advisory WR-01)."
     why_human: "Multi-page UX across the retention edge with real data, plus browser Back (SC4; 25-09 human-check)."
   - test: "Prohibition review (judgment tier, 25-09): confirm Watchlist and History filter state is never shared or cross-linked and the nav links stay param-free."
     expected: "Watchlist owns q/sort/tags/muted/custom, History owns artist/type/tag, nav links carry no params."
@@ -231,10 +231,10 @@ All 7 phase IDs are claimed by at least one plan; REQUIREMENTS.md maps no additi
 1. **One request / no requests while filtering (SC1, SC5).** Test: 50+ artists, network panel, type `beyonce`, hold a key, sort and filter. Expected: one `GET /watchlist`, nothing else, no history-throttling warning, and reload/Back reproduce the view. Why human: needs a real browser network panel.
 2. **Sort stability on real data (SC2).** Test: flip every sort direction where ties and `No releases yet` artists exist. Expected: ties never swap, and no-release artists stay at the bottom both ways. Why human: perceived stability on the real payload.
 3. **Add/refresh under filters (G4).** Test: a selected tag survives an add plus refresh, an artist added under `Has muted events` shows, and unchecking a last mute keeps the card until the next filter change. Why human: these are real add flows.
-4. **Scroll position.** Test: a chip label click and a toggle far down the list. Expected: no jump to the top. Why human: scroll restoration only shows in a browser.
+4. **Scroll position.** Test: click a card's chip label far down the list, then toggle `Has muted events`. Expected: the router never resets scroll, and the clicked card stays where it was on screen (clamped by the browser on a short filtered list, an expected limitation per the 2026-10-11 decision). Why human: scroll restoration only shows in a browser.
 5. **Contrast.** Test: the toolbar chip × and the pressed-toggle Check against #27272a. Expected: 3:1 or better. Why human: needs measurement on the rendered app.
 6. **375px truncation backstops.** Test: 32-character tags in the filter, card chip, and History trigger, a long artist name, a long query, and a malformed date. Expected: text truncates or wraps cleanly. Why human: jsdom can't assert layout.
-7. **History retention edge plus Back (SC4).** Test: page through the retention edge with Load more under a tag, reload, then press Back, and also try changing the tag mid-Load-more (WR-01). Expected: no aged-out events, and the tag persists. Why human: needs a real dataset and browser navigation.
+7. **History retention edge plus Back (SC4).** Test: on History with `EVENT_RETENTION_DAYS=45`, pick a tag, press Load more until it disappears, reload, then press Back, and also try changing the tag mid-Load-more (WR-01). Expected: retention counts from detection, so no card shows a Detected date older than the window (even for years-old releases), and the tag persists. Why human: needs a real dataset and browser navigation.
 8. **Judgment-tier prohibition (25-09).** Test: confirm the two routes never share or cross-link filter state. Status: unverified-prohibition, human review recommended. The LLM verdict is non-authoritative and says it holds.
 
 ### Gaps Summary

@@ -25,7 +25,7 @@ expected: Selected tag survives the refresh after adding an artist; an artist ad
 result: pass
 
 ### 4. Scroll position holds
-expected: Clicking a chip label or toggling `Has muted events` far down a 50+ artist list never jumps to the top.
+expected: The router never resets scroll. After a chip-label click far down a 50+ artist list, the clicked card stays where it was on screen. When the filtered list is shorter than the window, the browser clamps it as far as the page allows. Toggling `Has muted events` never makes the router reset scroll; if the filtered list is then shorter than the window, the browser clamp moving the page is expected (user decision 2026-10-11).
 result: issue
 reported: "it drops to 0 after clicking a tag"
 severity: major
@@ -39,7 +39,7 @@ expected: 32-char tags (tag filter, chip label with Check, History Tag trigger),
 result: pass
 
 ### 7. History tag filter across the retention edge
-expected: No event older than the retention window ever appears through Load more; reload keeps the tag; Back restores the previous combination. Note whether changing the Tag mid-Load-more leaks rows from the previous filter (advisory WR-01).
+expected: Retention counts from detection, the card's `Detected` date, not the release date. Through Load more under a tag, no card ever shows a Detected date older than the retention window, even when its release date is years old. Reload keeps the tag, and Back restores the previous combination. Run with `EVENT_RETENTION_DAYS=45` so rows exist on both sides of the edge. Note whether changing the Tag mid-Load-more leaks rows from the previous filter (advisory WR-01, fixed in 344d69b, so this now just confirms no leak).
 result: issue
 reported: "using load more shows events older than the retention edge, rest pass"
 severity: major
@@ -49,7 +49,7 @@ expected: Watchlist owns q/sort/tags/muted/custom, History owns artist/type/tag,
 result: pass
 
 ### 9. Search query stays readable at 375px (ad-hoc, found during test 6)
-expected: At 375px the watchlist search input shows enough of the typed artist name to read it; the "Search MusicBrainz to add" button truncates/shrinks before the query does.
+expected: At 375px and 640px, each Deezer search-result row shows enough of the artist name to read it, and the `Search MusicBrainz to add` button truncates before the name does.
 result: issue
 reported: "on 375px, when searching an artist, only the first letter shows in the search and the rest is truncated, this is because the entire \"Search Musicbrainz to add\" button isnt truncated, it should be the opposite, have the musicbrainz button truncated shorter so more of the artitst name can be shown in the search"
 severity: minor
@@ -66,7 +66,7 @@ blocked: 0
 ## Gaps
 
 - gap_id: G-25-4
-  truth: "Clicking a chip label or toggling `Has muted events` far down a 50+ artist list never jumps to the top."
+  truth: "The router never resets scroll, and after a chip-label click far down a 50+ artist list the clicked card stays where it was on screen. When the filtered list is shorter than the window, the browser clamps it as far as the page allows. Toggling `Has muted events` never makes the router reset scroll; if the filtered list is then shorter than the window, the browser clamp moving the page is expected (user decision 2026-10-11)."
   status: failed
   reason: "User reported: it drops to 0 after clicking a tag"
   severity: major
@@ -81,11 +81,11 @@ blocked: 0
     - "Product decision: literal scrollY preservation is impossible when the filtered list fits in one screen; recommended contract is 'router never resets scroll; clicked card stays at its on-screen position (clamped)'"
     - "Record the chip's getBoundingClientRect().top before writing the filter, and after the re-render scroll by the difference (useLayoutEffect)"
     - "Browser-level test (not jsdom) that the clicked chip stays roughly in place"
-  decision: "User chose (2026-10-11): anchor the clicked card. After a chip-label filter, the clicked chip/card keeps its on-screen position (the browser clamps it when the page is short). Reword the truth to: the router never resets scroll and the clicked card stays where it was on screen."
+  decision: "User chose (2026-10-11): anchor the clicked card. After a chip-label filter, the clicked chip/card keeps its on-screen position (the browser clamps it when the page is short). Reword the truth to: the router never resets scroll and the clicked card stays where it was on screen. Addendum (2026-10-11): user narrowed test 4 for the Has muted events toggle to promise only that the router never resets scroll. The browser clamp on a short filtered list is a documented, expected limitation, not a failure."
   debug_session: ".planning/debug/chip-click-scroll-reset.md"
 
 - gap_id: G-25-9
-  truth: "At 375px the watchlist search input shows enough of the typed artist name to read it; the \"Search MusicBrainz to add\" button truncates/shrinks before the query does."
+  truth: "At 375px and 640px, each Deezer search-result row shows enough of the artist name to read it, and the `Search MusicBrainz to add` button truncates before the name does."
   status: failed
   reason: "User reported: on 375px, when searching an artist, only the first letter shows in the search and the rest is truncated, this is because the entire \"Search Musicbrainz to add\" button isnt truncated, it should be the opposite, have the musicbrainz button truncated shorter so more of the artitst name can be shown in the search"
   severity: minor
@@ -103,7 +103,7 @@ blocked: 0
   debug_session: ".planning/debug/search-input-squeezed-375.md"
 
 - gap_id: G-25-7
-  truth: "No event older than the retention window ever appears through Load more on the History tag filter"
+  truth: "Retention counts from detection, the card's `Detected` date, not the release date. Through Load more under a tag, no card ever shows a Detected date older than the retention window, even when its release date is years old. Reload keeps the tag, and Back restores the previous combination. Run with `EVENT_RETENTION_DAYS=45` so rows exist on both sides of the edge."
   status: failed
   reason: "User reported: using load more shows events older than the retention edge, rest pass"
   severity: major
