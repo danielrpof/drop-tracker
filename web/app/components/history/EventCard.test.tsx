@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 
 import { EventCard } from "./EventCard"
 import type { EventItem } from "~/lib/api"
+import { formatIsoTitle } from "~/lib/format"
 
 // EventCard imports only the EventItem type from ~/lib/api, never a
 // function -- there is no API boundary here, so this file needs no module
@@ -277,5 +278,47 @@ describe("EventCard", () => {
       "href",
       "https://musicbrainz.org/recording/123e4567-e89b-12d3-a456-426614174000"
     )
+  })
+
+  // G-25-7: retention counts from created_at (Phase 10 D-01), so every card shows it.
+  it.each(["new_release", "guest_feature", "deluxe_change"] as const)(
+    "shows the Detected date from created_at on a %s card",
+    (eventType) => {
+      const event = buildEvent({ event_type: eventType })
+
+      const { container } = render(<EventCard event={event} />)
+
+      const times = container.querySelectorAll("time")
+      expect(times).toHaveLength(1)
+      const time = times[0]
+      expect(time).toHaveTextContent("1 Jan 2026")
+      expect(time).toHaveAttribute("datetime", event.created_at)
+      expect(time).toHaveAttribute("title", formatIsoTitle(event.created_at))
+      expect(time.parentElement).toHaveTextContent(/^Detected 1 Jan 2026$/)
+    }
+  )
+
+  it("shows both the release date and the Detected date for an old release detected recently", () => {
+    const event = buildEvent({
+      release_date: "2015-04-08",
+      created_at: "2026-10-11T12:00:00Z",
+    })
+
+    render(<EventCard event={event} />)
+
+    expect(screen.getByText(/2015-04-08/)).toBeInTheDocument()
+    expect(screen.getByText(/Detected/)).toHaveTextContent(
+      "Detected 11 Oct 2026"
+    )
+  })
+
+  it("omits the Detected line when created_at is unparseable", () => {
+    const event = buildEvent({ created_at: "garbage" })
+
+    const { container } = render(<EventCard event={event} />)
+
+    expect(container.querySelector("time")).toBeNull()
+    expect(screen.queryByText(/Detected/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument()
   })
 })

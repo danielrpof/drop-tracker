@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   formatAbsoluteTime,
   formatClock,
+  formatDetectedDate,
   formatDuration,
   formatIsoTitle,
   formatPollInterval,
@@ -136,4 +137,17 @@ describe("formatReleaseDate", () => {
       expect(formatReleaseDate(raw)).toBe(raw)
     }
   )
+})
+
+describe("formatDetectedDate", () => {
+  it.each([
+    ["2026-10-11T14:43:00Z", "11 Oct 2026"],
+    ["2026-01-01T00:00:00Z", "1 Jan 2026"], // no leading zero on the day
+  ])("renders %s as %s", (iso, expected) => {
+    expect(formatDetectedDate(iso)).toBe(expected)
+  })
+
+  it("returns null for an unparseable string", () => {
+    expect(formatDetectedDate("not a date")).toBeNull()
+  })
 })
