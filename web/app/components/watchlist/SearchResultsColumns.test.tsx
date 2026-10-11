@@ -192,6 +192,54 @@ describe("SearchResultsColumns", () => {
     expect(label.textContent).toBe("Search MusicBrainz to add")
   })
 
+  it("truncates the type line in Deezer and MusicBrainz rows (G-25-9)", () => {
+    const response: SearchResponse = {
+      query: "mixed",
+      sources: {
+        musicbrainz: { status: "ok", artists: [addableArtist] },
+        deezer: { status: "ok", artists: [deezerArtist] },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={null}
+        onAdd={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Artist")).toHaveClass("truncate")
+    expect(screen.getByText("Group")).toHaveClass("truncate")
+  })
+
+  it("leaves the Add to Watchlist and Already watching buttons uncapped", () => {
+    const response: SearchResponse = {
+      query: "mixed",
+      sources: {
+        musicbrainz: {
+          status: "ok",
+          artists: [addableArtist, watchedArtist],
+        },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={[watchlistEntry]}
+        onAdd={vi.fn()}
+      />
+    )
+
+    for (const name of ["Add to Watchlist", "Already watching"]) {
+      const button = screen.getByRole("button", { name })
+      expect(button).not.toHaveClass("max-w-[40%]")
+      expect(button.textContent).toBe(name)
+      expect(button.children).toHaveLength(0)
+    }
+  })
+
   it("falls back to the country code when disambiguation is blank", () => {
     const response: SearchResponse = {
       query: "drake",
