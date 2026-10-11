@@ -164,6 +164,34 @@ describe("SearchResultsColumns", () => {
     ).toBeDisabled()
   })
 
+  it("caps the Deezer button and truncates its label so the name keeps the row (G-25-9)", () => {
+    const response: SearchResponse = {
+      query: "deezer only",
+      sources: {
+        deezer: { status: "ok", artists: [deezerArtist] },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={null}
+        onAdd={vi.fn()}
+      />
+    )
+
+    const button = screen.getByRole("button", {
+      name: "Search MusicBrainz to add",
+    })
+    expect(button).toHaveClass("max-w-[40%]", "lg:max-w-none")
+    expect(button).toHaveAttribute("title")
+    expect(button.children).toHaveLength(1)
+    const label = button.children[0]
+    expect(label.tagName).toBe("SPAN")
+    expect(label).toHaveClass("truncate")
+    expect(label.textContent).toBe("Search MusicBrainz to add")
+  })
+
   it("falls back to the country code when disambiguation is blank", () => {
     const response: SearchResponse = {
       query: "drake",
