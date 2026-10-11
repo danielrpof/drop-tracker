@@ -193,7 +193,7 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 13/14 plans executed
+**Plans:** 14/14 plans executed
 
 Plans:
 **Wave 1**
@@ -232,7 +232,7 @@ Plans:
 
 **UAT gap closure — Wave 2** *(blocked on UAT gap closure Wave 1)*
 
-- [ ] 25-14-PLAN.md — Embedded bundle rebuild, the reworded UI-SPEC D-12, UAT tests 4/7/9, and verification checks 4/7, plus the Definition of Done and a blast-radius gate against `461267f`
+- [x] 25-14-PLAN.md — Embedded bundle rebuild, the reworded UI-SPEC D-12, UAT tests 4/7/9, and verification checks 4/7, plus the Definition of Done and a blast-radius gate against `461267f`
 
 **UI hint**: yes
 
@@ -337,7 +337,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
-| 25. Find & Filter — Watchlist and History | 13/14 | In Progress|  |
+| 25. Find & Filter — Watchlist and History | 14/14 | In Progress|  |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |
