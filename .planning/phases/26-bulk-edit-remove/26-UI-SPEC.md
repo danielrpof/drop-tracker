@@ -102,7 +102,7 @@ The existing card `PreferenceToggles` never pass `indeterminate`, so their rende
 - **A separate selection mode or an "Edit" toggle.** D-09 locks always-visible checkboxes.
 - **`Dialog` for Preferences.** D-07 locks a popover anchored to the bar.
 - **A Popover for add-tag or remove-tag.** A `TagCombobox` nested in a Popover means two stacked portals and two Esc layers. Both tag pickers instead swap **inline into the bar**, mirroring the card's "+ tag" swap (Phase 24). Their listbox flips upward on its own because the bar sits at the viewport bottom.
-- **Undo for bulk remove** (D-15, deferred).
+- **Undo for bulk artist removal** (D-15, deferred). This covers removing artists only; the bulk remove-tag toast does offer Undo (U4).
 - **`variant="destructive"` on the bar's Remove button.** The destructive token on `--popover` text measures about 3.7:1 (24-UI-SPEC [R8] flag), and red is kept for the confirm action. The bar's Remove is neutral `ghost` with `hover:text-destructive`, following the remove-artist × precedent.
 - **`Switch`.** Its checked fill would read as an immediate-apply toggle, and Preferences applies on `Apply` only.
 
@@ -114,15 +114,15 @@ This is the same Tailwind v4 default scale through default utilities that Phases
 
 | Token | Value | Usage in this phase |
 |-------|-------|----------------------|
-| xs | 4px | `gap-1` between the card's selection-checkbox label and the cover art; icon-to-text gap inside bar buttons (Button built-in `gap-1.5` stays as shipped) |
-| sm | 8px | Action bar inner padding `p-2` and `gap-2` between its items; `gap-2` between `Select all visible` and its text; `gap-2` between the popover's checkbox options |
-| md | 16px | Popover built-in `p-4 gap-4`; `gap-4` between the select-all control and the `N of M artists` count; bar viewport inset `bottom-4 px-4` below `sm`; card `p-4` (unchanged) |
+| xs | 4px | `gap-1` between the card's selection-checkbox label and the cover art; icon-to-text gap inside bar buttons (Button built-in `gap-1.5` stays as shipped); `gap-1` between action-bar items below `sm` (U3) |
+| sm | 8px | Action bar inner padding `p-2`, and `gap-2` between its items at `sm` and up; bar viewport inset `bottom-2 px-2` below `sm` (U3); `gap-2` between `Select all visible` and its text; `gap-2` between the popover's checkbox options |
+| md | 16px | Popover built-in `p-4 gap-4`; `gap-4` between the select-all control and the `N of M artists` count; card `p-4` (unchanged) |
 | lg | 24px | Bar viewport inset `sm:bottom-6`; dialog built-in `p-6` (unchanged) |
 | xl | 32px | `p-8` page gutter (unchanged); `sm:px-8` horizontal inset of the bar wrapper, so the bar aligns with the page gutter |
 | 2xl | 48px | Not used |
 | 3xl | 64px | `EmptyState`'s built-in `py-16` (unchanged) |
 
-**Control sizes (multiples of 4):** checkbox box `size-4` (16px); selection hit area `size-11` (44px); bar buttons `h-9` (36px) at `sm` and up and `h-11` (44px) icon-only below `sm`; inline picker input `h-9`, `sm:w-60` (240px); popover `w-80` (320px); remove-tag listbox `max-h-72` (288px).
+**Control sizes (multiples of 4):** checkbox box `size-4` (16px); selection hit area `size-11` (44px); bar buttons `h-9` (36px) at `sm` and up, and icon-only `size-11` (44px) below `sm`, Clear included (U3); inline picker input `h-9`, `sm:w-60` (240px); popover `w-80` (320px); remove-tag listbox `max-h-72` (288px).
 
 **Exceptions:**
 - **44px selection hit area.** Each selection checkbox (card and select-all) is wrapped in a `<label class="flex size-11 shrink-0 cursor-pointer select-none items-center justify-center">`. On the card the label also takes `-ml-3`, so the 16px box sits 18px from the card edge instead of floating 30px in. `select-none` stops a shift-click from selecting text.
@@ -263,8 +263,8 @@ The card's first child becomes a leading group:
 
 ### Action bar (D-10)
 
-**Wrapper:** `fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 pointer-events-none sm:bottom-6 sm:px-8`.
-**Bar:** `<div role="region" aria-label="Selection actions" class="pointer-events-auto flex w-full flex-col gap-2 rounded-2xl bg-popover p-2 text-popover-foreground shadow-2xl ring-1 ring-foreground/10 sm:w-auto sm:max-w-full sm:flex-row sm:items-center motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-150">`
+**Wrapper:** `fixed inset-x-0 bottom-2 z-40 flex justify-center px-2 pointer-events-none sm:bottom-6 sm:px-8`.
+**Bar:** `<div role="region" aria-label="Selection actions" class="pointer-events-auto flex w-full flex-wrap items-center gap-1 rounded-2xl bg-popover p-2 text-popover-foreground shadow-2xl ring-1 ring-foreground/10 sm:w-auto sm:max-w-full sm:flex-nowrap sm:gap-2 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-150">`
 
 **Desktop (≥ 640px), one row:**
 
@@ -275,16 +275,18 @@ The card's first child becomes a leading group:
 - The two `|` are `Separator orientation="vertical"` at `h-6`.
 - Every button is `Button variant="ghost"` at default size (`h-9`) with a leading icon. Remove adds `hover:text-destructive`.
 
-**Phone (< 640px), two rows:**
+**Phone (< 640px), one row (U3):**
 
 ```
-row 1:  [ 12 selected ]                                   [X Clear]
-row 2:  [TagPlus] [TagX] [Sliders] [Trash2]        ← grid grid-cols-4 gap-2, each h-11 w-full, icon-only
+[ 12 selected ]  [TagPlus] [TagX] [Sliders] [Trash2] [X]      ← gap-1; each control size-11 (44px), icon-only
 ```
-- Below `sm`, each action's text is `sr-only`. Use `<span class="sr-only sm:not-sr-only">Add tag</span>`, so the accessible name is identical at every width, and add `title` with the same text.
-- `Clear` keeps its visible text at every width.
+- `{N} selected` is `min-w-0 flex-1` with `px-0` below `sm` and `sm:px-2` above (visible text `{N} selected`, `tabular-nums`). Dropping the padding lets `1000 selected` (about 92px) fit the 103px slot at 375px.
+- The five controls are icon-only `size-11` (44px) `ghost` buttons. Below `sm`, each action's text is `sr-only`: use `<span class="sr-only sm:not-sr-only">Add tag</span>`, so the accessible name is identical at every width, and add `title` with the same text.
+- `Clear` is icon-only `X` below `sm`, with `<span class="sr-only sm:not-sr-only">Clear</span>`, `aria-label="Clear selection"` (unchanged), and `title="Clear selection"`. It keeps its visible text at `sm` and up.
+- Width check at 375px: the bar is 359px, and `p-2` leaves 343px inside. Five 44px controls and five 4px gaps take 240px, which leaves 103px for the count, enough for `1000 selected`.
+- One row is about 60px tall. The earlier phone layout took about 130px, roughly 20% of a 667px viewport.
 
-**Inline mode (add-tag or remove-tag active):** the action group (and, on phone, row 2) is replaced
+**Inline mode (add-tag or remove-tag active):** at `sm` and up, the action group is replaced by `[picker input, sm:w-60] [Cancel]`, and the count and Clear stay where they are. Below `sm`, the four action icons hide and the picker row `[input flex-1] [Cancel]` renders as a second row under `[count … Clear]` (e.g. `order-last basis-full sm:order-none sm:basis-auto` on the picker group); the bar returns to one row when inline mode exits (U3). Only one inline mode can be active at a time, and Preferences cannot be open alongside it.
 by `[picker input, flex-1 sm:w-60] [Cancel]`. The count and Clear stay where they are. Only one inline
 mode can be active at a time, and Preferences cannot be open alongside it.
 
@@ -373,6 +375,8 @@ Anchored to the `Preferences` button: `side="top"`, `align="center"`, `sideOffse
 ### Bulk remove tag (BULK-02, D-02, D-12)
 
 The flow is the same as add tag. The picker offers only tags that at least one selected artist carries, and the request targets the picked tag by **id** (D-22). Artists lacking the tag are unaffected. On success `refresh()` runs and the affected artists (`applied`) are marked sticky, so under an active filter on that tag the cards stay visible with the chip gone (D-13). If the tag no longer exists (deleted or merged concurrently), the server returns **404** `tag not found`: this follows the failure path (the picker closes, focus returns to `Remove tag`, the selection is kept, the remove-tag failure toast fires) and `refresh()` runs (Q10).
+
+**Undo (U4):** when `applied` is non-empty, the success toast carries an `Undo` action (sonner `action`, as the single-artist remove toast in `watchlist.tsx` already does) and stays 8000ms. Undo sends **one** bulk add-tag request with the tag's **name** and the remove response's `applied` ids, through the same bulk add-tag endpoint (normalization, get-or-create, the cap rule D-01). It does not touch the current selection, since a new one may exist, and does not mount the bar. There is no extra UI while it is in flight. On success `refresh()` runs, the restored ids are marked sticky (D-13), and the restore toast fires. Cap skips, possible only if other tags were added in between, use the restore warning. If every `applied` artist has reached 10 tags in the meantime (n = 0), the all-at-cap warning fires instead, and a failure fires the restore failure toast (copy below). Bulk artist removal keeps D-15: no Undo.
 
 ### Bulk preferences (BULK-03, D-05…D-08)
 
@@ -471,7 +475,7 @@ tag names render as **plain JSX text only** (Phase 06 XSS posture).
 | Action 2 | `Remove tag` (`TagX`) |
 | Action 3 | `Preferences` (`SlidersHorizontal`) |
 | Action 4 | `Remove` (`Trash2`) |
-| Clear (visible / `aria-label`) | `Clear` / `Clear selection` |
+| Clear (visible / `aria-label` / `title`) | `Clear` at `sm` and up, icon-only `X` below `sm` with `sr-only` text / `Clear selection` / `Clear selection` |
 | In-flight labels | `Adding…` · `Removing tag…` · `Applying…` · `Removing…` |
 
 ### Inline tag pickers
@@ -518,12 +522,16 @@ The second sentence is the REQUIREMENTS Out of Scope seed-mode disclosure (PITFA
 | Add tag, all applied | `Added “{tag}” to {n} artist{s}.` | — | `toast.success`, default |
 | Add tag, some at cap | `Added “{tag}” to {n} artist{s}.` | `{k} already {k=1 ? "has" : "have"} 10 tags: {names}.` | `toast.warning`, 8000ms |
 | Add tag, every artist at cap (n = 0) | `Couldn't add “{tag}” — every selected artist already has 10 tags.` | `{names}.` | `toast.warning`, 8000ms |
-| Remove tag, applied | `Removed “{tag}” from {n} artist{s}.` (n = artists that carried it) | — | `toast.success`, default |
+| Remove tag, applied | `Removed “{tag}” from {n} artist{s}.` (n = artists that carried it) | — | `toast.success`, 8000ms, `Undo` action when `applied` is non-empty (U4) |
+| Undo remove tag, restored | `Restored “{tag}” on {n} artist{s}.` | — | `toast.success`, default |
+| Undo remove tag, some at cap | `Restored “{tag}” on {n} artist{s}.` | `{k} already {k=1 ? "has" : "have"} 10 tags: {names}.` | `toast.warning`, 8000ms |
+| Undo remove tag, every artist at cap (n = 0) | `Couldn't restore “{tag}” — every artist already has 10 tags.` | `{names}.` | `toast.warning`, 8000ms |
 | Preferences, applied | `Updated preferences for {n} artist{s}.` | — | `toast.success`, default |
 | Remove, succeeded | `Removed {n} artist{s} from your watchlist.` | — | `toast.success`, default, **no action button** |
 | Any of the above with `gone` ids (appended to the description, or as the description when there is none) | — | `{g} {g=1 ? "artist was" : "artists were"} already removed from your watchlist.` | kind unchanged |
 | Add tag failed | `Couldn't add “{tag}” to the selected artists — try again.` | — | `toast.error` |
 | Remove tag failed | `Couldn't remove “{tag}” from the selected artists — try again.` | — | `toast.error` |
+| Undo remove tag failed | `Couldn't restore “{tag}” — try again.` | — | `toast.error` |
 | Preferences failed | `Couldn't update preferences — try again.` | — | `toast.error` |
 | Remove failed | `Couldn't remove the selected artists — nothing was removed. Try again.` | — | `toast.error` |
 | Server rejects the id count (backstop) | `Too many artists selected — select at most {max} and try again.` | — | `toast.error` |
@@ -557,7 +565,7 @@ The surfaces covered:
 
 Copy lives in the Copywriting Contract, so this section covers state coverage only.
 
-Applicable state considerations resolved: **58 rows — 41 covered, 7 backstop, 10 dismissed, 0 unresolved.**
+Applicable state considerations resolved: **59 rows — 42 covered, 7 backstop, 10 dismissed, 0 unresolved.**
 (The post-verification probe added 22 rows; they are at the end of the table.)
 
 | Category | Element(s) | Status | Resolution / Reason |
@@ -582,17 +590,18 @@ Applicable state considerations resolved: **58 rows — 41 covered, 7 backstop, 
 | partial | B2 uncheck with hidden selections | ✅ covered | Unchecking `Select all visible` deselects only the visible selected artists; hidden selections stay and count again once shown (Q9, Q1) |
 | error | B5 tag no longer exists | ✅ covered | A **404** `tag not found` follows the remove-tag failure path (selection kept, failure toast) and `refresh()` resyncs the cards (Q10, D-22) |
 | populated | B1/B2 | ✅ covered | A selected card shows a checked box and a neutral `ring-foreground/40`; select-all is checked, indeterminate, or unchecked by the rule above |
-| populated | B3 bar | ✅ covered | Desktop is one row (`{N} selected`, four ghost actions, Clear); phone is two rows with icon-only `h-11` actions carrying `sr-only` text |
+| populated | B3 bar | ✅ covered | Desktop is one row (`{N} selected`, four ghost actions, Clear); phone is also one row, with icon-only `size-11` actions and Clear carrying `sr-only` text, and inline mode adds a second row (U3) |
 | populated | B6 popover | ✅ covered | Seven checkboxes in the card's order and labels; Apply is disabled until something changes |
 | populated | B7 confirm | ✅ covered | The count is in the title and the action; up to three names and then `and {r} more`; the notes/tags, pending-alert and seed-mode sentence is always present |
 | populated | B8 after action | ✅ covered | The selection clears, the bar unmounts, cards update in place with no reload or skeletons, and focus follows the fallback chain (BULK-05) |
+| interaction | B8 remove-tag Undo | ✅ covered | When `applied` is non-empty, the remove-tag success toast offers `Undo` for 8000ms; Undo re-adds the tag by name to those ids in one bulk add-tag request, leaves the current selection and bar alone, then runs `refresh()` and marks the restored ids sticky, with restore success, cap-warning (including every artist at cap), and failure toasts (U4) |
 | zero-one-many | B7, B8 | ✅ covered | n = 1 uses the artist's name in the confirm title and the singular description; `{s}` pluralization throughout; `formatNameList` covers 1, 2, 3, and 4+ |
 | zero-one-many | B2 | ✅ covered | One visible artist: select-all toggles between unchecked and checked only, never indeterminate |
 | overflow | B5 listbox | ✅ covered | Capped at `max-h-72 overflow-y-auto`; the highlighted option scrolls into view |
 | overflow | B8 page bottom | ✅ covered | The page bottom padding adds `--bulk-bar-clearance`, so the last card scrolls clear of the bar |
 | overflow | B8 toasts | ✅ covered | The Toaster's bottom offset adds `--bulk-bar-clearance`, so failure toasts stack above the bar, never over it |
 | overflow | B1/B3 focus near the bar | ✅ covered | `html` carries `scroll-padding-bottom: var(--bulk-bar-clearance, 0px)`, so a card checkbox focused near the viewport bottom scrolls clear of the bar and focus is never hidden behind it (WCAG 2.4.11, U2) |
-| overflow | B3 at 375px | 🧪 backstop | Two-row layout, four `h-11` icon buttons in `grid-cols-4`, and no horizontal scroll with `{N}` up to 4 digits. Held-out visual test at 375px |
+| overflow | B3 at 375px | 🧪 backstop | One row: `{N} selected` (`min-w-0 flex-1`, `px-0`) and five icon-only `size-11` controls with `gap-1` fit the 343px inner width and leave 103px for the count, so a 4-digit count (`1000 selected`) fits with no horizontal scroll; inline mode adds a second row (U3). Held-out visual test at 375px |
 | overflow | B6 at 375px | 🧪 backstop | The `w-80` popover fits a 343px content width and collision handling keeps it on screen. Held-out visual test at 375px |
 | long-text | B7 names | 🧪 backstop | Three long or unbroken artist names wrap through ConfirmDialog's `wrap-anywhere` description. Held-out visual test with 60-character names |
 | long-text | B8 toast names | 🧪 backstop | A cap-skip description with three long names and a 32-character tag wraps inside the toast with no clipping. Held-out visual test |
@@ -644,6 +653,7 @@ interface BulkOutcome {
 - The response carries no entries. The client always calls `refresh()` after a bulk success and re-derives from it (Q2).
 - Bulk remove returns the removed count and the already-gone ids (D-03).
 - Remove-tag toast copy uses the server's carried count, the number of selected artists that actually carried the tag (Q2). Remove-tag sends a tag id; a missing tag returns 404 `tag not found` (D-22).
+- The `applied` ids from remove-tag are reused for its Undo, which re-adds the tag by name through the bulk add-tag endpoint (U4).
 - The server's 4xx response is the source of truth for the id-count limit `{max}` (CONTEXT "Claude's Discretion": 500–1000). Go and TS cannot share a constant, so the client may mirror the number in `web/app/lib/limits.ts` for the toast copy but must not rely on it.
 
 ---
