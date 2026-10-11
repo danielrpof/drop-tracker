@@ -81,6 +81,7 @@ blocked: 0
     - "Product decision: literal scrollY preservation is impossible when the filtered list fits in one screen; recommended contract is 'router never resets scroll; clicked card stays at its on-screen position (clamped)'"
     - "Record the chip's getBoundingClientRect().top before writing the filter, and after the re-render scroll by the difference (useLayoutEffect)"
     - "Browser-level test (not jsdom) that the clicked chip stays roughly in place"
+  decision: "User chose (2026-10-11): anchor the clicked card. After a chip-label filter, the clicked chip/card keeps its on-screen position (the browser clamps it when the page is short). Reword the truth to: the router never resets scroll and the clicked card stays where it was on screen."
   debug_session: ".planning/debug/chip-click-scroll-reset.md"
 
 - gap_id: G-25-9
@@ -115,9 +116,10 @@ blocked: 0
       issue: "shows only release_date, so the date retention uses is invisible"
     - path: "web/app/routes/history.tsx"
       issue: "nothing in a non-empty feed marks where the retention edge is"
-    - path: "internal/db/retention_test.go (TestRetention_TagFilterComposesWithCutoff)"
+    - path: "internal/httpserver/events_test.go (TestRetention_TagFilterComposesWithCutoff)"
       issue: "uses insertTestEventAt with no release_date, so it never covers 'detected recently, released long ago'"
   missing:
     - "Product decision: (A) keep D-01 and fix the UAT spec and UI (show the detection date or add an end-of-feed retention note, plus an automated test), or (B) switch retention to release_date, which reverses D-01 and hides newly added artists' back catalogues"
     - "Re-run test 7 with EVENT_RETENTION_DAYS=45 so there are rows on both sides of the edge"
+  decision: "User chose (2026-10-11): keep D-01 (retention counts from detection time) and clarify the UI. Show the detected date on History event cards (or an end-of-feed retention note), add a detected-recently/released-long-ago regression test, and reword UAT test 7 / the verification check to say retention counts from detection."
   debug_session: ".planning/debug/history-load-more-retention-leak.md"
