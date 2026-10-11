@@ -1,7 +1,8 @@
 ---
 phase: "26"
 slug: bulk-edit-remove
-status: draft
+status: approved
+reviewed_at: "2026-10-11"
 shadcn_initialized: true
 preset: base-maia
 created: "2026-10-11"
@@ -553,7 +554,8 @@ The surfaces covered:
 
 Copy lives in the Copywriting Contract, so this section covers state coverage only.
 
-Applicable state considerations resolved: **33 applicable — 27 covered, 6 backstop, 0 unresolved.**
+Applicable state considerations resolved: **55 rows — 38 covered, 7 backstop, 10 dismissed, 0 unresolved.**
+(The post-verification probe added 22 rows; they are at the end of the table.)
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
@@ -590,10 +592,33 @@ Applicable state considerations resolved: **33 applicable — 27 covered, 6 back
 | long-text | B8 toast names | 🧪 backstop | A cap-skip description with three long names and a 32-character tag wraps inside the toast with no clipping. Held-out visual test |
 | long-text | B4 inline input | 🧪 backstop | A 32-character tag in the `sm:w-60` inline input scrolls inside the field, and the counter does not push Cancel off the bar. Held-out visual test |
 | interaction | B1 shift-click | 🧪 backstop | Shift+click selects or deselects the inclusive range in visible order, and the anchor resets on a filter or sort change. Held-out unit test of the range helper plus a manual check |
+| empty | B1 no cards | ✅ covered | With no visible cards there are no card checkboxes; the B2 N = 0 row governs |
+| loading | B1, B2 in flight | ✅ covered | Card checkboxes and `Select all visible` are disabled while a bulk request is in flight (see the B3–B7 in-flight row) |
+| partial | B2 some selected | ✅ covered | Shows as `indeterminate` (`aria-checked="mixed"`) when 0 < effective < N; activating it selects every visible artist |
+| partial | B3 count after pruning | ✅ covered | `{N} selected` shows the effective selection after pruning, never the hidden ids (D-11) |
+| populated | B4 options | ✅ covered | Options, `Create “x”`, and keyboard behave exactly as the card's `TagCombobox` (24 D-15); only `onArtist` and the strings differ |
+| overflow | B4 listbox | ✅ covered | Same listbox height cap and scroll behavior as the card's `TagCombobox`, unchanged |
+| zero-one-many | B4, B5 input labels | ✅ covered | The `aria-label`s pluralize on N: `Add tag to 1 selected artist` / `… 12 selected artists` |
+| populated | B5 options | ✅ covered | Each option reads `{name}` and a right-aligned muted `{c} of {N}`, sorted by name |
+| zero-one-many | B5 counts | ✅ covered | With one selected artist every option reads `1 of 1`; the count format never pluralizes |
+| empty | B6 no selection | ✅ covered | The popover can't open with an empty selection, because `Preferences` lives in the bar, which is unmounted at 0 |
+| loading | B8 post-action refresh | ✅ covered | `refresh()` keeps current entries until new rows arrive; no skeletons flash (BULK-05) |
+| long-text | B5 long tag name | 🧪 backstop | A 32-character unbroken tag name truncates with an ellipsis (`min-w-0 truncate`) and the `{c} of {N}` count stays fully visible (`shrink-0`). Held-out visual test at `sm:w-60` and 375px |
+| error | B1, B2 toggling | ➖ dismissed | Selection is client-only state; toggling sends no request and cannot fail |
+| overflow | B1 checkbox | ➖ dismissed | A fixed 44px control; the card's own layout is unchanged by this phase |
+| long-text | B1 checkbox | ➖ dismissed | The artist name appears only in the `aria-label`, never as visible text beside the box |
+| zero-one-many | B1 checkbox | ➖ dismissed | Per-card binary state; there's no count to pluralize |
+| overflow | B2 label | ➖ dismissed | Fixed short label inside a `flex-wrap` heading row that wraps at narrow widths |
+| long-text | B2 label | ➖ dismissed | Fixed copy `Select all visible`; no interpolated text |
+| zero-one-many | B3 count | ➖ dismissed | `{N} selected` reads correctly at 1 and at many; no pluralized noun |
+| long-text | B3 labels | ➖ dismissed | Fixed action labels; count width is covered by the B3 375px backstop |
+| long-text | B6 labels | ➖ dismissed | Fixed option labels and title; `{N}` width is covered by the B6 375px backstop |
+| unclassified | B7 dialog | ➖ dismissed | The probe couldn't classify it; manual review finds loading, error, populated, zero-one-many, and long-text already covered above |
 
 <!-- Status vocabulary:
      ✅ covered   → plain truth string lifted into must_haves.truths
      🧪 backstop  → { statement, verification: backstop }; no evidence at verify → human_needed
+     ➖ dismissed → not applicable, reason given; not lifted
      ⚠ unresolved → explicit planner assumption -->
 
 ---
@@ -629,13 +654,13 @@ No third-party registries are declared. `web/components.json` has `registries: {
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: FLAG (non-blocking: bare `Remove`/`Clear`/`Apply` verbs)
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: FLAG (non-blocking: declared `-ml-3` and vendored `gap-1.5` exceptions)
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
 
 **Verification items to carry into UAT / ui-review:**
 - [ ] Each bulk action issues exactly **one** request (network panel), never one per artist.
@@ -646,4 +671,4 @@ No third-party registries are declared. `web/components.json` has `registries: {
 - [ ] With the bar visible, a failure toast appears above the bar on desktop and at 375px.
 - [ ] Unchecked selection boxes and the indeterminate glyph meet 3:1, measured in the running app.
 
-**Approval:** pending
+**Approval:** approved 2026-10-11 (gsd-ui-checker, 7/7 pass, 2 FLAGs accepted)
