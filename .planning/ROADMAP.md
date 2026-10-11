@@ -193,7 +193,7 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 10/10 plans executed
+**Plans:** 10/14 plans executed
 
 Plans:
 **Wave 1**
@@ -223,6 +223,16 @@ Plans:
 **Wave 6** *(blocked on Wave 5 completion)*
 
 - [x] 25-10-PLAN.md — Embedded bundle rebuild, the phase-closing Definition of Done, and the blast-radius gate
+
+**UAT gap closure — Wave 1** *(from 25-UAT.md gaps G-25-4, G-25-7, G-25-9, with the user's 2026-10-11 decisions)*
+
+- [ ] 25-11-PLAN.md — A chip-label click anchors the clicked card. `useScrollAnchor` records the chip's on-screen position and scrolls by the drift after the filtered re-render, clamped by the browser on short pages. Includes jsdom tests with stubbed layout for both directions and the disconnected case (G-25-4)
+- [ ] 25-12-PLAN.md — History cards show `Detected {date}` from `created_at`, the date retention counts from (D-01 kept), plus an integration test for "detected recently, released long ago" under a tag filter (G-25-7)
+- [ ] 25-13-PLAN.md — The Deezer search-result button is capped at 40% of the row below lg and truncates its label, and the type line truncates, so the artist name stays readable at 375px and 640px (G-25-9)
+
+**UAT gap closure — Wave 2** *(blocked on UAT gap closure Wave 1)*
+
+- [ ] 25-14-PLAN.md — Embedded bundle rebuild, the reworded UI-SPEC D-12, UAT tests 4/7/9, and verification checks 4/7, plus the Definition of Done and a blast-radius gate against `461267f`
 
 **UI hint**: yes
 
