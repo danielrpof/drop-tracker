@@ -164,7 +164,7 @@ describe("SearchResultsColumns", () => {
     ).toBeDisabled()
   })
 
-  it("caps the Deezer button and truncates its label so the name keeps the row (G-25-9)", () => {
+  it("caps the Deezer hint wrapper, titles it, and truncates the button label (G-25-9, WR-04)", () => {
     const response: SearchResponse = {
       query: "deezer only",
       sources: {
@@ -183,8 +183,15 @@ describe("SearchResultsColumns", () => {
     const button = screen.getByRole("button", {
       name: "Search MusicBrainz to add",
     })
-    expect(button).toHaveClass("max-w-[40%]", "lg:max-w-none")
-    expect(button).toHaveAttribute("title")
+    const wrapper = button.parentElement as HTMLElement
+    expect(wrapper.tagName).toBe("SPAN")
+    expect(wrapper).toHaveClass("max-w-[40%]", "shrink-0", "lg:max-w-none")
+    expect(wrapper).not.toHaveClass("pointer-events-none")
+    expect(wrapper.getAttribute("title")).toContain("MusicBrainz identity")
+    expect(button).toBeDisabled()
+    expect(button).toHaveClass("w-full")
+    expect(button).not.toHaveClass("max-w-[40%]")
+    expect(button).not.toHaveAttribute("title")
     expect(button.children).toHaveLength(1)
     const label = button.children[0]
     expect(label.tagName).toBe("SPAN")

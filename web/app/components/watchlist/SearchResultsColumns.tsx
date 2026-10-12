@@ -131,6 +131,9 @@ interface SearchResultRowProps {
   onAdd: (sourceName: string, result: SearchArtist) => Promise<void>
 }
 
+const DEEZER_ADD_HINT =
+  "This project can't yet match a Deezer artist to its MusicBrainz identity -- search MusicBrainz to add this artist and get release detection."
+
 // SearchResultRow renders one result: cover art, name, type, and a
 // one-line-truncated secondary label (disambiguation, falling back to
 // country when disambiguation is blank) when present, all as plain JSX
@@ -189,16 +192,15 @@ function SearchResultRow({
           Already watching
         </Button>
       ) : !canAdd ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled
-          title="This project can't yet match a Deezer artist to its MusicBrainz identity -- search MusicBrainz to add this artist and get release detection."
+        // WR-04: a disabled button gets no pointer events, so the title sits on the wrapper.
+        <span
+          title={DEEZER_ADD_HINT}
           className="max-w-[40%] shrink-0 lg:max-w-none"
         >
-          {/* G-25-9: cap + truncate so the artist name keeps the row below lg */}
-          <span className="truncate">Search MusicBrainz to add</span>
-        </Button>
+          <Button variant="secondary" size="sm" disabled className="w-full">
+            <span className="truncate">Search MusicBrainz to add</span>
+          </Button>
+        </span>
       ) : (
         <Button
           size="sm"
