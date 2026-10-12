@@ -423,6 +423,7 @@ announcement per change, and all six modes are visible at once.
 | Tag filter | Toolbar chip × activated | the chips input |
 | Toggle / Sort | Changed | stays on the control (Select returns focus to its trigger) |
 | Card chip label | Toggled, card still visible | stays on that label button |
+| Card chip label | Toggled, card leaves | Keyboard toggle (Enter or Space on the focused label): a chip label on the fallback anchor card, the same surviving card the scroll anchor uses, preferring a pressed one and focused with `preventScroll`; the `Your artists` heading (`tabIndex={-1}`) when no card survives; never `<body>`. Mouse or touch click: focus is left alone (G-25-12, user decision 2026-10-12) |
 | Clear filters (either button) | Activated | the name filter input |
 | History Tag control | Option committed | the Tag trigger (existing `Combobox<T>` behavior) |
 | History "Show all tags" | Activated | the Tag trigger |
