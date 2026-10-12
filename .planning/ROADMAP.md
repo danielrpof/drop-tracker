@@ -193,7 +193,7 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 18/18 plans executed
+**Plans:** 18/21 plans executed
 
 Plans:
 **Wave 1**
@@ -246,6 +246,18 @@ Plans:
 **Verification gap closure — Wave 3** *(blocked on 25-15, 25-16, 25-17)*
 
 - [x] 25-18-PLAN.md — Embedded bundle rebuild with marker counts, the WR-01..WR-04 decisions recorded in three UI-SPEC lines, the Definition of Done, and a blast-radius gate against `8ccde67`
+
+**UAT gap closure (round 3) — Wave 1** *(from 25-UAT.md gaps G-25-11, G-25-12, G-25-13, with the user's 2026-10-12 decisions; waves are sequential because each plan edits its own 25-UI-SPEC line)*
+
+- [ ] 25-19-PLAN.md — When the clicked card leaves, the scroll anchor falls back to the nearest surviving card in either direction (next before previous at each distance), so a run of leaving cards never collapses the page. Includes hook and route run-case tests and the widened UI-SPEC D-12 rule (G-25-11)
+
+**UAT gap closure (round 3) — Wave 2** *(blocked on 25-19)*
+
+- [ ] 25-20-PLAN.md — A keyboard toggle that removes its card moves focus to the fallback card's pressed chip label, or to the `Your artists` heading when nothing survives. Uses `useEffectEvent` in `useScrollAnchor`, adds `data-chip-label`, and adds the "Toggled, card leaves" focus row (G-25-12)
+
+**UAT gap closure (round 3) — Wave 3** *(blocked on 25-19, 25-20)*
+
+- [ ] 25-21-PLAN.md — The disabled Deezer button gets its hint as an accessible description (sr-only span, per-row `useId`, `aria-describedby`) (G-25-13). Then the embedded bundle is rebuilt with marker counts, and the Definition of Done and a blast-radius gate run against `9d3413f`
 
 **UI hint**: yes
 
