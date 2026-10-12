@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.6
 milestone_name: Watchlist Organization
 current_phase: 25
-current_phase_name: Find & Filter — Watchlist and History
+current_phase_name: find-filter-watchlist-and-history
 status: executing
 stopped_at: Completed 25-14-PLAN.md
-last_updated: "2026-10-11T20:35:40.287Z"
+last_updated: "2026-10-12T19:53:17.045Z"
 last_activity: 2026-10-11
 last_activity_desc: Phase 25 execution started
-state_head: 2c724eece25b091b66a30b6372e28a24ee846d4a
+state_head: 67a698ed7201765dc429fbcdfbbc2da1e933e17e
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 28
+  total_plans: 32
   completed_plans: 28
   percent: 20
 ---
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 
 ## Current Position
 
-Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
+Phase: 25 (find-filter-watchlist-and-history) — READY TO EXECUTE
 Plan: 5 of 14
 Status: Ready to execute
 Last activity: 2026-10-11 - Completed quick task 261011-moj: Amend Phase 26 docs with UI review U1–U4
