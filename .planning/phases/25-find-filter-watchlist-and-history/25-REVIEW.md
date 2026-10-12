@@ -1,188 +1,139 @@
 ---
 phase: 25-find-filter-watchlist-and-history
-reviewed: 2026-10-11T20:41:29Z
+reviewed: 2026-10-12T20:25:38Z
 depth: standard
-files_reviewed: 13
+files_reviewed: 8
 files_reviewed_list:
-  - internal/httpserver/events_test.go
-  - web/app/components/history/EventCard.tsx
-  - web/app/components/history/EventCard.test.tsx
-  - web/app/components/watchlist/SearchResultsColumns.tsx
   - web/app/components/watchlist/SearchResultsColumns.test.tsx
-  - web/app/components/watchlist/TagChips.tsx
-  - web/app/components/watchlist/TagChips.test.tsx
-  - web/app/lib/format.ts
-  - web/app/lib/format.test.ts
-  - web/app/lib/useScrollAnchor.ts
+  - web/app/components/watchlist/SearchResultsColumns.tsx
   - web/app/lib/useScrollAnchor.test.tsx
-  - web/app/routes/watchlist.tsx
+  - web/app/lib/useScrollAnchor.ts
+  - web/app/lib/watchlistView.test.ts
+  - web/app/lib/watchlistView.ts
   - web/app/routes/watchlist.test.tsx
+  - web/app/routes/watchlist.tsx
 findings:
   critical: 0
-  warning: 4
-  info: 5
-  total: 9
+  warning: 3
+  info: 3
+  total: 6
 status: issues_found
 ---
 
-# Phase 25: Code Review Report (gap closure 25-11 to 25-14)
+# Phase 25: Code Review Report (gap closure 25-15 to 25-17)
 
-**Reviewed:** 2026-10-11T20:41:29Z
+**Reviewed:** 2026-10-12T20:25:38Z
 **Depth:** standard
-**Files Reviewed:** 13
+**Files Reviewed:** 8
 **Status:** issues_found
 
-_Prior review (commit 2cd98c2, 40 files) was `issues_found` with 0 critical, 4 warning, and 7 info. This report replaces it and covers only `2cd98c2..HEAD`._
+_The prior report (2026-10-11, 0 critical, 4 warning, 5 info) is replaced. This report covers `efcb6ec..HEAD` for the eight files above._
 
 ## Summary
 
-This is an incremental review of the three gap-closure plans:
-- **25-11:** `useScrollAnchor` and chip-click anchoring, plus clearing sticky cards on Back/Forward.
-- **25-12:** the History card's `Detected` date (`formatDetectedDate`) and a retention integration test.
-- **25-13:** the Deezer "Search MusicBrainz to add" width cap and label truncation.
+This re-review covers gap-closure plans 25-15 (sticky set keyed to the filter, carried across the route's own rewrites), 25-16 (Deezer hint title moved to a wrapper), and 25-17 (fallback scroll-anchor candidates). The four scoped test files pass locally (`vitest run`, 158 tests).
 
-The backend test (`TestRetention_TagFilterKeepsOldReleasesDetectedInWindow`) is sound: it is order-checked, it terminates, cleanup cascades via `ON DELETE CASCADE`, and the time margins are wide. `formatDetectedDate` and the EventCard line are correct; tests pin TZ to UTC.
+Status of the prior warnings:
 
-All the substantive defects are in the 25-11 scroll-anchor and sticky-card interaction:
-- The hook assumes the URL change and the sticky clear land in one commit. React Router 7.18.2 commits navigations inside `startTransition` (`node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6752`). That puts the synchronous `clearSticky()` in an earlier commit. A sticky card the user clicks on can unmount and remount, which loses both the scroll anchor and focus.
-- The anchor is skipped by design when the clicked card leaves the list. That is a reachable path where the G-25-4 collapse comes back.
-- The new `filterKey` effect clears sticky cards on the route's own programmatic URL writes, not only on Back/Forward.
+| Prior | Verdict | Notes |
+|-------|---------|-------|
+| WR-01 (sticky card unmounts before the filter commits) | **Resolved** | `reconcileSticky` runs during render (`watchlist.tsx:95-101`), so the reset lands in the same transition render as the location. The sync `clearSticky()` calls were removed from `handleTagsChange`, `handleFlagChange` and `handleSortChange`. A sticky card's chip click can only add a tag the card carries, so the card matches and stays mounted. The route test at `watchlist.test.tsx:2392` pins `isConnected`, node identity, focus and the `scrollBy` correction, and its RED evidence shows it failed against the old code. |
+| WR-02 (anchor dropped when the clicked card leaves) | **Partially resolved** | Only the two immediate neighbours are tried. If they also leave, the collapse comes back. See WR-01 below. Focus loss on the same path is still unhandled. See WR-03 below. |
+| WR-03 (`filterKey` effect clears on the route's own writes, after paint) | **Resolved** | The post-paint effect is gone. `writeKeepingSticky` and `carrySticky` keep stickies for a replace landing on the target key only. User pushes and Back/Forward pops still clear. Merge and delete route tests cover it (`watchlist.test.tsx:1709, 1740`), and the commit-probe Back test (`2068`) proves the same-commit drop. A Back change that only touches `q` still clears after paint through the `view.q` effect. That is acceptable, because `query` itself also resyncs in that effect. |
+| WR-04 (title unreachable on a disabled button) | **Partially resolved** | Mouse hover now reaches the wrapper's `title`. Moving it off the button removed the hint's accessible description, and touch and keyboard users still have no way to read it. See WR-02 below. |
 
-The 25-13 truncation leans on a `title` that the Button's `disabled:pointer-events-none` makes unreachable.
-
-No security issues found.
+I traced the carry state machine (`reconcileSticky` / `carrySticky`) through these paths: merge, delete, no-op `replaceSelectedTag`, canonicalization after a pop, first-load validation, a same-tick write layered on an unlanded push, and the q debounce. It converges, and it does not keep stickies across a user filter change. I found no security issues.
 
 ## Warnings
 
-### WR-01: A chip click on a sticky card unmounts the card before the filter commits, dropping the scroll anchor and focus
+### WR-01: The fallback anchor only checks the two immediate neighbours, so the G-25-4 collapse returns when a run of cards leaves
 
-**File:** `web/app/routes/watchlist.tsx:441-448, 459-465` (with `web/app/lib/useScrollAnchor.ts:12-18`)
-**Issue:** `toggleFilterTag` captures the chip and then calls `handleTagsChange`. That runs `write()`, which is a router navigation, and then `clearSticky()`. The two updates commit separately:
-- `clearSticky()` is a discrete-event (sync-lane) state update. It commits at the end of the click.
-- The navigation is async inside the router. React Router 7.18.2 then applies the new location inside `React.startTransition`, so it commits later.
+**File:** `web/app/lib/useScrollAnchor.ts:3-10, 12-14, 28-29`; `web/app/lib/useScrollAnchor.test.tsx:217-226`
+**Issue:** `anchorCandidates` returns `[chip, card.nextElementSibling, card.previousElementSibling]`. Tag filtering is any-of (`matchesAnyTag`). When a selected chip is un-pressed, every card that carries only that tag leaves, not just the clicked one.
 
-The first commit therefore renders the **old** filter with stickies cleared. Take a card that was visible only because it was sticky: say the user just removed tag A while filtering by A, and the card still carries B. That commit removes the card.
+With the default name sort, cards that carry only the un-pressed tag are interleaved with the others, so runs of adjacent leavers are common. Example: `?tags=3,7` over ten cards where five carry only tag 3. If the clicked card's next and previous siblings also carry only tag 3, every candidate is disconnected. The layout effect then returns without correcting, which is the original "it drops after clicking a tag" symptom.
 
-The second commit applies the new filter. In this example that is `tags=A,B` with OR semantics (`matchesAnyTag`), so the card matches again and is re-mounted as a **new** DOM node. When `useScrollAnchor`'s layout effect runs on the key change, the captured chip has `isConnected === false`, so no correction is made. Two further effects follow:
-- The page can visibly collapse and re-expand between the two commits.
-- The focused chip button is destroyed, so focus falls to `<body>`. The TagChips contract asserts `label` keeps focus.
-
-No test combines a sticky card with a chip click. The G-25-4 tests only use fresh, non-sticky rows.
-
-**Fix:** Make the sticky invalidation part of the same render as the URL change instead of a separate state write. For example, key the sticky set to the filter it was created under and derive it during render:
-```tsx
-const [sticky, setSticky] = useState<{ key: string; ids: ReadonlySet<number> }>(
-  () => ({ key: filterKey, ids: new Set() })
-)
-const stickyIds = sticky.key === filterKey ? sticky.ids : EMPTY_SET
-
-function markSticky(id: number) {
-  setSticky((prev) => {
-    const ids = prev.key === filterKey ? prev.ids : EMPTY_SET
-    return ids.has(id) ? prev : { key: filterKey, ids: new Set(ids).add(id) }
-  })
+The hook test "calls no scroll API when no candidate survives" (line 217) treats this as the intended outcome. The header comment also overstates the behaviour: "or its nearest surviving neighbour" is really "one of its two adjacent cards".
+**Fix:** Capture every sibling card's top at click time. After the commit, choose the connected one closest in DOM order to the clicked card:
+```ts
+export function anchorCandidates(el: HTMLElement): HTMLElement[] {
+  const card = el.closest("li")
+  if (!card?.parentElement) return [el]
+  const cards = [...card.parentElement.children].filter(
+    (c): c is HTMLElement => c instanceof HTMLElement
+  )
+  const i = cards.indexOf(card)
+  const out: HTMLElement[] = [el]
+  for (let d = 1; d < cards.length; d++) {
+    if (cards[i + d]) out.push(cards[i + d])
+    if (cards[i - d]) out.push(cards[i - d])
+  }
+  return out
 }
-// drop clearSticky() from handleTagsChange/handleFlagChange/handleSortChange
-// and the filterKey effect; keep the q path (query is local state).
 ```
-This also removes the post-paint flash in WR-03. Add a route test: make a card sticky, click one of its chips, and assert `scrollBy` was called and the chip still has focus.
+If measuring every card at click time is a concern, cap `d` at a small window, such as 10. Then change the line-217 test so that a surviving card two positions away is used. Also fix the header comment, or the UI-SPEC D-12 line if the two-neighbour limit is intentional.
 
-### WR-02: The anchor is silently dropped whenever the clicked card leaves the list, so the G-25-4 collapse returns
+### WR-02: Moving `title` to the wrapper strips the Deezer hint's accessible description, and touch and keyboard users still cannot read it
 
-**File:** `web/app/lib/useScrollAnchor.ts:15`, `web/app/routes/watchlist.test.tsx:2182-2210`
-**Issue:** The reworded contract (25-14, UAT test 4) says that after a chip-label click "the clicked card stays where it was on screen." Tag filtering is OR (`matchesAnyTag`). So un-pressing a chip while two or more tags are selected removes every card that carries only that tag, including the clicked one. That is the exact case in `?tags=3,7`, clicking "trap".
+**File:** `web/app/components/watchlist/SearchResultsColumns.tsx:195-203`; `web/app/components/watchlist/SearchResultsColumns.test.tsx:183-194`
+**Issue:** Before 25-16, `title` sat on the native `<button disabled>`. Per accname/HTML-AAM, it was that button's accessible description, so a screen reader in browse mode announced "Search MusicBrainz to add, button, unavailable" followed by the reason. The title now sits on a generic `<span>`. Assistive tech does not reliably expose a `title` on a generic element, and the button has no description left.
 
-When that happens `a.el.isConnected` is false, the hook returns, and the page collapses under the viewport with no compensation. This is the original "it drops after clicking a tag" symptom. The test at line 2182 enshrines this as the intended outcome instead of providing a fallback.
-**Fix:** Capture fallback anchors at click time and use the first one still connected. Candidates are the clicked card's `<li>`, its next and previous sibling cards, and the list heading:
-```ts
-const capture = useCallback((els: HTMLElement[]) => {
-  anchor.current = els.map((el) => ({ el, top: el.getBoundingClientRect().top }))
-}, [])
-// layout effect: const a = anchor.current?.find((x) => x.el.isConnected)
-```
-In `TagChips`/`toggleFilterTag`, pass `[chip, chip.closest("li")?.nextElementSibling, chip.closest("li")?.previousElementSibling]` filtered to elements. Then update the line-2182 test to expect a correction based on the surviving neighbor.
-
-### WR-03: The `filterKey` effect clears sticky cards on the route's own URL writes, not just Back/Forward, and only after paint
-
-**File:** `web/app/routes/watchlist.tsx:153-161` (interacts with `274-286`, `296-298`, `165-184`)
-**Issue:** The comment says the effect exists because "Back/Forward changes filters without going through a handler." But it fires on **any** `filterKey` change, and the route itself rewrites `tags` programmatically in two places:
-- `replaceSelectedTag` runs when Manage tags merges or deletes a selected tag.
-- The canonicalization effect runs `settleTagIds`.
-
-Concrete regression introduced by this diff:
-1. Filter by `rap`.
-2. Remove `rap` from card X. X stays because it is sticky.
-3. Open Manage tags and merge `rap` into `hip-hop`. `replaceSelectedTag(3, 9)` rewrites `tags=9`, `filterKey` changes, and `clearSticky()` runs.
-4. X vanishes, even though the user never changed the filter. Before 2cd98c2 it stayed.
-
-Separately, the effect runs after paint. On Back the first painted frame still shows the stale sticky cards, and they disappear one frame later.
-**Fix:** Preferred: the render-derived sticky set from WR-01 fixes the flash. For the merge case, have `applyTagChange` carry the sticky set across the key it is about to write. Alternatively, set a `selfWriteRef` before `replaceSelectedTag` or the canonical `write`, and skip the clear when the key change came from that write:
-```ts
-const selfWriteRef = useRef(false)
-// in replaceSelectedTag / canonical effect, before write(): selfWriteRef.current = true
-useEffect(() => {
-  if (prevFilterKey.current === filterKey) return
-  prevFilterKey.current = filterKey
-  if (selfWriteRef.current) { selfWriteRef.current = false; return }
-  clearSticky()
-}, [filterKey])
-```
-
-### WR-04: The truncated "Search MusicBrainz to add" label relies on a `title` tooltip that can never appear
-
-**File:** `web/app/components/watchlist/SearchResultsColumns.tsx:192-201`, `web/app/components/watchlist/SearchResultsColumns.test.tsx:167-193`
-**Issue:** Below `lg`, the Deezer button is now capped at `max-w-[40%]` and its label truncates. In a 375px row the cap is about 115px, so the label reads roughly "Search Mus…". At `sm`, each of the two grid columns is about 285px, so the label is similarly cut.
-
-The only full explanation is the `title` attribute. But `buttonVariants` includes `disabled:pointer-events-none` (`web/app/components/ui/button.tsx:7`), and this button is always `disabled`, so hovering never shows the native tooltip. Touch devices have no hover at all. Sighted users below `lg` therefore cannot read either the label or why the action is unavailable. The test asserts `toHaveAttribute("title")` as if it were a working fallback.
-**Fix:** Move the `title` (or a real Tooltip) to a wrapper that receives pointer events, and put the width cap on that wrapper. Or use a short label that does not need truncating below `lg`:
+The test asserts `expect(button).not.toHaveAttribute("title")`, which locks the regression in. The touch gap from the prior review is still open: touch has no hover, and the truncated label, around "Search Mus…" at 375px, is all that touch users see. The disabled button is also not focusable, so keyboard users cannot reach the hint either.
+**Fix:** Keep the wrapper `title` for mouse users, and attach the hint to the button with `aria-describedby`:
 ```tsx
+const hintId = useId()
+// ...
 <span title={DEEZER_ADD_HINT} className="max-w-[40%] shrink-0 lg:max-w-none">
-  <Button variant="secondary" size="sm" disabled className="w-full">
+  <Button variant="secondary" size="sm" disabled className="w-full" aria-describedby={hintId}>
     <span className="truncate">Search MusicBrainz to add</span>
   </Button>
+  <span id={hintId} className="sr-only">{DEEZER_ADD_HINT}</span>
 </span>
 ```
-If you keep the tooltip, change the test to assert the wrapper's `title`.
+In the test, replace `not.toHaveAttribute("title")` with `expect(button).toHaveAccessibleDescription(DEEZER_ADD_HINT_TEXT)`. For touch, consider a visible one-line note under the Deezer column heading, like the existing "unavailable" `<p>`, instead of relying on per-row hover.
+
+### WR-03: When the clicked card leaves the list, the focused chip is destroyed and focus falls to `<body>`
+
+**File:** `web/app/routes/watchlist.tsx:491-497`; `web/app/lib/useScrollAnchor.ts:25-32`
+**Issue:** 25-17 now handles scroll position on the "clicked card leaves" path, but not focus. When a selected chip is un-pressed and its card no longer matches, the focused label button unmounts with the card, and `document.activeElement` becomes `<body>`. A keyboard user (Enter/Space on the chip) is sent back to the top of the tab order.
+
+The UI-SPEC focus table only defines "Card chip label | Toggled, card still visible | stays on that label button", so there is no rule for this case. The previous-card and next-card route tests (`watchlist.test.tsx:2330, 2367`) never assert where focus goes.
+**Fix:** After the scroll correction in the layout effect, move focus to a sensible target if the captured element had focus and is now disconnected. The surviving fallback card's first chip label or the card itself works, or the list heading (`#watchlist-artists-heading`) with `tabIndex={-1}`:
+```ts
+const hadFocus = anchor.current?.[0]?.el === document.activeElement // capture time
+// in the layout effect, after scrollBy:
+if (hadFocus && !candidates[0].el.isConnected) {
+  ;(a.el.querySelector<HTMLElement>("button") ?? a.el).focus({ preventScroll: true })
+}
+```
+Add a "Toggled, card leaves" row to the UI-SPEC focus table, and assert focus in the two WR-02 route tests.
 
 ## Info
 
-### IN-01: The `format.ts` header comment is stale
+### IN-01: Dead stub and a misleading comment in the previous-card route test
 
-**File:** `web/app/lib/format.ts:7-19`
-**Issue:** The header claims "Six formatters, six call sites" and lists them. The module now also exports `formatReleaseDate` and `formatDetectedDate`, so the inventory is wrong. It is also the long header style that CLAUDE.md's comment discipline asks to avoid.
-**Fix:** Replace the inventory with a 1-3 line intent summary. Per-function comments already document each formatter.
+**File:** `web/app/routes/watchlist.test.tsx:2336-2351`
+**Issue:** The comment says "The label detaches, so key the rect on read order: 400 first, then 120". The label is read once at capture time. After the commit it is disconnected and skipped by `find(isConnected)`, so the `120` branch never runs. The test passes because of the `Daddy Yankee` `stubCardTop` alone.
+**Fix:** Drop the read-order mock, or replace it with `expect(label.isConnected).toBe(false)` so the test states why the fallback is used.
 
-### IN-02: One History card mixes two date formats
+### IN-02: `clearFilters` re-derives "will the filter key change" by hand, and neither branch is tested
 
-**File:** `web/app/components/history/EventCard.tsx:86-96` (vs `122`, `176`, `212`)
-**Issue:** The new line renders `Detected 11 Oct 2026`. The release date in all three bodies is still the raw ISO string, `event.release_date ?? "Release date unknown"`, which renders as `2015-04-08`. The `formatDetectedDate` comment says it "match[es] formatReleaseDate", but EventCard never calls `formatReleaseDate`. One card now shows `2015-04-08` directly above `Detected 11 Oct 2026`.
-**Fix:** Render release dates through `formatReleaseDate(event.release_date)` in `NewReleaseBody`, `GuestFeatureBody` and `DeluxeChangeBody`. Then update the `getByText(/2015-04-08/)` assertion.
+**File:** `web/app/routes/watchlist.tsx:517`
+**Issue:** `if (view.tagIds.length === 0 && !view.muted && !view.custom) clearSticky()` duplicates the knowledge that `CLEAR_FILTER_KEYS` minus `q` makes up the URL-owned part of `filterKeyOf`. Adding a key to either list silently breaks the predicate. No route test makes a card sticky and then runs Clear filters (`grep` finds no sticky assertion near any "Clear filters" click).
+**Fix:** Derive the predicate from the key itself, for example `if (filterKeyOf({ ...view, tagIds: [], muted: false, custom: false }) === filterKey) clearSticky()`. Alternatively, call `clearSticky()` unconditionally, since it is idempotent and the landing reset makes it harmless. Add one sticky-then-Clear-filters test for the q-only branch.
 
-### IN-03: The local-calendar behavior of `formatDetectedDate` is untested
+### IN-03: The browser-level checks behind WR-01, WR-02 and WR-04 are still outstanding
 
-**File:** `web/app/lib/format.test.ts:142-153`
-**Issue:** Vitest pins `TZ=UTC` (`web/vitest.config.ts`), so `getDate()` and `getUTCDate()` give identical results. Swapping to UTC accessors, or adopting a different local-day rule, would pass every case. The function's stated intent is a local date.
-**Fix:** Add a case that derives the expectation from local accessors on an instant near midnight. Alternatively, document that local-vs-UTC is covered only by `formatAbsoluteTime`'s existing TZ self-check.
+**File:** `web/app/lib/useScrollAnchor.test.tsx`; `web/app/routes/watchlist.test.tsx:2222-2428`; `web/app/components/watchlist/SearchResultsColumns.test.tsx:167-199`
+**Issue:** All anchor tests stub `getBoundingClientRect` and `scrollBy`. 25-15 D4, 25-16 D2, 25-17 D3 and 25-18 D4 are `human_judgment: true` and deferred to `/gsd-verify-work`. These checks are still unverified:
+- how the hook's `scrollBy` interacts with native `overflow-anchor` (Chromium/Firefox) and with page-end clamping;
+- the native tooltip actually appearing through `disabled:pointer-events-none`.
 
-### IN-04: The sort-announcement tests can pass without cancellation on a slow runner
-
-**File:** `web/app/routes/watchlist.test.tsx:1404-1451`
-**Issue:** `shouldAdvanceTime: true` advances the fake clock with real time. If typing "a" and picking the sort option take more than 500ms of real time, the count announcement fires **before** the sort. The sort message then overwrites it, and "cancels a pending count announcement" passes even if `handleSortChange` stopped clearing `countTimer`.
-**Fix:** Before the sort pick, assert that the timer is still pending, for example `expect(status()).not.toHaveTextContent("Showing")` right after typing. That way a vacuous run fails instead of passing.
-
-### IN-05: G-25-4 has jsdom-only coverage, while the gap's debug plan required a browser-level check
-
-**File:** `web/app/lib/useScrollAnchor.test.tsx`, `web/app/routes/watchlist.test.tsx:2099-2211`
-**Issue:** Every anchor test mocks `getBoundingClientRect` and `scrollBy`. Three things the real failure depends on are never exercised:
-- the two-commit transition ordering (WR-01),
-- native CSS scroll anchoring (`overflow-anchor`),
-- browser clamping on short pages.
-
-The G-25-4 diagnosis listed "Browser-level test (not jsdom) that the clicked chip stays roughly in place" as a required artifact.
-**Fix:** Add a Playwright-style check, or record a manual UAT step that covers a sticky-card chip click and an un-press with two or more tags selected (WR-01, WR-02).
+This carries over prior IN-05. Prior IN-01 to IN-04 (format.ts header, EventCard date mix, TZ-pinned `formatDetectedDate`, sort-announcement timing) were outside 25-15 to 25-17 and are unchanged.
+**Fix:** Run the UAT steps in a real browser before closing the phase: a sticky-card chip click, un-pressing with two or more tags selected (last card, middle card, and a run of adjacent leavers), and Deezer pill hover at 375/640/1024px.
 
 ---
 
-_Reviewed: 2026-10-11T20:41:29Z_
+_Reviewed: 2026-10-12T20:25:38Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
