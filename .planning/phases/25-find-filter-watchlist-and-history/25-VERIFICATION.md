@@ -1,46 +1,52 @@
 ---
 phase: 25-find-filter-watchlist-and-history
-verified: 2026-10-12T20:32:03Z
+verified: 2026-10-12T22:41:48Z
 status: human_needed
-score: 18/21 must-haves verified
+score: 23/24 must-haves verified
 covered_files:
-  - .planning/REQUIREMENTS.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-01-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-01-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-02-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-02-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-03-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-03-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-04-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-04-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-05-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-05-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-06-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-06-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-07-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-07-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-08-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-08-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-09-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-09-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-10-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-10-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-11-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-11-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-12-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-12-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-13-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-13-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-14-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-14-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-15-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-15-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-16-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-16-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-17-PLAN.md
-  - .planning/phases/25-find-filter-watchlist-and-history/25-17-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-18-PLAN.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-19-PLAN.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-20-PLAN.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-21-PLAN.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-01-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-02-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-03-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-04-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-05-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-06-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-07-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-08-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-09-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-10-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-11-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-12-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-13-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-14-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-15-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-16-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-17-SUMMARY.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-18-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-19-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-20-SUMMARY.md
+  - .planning/phases/25-find-filter-watchlist-and-history/25-21-SUMMARY.md
+  - .planning/REQUIREMENTS.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-CONTEXT.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-REVIEW.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-UAT.md
@@ -76,49 +82,37 @@ covered_files:
   - web/app/routes/history.tsx
   - web/app/routes/watchlist.test.tsx
   - web/app/routes/watchlist.tsx
-covered_digest: "v1:sha256:936afd60e0b433d234625edec48053e8537d5d60a8d7a9d5cd84924ec969eb8e"
+covered_digest: "v1:sha256:e7a9a4f63dd3f9851369da1e716c2defbf07ef6e98985b73de70a439c6f5dcca"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
-  previous_status: gaps_found
-  previous_score: 9/11
+  previous_status: human_needed
+  previous_score: 18/21
   gaps_closed:
-    - "G-25-4 sticky path (prior WR-01): a chip-label click on a sticky card keeps the same label element connected and focused, and scrollBy runs once with the drift. The prior verifier's red probe is now the committed route test watchlist.test.tsx:2392, which passes."
-    - "Prior WR-03 regression: per the 2026-10-11 user decision, a Manage tags merge or delete of a selected tag now keeps sticky cards (route tests :1709 and :1740 pass), and the post-paint filterKey effect is gone"
-    - "Prior decision items 10-12 (WR-02, WR-03, WR-04) were decided by the user on 2026-10-11 and implemented in 25-15, 25-16, and 25-17, as recorded in UI-SPEC and CONTEXT G4"
+    - "G-25-11 (review WR-01, user decision 'widen'): anchorCandidates now returns the chip plus every sibling card nearest-first, next before previous at each distance. The prior verifier's A1..E5 probe is now committed as hook and route tests and passes. Prior truth 15 (UNCERTAIN) is closed."
+    - "G-25-12 (review WR-03, user decision 'anchor'): a keyboard toggle that removes its card moves focus to the fallback card's pressed chip label, or to the `Your artists` heading when nothing survives. A mouse click moves no focus. Prior truth 21 (UNCERTAIN) is closed."
+    - "G-25-13 (review WR-02, user decision 'describe'): the disabled Deezer button has DEEZER_ADD_HINT as its accessible description through aria-describedby on a per-row useId sr-only span. The prior regression item is closed."
+    - "G-25-9 layout (prior truth 17, insufficient_spec): UAT test 9 passed on 2026-10-12."
   gaps_remaining: []
-  regressions:
-    - "Deezer hint pill: moving `title` from the disabled <button> to a wrapper <span> (25-16, per the user decision) removed the button's accessible description. Before, the title on the button was its description; now the probe finds none. No must-have names the description, so this is a decision item, not a gap."
+  regressions: []
 human_verification:
-  - test: "UAT test 4 re-test (25-17 and 25-18 human-check). Use a real browser with 50+ artists, scrolled far down the Watchlist. (1) Filter by a tag, remove it from a card that also carries a second tag, then click that card's second chip label. (2) With two tags selected, un-press a chip on the last card that carries only that tag. (3) Do the same on a middle card that has staying cards below it. (4) Toggle `Has muted events`."
-    expected: "(1) The clicked card stays where it was on screen and its label keeps the focus ring. (2) and (3) The next surviving neighbour (or, failing that, the previous one) stays where it was on screen, clamped only when the filtered page is shorter than the window. (4) The router never resets scroll. Also note any fight between the hook's scrollBy and native `overflow-anchor`."
-    why_human: "jsdom has no layout. All anchor tests stub getBoundingClientRect and scrollBy (review IN-03)."
-  - test: "25-18 human-check (3) and (4). Filter by a tag, remove it from a card, then open Manage tags and merge that tag into another, or delete it while another tag stays selected. Separately, make a card sticky under a toggled filter, then press Back."
-    expected: "The edited card stays visible after the merge or delete. Back never shows the stale card, not even for one frame."
-    why_human: "Same-frame paint behaviour in a real browser (the commit-probe route test covers it in jsdom)."
-  - test: "UAT test 7 re-test. On History with `EVENT_RETENTION_DAYS=45`, pick a tag, press Load more until it disappears, reload, then press Back."
-    expected: "No card shows a `Detected` date older than the retention window, even when its release date is years old. Reload keeps the tag, and Back restores the previous combination."
-    why_human: "Multi-page UX on real data plus browser Back. UAT test 7 is still `result: issue` pending this re-test."
-  - test: "UAT test 9 re-test plus 25-16 human-check. Search `Bad Bunny` and view the Deezer column at 375px, 640px, and 1024px, hovering the truncated `Search Mus…` pill."
-    expected: "The artist name is readable and the pill truncates before the name does. Hovering the pill shows the native tooltip with the full hint. At 1024px the full label shows."
-    why_human: "Real widths and native tooltips (insufficient_spec for jsdom)."
-  - test: "Decision (review WR-01, run of adjacent leavers). At `?tags=A,B`, un-press a chip on a card whose next and previous cards also carry only that tag."
-    expected: "Today, no correction runs and the page can collapse under the viewport (verifier probe: cards A1..E5, clicked C3, B2 and D4 leave too, A1 and E5 survive, scrollBy never called). This matches the recorded user decision ('with neither left, no correction runs'). Decide whether to accept it as a documented limitation or widen the search to the nearest surviving card, as review WR-01 proposes."
-    why_human: "Product decision. The locked decision covers only the two immediate neighbours. Interleaved single-tag cards make this common on a 50+ list."
-  - test: "Decision (review WR-03, focus when the clicked card leaves). With two tags selected, press Enter on a card's chip label so that the card leaves the list."
-    expected: "Today focus falls to <body> (verifier probe: activeElement=BODY, label disconnected). The UI-SPEC focus table defines only 'Toggled, card still visible'. The 25-08 truth ('keeps focus on the label button') is unqualified but cannot hold once the label unmounts. Decide on a focus target (the surviving fallback card's chip label, or the list heading) and add a 'Toggled, card leaves' row, or accept the current behaviour."
-    why_human: "Undefined contract. Keyboard users get sent back to the top of the tab order."
-  - test: "Decision (review WR-02, Deezer hint accessible description). Use a screen reader on a Deezer search-result row."
-    expected: "Today the disabled button announces only 'Search MusicBrainz to add, button, unavailable' without the reason (verifier probe: toHaveAccessibleDescription fails), and the test asserts `not.toHaveAttribute(\"title\")`. Decide whether to add `aria-describedby` to an sr-only hint, as review WR-02 proposes, or accept the change."
-    why_human: "A side effect of the WR-04 decision that the user didn't weigh. Touch users also still can't reach the hint, which 25-16 accepted."
+  - test: "G-25-11 re-test, plus review WR-02 (distant survivor). Run the rebuilt binary with 50+ artists, scroll far down, and select two tags. (a) Un-press a chip on a card whose immediate neighbours also leave, a run of two or three on each side. (b) Un-press a tag that removes a long run, five or more cards on each side, so the nearest survivor was below the fold before the click."
+    expected: "(a) The nearest surviving card keeps its on-screen position and the page does not collapse. (b) Today the code pins the survivor at its old viewport offset (`useScrollAnchor.ts:55`), even when that offset was off-screen. The viewport can then show cards from far above the click point, and neither nearest survivor is visible. Record what you see, then decide: accept D-12 literally ('where it was on screen'), or aim the fallback at the click position or clamp it into the viewport, as review WR-02 proposes. Also note any fight with native `overflow-anchor`."
+    why_human: "jsdom has no layout. Every anchor test stubs getBoundingClientRect and scrollBy. The distant-survivor contract is undecided. The committed route test even uses a survivor top of 900, below jsdom's 768px fold, so it pins this behaviour without asserting it. UAT test 4 was passed under a no-browser waiver, before 25-19 widened the search."
+  - test: "G-25-12 re-test. On the rebuilt binary with two tags selected, Tab to a chip label and press Enter (then Space) so that its card leaves. Try it on the last card, a middle card, a run of leaving cards, and a toggle that leaves no card. Then repeat one case with a mouse click."
+    expected: "Focus lands on a pressed chip label of the surviving card the scroll anchor used, with a visible focus ring, and never on <body>. With no survivor, focus goes to the `Your artists` heading. That heading has `outline-none` (review IN-02), so check whether you can tell where focus went. A mouse click moves no focus. If the fallback card ends up off-screen (see the previous item), the focused chip is off-screen too, because it is focused with `preventScroll`. Record whether that happens on a realistic run."
+    why_human: "Real focus-ring visibility, on-screen position after preventScroll, and real browser `detail` values for Enter and Space. The route tests prove the focus target in jsdom only."
+  - test: "G-25-13 re-test, plus review WR-01 (double announcement). With NVDA or VoiceOver, search `Bad Bunny` and read a Deezer result row in browse mode (virtual cursor), then with object navigation."
+    expected: "The disabled `Search MusicBrainz to add` button is announced with its reason (the DEEZER_ADD_HINT sentence), and nothing changes visually. Today the hint lives in a visible-to-AT `sr-only` sibling, so browse mode will likely read the 130-character sentence a second time as plain text, and some readers may expose the wrapper `title` as a third copy. Decide whether to switch the span to `hidden`. That keeps the accessible description, because aria-describedby follows a direct reference into hidden content, but it departs from the literal 'sr-only hint' wording of the decision."
+    why_human: "jsdom has no screen reader. 25-21 coverage D3 is `human_judgment: true`. Whether the hint is read twice depends on the AT."
 ---
 
 # Phase 25: Find & Filter (Watchlist and History) Verification Report
 
 **Phase Goal:** With a 50+ artist watchlist, the user can find any artist or group of artists in seconds, by name, tag, or preference state and in the order they choose, and can narrow the History feed to the same tags.
-**Verified:** 2026-10-12T20:32:03Z
+**Verified:** 2026-10-12T22:41:48Z
 **Status:** human_needed
-**Re-verification:** Yes, after gap-closure plans 25-15 to 25-18 (G-25-4 sticky path; review WR-01 to WR-04 decisions)
+**Re-verification:** Yes. This run follows gap-closure plans 25-19, 25-20, and 25-21, which closed UAT gaps G-25-11, G-25-12, and G-25-13.
 
 ## Goal Achievement
 
@@ -126,144 +120,160 @@ human_verification:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | SC1: typing narrows the list as you type; "N of M artists" always shows | ✓ VERIFIED | Regression check. Full web suite 604/604 (orchestrator gate). `watchlist.test.tsx` passes in my 191-test run. |
-| 2 | SC2: sort by name, date added, or latest release; stable ties; no-release artists last both ways | ✓ VERIFIED | `TestService_List_LatestRelease`, `TestService_ProjectionParity`, and `TestWatchlist_List_LatestRelease` PASS against local Postgres (this run). `watchlistView.test.ts` passes. |
-| 3 | SC3: tag, muted, and custom filters combine with search and sort; zero matches gives one Clear filters | ✓ VERIFIED | Regression check. Route and view suites pass, and the filter code paths are unchanged apart from the sticky handling. |
-| 4 | SC4: History tag filter alongside existing filters, includes removed artists, never past retention on first page or Load more | ✓ VERIFIED | `TestListEvents_TagFilter`, `TestRetention_TagFilterComposesWithCutoff`, `TestRetention_TagFilterKeepsOldReleasesDetectedInWindow`, `TestListEvents_TagFilterComposesWithOtherFilters`, and `TestHasOlderEvents_*` PASS (this run). No Go, SQL, or events change since 8ccde67. |
-| 5 | SC5: one request on open, none for search, sort, or filter | ✓ VERIFIED | Regression check. SC5 route test passes. |
-| 6 | G-25-4 sticky path (25-15 T1, prior gap): a chip click on a sticky card keeps the same label connected and focused, and scrollBy runs once with the drift | ✓ VERIFIED | `watchlist.test.tsx:2392` replays the prior red probe exactly (`/?tags=3`, detach reggaeton, click `Filter by trap`). It asserts `?tags=3%2C7`, `isConnected`, the same node, `toHaveFocus`, and `scrollBy(0,-280)` once. It passes. The sync `clearSticky()` was removed from `handleTagsChange`/`handleFlagChange`/`handleSortChange` (`watchlist.tsx:475-507`). |
-| 7 | Sticky set keyed to the filterKey and reconciled during render; dropped in the same render as any G4 or Back/Forward filter change | ✓ VERIFIED | `watchlist.tsx:89-101` calls `reconcileSticky(sticky, {key, loc, replace})` during render. The commit-probe test `:2068` asserts the first layout commit after Back already excludes the stale card. Passes. |
-| 8 | Turning a filter off again never revives a previously sticky card | ✓ VERIFIED | `:2113` passes. The design note in 25-15 explains why it uses a render-time reset rather than a derived `key === filterKey`. |
-| 9 | WR-03 decision: the route's own tag rewrites (merge/delete, first-load validation, canonicalization) carry stickies | ✓ VERIFIED | Four `writeKeepingSticky(` call sites (`writeTagIds`, canonical effect, `replaceSelectedTag`). Route tests `:1709` (merge) and `:1740` (delete) pass, and the follow-up toggle in `:1709` drops the card. |
-| 10 | A carry lives only until its first landing and applies only to a replace landing on its target | ✓ VERIFIED | `watchlistView.ts:197-220` is pure. Unit tests F-I in `watchlistView.test.ts` pass. The production replace flag comes from `useNavigationType() === NavigationType.Replace`, and every G4 write is a push (`write(...)` with no `replace`). |
-| 11 | Typing clears stickies in the same render; Clear filters clears explicitly only when no URL axis is active | ✓ VERIFIED | `handleQueryChange` batches `setQuery` with `clearSticky()`, and test `:1198` passes. With URL axes active, Clear filters is a push that changes filterKey, the same drop mechanism tests `:1469`/`:2113` exercise. The q-only branch has no test (review IN-02, advisory). Its effect is effectively unobservable, because no filter remains to hide a card. |
-| 12 | Router contract unchanged; every write passes preventScrollReset | ✓ VERIFIED | `useUrlParams.ts` was last changed in 115e13f (25-04). `urlWriteOptions` always returns `preventScrollReset: true`. |
-| 13 | WR-04 decision (25-16): the wrapper span carries the title and the 40% cap; the button gets `w-full`, keeps the truncating span, and keeps the exact accessible name | ✓ VERIFIED | `SearchResultsColumns.tsx:196-203`. The test `caps the Deezer hint wrapper, titles it...` passes, and `getByRole(name: "Search MusicBrainz to add")` resolves. `ui/button.tsx` is unchanged. See the decision item for the lost description. |
-| 14 | WR-02 decision (25-17): candidates are chip, next card, previous card; the first connected one wins; a chip's own drift wins; no candidate means no scroll call; the API shape is unchanged | ✓ VERIFIED | `useScrollAnchor.ts:5-32`. The hook fallback cases and the `anchorCandidates` tests pass. Route tests `:2330` (previous neighbour, `scrollBy(0,-200)`) and `:2367` (next neighbour, `scrollBy(0,-400)`) pass. Only `window.scrollBy` is used. |
-| 15 | 25-17 T2: when the clicked card leaves, a surviving neighbour holds its position "so the page no longer collapses" | ? UNCERTAIN (decision) | Holds when an immediate neighbour survives. A verifier probe at `?tags=3,7` (A1[3], B2..D4[7], E5[3]; un-press C3's trap) gave `shown=[A1,E5]`, `scrollBy` calls `[]`. The collapse returns for a run of adjacent leavers. This matches the recorded decision text (UI-SPEC D-12: "with neither left, no correction runs"), so it is escalated as a decision rather than failed. |
-| 16 | G-25-7: retention counts from detection; cards show `Detected {date}` | ✓ VERIFIED | Regression check. `TestRetention_TagFilterKeepsOldReleasesDetectedInWindow` PASS. EventCard and format suites pass in the full suite. Bundle `Detected` count is 3 (unchanged). |
-| 17 | G-25-9: at 375 and 640px the Deezer row shows a readable name and the pill truncates first | ⚠️ insufficient_spec → human | The class contract is verified (truth 13). Readability is a layout truth, routed to UAT test 9. |
-| 18 | 25-18: embedded SPA rebuilt with all four fixes | ✓ VERIFIED | Marker counts vs 8ccde67: `carryTo` 0→5, `previousElementSibling` 0→1, `w-full` 39→40. No `web/app` commit after 24d8aaa. `go build ./cmd/server` OK (orchestrator). |
-| 19 | 25-18: UI-SPEC (3 lines) and CONTEXT G4 (1 line) record the decisions; UAT and VERIFICATION left untouched by the executor | ✓ VERIFIED | `git diff -U0 8ccde67` shows exactly the three UI-SPEC bullets and the one amended CONTEXT G4 bullet. `25-UAT.md` and `25-VERIFICATION.md` have no diff since 8ccde67. |
-| 20 | 25-18: Definition of Done gates and empty blast radius | ✓ VERIFIED | The blast-radius diff vs 8ccde67 (`*.go`, queries, internal/db, internal/events, go.mod/sum, package files, ui/, useUrlParams, root.tsx, TagChips.tsx) is empty. Typecheck and prettier are clean (this run). Go 25/25 packages and web 604/604 pass (orchestrator). Local `-race` is skipped under the accepted CI-only exception. |
-| 21 | D-08 / 25-08 T: the chip label keeps focus on itself | ? UNCERTAIN (decision) | Holds whenever the card stays (truth 6 and the 25-08 tests). When the clicked card leaves, the probe shows the label disconnected and `activeElement=BODY`. The UI-SPEC focus table scopes the rule to "card still visible" and defines no target for "card leaves", so this is escalated as a decision. The behaviour dates from 25-08 and was not introduced by 25-15 to 25-18. |
+| 1 | SC1: typing narrows the list as you type, and "N of M artists" always shows | ✓ VERIFIED | Regression check. Full web suite exit 0 in this run (coverage 95.34/90.84/96.12/97.16). UAT 1 pass. |
+| 2 | SC2: sort by name, date added, or latest release, with stable ties and no-release artists last in both directions | ✓ VERIFIED | Re-run this run against local Postgres: `TestService_List_LatestRelease`, `TestService_ProjectionParity`, and `TestWatchlist_List_LatestRelease` PASS. UAT 2 pass. |
+| 3 | SC3: tag, muted, and custom filters combine with search and sort, and zero matches gives one Clear filters | ✓ VERIFIED | Regression check. Route and view suites pass (209/209 in the scoped run). UAT 3 pass. |
+| 4 | SC4: the History tag filter works alongside the existing filters, includes removed artists, and never goes past retention on the first page or on Load more | ✓ VERIFIED | Re-run this run: `TestListEvents_TagFilter`, `TestRetention_TagFilterComposesWithCutoff`, `TestRetention_TagFilterKeepsOldReleasesDetectedInWindow`, `TestListEvents_TagFilterComposesWithOtherFilters`, and `TestHasOlderEvents_*` PASS. UAT 7 pass. No Go, SQL, or events change since `9d3413f`. |
+| 5 | SC5: one request on open, and none for search, sort, or filter | ✓ VERIFIED | Regression check. The SC5 route test passes. UAT 1 pass. |
+| 6 | G-25-4 sticky path: a chip click on a sticky card keeps the same label connected and focused | ✓ VERIFIED | Regression check. The route test `keeps a sticky card's chip anchored and focused...` passes. `watchlist.tsx` changed only in 25-20's focus wiring. |
+| 7 | The sticky set is reconciled during render and dropped in the same render as a G4 or Back/Forward filter change | ✓ VERIFIED | Regression check. The commit-probe route test passes. |
+| 8 | Turning a filter off again never revives a sticky card | ✓ VERIFIED | Regression check. Passes. |
+| 9 | WR-03 decision: the route's own tag rewrites carry stickies | ✓ VERIFIED | Regression check. Merge and delete route tests pass. UAT 10 pass. |
+| 10 | A carry lives only until its first landing | ✓ VERIFIED | Regression check. `watchlistView.test.ts` F-I pass. |
+| 11 | Typing clears stickies in the same render | ✓ VERIFIED | Regression check. Passes. |
+| 12 | The router contract is unchanged, and every write passes preventScrollReset | ✓ VERIFIED | `git diff --name-only 9d3413f -- web/app/lib/useUrlParams.ts` is empty. `useUrlParams.test.tsx` passes. |
+| 13 | WR-04 decision: the wrapper span carries the title and the 40% cap, and the button keeps its accessible name | ✓ VERIFIED | `SearchResultsColumns.tsx:197-211` is unchanged apart from the 25-21 additions. The name query resolves. UAT 9 pass. |
+| 14 | Fallback rules: a connected chip wins, no surviving candidate means no scroll call, a zero drift calls nothing, and the capture stays backward compatible | ✓ VERIFIED | `useScrollAnchor.ts:49-57`. The pre-existing hook cases pass unedited. The new parameters `onFocusLost?` and `viaKeyboard?` are optional. |
+| 15 | G-25-11: when the clicked card leaves, the anchor falls back to the nearest survivor in either direction, next before previous at each distance, with no cap. A run of adjacent leavers no longer collapses the page. | ✓ VERIFIED | `anchorCandidates` walks outward over `card.parentElement.children` (`useScrollAnchor.ts:5-19`). These tests pass: hook `run of leaving cards (G-25-11)` (2 cases), `anchorCandidates` ordering (`[chip, D4, B2, E5, A1]`), and route `corrects by the nearest survivor's drift when a run of cards leaves (G-25-11)` (`?tags=7`, `[Arcangel, Eladio Carrion]`, `scrollBy(0,-600)` once). 25-19 SUMMARY records the RED run (5 failed before the change). The distant-survivor behaviour is a decision item (review WR-02), not a breach of this truth. |
+| 16 | G-25-7: retention counts from detection, and cards show `Detected {date}` | ✓ VERIFIED | `TestRetention_TagFilterKeepsOldReleasesDetectedInWindow` PASS (this run). UAT 7 pass. |
+| 17 | G-25-9: at 375 and 640px the Deezer name is readable and the pill truncates first | ✓ VERIFIED (human) | UAT test 9 `result: pass` (2026-10-12). This closes the prior insufficient_spec item. |
+| 18 | G-25-12: a keyboard toggle that removes its card moves focus to a chip label on the fallback anchor card, preferring a pressed one, or to the tabIndex -1 `Your artists` heading when no card survives, and never to <body> | ✓ VERIFIED | `watchlist.tsx:195-205` uses constant selectors and `(target ?? headingRef.current)?.focus({ preventScroll: true })`. The heading (`:599-606`) has `tabIndex={-1}` and stays mounted while `entries.length > 0`, including the filtered-to-zero state. Route tests pass: last card → previous card's pressed label, middle card → next card's, the run case lands on the scroll-anchor card, and no survivor → heading. This is a behaviour-dependent truth, and the tests exercise the focus transition. |
+| 19 | G-25-12 scope: focus moves only for a keyboard toggle (`detail === 0`) when the label held focus at click time and focus actually fell to the document | ✓ VERIFIED | `TagChips.tsx:200` passes `e.detail === 0`. The hook records `viaKeyboard && el.contains(document.activeElement)` and gates on `!captured.el.isConnected && (active is body or null)` (`:45, :58-65`). These tests pass: hook `onFocusLost` stays quiet for mouse (detail 1), never-focused, card-stays, and focus-moved-away; route `a mouse click that removes the card moves no focus`; TagChips `Enter on the focused label reports a keyboard toggle`. |
+| 20 | G-25-12: the focus move uses preventScroll and runs after the scroll correction | ✓ VERIFIED | `scrollBy` (`:56`) runs before `reportFocusLost` (`:64`) in the same layout effect, and the call site uses `preventScroll: true`. Hook test `reports the surviving card after the scroll correction for a keyboard capture` passes. The callback goes through `useEffectEvent`, so the effect stays keyed on `[key]`. |
+| 21 | G-25-13: the disabled Deezer button has DEEZER_ADD_HINT as its accessible description through aria-describedby on a per-row useId sr-only span, with the name and the wrapper title and cap unchanged. Ids are unique per row, and the Add and Already watching buttons have no description. | ✓ VERIFIED | `SearchResultsColumns.tsx:161, 206, 211-213`. Test `:200` asserts `toHaveAccessibleDescription(DEEZER_ADD_HINT)`. `describes each Deezer button with its own sr-only hint (G-25-13)` checks distinct ids. Test `:286` asserts `not.toHaveAttribute("aria-describedby")` on the other buttons. All pass. |
+| 22 | G-25-13: a real screen reader announces the reason, once and without a visual change | ? UNCERTAIN (human) | The accname mechanism is verified (truth 21), but real AT output can't be checked here (25-21 D3 is `human_judgment: true`). Review WR-01 predicts a duplicate browse-mode read because the span is `sr-only`, not `hidden`. See human item 3. |
+| 23 | UI-SPEC records all three decisions | ✓ VERIFIED | `git diff -U0 9d3413f -- 25-UI-SPEC.md` shows 2 removed and 3 added lines. The D-12 bullet now carries `widened to the nearest surviving card by G-25-11, user decision 2026-10-12` (the old `with neither left` text is gone). Line 426 adds the `Card chip label \| Toggled, card leaves` row right after `Toggled, card still visible`. The page-order note carries `G-25-13, user decision 2026-10-12` (count 1). |
+| 24 | 25-21: the embedded SPA is rebuilt with all three fixes, the DoD gates pass, and the blast radius is empty | ✓ VERIFIED | Bundle markers vs `9d3413f`: `parentElement` 9→10, `data-chip-label` 0→3, `aria-describedby` 3→4. `watchlist-*.js` contains `toggleFilterTag(n,e.currentTarget,e.detail===0)` and `preventScroll:!0`. The bundle commit `5358e5b` follows the last `web/app` commit `69d6f9e`. The blast-radius diff (`*.go`, queries, internal/db, internal/events, go.mod/sum, package files, ui/, useUrlParams, root.tsx, CONTEXT) is empty. Only the eight gap-plan `web/app` files changed. In this run: typecheck clean, prettier clean, full web suite exit 0 with thresholds met. Go vet, golangci-lint, the coverage gate (90.32%), and sqlc-check come from 25-21-SUMMARY. No Go source changed, so the prior gate state carries. Local `-race` is skipped under the recorded "CI-only race extended" waiver. |
 
-**Score:** 18/21 truths verified (0 present but behavior-unverified; 2 uncertain, decision; 1 insufficient_spec, human).
+**Score:** 23/24 truths verified (0 present but behavior-unverified; 1 uncertain, routed to human).
+
+### Advisory (New Scope, Unevidenced)
+
+None. Both review warnings are in files this round modified, and both reproduce from the code, so they are reported as Warnings below rather than as advisories. Neither is a Blocker.
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `web/app/routes/watchlist.tsx` | render-time `reconcileSticky`, `writeKeepingSticky` | ✓ VERIFIED | Contains `reconcileSticky(` (1) and `writeKeepingSticky(` (4 call sites), and imports `NavigationType`. No `prevFilterKey` effect remains. |
-| `web/app/lib/watchlistView.ts` | `StickyState`, `reconcileSticky`, `carrySticky`, `EMPTY_IDS` | ✓ VERIFIED | All four exported, pure (no router import). Used by the route. |
-| `web/app/lib/watchlistView.test.ts` | unit tests F-I | ✓ VERIFIED | Pass |
-| `web/app/routes/watchlist.test.tsx` | sticky chip, Back commit probe, toggle-off, merge/delete, fallback neighbours | ✓ VERIFIED | All named tests are present and pass |
-| `web/app/lib/useScrollAnchor.ts` | `anchorCandidates` plus the first-connected correction | ✓ VERIFIED | 35 lines. Imported by `watchlist.tsx` (`useScrollAnchor(filterKey)`). |
-| `web/app/lib/useScrollAnchor.test.tsx` | fallback order, all-gone, chip wins, shape | ✓ VERIFIED | Pass |
-| `web/app/components/watchlist/SearchResultsColumns.tsx` | `DEEZER_ADD_HINT`, titled capped wrapper | ✓ VERIFIED | `title={DEEZER_ADD_HINT}` count 1 |
-| `internal/webassets/build/client` | rebuilt bundle | ✓ VERIFIED | Marker counts above |
+| `web/app/lib/useScrollAnchor.ts` | `anchorCandidates` outward walk; `useScrollAnchor(key, onFocusLost?)`; `useEffectEvent` | ✓ VERIFIED | 69 lines, contains `parentElement` and `useEffectEvent`, uses only `window.scrollBy` (no `scrollTo` or `scrollIntoView`). Imported and used by `watchlist.tsx:205`. |
+| `web/app/lib/useScrollAnchor.test.tsx` | run cases, ordering cases, onFocusLost cases | ✓ VERIFIED | All pass |
+| `web/app/components/watchlist/TagChips.tsx` | `data-chip-label`, `e.detail === 0` | ✓ VERIFIED | `:196, :200` |
+| `web/app/components/watchlist/TagChips.test.tsx` | viaKeyboard false for mouse, true for Enter | ✓ VERIFIED | Pass |
+| `web/app/routes/watchlist.tsx` | `focusAfterCardLeaves`, `toggleFilterTag(tag, anchor?, viaKeyboard?)`, heading `tabIndex={-1}` | ✓ VERIFIED | `:195-205, :500-506, :599-606` |
+| `web/app/routes/watchlist.test.tsx` | G-25-11 run route case; G-25-12 describe (5 cases) | ✓ VERIFIED | All pass |
+| `web/app/components/watchlist/SearchResultsColumns.tsx` | exported `DEEZER_ADD_HINT`, `useId`, `aria-describedby={hintId}`, sr-only span | ✓ VERIFIED | `:161, :206, :211-213` |
+| `web/app/components/watchlist/SearchResultsColumns.test.tsx` | accessible description, id uniqueness, other buttons undescribed | ✓ VERIFIED | Pass |
+| `25-UI-SPEC.md` | D-12 widened bullet, focus row, page-order note | ✓ VERIFIED | See truth 23 |
+| `internal/webassets/build/client` | rebuilt bundle | ✓ VERIFIED | See truth 24 |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| router location commit | sticky reconcile | `reconcileSticky(...)` → `setSticky` during render → `selectVisible(..., stickyIds)` | ✓ WIRED | `watchlist.tsx:95-101, 471` |
-| `replaceSelectedTag`, `writeTagIds`, canonical effect | sticky carry | `writeKeepingSticky` → `carrySticky(prev, from, to)` inside the synchronous `write` mutator | ✓ WIRED | `useUrlParams.write` calls `mutate(next)` synchronously before `setParams` |
-| `useNavigationType()` | replace flag | `navigationType === NavigationType.Replace` | ✓ WIRED | `watchlist.tsx:98` |
-| `toggleFilterTag` | `useScrollAnchor` | `captureScrollAnchor(anchor)` → `anchorCandidates` → layout effect on `filterKey` → `scrollBy` | ✓ WIRED | The prior PARTIAL (sticky remount) is closed by truth 6 |
-| Wrapper span title | native tooltip | wrapper has no `pointer-events-none` | ✓ WIRED (hover → human) | |
-| `web/` | `internal/webassets/build/client` | make web recipe | ✓ WIRED | |
+| `TagChips` label onClick | `toggleFilterTag` → `captureScrollAnchor` | `actions.toggleFilterTag(tag, e.currentTarget, e.detail === 0)` → `captureScrollAnchor(anchor, viaKeyboard)` | ✓ WIRED | `TagChips.tsx:200`, `watchlist.tsx:506` |
+| `captureScrollAnchor` | `anchorCandidates` | capture maps every candidate to `{el, top}` | ✓ WIRED | `useScrollAnchor.ts:41-44` |
+| `useScrollAnchor(filterKey, focusAfterCardLeaves)` | layout effect | `useEffectEvent` → `onFocusLost(a?.el ?? null)` after `scrollBy` | ✓ WIRED | `useScrollAnchor.ts:34-36, 49-66` |
+| `focusAfterCardLeaves` | chip label button | `querySelector('[data-chip-label][aria-pressed="true"]')`, then `[data-chip-label]`, then `headingRef` | ✓ WIRED | Constant selectors only |
+| disabled Deezer `Button` | sr-only hint span | `aria-describedby={hintId}` ↔ `id={hintId}` | ✓ WIRED | `toHaveAccessibleDescription` passes |
+| `web/` | `internal/webassets/build/client` | make web recipe | ✓ WIRED | Bundle markers present |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 |----------|---------------|--------|--------------------|--------|
-| Watchlist list | `visible` | `listWatchlist()` → `entries` → `selectVisible(entries, view, stickyIds)` | Yes | ✓ FLOWING |
-| Sticky set | `stickyIds` | `markSticky` from in-card edits and adds → `reconcileSticky` | Yes | ✓ FLOWING |
-| Scroll anchor | candidate tops | live `getBoundingClientRect` | Yes (stubbed in jsdom) | ✓ FLOWING |
+| Watchlist list | `visible` | `listWatchlist()` → `selectVisible(entries, view, stickyIds)` | Yes | ✓ FLOWING |
+| Scroll anchor | candidate tops | live `getBoundingClientRect` over the rendered `<ul>` children | Yes (stubbed in jsdom) | ✓ FLOWING |
+| Focus target | fallback card | first connected candidate from the same capture | Yes | ✓ FLOWING |
+| Deezer description | `DEEZER_ADD_HINT` | static constant (intended) | n/a | ✓ |
 | EventCard Detected | `event.created_at` | GET /events → `ListEvents` | Yes | ✓ FLOWING |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| Gap-closure web suites | `vitest run useScrollAnchor, watchlistView, watchlist route, SearchResultsColumns, TagChips, useUrlParams` | 6 files, 191 passed | ✓ PASS |
-| History retention and tag filter, latest-release sort (Go) | `go test ./internal/httpserver/ ./internal/watchlist/ -run 'TestRetention_\|TestListEvents_TagFilter\|TestHasOlderEvents_\|TestService_List_LatestRelease\|TestService_ProjectionParity\|TestWatchlist_List_LatestRelease'` | 9 PASS | ✓ PASS |
-| Typecheck and prettier | `pnpm run typecheck`, `prettier --check` (8 changed files) | clean | ✓ PASS |
-| Full suites (orchestrator, not repeated) | `go test ./... -count=1`; `pnpm test` | 25 packages ok; 604/604 | ✓ PASS |
-| Probe A: focus when clicked card leaves (review WR-03) | temporary route test, deleted after the run | `connected:false, active:"BODY"` | ⚠️ reproduces (decision) |
-| Probe B: run of adjacent leavers (review WR-01) | temporary route test, deleted after the run | `shown:[A1,E5], scrollByCalls:[]` | ⚠️ reproduces (decision) |
-| Probe C: Deezer button accessible description (review WR-02) | temporary component test, deleted after the run | `absent` | ⚠️ reproduces (decision) |
-
-The probe file was deleted after the run, and `git status --porcelain web` was empty afterwards.
+| Gap-closure web suites | `vitest run useScrollAnchor, watchlist route, TagChips, SearchResultsColumns, watchlistView, useUrlParams --coverage.enabled=false` | 6 files, 209 passed | ✓ PASS |
+| Named G-25-11, G-25-12, and G-25-13 tests | same run with `--reporter=verbose` | all 17 named cases ✓ | ✓ PASS |
+| Full web suite, run once | `corepack pnpm --dir web test` | exit 0; Statements 95.34%, Branches 90.84%, Functions 96.12%, Lines 97.16% | ✓ PASS |
+| History retention and tag filter, latest-release sort (Go) | `TEST_DATABASE_URL=... go test ./internal/httpserver/ ./internal/watchlist/ -run 'TestRetention_\|TestListEvents_TagFilter\|TestHasOlderEvents_\|TestService_List_LatestRelease\|TestService_ProjectionParity\|TestWatchlist_List_LatestRelease'` | 9 PASS | ✓ PASS |
+| Typecheck and prettier | `pnpm run typecheck`; `prettier --check` on the 8 changed files | clean | ✓ PASS |
+| Bundle markers | grep counts under `internal/webassets/build/client/assets` vs `9d3413f` | 9→10, 0→3, 3→4 | ✓ PASS |
 
 ### Probe Execution
 
 Step 7c: SKIPPED. No `scripts/*/tests/probe-*.sh` is declared or conventional for this phase.
 
-### Prohibitions (gap-closure plans)
+### Prohibitions (gap-closure plans 25-19 to 25-21)
 
 | Plan | Prohibition | Tier | Disposition |
 |------|-------------|------|-------------|
-| 25-15 | No change to `useUrlParams.ts`; never drop preventScrollReset | test | ✓ enforced: blast diff empty, `useUrlParams.test.tsx` passes |
-| 25-15 | No carry across a G4 or Back/Forward filter change; a carry never outlives its first landing | test | ✓ enforced: unit tests F-I, route tests `:2068`, `:2113`, and the toggle tail of `:1709` |
-| 25-15, 25-18 | No npm package, module, migration, or Go change | test | ✓ enforced: blast diff vs 8ccde67 empty |
-| 25-16 | No edit to `ui/button.tsx`; text, accessible name, and hint copy unchanged | test | ✓ enforced: diff empty, the name query resolves, `DEEZER_ADD_HINT` text matches |
-| 25-17 | Only `window.scrollBy`, no height padding; no change to `useUrlParams`, `watchlist.tsx`, or `TagChips` in that plan | test | ✓ enforced: hook greps clean. `watchlist.tsx`'s last change is from 25-15. |
-| 25-18 | No edit to 25-UAT.md or 25-VERIFICATION.md | test | ✓ enforced: no diff since 8ccde67 (this report is the verifier's own write) |
-| 25-04 (prior) | MUST NOT remove a card from view as a consequence of the user's own in-card edit (G4) | test | ✓ now enforced: the prior WR-03 flag is resolved by the user decision and route tests `:1709` and `:1740` |
-| 25-09 (prior) | No shared filter state between routes | judgment | ✓ resolved by human (UAT test 8 passed) |
+| 25-19 | No height padding; no scroll API other than `window.scrollBy` | test | ✓ enforced: no `scrollTo(`, `scrollIntoView`, or style height in the hook or route |
+| 25-19 | No change to watchlist.tsx, TagChips.tsx, useUrlParams.ts, or package files in that plan | test | ✓ enforced: `a4f8b09` touches only the hook, its test, and the route test |
+| 25-20 | Selectors are constant literals | test | ✓ enforced: both selectors are string literals |
+| 25-20 | No focus move for mouse or touch, card stays, label not focused, or focus moved away | test | ✓ enforced: four hook cases plus the route mouse case |
+| 25-20, 25-21 | No change to useUrlParams, components/ui, package files, Go, or migrations | test | ✓ enforced: blast diff vs `9d3413f` empty |
+| 25-21 | No visual change to the Deezer row | test | ✓ enforced: the hint is `sr-only` and the wrapper classes are unchanged (the test asserts the class) |
+| 25-21 | No executor edit to UAT, VERIFICATION, or CONTEXT | test | ✓ enforced: no commits to them since `9d3413f`, and UAT has none since `1cb2a7b` |
 
 ### Requirements Coverage
 
 | Requirement | Source Plan | Description | Status | Evidence |
 |-------------|-------------|-------------|--------|----------|
-| WLVW-01 | 25-04, 25-10, 25-13, 25-14, 25-16, 25-18 | Search the watchlist by name | ✓ SATISFIED | Truth 1. Deezer-row layout pending UAT 9. |
+| WLVW-01 | 25-04, 25-10, 25-13, 25-14, 25-16, 25-18, 25-21 | Search the watchlist by name | ✓ SATISFIED | Truths 1, 13, 17, 21. Real-AT check pending (human item 3). |
 | WLVW-02 | 25-05, 25-10 | Sort by name or date added, stable | ✓ SATISFIED | Truth 2 |
 | WLVW-03 | 25-01, 25-03, 25-05, 25-10 | Sort by latest release, none last | ✓ SATISFIED | Truth 2 |
-| WLVW-04 | 25-07, 25-08, 25-10, 25-11, 25-14, 25-15, 25-17, 25-18 | Filter by one or more tags | ✓ SATISFIED | Truths 3, 6, 14. The prior sticky-path gap is closed. Two decision items (truths 15 and 21) are polish on the chip-click path, not on filtering. |
-| WLVW-05 | 25-08, 25-10 | Muted / custom release-type filters | ✓ SATISFIED | Truth 3 |
+| WLVW-04 | 25-07, 25-08, 25-10, 25-11, 25-14, 25-15, 25-17 to 25-21 | Filter by one or more tags | ✓ SATISFIED | Truths 3, 6, 14, 15, 18-20 |
+| WLVW-05 | 25-08, 25-10 | Muted and custom release-type filters | ✓ SATISFIED | Truth 3 |
 | WLVW-06 | 25-04, 25-07, 25-08, 25-10, 25-15, 25-18 | Combine; N of M; empty state | ✓ SATISFIED | Truths 1, 3, 7-11 |
-| HIST-02 | 25-02, 25-06, 25-09, 25-10, 25-12, 25-14 | History by tag, retention-respecting | ✓ SATISFIED | Truths 4, 16. Retention-edge re-test pending (UAT 7). |
+| HIST-02 | 25-02, 25-06, 25-09, 25-10, 25-12, 25-14 | History by tag, retention-respecting | ✓ SATISFIED | Truths 4, 16. UAT 7 pass. |
 
-All 7 IDs are claimed by at least one plan, and REQUIREMENTS.md maps no other IDs to Phase 25, so none are orphaned. Bookkeeping: REQUIREMENTS.md still lists WLVW-02, -03, -05, and HIST-02 as "Gaps Found" with unchecked boxes. That is stale relative to the code and is the orchestrator's to update.
+All 7 IDs are claimed by at least one plan, and REQUIREMENTS.md maps no other ID to Phase 25, so none are orphaned. Bookkeeping: REQUIREMENTS.md still shows WLVW-02, WLVW-03, WLVW-05, and HIST-02 as unchecked and "Gaps Found". That is stale relative to the code and to the UAT passes, and it is the orchestrator's to update. 25-UAT.md also still records G-25-11, G-25-12, and G-25-13 as `status: failed` and tests 11-13 as `issue`. Those are the user's decision answers and are now implemented. /gsd-verify-work owns that file.
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| gap-closure source and test files (8) | — | TBD/FIXME/XXX/TODO/HACK | none found | — |
-| `web/app/lib/useScrollAnchor.ts` | 5-14 | Only immediate neighbours are candidates; header says "nearest surviving neighbour" (review WR-01) | ⚠️ Warning | Collapse returns for runs of adjacent leavers (Probe B). Decision item. |
-| `web/app/components/watchlist/SearchResultsColumns.tsx` | 196-203 | `title` on a generic span; the button lost its accessible description (review WR-02) | ⚠️ Warning | Screen-reader users lose the reason (Probe C). Decision item. |
-| `web/app/routes/watchlist.tsx` | 491-497 | No focus target when the clicked card unmounts (review WR-03) | ⚠️ Warning | Focus goes to `<body>` (Probe A). Decision item. |
-| `web/app/routes/watchlist.tsx` | 517 | Hand-derived Clear-filters predicate, q-only branch untested (review IN-02) | ℹ️ Info | Fragile if keys change |
-| `web/app/routes/watchlist.test.tsx` | 2336-2351 | Dead read-order stub (review IN-01) | ℹ️ Info | Misleading test comment |
+| 8 gap-closure source and test files | — | TBD/FIXME/XXX/TODO/HACK | none found | — |
+| `web/app/lib/useScrollAnchor.ts` | 53-57 | A fallback survivor is pinned at its capture-time viewport offset, even when that offset was off-screen (review WR-02) | ⚠️ Warning | On long runs the viewport can jump to unrelated cards, and the G-25-12 focus target can sit off-screen. Human item 1 (decision). |
+| `web/app/components/watchlist/SearchResultsColumns.tsx` | 211-213 | The description element is `sr-only` (still in the a11y tree), not `hidden` (review WR-01) | ⚠️ Warning | The hint is likely read twice in browse mode. Human item 3 (decision). |
+| `web/app/routes/watchlist.tsx` | 197-203 | A chipless first survivor sends focus to the heading even when a nearer card with chips exists (review IN-01) | ℹ️ Info | Rare. It needs a sticky card plus the last tag un-pressed. It still never falls to `<body>`. |
+| `web/app/routes/watchlist.tsx` | 603 | The focusable heading keeps `outline-none` (review IN-02) | ℹ️ Info | No visible indicator in the no-survivor path. Folded into human item 2. |
+| `web/app/components/watchlist/TagChips.tsx` | 198 | The comment says `detail` is 0 "only" for Enter or Space (review IN-03) | ℹ️ Info | Inaccurate comment. The hook's focus guards make the behaviour safe. |
+| `SearchResultsColumns.test.tsx` | 200, 234 | The hint copy is pinned only via the imported constant (review IN-04) | ℹ️ Info | A copy regression would still pass |
+| `watchlist.test.tsx`, `watchlist.tsx:531` | — | Carried-over review IN-05 and IN-06 | ℹ️ Info | Unchanged from the prior round |
 
 ### Assessment of the 25-REVIEW.md warnings
 
-None of the three warnings breaks a must-have as the locked user decisions scope it, and none contradicts a locked decision. Each one reproduces deterministically, though, and each leaves a gap in a contract the user hasn't settled, so all three are escalated as decisions, not gaps.
+Neither warning breaks a must-have or reopens a gap. Both sit in contracts the user's decision wording doesn't settle, so both are escalated as decisions inside the real-browser and screen-reader re-tests.
 
-- **Review WR-01 (two-neighbour limit).** It does not break the WR-02 decision. UI-SPEC D-12 records "next sibling card, then its previous one ... with neither left, no correction runs" as the user's own wording, and 25-17 T3 pins the no-candidate no-op. It does make 25-17 T2's "page no longer collapses" overclaim (truth 15, UNCERTAIN), and it brings back the original G-25-4 symptom on a path that is likely with interleaved single-tag cards on a 50+ list. A decision is needed: accept and fix the header comment, or widen the search per the review's sketch.
-- **Review WR-02 (accessible description lost).** It does not break a must-have. 25-16 only promises the accessible name, which is unchanged, and the wrapper-title layout is the user's WR-04 decision. It is a real accessibility regression relative to Phase 6, and the user likely didn't weigh it when choosing the wrapper. The `aria-describedby` fix is small and is compatible with the decision.
-- **Review WR-03 (focus to body).** It does not break a locked decision. The UI-SPEC focus table only covers "card still visible". The 25-08 truth reads more broadly, but no label can keep focus once it unmounts, and this behaviour predates the gap closure. It needs a contract row (truth 21, UNCERTAIN).
+- **Review WR-01 (duplicate announcement).** The G-25-13 must-have is met: the accessible description is computed and asserted, with no visual change. The user's decision literally says "an sr-only hint", and 25-21 implemented exactly that. The double read in browse mode is a predicted AT quality issue, not a missing behaviour. The `hidden` fix keeps the description and the tests (`textContent` still includes hidden nodes). It only deviates from the literal "sr-only" wording, so the user needs to choose it.
+- **Review WR-02 (distant fallback off-screen).** The G-25-11 must-have ("nearest surviving card ... never collapses the page under the viewport") and the 25-19 truth (the survivor "keeps its on-screen position") are both met literally. `scrollBy` always runs when any card survives, and the survivor returns to its captured offset. When that offset was itself off-screen, though, the user lands on cards far from the click point. That is the G-25-4 "lost my place" symptom from the other side, on long runs only. G-25-12 inherits it, because focus goes to that card's chip with `preventScroll`, which the plan mandated. The UI-SPEC D-12 wording ("where it was on screen") doesn't say what to do with a survivor that was not on screen. This needs a product decision plus a real-browser look, not a gap closure. If the user picks the review's clamp or aim-at-click fix, it is a small change to `useScrollAnchor.ts:55` plus one hook test.
 
 ### Human Verification Required
 
-1. **UAT 4 re-test: scroll anchor on a real long list.** Test: the sticky-card chip click, last card leaves, middle card leaves, then toggle `Has muted events`. Expected: the clicked card (or its surviving neighbour) holds its on-screen position, the label keeps focus on the sticky path, and the router never resets scroll. Why human: no layout in jsdom.
-2. **Manage tags merge/delete after a card went sticky, and Back after a sticky card.** Expected: the card survives the merge or delete, and Back shows no stale frame. Why human: real paint timing.
-3. **UAT 7 re-test: History retention edge plus reload and Back.** Expected: no card's Detected date falls outside the window, and the tag persists. Why human: real data and navigation.
-4. **UAT 9 re-test: Deezer row at 375, 640, and 1024px, plus hover tooltip.** Expected: the name is readable, the pill truncates first, and hover shows the full hint. Why human: real widths and tooltips.
-5. **Decision, review WR-01.** Accept the two-neighbour limit, or widen to the nearest surviving card?
-6. **Decision, review WR-03.** Where should focus go when the clicked card leaves the list?
-7. **Decision, review WR-02.** Restore the hint as the button's accessible description via `aria-describedby`?
+1. **G-25-11 real-browser re-test, plus the distant-survivor decision (review WR-02).** Test: on 50+ artists, un-press a chip that removes a short run (2-3 cards each side) and then a long run (5+ each side). Expected: the nearest survivor holds its on-screen position and the page doesn't collapse. For the long run, record whether the viewport lands on unrelated cards, then decide between accepting D-12 literally and clamping or aiming at the click point. Why human: jsdom has no layout, and UAT 4 was passed without a browser before the search was widened.
+2. **G-25-12 keyboard re-test.** Test: press Enter and Space on a chip label so its card leaves (last, middle, run, no survivor), then repeat with a mouse click. Expected: a visible focus ring on the fallback card's pressed chip label (or the heading), never on `<body>`, and no focus move for the mouse. Check that the focused element is on screen, and whether the heading's missing outline matters. Why human: real focus rings, preventScroll position, and real `detail` values.
+3. **G-25-13 screen-reader re-test, plus the double-read decision (review WR-01).** Test: NVDA or VoiceOver on a Deezer row in browse mode. Expected: the reason is announced with the disabled button and nothing changes visually. Record whether it is read twice, then decide whether to switch `sr-only` to `hidden`. Why human: jsdom has no screen reader.
 
 ### Gaps Summary
 
-The previous report's one gap is closed. A chip click on a sticky card no longer unmounts it. The sticky set is now reconciled during render against the filter key, the router location key, and the navigation type. The verifier's earlier red probe is now a committed, passing route test that checks node identity, focus, and the scroll correction. The prior WR-03 regression is resolved per the user's decision: the route's own tag rewrites carry sticky cards, with route and unit tests. The WR-02 and WR-04 decisions are implemented exactly as recorded. The bundle carries all fixes, the blast radius is empty, and every original success criterion holds under regression tests (Go History/retention and latest-release tests re-run green, web 604/604).
+All three gaps from the prior round are closed in code and covered by passing tests.
 
-No blocker remains. The status is human_needed for two reasons. First, the real-browser re-tests: UAT 4, 7, and 9 are still `issue` in 25-UAT.md until re-run. Second, the three new review warnings each reproduce deterministically in contracts the user has not yet decided: a run of adjacent leavers gets no anchor, focus goes to `<body>` when the clicked card leaves, and the Deezer hint's accessible description is gone. If the user wants any of them fixed, they fit one small follow-up plan touching `useScrollAnchor.ts`, `watchlist.tsx`, and `SearchResultsColumns.tsx`.
+- **G-25-11.** The scroll-anchor fallback now walks outward to the nearest surviving card. The prior verifier's A1..E5 probe is a committed hook test and route test.
+- **G-25-12.** A keyboard toggle that removes its card moves focus to the fallback card's pressed chip label, or to the `Your artists` heading when nothing survives. It never falls to `<body>`, and mouse clicks are left alone. Route tests cover last card, middle card, run, no survivor, and mouse, and hook tests cover every guard.
+- **G-25-13.** The disabled Deezer button exposes DEEZER_ADD_HINT as its accessible description through a per-row `useId` id.
+
+The UI-SPEC records all three decisions. The embedded bundle carries all three fixes, and the blast radius is empty. Every original success criterion still holds: in this run the Go History, retention, and latest-release tests re-ran green against Postgres, and the full web suite exited 0 above its coverage thresholds.
+
+No blocker remains. The status is human_needed because:
+
+- G-25-11, G-25-12, and G-25-13 need the real-browser and screen-reader re-tests that jsdom cannot perform.
+- Two review warnings ride along as decisions inside those re-tests:
+  - Review WR-02: a distant survivor is pinned off-screen, and focus can follow it there.
+  - Review WR-01: the sr-only hint is likely read twice.
+
+If the user wants either one changed, both fit in one small follow-up touching `useScrollAnchor.ts` and `SearchResultsColumns.tsx`.
 
 ---
 
-_Verified: 2026-10-12T20:32:03Z_
+_Verified: 2026-10-12T22:41:48Z_
 _Verifier: Claude (gsd-verifier)_
