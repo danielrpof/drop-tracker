@@ -1706,6 +1706,58 @@ describe("Watchlist tag filter consistency (D-13)", () => {
     expect(filterChip("rap")).not.toBeInTheDocument()
   })
 
+  it("keeps a sticky card when Manage tags merges a selected tag away (WR-03)", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockDetachTag.mockResolvedValue(undefined)
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: trap,
+      carrierCountAfterMerge: 3,
+    })
+    mockMergeTag.mockResolvedValueOnce({ ...trap, carrier_count: 3 })
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5")
+    await screen.findByText("Bad Bunny")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove tag rap from Bad Bunny" })
+    )
+    expect(shown()).toEqual(["Bad Bunny"])
+
+    await openManageTags()
+    await mergeRapIntoTrap()
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    await userEvent.keyboard("{Escape}")
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Has muted events" })
+    )
+    expect(shown()).toEqual([])
+  })
+
+  it("keeps a sticky card when Manage tags deletes one of two selected tags (WR-03)", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockDetachTag.mockResolvedValue(undefined)
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5,9")
+    await screen.findByText("Bad Bunny")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove tag rap from Bad Bunny" })
+    )
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+
+    await openManageTags()
+    await deleteTagInDialog("rap")
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    await userEvent.keyboard("{Escape}")
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+  })
+
   it("de-duplicates when both sides of a merge were selected", async () => {
     mockListWatchlist.mockResolvedValue(rows)
     mockVocabulary()

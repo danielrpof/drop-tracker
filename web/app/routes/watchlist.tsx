@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Tags } from "lucide-react"
+import { NavigationType, useLocation, useNavigationType } from "react-router"
 import { toast } from "sonner"
 
 import { EmptyState } from "~/components/common/EmptyState"
@@ -25,15 +26,19 @@ import { useScrollAnchor } from "~/lib/useScrollAnchor"
 import { useUrlParams } from "~/lib/useUrlParams"
 import {
   CLEAR_FILTER_KEYS,
+  EMPTY_IDS,
   SORT_OPTIONS,
   canonicalWatchlistParams,
+  carrySticky,
   DEFAULT_SORT,
   formatArtistCount,
   isFiltered,
   parseWatchlistParams,
+  reconcileSticky,
   selectVisible,
   tagFilterOptions,
   type SortKey,
+  type StickyState,
   type WatchlistView,
 } from "~/lib/watchlistView"
 import { sortTagsByName } from "~/lib/tags"
@@ -53,7 +58,6 @@ import {
 // populated list -- only the very first mount renders them.
 const Q_WRITE_DEBOUNCE_MS = 300
 const COUNT_ANNOUNCE_DEBOUNCE_MS = 500
-const EMPTY_IDS: ReadonlySet<number> = new Set()
 
 function filterKeyOf(view: WatchlistView): string {
   return `${view.sort}|${view.tagIds.join(",")}|${view.muted}|${view.custom}`
@@ -69,6 +73,8 @@ export default function Watchlist() {
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
 
   const { params, write } = useUrlParams()
+  const location = useLocation()
+  const navigationType = useNavigationType()
   const view = parseWatchlistParams(params)
   const filterKey = filterKeyOf(view)
   const [query, setQuery] = useState(view.q)
@@ -80,15 +86,18 @@ export default function Watchlist() {
   // Cards the user just touched or added stay visible past a filter (G4). Keyed
   // to the filter: the router commits the URL in a transition, so the reset must
   // happen in that same render.
-  const [sticky, setSticky] = useState<{
-    key: string
-    ids: ReadonlySet<number>
-  }>(() => ({ key: filterKey, ids: EMPTY_IDS }))
-  let current = sticky
-  if (sticky.key !== filterKey) {
-    current = { key: filterKey, ids: EMPTY_IDS }
-    setSticky(current)
-  }
+  const [sticky, setSticky] = useState<StickyState>(() => ({
+    key: filterKey,
+    loc: location.key,
+    ids: EMPTY_IDS,
+    carryTo: null,
+  }))
+  const current = reconcileSticky(sticky, {
+    key: filterKey,
+    loc: location.key,
+    replace: navigationType === NavigationType.Replace,
+  })
+  if (current !== sticky) setSticky(current)
   const stickyIds = current.ids
 
   // Last known name per tag id, so a chip survives its last carrier leaving.
@@ -99,15 +108,13 @@ export default function Watchlist() {
 
   function markSticky(id: number) {
     setSticky((prev) =>
-      prev.ids.has(id)
-        ? prev
-        : { key: prev.key, ids: new Set(prev.ids).add(id) }
+      prev.ids.has(id) ? prev : { ...prev, ids: new Set(prev.ids).add(id) }
     )
   }
 
   function clearSticky() {
     setSticky((prev) =>
-      prev.ids.size === 0 ? prev : { key: prev.key, ids: EMPTY_IDS }
+      prev.ids.size === 0 ? prev : { ...prev, ids: EMPTY_IDS }
     )
   }
 
@@ -121,8 +128,21 @@ export default function Watchlist() {
     return [...out].sort((a, b) => a - b)
   }
 
+  // The route's own tag rewrites keep sticky cards across their landing (WR-03).
+  function writeKeepingSticky(
+    mutate: (next: URLSearchParams) => void,
+    opts: { replace?: boolean }
+  ) {
+    write((p) => {
+      const from = filterKeyOf(parseWatchlistParams(p))
+      mutate(p)
+      const to = filterKeyOf(parseWatchlistParams(p))
+      setSticky((prev) => carrySticky(prev, from, to))
+    }, opts)
+  }
+
   function writeTagIds(ids: number[]) {
-    write(
+    writeKeepingSticky(
       (p) => {
         if (ids.length === 0) p.delete("tags")
         else p.set("tags", ids.join(","))
@@ -184,7 +204,7 @@ export default function Watchlist() {
       else canonical.set("tags", settled.join(","))
     }
     if (canonical.toString() === params.toString()) return
-    write(
+    writeKeepingSticky(
       (p) => {
         for (const key of ["sort", "tags", "muted", "custom"]) {
           const value = canonical.get(key)
@@ -194,7 +214,7 @@ export default function Watchlist() {
       },
       { replace: true }
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- settleTagIds only reads refs
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- settleTagIds and writeKeepingSticky only read refs and setters
   }, [params, write])
 
   useEffect(() => {
@@ -286,7 +306,7 @@ export default function Watchlist() {
 
   // Swap or drop one selected tag id, de-duplicated and ascending.
   function replaceSelectedTag(from: number, to: number | null) {
-    write(
+    writeKeepingSticky(
       (p) => {
         const ids = parseWatchlistParams(p).tagIds
         if (!ids.includes(from)) return

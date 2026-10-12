@@ -4,6 +4,7 @@ import { makeEntry } from "~/lib/test/fixtures"
 import {
   SORT_OPTIONS,
   canonicalWatchlistParams,
+  carrySticky,
   compareForSort,
   foldName,
   formatArtistCount,
@@ -13,9 +14,11 @@ import {
   matchesAnyTag,
   matchesName,
   parseWatchlistParams,
+  reconcileSticky,
   selectVisible,
   tagFilterOptions,
   type SortKey,
+  type StickyState,
 } from "~/lib/watchlistView"
 
 describe("matchesName", () => {
@@ -456,5 +459,61 @@ describe("muted and custom axes", () => {
     }
     expect(isFiltered({ ...base, muted: true })).toBe(true)
     expect(isFiltered({ ...base, custom: true })).toBe(true)
+  })
+})
+
+describe("sticky set (G4, WR-03)", () => {
+  const s0: StickyState = {
+    key: "a",
+    loc: "1",
+    ids: new Set([1]),
+    carryTo: null,
+  }
+  const kept = (s: StickyState) => [...s.ids]
+
+  it("consumes a carry on the first landing, even one that leaves the filter unchanged", () => {
+    const s1 = carrySticky(s0, "a", "b")
+    expect(s1.carryTo).toBe("b")
+
+    const s2 = reconcileSticky(s1, { key: "a", loc: "2", replace: false })
+    expect(s2.carryTo).toBeNull()
+    expect(s2.loc).toBe("2")
+    expect(kept(s2)).toEqual([1])
+
+    expect(
+      kept(reconcileSticky(s2, { key: "b", loc: "3", replace: false }))
+    ).toEqual([])
+    expect(
+      kept(reconcileSticky(s2, { key: "b", loc: "3", replace: true }))
+    ).toEqual([])
+  })
+
+  it("applies a carry only to a replace landing on its target", () => {
+    const c = carrySticky(s0, "a", "b")
+
+    const landed = reconcileSticky(c, { key: "b", loc: "2", replace: true })
+    expect(kept(landed)).toEqual([1])
+    expect(landed.carryTo).toBeNull()
+
+    expect(
+      kept(reconcileSticky(c, { key: "b", loc: "2", replace: false }))
+    ).toEqual([])
+    expect(
+      kept(reconcileSticky(c, { key: "x", loc: "2", replace: true }))
+    ).toEqual([])
+  })
+
+  it("never carries over an unlanded filter change or onto the current filter", () => {
+    expect(carrySticky(s0, "x", "y").carryTo).toBeNull()
+    expect(carrySticky(s0, "a", "a").carryTo).toBeNull()
+    expect(carrySticky({ ...s0, carryTo: "b" }, "a", "a").carryTo).toBeNull()
+  })
+
+  it("returns the same state when nothing landed", () => {
+    expect(reconcileSticky(s0, { key: "a", loc: "1", replace: true })).toBe(s0)
+
+    const q = reconcileSticky(s0, { key: "a", loc: "2", replace: true })
+    expect(kept(q)).toEqual([1])
+    expect(q.loc).toBe("2")
   })
 })

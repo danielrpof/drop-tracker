@@ -183,6 +183,42 @@ export function hasCustomReleaseTypes(entry: WatchlistEntry): boolean {
   )
 }
 
+export const EMPTY_IDS: ReadonlySet<number> = new Set()
+
+export interface StickyState {
+  key: string
+  loc: string
+  ids: ReadonlySet<number>
+  carryTo: string | null
+}
+
+// A carry lives only until the next landing, and keeps ids only for a replace
+// landing on its target (WR-03). A landing on the same key still consumes it.
+export function reconcileSticky(
+  prev: StickyState,
+  at: { key: string; loc: string; replace: boolean }
+): StickyState {
+  if (at.key === prev.key && at.loc === prev.loc) return prev
+  const keep = at.key === prev.key || (at.replace && prev.carryTo === at.key)
+  return {
+    key: at.key,
+    loc: at.loc,
+    carryTo: null,
+    ids: keep ? prev.ids : EMPTY_IDS,
+  }
+}
+
+// Only a write that starts from the reconciled key can carry; one layered on an
+// unlanded filter change in the same tick, or back onto the current key, cannot.
+export function carrySticky(
+  prev: StickyState,
+  from: string,
+  to: string
+): StickyState {
+  const carryTo = from === prev.key && to !== prev.key ? to : null
+  return carryTo === prev.carryTo ? prev : { ...prev, carryTo }
+}
+
 // An entry is visible when it matches every active axis or is sticky (G4).
 export function selectVisible(
   entries: WatchlistEntry[],
