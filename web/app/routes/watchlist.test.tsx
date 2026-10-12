@@ -2468,3 +2468,89 @@ describe("chip click keeps the clicked card on screen (G-25-4)", () => {
     expect(scrollBy).toHaveBeenCalledWith(0, -280)
   })
 })
+
+describe("chip toggle moves focus to the fallback card when its card leaves (G-25-12)", () => {
+  const reggaeton = { id: 3, name: "reggaeton" }
+  const trap = { id: 7, name: "trap" }
+  const rows = [
+    makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton] }),
+    makeEntry({ id: 2, name: "Daddy Yankee", tags: [reggaeton] }),
+    makeEntry({ id: 3, name: "Travis Scott", tags: [trap] }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", { name: /^Remove .* from watchlist$/ })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+  const search = () => screen.getByTestId("location-search").textContent
+  const labelOf = (artist: string, tag: string) =>
+    within(screen.getByText(artist).closest("li")!).getByRole("button", {
+      name: `Filter by ${tag}`,
+    })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("Enter on the last card's chip lands focus on the previous card's pressed label", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Travis Scott")
+    const trapLabel = labelOf("Travis Scott", "trap")
+    const target = labelOf("Daddy Yankee", "reggaeton")
+    const focus = vi.spyOn(target, "focus")
+
+    trapLabel.focus()
+    await userEvent.keyboard("{Enter}")
+
+    expect(search()).toBe("?tags=3")
+    expect(trapLabel.isConnected).toBe(false)
+    expect(target).toHaveFocus()
+    expect(target).toHaveAttribute("aria-pressed", "true")
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
+  it("Enter on a middle card's chip lands focus on the next card's pressed label", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Travis Scott")
+    const target = labelOf("Travis Scott", "trap")
+    const focus = vi.spyOn(target, "focus")
+
+    labelOf("Daddy Yankee", "reggaeton").focus()
+    await userEvent.keyboard("{Enter}")
+
+    expect(search()).toBe("?tags=7")
+    expect(shown()).toEqual(["Travis Scott"])
+    expect(target).toHaveFocus()
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
+  it("a mouse click that removes the card moves no focus", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Travis Scott")
+    const trapLabel = labelOf("Travis Scott", "trap")
+    const target = labelOf("Daddy Yankee", "reggaeton")
+    const focus = vi.spyOn(target, "focus")
+
+    await userEvent.click(trapLabel)
+
+    expect(search()).toBe("?tags=3")
+    expect(trapLabel.isConnected).toBe(false)
+    expect(focus).not.toHaveBeenCalled()
+    expect(document.body).toHaveFocus()
+  })
+})

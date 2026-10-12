@@ -192,7 +192,16 @@ export default function Watchlist() {
     }
   }, [view.q])
 
-  const captureScrollAnchor = useScrollAnchor(filterKey)
+  // G-25-12: focus the fallback card's chip when a keyboard toggle removes its card.
+  function focusAfterCardLeaves(fallback: HTMLElement | null) {
+    const target =
+      fallback?.querySelector<HTMLElement>(
+        '[data-chip-label][aria-pressed="true"]'
+      ) ?? fallback?.querySelector<HTMLElement>("[data-chip-label]")
+    target?.focus({ preventScroll: true })
+  }
+
+  const captureScrollAnchor = useScrollAnchor(filterKey, focusAfterCardLeaves)
 
   // Drop an unknown or default sort, bad tag ids, and non-"1" flags from the
   // URL without a history entry. Once validated, retired and unknown tag ids go too.
@@ -488,8 +497,12 @@ export default function Watchlist() {
     scheduleCountAnnouncement()
   }
 
-  function toggleFilterTag(tag: TagRef, anchor?: HTMLElement) {
-    if (anchor) captureScrollAnchor(anchor)
+  function toggleFilterTag(
+    tag: TagRef,
+    anchor?: HTMLElement,
+    viaKeyboard?: boolean
+  ) {
+    if (anchor) captureScrollAnchor(anchor, viaKeyboard)
     tagNamesRef.current.set(tag.id, tag.name)
     const ids = new Set(view.tagIds)
     if (!ids.delete(tag.id)) ids.add(tag.id)

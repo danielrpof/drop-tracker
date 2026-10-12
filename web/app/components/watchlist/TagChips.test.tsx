@@ -553,11 +553,26 @@ describe("TagChips — chip label filter toggle (D-08)", () => {
 
     expect(toggleFilterTag).toHaveBeenCalledWith(
       { id: 3, name: "reggaeton" },
-      label
+      label,
+      false
     )
     expect(mockAttachTag).not.toHaveBeenCalled()
     expect(mockDetachTag).not.toHaveBeenCalled()
     expect(label).toHaveFocus()
+  })
+
+  it("Enter on the focused label reports a keyboard toggle", async () => {
+    const { toggleFilterTag } = renderFilterable()
+    const label = screen.getByRole("button", { name: "Filter by reggaeton" })
+
+    label.focus()
+    await userEvent.keyboard("{Enter}")
+
+    expect(toggleFilterTag).toHaveBeenCalledWith(
+      { id: 3, name: "reggaeton" },
+      label,
+      true
+    )
   })
 
   it("shows the active state with aria-pressed, a Check, and an inset ring", () => {

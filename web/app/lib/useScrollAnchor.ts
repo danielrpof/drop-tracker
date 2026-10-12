@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef } from "react"
+import { useCallback, useEffectEvent, useLayoutEffect, useRef } from "react"
 
 // Chip first, then every sibling card nearest-first (next before previous at
 // each distance): fallbacks if the clicked card leaves the filtered list (G-25-11).
@@ -20,24 +20,49 @@ export function anchorCandidates(el: HTMLElement): HTMLElement[] {
 
 // G-25-4: a filter can collapse the page under the viewport; keep the clicked
 // element, or its nearest surviving neighbour, where it was on screen.
-// Consumed by the next `key` change, before paint.
-export function useScrollAnchor(key: string): (el: HTMLElement) => void {
-  const anchor = useRef<{ el: HTMLElement; top: number }[] | null>(null)
+// Consumed by the next `key` change, before paint. G-25-12: if a keyboard
+// capture's focused element left, onFocusLost gets the surviving card (or null).
+export function useScrollAnchor(
+  key: string,
+  onFocusLost?: (fallback: HTMLElement | null) => void
+): (el: HTMLElement, viaKeyboard?: boolean) => void {
+  const anchor = useRef<{
+    el: HTMLElement
+    candidates: { el: HTMLElement; top: number }[]
+    hadFocus: boolean
+  } | null>(null)
+  const reportFocusLost = useEffectEvent((fallback: HTMLElement | null) =>
+    onFocusLost?.(fallback)
+  )
 
-  const capture = useCallback((el: HTMLElement) => {
-    anchor.current = anchorCandidates(el).map((c) => ({
-      el: c,
-      top: c.getBoundingClientRect().top,
-    }))
+  const capture = useCallback((el: HTMLElement, viaKeyboard = false) => {
+    anchor.current = {
+      el,
+      candidates: anchorCandidates(el).map((c) => ({
+        el: c,
+        top: c.getBoundingClientRect().top,
+      })),
+      hadFocus: viaKeyboard && el.contains(document.activeElement),
+    }
   }, [])
 
   useLayoutEffect(() => {
-    const candidates = anchor.current
+    const captured = anchor.current
     anchor.current = null
-    const a = candidates?.find((c) => c.el.isConnected)
-    if (!a) return
-    const delta = a.el.getBoundingClientRect().top - a.top
-    if (delta !== 0) window.scrollBy(0, delta)
+    if (!captured) return
+    const a = captured.candidates.find((c) => c.el.isConnected)
+    if (a) {
+      const delta = a.el.getBoundingClientRect().top - a.top
+      if (delta !== 0) window.scrollBy(0, delta)
+    }
+    const active = document.activeElement
+    if (
+      captured.hadFocus &&
+      !captured.el.isConnected &&
+      (!active || active === document.body)
+    ) {
+      reportFocusLost(a?.el ?? null)
+    }
   }, [key])
 
   return capture
