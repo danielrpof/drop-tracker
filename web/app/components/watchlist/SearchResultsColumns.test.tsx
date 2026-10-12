@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import type { SearchArtist, SearchResponse, WatchlistEntry } from "~/lib/api"
 
-import { SearchResultsColumns } from "./SearchResultsColumns"
+import { DEEZER_ADD_HINT, SearchResultsColumns } from "./SearchResultsColumns"
 
 // This component takes its API data as props and reports actions via the
 // onAdd callback prop -- it never imports ~/lib/api itself, so no module
@@ -197,6 +197,45 @@ describe("SearchResultsColumns", () => {
     expect(label.tagName).toBe("SPAN")
     expect(label).toHaveClass("truncate")
     expect(label.textContent).toBe("Search MusicBrainz to add")
+    expect(button).toHaveAccessibleDescription(DEEZER_ADD_HINT)
+  })
+
+  it("describes each Deezer button with its own sr-only hint (G-25-13)", () => {
+    const secondDeezer: SearchArtist = {
+      ...deezerArtist,
+      id: "deezer-2",
+      name: "Second Deezer Artist",
+    }
+    const response: SearchResponse = {
+      query: "deezer",
+      sources: {
+        deezer: { status: "ok", artists: [deezerArtist, secondDeezer] },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={null}
+        onAdd={vi.fn()}
+      />
+    )
+
+    const buttons = screen.getAllByRole("button", {
+      name: "Search MusicBrainz to add",
+    })
+    expect(buttons).toHaveLength(2)
+    const ids = buttons.map((b) => b.getAttribute("aria-describedby"))
+    expect(ids[0]).toBeTruthy()
+    expect(ids[1]).toBeTruthy()
+    expect(ids[0]).not.toBe(ids[1])
+    for (const [i, button] of buttons.entries()) {
+      const hint = document.getElementById(ids[i] as string) as HTMLElement
+      expect(hint.textContent).toBe(DEEZER_ADD_HINT)
+      expect(hint).toHaveClass("sr-only")
+      expect(button.contains(hint)).toBe(false)
+      expect(button.closest("li")?.contains(hint)).toBe(true)
+    }
   })
 
   it("truncates the type line in Deezer and MusicBrainz rows (G-25-9)", () => {
@@ -244,6 +283,7 @@ describe("SearchResultsColumns", () => {
       expect(button).not.toHaveClass("max-w-[40%]")
       expect(button.textContent).toBe(name)
       expect(button.children).toHaveLength(0)
+      expect(button).not.toHaveAttribute("aria-describedby")
     }
   })
 
@@ -304,7 +344,7 @@ describe("SearchResultsColumns", () => {
 
     const row = screen.getByRole("listitem")
     expect(row.textContent).toBe(
-      `${deezerArtist.name}${deezerArtist.type}Search MusicBrainz to add`
+      `${deezerArtist.name}${deezerArtist.type}Search MusicBrainz to add${DEEZER_ADD_HINT}`
     )
   })
 

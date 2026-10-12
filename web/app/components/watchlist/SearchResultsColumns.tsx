@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 
 import { CoverArt } from "~/components/common/CoverArt"
 import { Button } from "~/components/ui/button"
@@ -131,7 +131,7 @@ interface SearchResultRowProps {
   onAdd: (sourceName: string, result: SearchArtist) => Promise<void>
 }
 
-const DEEZER_ADD_HINT =
+export const DEEZER_ADD_HINT =
   "This project can't yet match a Deezer artist to its MusicBrainz identity -- search MusicBrainz to add this artist and get release detection."
 
 // SearchResultRow renders one result: cover art, name, type, and a
@@ -158,6 +158,7 @@ function SearchResultRow({
   alreadyWatching,
   onAdd,
 }: SearchResultRowProps) {
+  const hintId = useId()
   const [pending, setPending] = useState(false)
   const canAdd = isAddableSource(sourceName)
   const secondaryLabel = artist.disambiguation ?? artist.country
@@ -193,13 +194,23 @@ function SearchResultRow({
         </Button>
       ) : !canAdd ? (
         // WR-04: a disabled button gets no pointer events, so the title sits on the wrapper.
+        // aria-describedby gives screen readers the same hint (G-25-13).
         <span
           title={DEEZER_ADD_HINT}
           className="max-w-[40%] shrink-0 lg:max-w-none"
         >
-          <Button variant="secondary" size="sm" disabled className="w-full">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled
+            aria-describedby={hintId}
+            className="w-full"
+          >
             <span className="truncate">Search MusicBrainz to add</span>
           </Button>
+          <span id={hintId} className="sr-only">
+            {DEEZER_ADD_HINT}
+          </span>
         </span>
       ) : (
         <Button
