@@ -5,11 +5,11 @@ milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
 status: executing
-stopped_at: Completed 25-15-PLAN.md
-last_updated: "2026-10-12T20:02:05.085Z"
+stopped_at: Completed 25-16-PLAN.md
+last_updated: "2026-10-12T20:05:12.259Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 25 execution started
-state_head: 5bd92d0fae3f7e2579520e4c8ee74ec458aa3d67
+state_head: ca1106b2fa742341bcd31a0fd08a1024c4c79fd5
 progress:
   total_phases: 5
   completed_phases: 1
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
-Plan: 2 of 18
+Plan: 3 of 18
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 25 execution started
 
@@ -177,6 +177,7 @@ Last activity: 2026-10-12 — Phase 25 execution started
 | Phase 25 P13 | 5 min | 2 tasks | 2 files |
 | Phase 25 P14 | 4 min | 3 tasks | 17 files |
 | Phase 25 P15 | 8 min | 2 tasks | 4 files |
+| Phase 25 P16 | 4 min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -416,6 +417,7 @@ Recent decisions affecting current work:
 - [Phase 25]: 25-11: only the chip-label path anchors scroll (useScrollAnchor); no expiry on unconsumed anchor — Toolbar toggles have no card to keep; a timer or same-key clear would race the router commit
 - [Phase 25]: 25-12: History cards show a per-card Detected date (created_at); retention stays on created_at (D-01), no SQL change
 - [Phase 25]: 25-15: sticky set keyed to filterKey and reset during render (not a derived key compare, which revives cards when a filter is turned off); route-own tag rewrites carry via a single-landing, replace-only carry
+- [Phase 25]: 25-16: Deezer hint title and 40% cap live on a wrapper span (a disabled button gets no pointer events); Button is w-full inside it (WR-04)
 
 ### Pending Todos
 
@@ -511,8 +513,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-12T20:02:04.979Z
-Stopped at: Completed 25-15-PLAN.md
+Last session: 2026-10-12T20:05:12.167Z
+Stopped at: Completed 25-16-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
