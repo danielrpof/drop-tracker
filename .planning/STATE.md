@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
 status: executing
-stopped_at: Completed 25-18-PLAN.md
-last_updated: "2026-10-12T20:16:10.854Z"
+stopped_at: Completed 25-19-PLAN.md
+last_updated: "2026-10-12T22:09:16.147Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 25 execution started
-state_head: 48d663be1beaafff4837eb10c4128bd8629f4c7f
+state_head: 41c74871186f1f9796405229a4d362c334a11e25
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 32
-  completed_plans: 32
+  total_plans: 35
+  completed_plans: 33
   percent: 20
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
-Plan: 5 of 18
+Plan: 2 of 21
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 25 execution started
 
@@ -180,6 +180,7 @@ Last activity: 2026-10-12 — Phase 25 execution started
 | Phase 25 P16 | 4 min | 1 tasks | 2 files |
 | Phase 25 P17 | 5 min | 2 tasks | 3 files |
 | Phase 25 P18 | 5 min | 3 tasks | 3 files |
+| Phase 25 P19 | 2 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -422,6 +423,7 @@ Recent decisions affecting current work:
 - [Phase 25]: 25-16: Deezer hint title and 40% cap live on a wrapper span (a disabled button gets no pointer events); Button is w-full inside it (WR-04)
 - [Phase 25]: 25-17: useScrollAnchor falls back to the clicked card's next, then previous, sibling when the chip leaves the DOM (WR-02, user decision 2026-10-11); list heading excluded
 - [Phase 25]: 25-18: WR-01..WR-04 decisions recorded in UI-SPEC; CONTEXT G4 amended for WR-03 (user decision 2026-10-11)
+- [Phase 25]: [Phase 25-19]: G-25-11 scroll anchor fallback widened to the nearest surviving card (no distance cap, next before previous at each distance), user decision 2026-10-12
 
 ### Pending Todos
 
@@ -517,8 +519,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-12T20:16:10.768Z
-Stopped at: Completed 25-18-PLAN.md
+Last session: 2026-10-12T22:09:16.043Z
+Stopped at: Completed 25-19-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

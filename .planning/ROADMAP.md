@@ -193,7 +193,7 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 18/21 plans executed
+**Plans:** 19/21 plans executed
 
 Plans:
 **Wave 1**
@@ -249,7 +249,7 @@ Plans:
 
 **UAT gap closure (round 3) — Wave 1** *(from 25-UAT.md gaps G-25-11, G-25-12, G-25-13, with the user's 2026-10-12 decisions; waves are sequential because each plan edits its own 25-UI-SPEC line)*
 
-- [ ] 25-19-PLAN.md — When the clicked card leaves, the scroll anchor falls back to the nearest surviving card in either direction (next before previous at each distance), so a run of leaving cards never collapses the page. Includes hook and route run-case tests and the widened UI-SPEC D-12 rule (G-25-11)
+- [x] 25-19-PLAN.md — When the clicked card leaves, the scroll anchor falls back to the nearest surviving card in either direction (next before previous at each distance), so a run of leaving cards never collapses the page. Includes hook and route run-case tests and the widened UI-SPEC D-12 rule (G-25-11)
 
 **UAT gap closure (round 3) — Wave 2** *(blocked on 25-19)*
 
@@ -362,7 +362,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
-| 25. Find & Filter — Watchlist and History | 18/18 | In Progress|  |
+| 25. Find & Filter — Watchlist and History | 19/21 | In Progress|  |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |
