@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 25
 current_phase_name: Find & Filter — Watchlist and History
 status: executing
-stopped_at: Completed 25-16-PLAN.md
-last_updated: "2026-10-12T20:05:12.259Z"
+stopped_at: Completed 25-17-PLAN.md
+last_updated: "2026-10-12T20:11:09.570Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 25 execution started
-state_head: ca1106b2fa742341bcd31a0fd08a1024c4c79fd5
+state_head: fe62df65d7e80e110e90330f4dc050a986d8c927
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 32
-  completed_plans: 29
+  completed_plans: 31
   percent: 20
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 25 (Find & Filter — Watchlist and History) — EXECUTING
-Plan: 3 of 18
+Plan: 4 of 18
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 25 execution started
 
@@ -178,6 +178,7 @@ Last activity: 2026-10-12 — Phase 25 execution started
 | Phase 25 P14 | 4 min | 3 tasks | 17 files |
 | Phase 25 P15 | 8 min | 2 tasks | 4 files |
 | Phase 25 P16 | 4 min | 1 tasks | 2 files |
+| Phase 25 P17 | 5 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -418,6 +419,7 @@ Recent decisions affecting current work:
 - [Phase 25]: 25-12: History cards show a per-card Detected date (created_at); retention stays on created_at (D-01), no SQL change
 - [Phase 25]: 25-15: sticky set keyed to filterKey and reset during render (not a derived key compare, which revives cards when a filter is turned off); route-own tag rewrites carry via a single-landing, replace-only carry
 - [Phase 25]: 25-16: Deezer hint title and 40% cap live on a wrapper span (a disabled button gets no pointer events); Button is w-full inside it (WR-04)
+- [Phase 25]: 25-17: useScrollAnchor falls back to the clicked card's next, then previous, sibling when the chip leaves the DOM (WR-02, user decision 2026-10-11); list heading excluded
 
 ### Pending Todos
 
@@ -513,8 +515,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-12T20:05:12.167Z
-Stopped at: Completed 25-16-PLAN.md
+Last session: 2026-10-12T20:11:09.475Z
+Stopped at: Completed 25-17-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
