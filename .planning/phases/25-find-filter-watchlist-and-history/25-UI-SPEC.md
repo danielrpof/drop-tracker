@@ -185,7 +185,7 @@ This keeps Phase 24 [R1] intact: a tag chip never takes a hue, a tinted fill, or
 <div class="flex flex-col gap-6 p-8">                          (unchanged)
   header: <h1>Watchlist</h1> ……… [Manage tags]                  (unchanged)
   route-level <div role="status" aria-atomic="true" sr-only>    (unchanged, Phase 24 [R6])
-  SearchBox "Search artists" + SearchResultsColumns              (unchanged, D-01; one G-25-9 exception: the Deezer row's disabled button truncates its label inside a wrapper capped at 40% of the row below lg, and the wrapper carries the explanatory title so it shows on hover (WR-04, user decision 2026-10-11))
+  SearchBox "Search artists" + SearchResultsColumns              (unchanged, D-01; one G-25-9 exception: the Deezer row's disabled button truncates its label inside a wrapper capped at 40% of the row below lg, and the wrapper carries the explanatory title so it shows on hover (WR-04, user decision 2026-10-11); the disabled button also carries that hint as its accessible description, through aria-describedby on an sr-only span with a per-row useId id, with no visual change (G-25-13, user decision 2026-10-12))
   error | skeletons | "No artists yet"                           (unchanged)
   <section aria-labelledby="watchlist-artists-heading" class="flex flex-col gap-4">   NEW, only when M > 0
     heading row
