@@ -206,3 +206,4 @@ blocked: 0
 ## Execution Waivers
 
 - waiver: "CI-only race (user decision 2026-10-11). The user accepted running the gap-closure integration suite without -race locally, because cgo is disabled on this Windows box. CI's race job remains the gate. Applies to gap-closure plans 25-11..25-14 only."
+- waiver: "CI-only race extended (user decision 2026-10-12). The user accepted running the gap-closure integration suite without -race locally for gap-closure plans 25-19..25-21. CI's race job remains the gate."
