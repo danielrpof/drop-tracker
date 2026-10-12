@@ -34,6 +34,7 @@ import {
   selectVisible,
   tagFilterOptions,
   type SortKey,
+  type WatchlistView,
 } from "~/lib/watchlistView"
 import { sortTagsByName } from "~/lib/tags"
 import {
@@ -52,6 +53,11 @@ import {
 // populated list -- only the very first mount renders them.
 const Q_WRITE_DEBOUNCE_MS = 300
 const COUNT_ANNOUNCE_DEBOUNCE_MS = 500
+const EMPTY_IDS: ReadonlySet<number> = new Set()
+
+function filterKeyOf(view: WatchlistView): string {
+  return `${view.sort}|${view.tagIds.join(",")}|${view.muted}|${view.custom}`
+}
 
 export default function Watchlist() {
   const [entries, setEntries] = useState<WatchlistEntry[] | null>(null)
@@ -64,16 +70,26 @@ export default function Watchlist() {
 
   const { params, write } = useUrlParams()
   const view = parseWatchlistParams(params)
+  const filterKey = filterKeyOf(view)
   const [query, setQuery] = useState(view.q)
   const lastWrittenQ = useRef(view.q)
   const qTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const filterInputRef = useRef<HTMLInputElement | null>(null)
   const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const countRef = useRef({ n: 0, m: 0 })
-  // Cards the user just touched or added stay visible past a filter (G4).
-  const [stickyIds, setStickyIds] = useState<ReadonlySet<number>>(
-    () => new Set()
-  )
+  // Cards the user just touched or added stay visible past a filter (G4). Keyed
+  // to the filter: the router commits the URL in a transition, so the reset must
+  // happen in that same render.
+  const [sticky, setSticky] = useState<{
+    key: string
+    ids: ReadonlySet<number>
+  }>(() => ({ key: filterKey, ids: EMPTY_IDS }))
+  let current = sticky
+  if (sticky.key !== filterKey) {
+    current = { key: filterKey, ids: EMPTY_IDS }
+    setSticky(current)
+  }
+  const stickyIds = current.ids
 
   // Last known name per tag id, so a chip survives its last carrier leaving.
   const tagNamesRef = useRef(new Map<number, string>())
@@ -82,11 +98,17 @@ export default function Watchlist() {
   const tagIdsValidatedRef = useRef(false)
 
   function markSticky(id: number) {
-    setStickyIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+    setSticky((prev) =>
+      prev.ids.has(id)
+        ? prev
+        : { key: prev.key, ids: new Set(prev.ids).add(id) }
+    )
   }
 
   function clearSticky() {
-    setStickyIds((prev) => (prev.size === 0 ? prev : new Set()))
+    setSticky((prev) =>
+      prev.ids.size === 0 ? prev : { key: prev.key, ids: EMPTY_IDS }
+    )
   }
 
   function settleTagIds(ids: number[]): number[] {
@@ -150,15 +172,7 @@ export default function Watchlist() {
     }
   }, [view.q])
 
-  // Back/Forward changes filters without going through a handler (G4).
-  const filterKey = `${view.sort}|${view.tagIds.join(",")}|${view.muted}|${view.custom}`
   const captureScrollAnchor = useScrollAnchor(filterKey)
-  const prevFilterKey = useRef(filterKey)
-  useEffect(() => {
-    if (prevFilterKey.current === filterKey) return
-    prevFilterKey.current = filterKey
-    clearSticky()
-  }, [filterKey])
 
   // Drop an unknown or default sort, bad tag ids, and non-"1" flags from the
   // URL without a history entry. Once validated, retired and unknown tag ids go too.
@@ -190,7 +204,7 @@ export default function Watchlist() {
     }
   }, [])
 
-  // Resolves with the loaded rows (null on failure); never touches stickyIds.
+  // Resolves with the loaded rows (null on failure); never touches the sticky set.
   const refresh = useCallback(() => {
     setError(false)
     return listWatchlist()
@@ -443,7 +457,6 @@ export default function Watchlist() {
       if (ids.length === 0) p.delete("tags")
       else p.set("tags", ids.join(","))
     })
-    clearSticky()
     scheduleCountAnnouncement()
   }
 
@@ -452,7 +465,6 @@ export default function Watchlist() {
       if (next) p.set(key, "1")
       else p.delete(key)
     })
-    clearSticky()
     scheduleCountAnnouncement()
   }
 
@@ -469,7 +481,6 @@ export default function Watchlist() {
       if (next === DEFAULT_SORT) p.delete("sort")
       else p.set("sort", next)
     })
-    clearSticky()
     if (countTimer.current) clearTimeout(countTimer.current)
     const label = SORT_OPTIONS.find((o) => o.value === next)!.label
     announce(`Sorted by ${label}.`)
@@ -483,7 +494,7 @@ export default function Watchlist() {
     write((p) => {
       for (const key of CLEAR_FILTER_KEYS) p.delete(key)
     })
-    clearSticky()
+    if (view.tagIds.length === 0 && !view.muted && !view.custom) clearSticky()
     filterInputRef.current?.focus()
     const m = entries?.length ?? 0
     announce(`Filters cleared. Showing ${formatArtistCount(m, m)}.`)

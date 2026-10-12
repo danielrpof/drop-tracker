@@ -7,7 +7,8 @@ import {
   within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { createRoutesStub, useNavigate } from "react-router"
+import { useLayoutEffect } from "react"
+import { createRoutesStub, useLocation, useNavigate } from "react-router"
 import { toast } from "sonner"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -2012,6 +2013,75 @@ describe("Watchlist preference toggles (WLVW-05)", () => {
     await waitFor(() => expect(shown()).toEqual(["Bad Two", "Drake"]))
   })
 
+  it("drops a sticky card in the same commit as Back's URL change", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    vi.mocked(updateWatchlistPreferences).mockResolvedValue({
+      ...rows[0],
+      muted_event_types: [],
+    })
+    const commits: { search: string; shown: (string | undefined)[] }[] = []
+    function CommitProbe() {
+      const location = useLocation()
+      useLayoutEffect(() => {
+        commits.push({ search: location.search, shown: shown() })
+      }, [location])
+      return null
+    }
+    function WithBack() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <CommitProbe />
+          <button onClick={() => navigate(-1)}>history back</button>
+          <WatchlistWithProbe />
+        </>
+      )
+    }
+    renderRoute(WithBack, "/", "/?muted=1")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(customToggle())
+    const card = screen.getByText("Bad Bunny").closest("li")!
+    await userEvent.click(
+      within(card).getByRole("checkbox", { name: /^Mute guest feature alerts/ })
+    )
+    await waitFor(() => expect(updateWatchlistPreferences).toHaveBeenCalled())
+    expect(shown()).toEqual(["Bad Bunny", "Drake"])
+
+    commits.length = 0
+    await userEvent.click(screen.getByRole("button", { name: "history back" }))
+
+    await waitFor(() => expect(shown()).toEqual(["Bad Two", "Drake"]))
+    expect(commits[0]).toEqual({
+      search: "?muted=1",
+      shown: ["Bad Two", "Drake"],
+    })
+  })
+
+  it("does not bring a sticky card back when a toggle is turned off again", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    vi.mocked(updateWatchlistPreferences).mockResolvedValue({
+      ...rows[0],
+      muted_event_types: [],
+    })
+    renderRoute(WatchlistWithProbe, "/", "/?muted=1")
+    await screen.findByText("Bad Bunny")
+
+    const card = screen.getByText("Bad Bunny").closest("li")!
+    await userEvent.click(
+      within(card).getByRole("checkbox", { name: /^Mute guest feature alerts/ })
+    )
+    await waitFor(() => expect(updateWatchlistPreferences).toHaveBeenCalled())
+    expect(shown()).toEqual(["Bad Bunny", "Bad Two", "Drake"])
+
+    await userEvent.click(customToggle())
+    expect(shown()).toEqual(["Drake"])
+
+    await userEvent.click(customToggle())
+    expect(search()).toBe("?muted=1")
+    expect(shown()).toEqual(["Bad Two", "Drake"])
+  })
+
   it("drops an invalid muted or custom param with replace", async () => {
     mockListWatchlist.mockResolvedValue(rows)
     renderRoute(WatchlistWithProbe, "/", "/?muted=yes&custom=2&q=b")
@@ -2207,5 +2277,42 @@ describe("chip click keeps the clicked card on screen (G-25-4)", () => {
     expect(search()).toBe("?tags=3")
     expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
     expect(scrollBy).not.toHaveBeenCalled()
+  })
+
+  it("keeps a sticky card's chip anchored and focused when the chip filters (WR-01)", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    const trap = { id: 7, name: "trap" }
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton, trap] }),
+      rows[1],
+      rows[2],
+    ])
+    mockDetachTag.mockResolvedValue(undefined)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Remove tag reggaeton from Bad Bunny",
+      })
+    )
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+    const cardOf = () => screen.getByText("Bad Bunny").closest("li")!
+    const label = within(cardOf()).getByRole("button", {
+      name: "Filter by trap",
+    })
+    stubTop(label, 400, 120)
+
+    await userEvent.click(label)
+
+    expect(search()).toBe("?tags=3%2C7")
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+    expect(label.isConnected).toBe(true)
+    expect(
+      within(cardOf()).getByRole("button", { name: "Filter by trap" })
+    ).toBe(label)
+    expect(label).toHaveFocus()
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -280)
   })
 })
