@@ -2301,7 +2301,33 @@ describe("chip click keeps the clicked card on screen (G-25-4)", () => {
     expect(scrollBy).toHaveBeenCalledWith(0, 280)
   })
 
-  it("skips the correction when the clicked card leaves the list", async () => {
+  // The card's rect depends on whether it still has a sibling on `side`, so
+  // the before/after reads differ however often the DOM is measured.
+  function stubCardTop(
+    card: HTMLElement,
+    side: "next" | "previous",
+    withSibling: number,
+    alone: number
+  ) {
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(() => {
+      const sibling =
+        side === "next" ? card.nextElementSibling : card.previousElementSibling
+      const top = sibling ? withSibling : alone
+      return {
+        top,
+        bottom: top + 100,
+        left: 0,
+        right: 300,
+        width: 300,
+        height: 100,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }
+    })
+  }
+
+  it("corrects by the previous card's drift when the last clicked card leaves the list (WR-02)", async () => {
     const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
     mockListWatchlist.mockResolvedValue(rows)
     renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
@@ -2323,12 +2349,44 @@ describe("chip click keeps the clicked card on screen (G-25-4)", () => {
         toJSON: () => ({}),
       }
     })
+    stubCardTop(
+      screen.getByText("Daddy Yankee").closest("li")!,
+      "next",
+      500,
+      300
+    )
 
     await userEvent.click(label)
 
     expect(search()).toBe("?tags=3")
     expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
-    expect(scrollBy).not.toHaveBeenCalled()
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -200)
+  })
+
+  it("corrects by the next card's drift when a middle clicked card leaves the list (WR-02)", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Bad Bunny")
+    stubCardTop(
+      screen.getByText("Travis Scott").closest("li")!,
+      "previous",
+      600,
+      200
+    )
+
+    await userEvent.click(
+      within(screen.getByText("Daddy Yankee").closest("li")!).getByRole(
+        "button",
+        { name: "Filter by reggaeton" }
+      )
+    )
+
+    expect(search()).toBe("?tags=7")
+    expect(shown()).toEqual(["Travis Scott"])
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -400)
   })
 
   it("keeps a sticky card's chip anchored and focused when the chip filters (WR-01)", async () => {
