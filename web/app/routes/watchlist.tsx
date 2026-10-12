@@ -192,13 +192,14 @@ export default function Watchlist() {
     }
   }, [view.q])
 
-  // G-25-12: focus the fallback card's chip when a keyboard toggle removes its card.
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  // G-25-12: after a keyboard toggle removes its card, focus the fallback card's chip, else the heading.
   function focusAfterCardLeaves(fallback: HTMLElement | null) {
     const target =
       fallback?.querySelector<HTMLElement>(
         '[data-chip-label][aria-pressed="true"]'
       ) ?? fallback?.querySelector<HTMLElement>("[data-chip-label]")
-    target?.focus({ preventScroll: true })
+    ;(target ?? headingRef.current)?.focus({ preventScroll: true })
   }
 
   const captureScrollAnchor = useScrollAnchor(filterKey, focusAfterCardLeaves)
@@ -597,6 +598,8 @@ export default function Watchlist() {
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2
                 id="watchlist-artists-heading"
+                ref={headingRef}
+                tabIndex={-1}
                 className="text-heading font-semibold text-foreground outline-none"
               >
                 Your artists

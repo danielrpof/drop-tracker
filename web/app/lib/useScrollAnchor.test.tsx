@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useRef, useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -407,5 +407,147 @@ describe("anchorCandidates", () => {
     expect(anchorCandidates(screen.getByTestId("solo"))).toEqual([
       screen.getByTestId("solo"),
     ])
+  })
+})
+
+function FocusHarness({
+  survivors,
+  onFocusLost,
+}: {
+  survivors: string[]
+  onFocusLost: (fallback: HTMLElement | null) => void
+}) {
+  const [key, setKey] = useState("a")
+  const [kept, setKept] = useState(RUN)
+  const chip = useRef<HTMLButtonElement>(null)
+  const capture = useScrollAnchor(key, onFocusLost)
+  const leave = () => {
+    setKept(survivors)
+    setKey((k) => k + "x")
+  }
+  return (
+    <>
+      <ul>
+        {RUN.map(
+          (id) =>
+            kept.includes(id) && (
+              <li key={id} data-testid={id}>
+                {id === "C3" && (
+                  <button
+                    ref={chip}
+                    data-testid="chip"
+                    onClick={(e) => {
+                      capture(e.currentTarget, e.detail === 0)
+                      leave()
+                    }}
+                  >
+                    chip
+                  </button>
+                )}
+              </li>
+            )
+        )}
+      </ul>
+      <button
+        onClick={(e) => chip.current && capture(chip.current, e.detail === 0)}
+      >
+        capture only
+      </button>
+      <button onClick={leave}>leave</button>
+      <button>elsewhere</button>
+    </>
+  )
+}
+
+describe("useScrollAnchor onFocusLost (G-25-12)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const rect = (top: number) =>
+    ({
+      top,
+      bottom: top + 10,
+      left: 0,
+      right: 10,
+      width: 10,
+      height: 10,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    }) as DOMRect
+
+  function setup(survivors: string[]) {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    const onFocusLost = vi.fn()
+    render(<FocusHarness survivors={survivors} onFocusLost={onFocusLost} />)
+    // E5 drifts by -150 between capture and the layout effect.
+    vi.spyOn(screen.getByTestId("E5"), "getBoundingClientRect")
+      .mockReturnValueOnce(rect(800))
+      .mockReturnValue(rect(650))
+    return { scrollBy, onFocusLost, chip: screen.getByTestId("chip") }
+  }
+
+  it("reports the surviving card after the scroll correction for a keyboard capture", () => {
+    const { scrollBy, onFocusLost, chip } = setup(["A1", "E5"])
+
+    chip.focus()
+    fireEvent.click(chip)
+
+    expect(onFocusLost).toHaveBeenCalledTimes(1)
+    expect(onFocusLost).toHaveBeenCalledWith(screen.getByTestId("E5"))
+    expect(scrollBy).toHaveBeenCalledWith(0, -150)
+    expect(scrollBy.mock.invocationCallOrder[0]).toBeLessThan(
+      onFocusLost.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("reports null when no card survives", () => {
+    const { scrollBy, onFocusLost, chip } = setup([])
+
+    chip.focus()
+    fireEvent.click(chip)
+
+    expect(onFocusLost).toHaveBeenCalledTimes(1)
+    expect(onFocusLost).toHaveBeenCalledWith(null)
+    expect(scrollBy).not.toHaveBeenCalled()
+  })
+
+  it("stays quiet when the chip's card stays", () => {
+    const { onFocusLost, chip } = setup(RUN)
+
+    chip.focus()
+    fireEvent.click(chip)
+
+    expect(onFocusLost).not.toHaveBeenCalled()
+  })
+
+  it("stays quiet for a mouse click (detail 1) even though the chip held focus", () => {
+    const { onFocusLost, chip } = setup(["A1", "E5"])
+
+    chip.focus()
+    fireEvent.click(chip, { detail: 1 })
+
+    expect(onFocusLost).not.toHaveBeenCalled()
+  })
+
+  it("stays quiet when the chip never held focus", () => {
+    const { onFocusLost, chip } = setup(["A1", "E5"])
+
+    fireEvent.click(chip)
+
+    expect(onFocusLost).not.toHaveBeenCalled()
+  })
+
+  it("stays quiet when focus moved elsewhere before the key change", () => {
+    const { onFocusLost, chip } = setup(["A1", "E5"])
+
+    chip.focus()
+    fireEvent.click(screen.getByRole("button", { name: "capture only" }))
+    screen.getByRole("button", { name: "elsewhere" }).focus()
+    fireEvent.click(screen.getByRole("button", { name: "leave" }))
+
+    expect(chip.isConnected).toBe(false)
+    expect(onFocusLost).not.toHaveBeenCalled()
   })
 })

@@ -2553,4 +2553,49 @@ describe("chip toggle moves focus to the fallback card when its card leaves (G-2
     expect(focus).not.toHaveBeenCalled()
     expect(document.body).toHaveFocus()
   })
+
+  it("focuses the Your artists heading when no card survives", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({
+        id: 1,
+        name: "Bad Bunny",
+        tags: [reggaeton],
+        muted_event_types: ["guest_feature"],
+      }),
+      makeEntry({ id: 3, name: "Travis Scott", tags: [trap] }),
+    ])
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7&muted=1")
+    await screen.findByText("Bad Bunny")
+    expect(shown()).toEqual(["Bad Bunny"])
+
+    labelOf("Bad Bunny", "reggaeton").focus()
+    await userEvent.keyboard("{Enter}")
+
+    expect(
+      await screen.findByText("No artists match these filters")
+    ).toBeInTheDocument()
+    const heading = screen.getByRole("heading", { name: "Your artists" })
+    expect(heading).toHaveFocus()
+    expect(heading).toHaveAttribute("tabindex", "-1")
+  })
+
+  it("lands on the same card the scroll anchor uses when a run of cards leaves", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Arcangel", tags: [trap] }),
+      makeEntry({ id: 2, name: "Bad Bunny", tags: [reggaeton] }),
+      makeEntry({ id: 3, name: "Chencho Corleone", tags: [reggaeton] }),
+      makeEntry({ id: 4, name: "Daddy Yankee", tags: [reggaeton] }),
+      makeEntry({ id: 5, name: "Eladio Carrion", tags: [trap] }),
+    ])
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Eladio Carrion")
+
+    labelOf("Chencho Corleone", "reggaeton").focus()
+    await userEvent.keyboard("{Enter}")
+
+    expect(search()).toBe("?tags=7")
+    expect(labelOf("Eladio Carrion", "trap")).toHaveFocus()
+  })
 })
