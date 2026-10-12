@@ -193,7 +193,7 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 20/21 plans executed
+**Plans:** 21/21 plans executed
 
 Plans:
 **Wave 1**
@@ -257,7 +257,7 @@ Plans:
 
 **UAT gap closure (round 3) — Wave 3** *(blocked on 25-19, 25-20)*
 
-- [ ] 25-21-PLAN.md — The disabled Deezer button gets its hint as an accessible description (sr-only span, per-row `useId`, `aria-describedby`) (G-25-13). Then the embedded bundle is rebuilt with marker counts, and the Definition of Done and a blast-radius gate run against `9d3413f`
+- [x] 25-21-PLAN.md — The disabled Deezer button gets its hint as an accessible description (sr-only span, per-row `useId`, `aria-describedby`) (G-25-13). Then the embedded bundle is rebuilt with marker counts, and the Definition of Done and a blast-radius gate run against `9d3413f`
 
 **UI hint**: yes
 
@@ -362,7 +362,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
-| 25. Find & Filter — Watchlist and History | 20/21 | In Progress|  |
+| 25. Find & Filter — Watchlist and History | 21/21 | In Progress|  |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |
