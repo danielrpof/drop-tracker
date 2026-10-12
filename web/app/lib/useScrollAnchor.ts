@@ -1,12 +1,21 @@
 import { useCallback, useLayoutEffect, useRef } from "react"
 
-// Chip first, then the card's next and previous siblings: a fallback when the
-// clicked card itself leaves the filtered list (WR-02).
+// Chip first, then every sibling card nearest-first (next before previous at
+// each distance): fallbacks if the clicked card leaves the filtered list (G-25-11).
 export function anchorCandidates(el: HTMLElement): HTMLElement[] {
   const card = el.closest("li")
-  return [el, card?.nextElementSibling, card?.previousElementSibling].filter(
+  const parent = card?.parentElement
+  if (!card || !parent) return [el]
+  const cards = Array.from(parent.children).filter(
     (c): c is HTMLElement => c instanceof HTMLElement
   )
+  const at = cards.indexOf(card)
+  const out = [el]
+  for (let d = 1; at + d < cards.length || at - d >= 0; d++) {
+    if (at + d < cards.length) out.push(cards[at + d])
+    if (at - d >= 0) out.push(cards[at - d])
+  }
+  return out
 }
 
 // G-25-4: a filter can collapse the page under the viewport; keep the clicked

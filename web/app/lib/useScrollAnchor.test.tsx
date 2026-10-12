@@ -238,7 +238,135 @@ describe("useScrollAnchor fallback candidates (WR-02)", () => {
   })
 })
 
+const RUN = ["A1", "B2", "C3", "D4", "E5"]
+
+function RunHarness() {
+  const [key, setKey] = useState("a")
+  const [kept, setKept] = useState(RUN)
+  const chip = useRef<HTMLButtonElement>(null)
+  const capture = useScrollAnchor(key)
+  const keep = (ids: string[]) => () => {
+    setKept(ids)
+    setKey((k) => k + "x")
+  }
+  return (
+    <>
+      <ul>
+        {RUN.map(
+          (id) =>
+            kept.includes(id) && (
+              <li key={id} data-testid={id}>
+                {id === "C3" && (
+                  <button ref={chip} data-testid="chip">
+                    chip
+                  </button>
+                )}
+              </li>
+            )
+        )}
+      </ul>
+      <button onClick={() => chip.current && capture(chip.current)}>
+        capture
+      </button>
+      <button onClick={keep(["A1", "E5"])}>keep ends</button>
+      <button onClick={keep(["A1"])}>keep first</button>
+    </>
+  )
+}
+
+describe("useScrollAnchor run of leaving cards (G-25-11)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function setup(tops: Record<string, number>) {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    render(<RunHarness />)
+    for (const id of [...RUN, "chip"]) {
+      vi.spyOn(
+        screen.getByTestId(id),
+        "getBoundingClientRect"
+      ).mockImplementation(
+        () =>
+          ({
+            top: tops[id],
+            bottom: tops[id] + 10,
+            left: 0,
+            right: 10,
+            width: 10,
+            height: 10,
+            x: 0,
+            y: tops[id],
+            toJSON: () => ({}),
+          }) as DOMRect
+      )
+    }
+    const click = (name: string) =>
+      userEvent.click(screen.getByRole("button", { name }))
+    return { scrollBy, click }
+  }
+
+  const tops = () => ({ A1: 0, B2: 200, C3: 400, D4: 600, E5: 800, chip: 410 })
+
+  it("corrects by the next-side survivor when it ties on distance", async () => {
+    const t = tops()
+    const { scrollBy, click } = setup(t)
+
+    await click("capture")
+    t.E5 = 650
+    t.A1 = -50
+    await click("keep ends")
+
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -150)
+  })
+
+  it("falls back to the previous side when the next side runs out", async () => {
+    const t = tops()
+    const { scrollBy, click } = setup(t)
+
+    await click("capture")
+    t.A1 = -30
+    await click("keep first")
+
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -30)
+  })
+})
+
 describe("anchorCandidates", () => {
+  it("lists every sibling card nearest-first, next before previous", () => {
+    render(
+      <ul>
+        {RUN.map((id) => (
+          <li key={id} data-testid={id}>
+            {id === "C3" && <button data-testid="chip" />}
+          </li>
+        ))}
+      </ul>
+    )
+
+    expect(anchorCandidates(screen.getByTestId("chip"))).toEqual(
+      ["chip", "D4", "B2", "E5", "A1"].map((id) => screen.getByTestId(id))
+    )
+  })
+
+  it("continues on the next side when the previous side runs out", () => {
+    render(
+      <ul>
+        {RUN.map((id) => (
+          <li key={id} data-testid={id}>
+            {id === "B2" && <button data-testid="chip" />}
+          </li>
+        ))}
+      </ul>
+    )
+
+    expect(anchorCandidates(screen.getByTestId("chip"))).toEqual(
+      ["chip", "C3", "A1", "D4", "E5"].map((id) => screen.getByTestId(id))
+    )
+  })
+
   it("lists the chip, then the next and previous cards", () => {
     render(
       <ul>

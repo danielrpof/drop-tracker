@@ -2389,6 +2389,48 @@ describe("chip click keeps the clicked card on screen (G-25-4)", () => {
     expect(scrollBy).toHaveBeenCalledWith(0, -400)
   })
 
+  it("corrects by the nearest survivor's drift when a run of cards leaves (G-25-11)", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    const trap = { id: 7, name: "trap" }
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Arcangel", tags: [trap] }),
+      makeEntry({ id: 2, name: "Bad Bunny", tags: [reggaeton] }),
+      makeEntry({ id: 3, name: "Chencho Corleone", tags: [reggaeton] }),
+      makeEntry({ id: 4, name: "Daddy Yankee", tags: [reggaeton] }),
+      makeEntry({ id: 5, name: "Eladio Carrion", tags: [trap] }),
+    ])
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Eladio Carrion")
+    const eladio = screen.getByText("Eladio Carrion").closest("li")!
+    // Keyed on the list's child count so the reads differ however often measured.
+    vi.spyOn(eladio, "getBoundingClientRect").mockImplementation(() => {
+      const top = eladio.parentElement!.children.length === 5 ? 900 : 300
+      return {
+        top,
+        bottom: top + 100,
+        left: 0,
+        right: 300,
+        width: 300,
+        height: 100,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }
+    })
+
+    await userEvent.click(
+      within(screen.getByText("Chencho Corleone").closest("li")!).getByRole(
+        "button",
+        { name: "Filter by reggaeton" }
+      )
+    )
+
+    expect(search()).toBe("?tags=7")
+    expect(shown()).toEqual(["Arcangel", "Eladio Carrion"])
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -600)
+  })
+
   it("keeps a sticky card's chip anchored and focused when the chip filters (WR-01)", async () => {
     const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
     const trap = { id: 7, name: "trap" }
