@@ -88,7 +88,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 **Milestone Goal:** Keep a 50+ artist watchlist manageable. The user can label, annotate, find, bulk-change, and bulk-add artists, with no new background API polling.
 
 - [x] **Phase 24: Artist Tags & Notes** - Free-form, case-insensitive tags with autocomplete and a plain-text note on each Watchlist card, global tag rename/merge/delete, and tags that belong to the artist so they survive a remove and re-add (completed 2026-10-06)
-- [ ] **Phase 25: Find & Filter — Watchlist and History** - Client-side name search, stable sorts (including latest release), and tag/preference filters over the fully loaded watchlist, plus a retention-aware tag filter on the History feed
+- [x] **Phase 25: Find & Filter — Watchlist and History** - Client-side name search, stable sorts (including latest release), and tag/preference filters over the fully loaded watchlist, plus a retention-aware tag filter on the History feed (completed 2026-10-12)
 - [ ] **Phase 26: Bulk Edit & Remove** - Multi-select on the Watchlist with one-action tag add/remove, preference changes, and a count-confirmed all-or-nothing remove, backed by set-based transactional endpoints
 - [ ] **Phase 27: Paste-a-List Bulk Add** - Paste names one per line, watch them resolve one search at a time within the existing rate limits, review best matches by confidence, and add the confirmed set in one request
 - [ ] **Phase 28: Tags on Discord Notifications** - Tags on real-time embeds and digest lines, with markdown escaping added to the real-time path and the digest's chunking guarantees re-proven against longer lines
@@ -193,7 +193,7 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 21/21 plans executed
+**Plans:** 21/21 plans complete
 
 Plans:
 **Wave 1**
@@ -362,7 +362,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
-| 25. Find & Filter — Watchlist and History | 21/21 | In Progress|  |
+| 25. Find & Filter — Watchlist and History | 21/21 | Complete    | 2026-10-12 |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |
