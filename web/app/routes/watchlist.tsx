@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Tags } from "lucide-react"
+import { NavigationType, useLocation, useNavigationType } from "react-router"
 import { toast } from "sonner"
 
 import { EmptyState } from "~/components/common/EmptyState"
@@ -9,6 +10,7 @@ import { ManageTagsDialog } from "~/components/watchlist/ManageTagsDialog"
 import { SearchBox } from "~/components/watchlist/SearchBox"
 import { SearchResultsColumns } from "~/components/watchlist/SearchResultsColumns"
 import { WatchlistRow } from "~/components/watchlist/WatchlistRow"
+import { WatchlistToolbar } from "~/components/watchlist/WatchlistToolbar"
 import {
   ApiError,
   type SearchArtist,
@@ -20,24 +22,47 @@ import {
   removeWatchlist,
 } from "~/lib/api"
 import { isAddableSource } from "~/lib/sources"
+import { useScrollAnchor } from "~/lib/useScrollAnchor"
+import { useUrlParams } from "~/lib/useUrlParams"
+import {
+  CLEAR_FILTER_KEYS,
+  EMPTY_IDS,
+  SORT_OPTIONS,
+  canonicalWatchlistParams,
+  carrySticky,
+  DEFAULT_SORT,
+  formatArtistCount,
+  isFiltered,
+  parseWatchlistParams,
+  reconcileSticky,
+  selectVisible,
+  tagFilterOptions,
+  type SortKey,
+  type StickyState,
+  type WatchlistView,
+} from "~/lib/watchlistView"
+import { sortTagsByName } from "~/lib/tags"
 import {
   rewriteTags,
   TagVocabularyProvider,
   type TagChange,
 } from "~/lib/useTagVocabulary"
 
-// Watchlist renders the UI-02 management surface: fetches listWatchlist()
-// on mount and renders the entries in exactly the order the server
-// returned them -- ListWatchlist already orders by artist name then artist
-// id, a deterministic total order even for two artists sharing a name, so
-// this route never re-sorts client-side. Per D-03/D-04 this tab is a pure
-// management list with no cross-reference to History-tab state; every
-// release-activity signal lives on the History tab only.
+// Watchlist renders the UI-02 management surface: loads GET /watchlist once
+// on mount. Phase 25 D-02/D-03 add client-side find/sort over that list and
+// a latest-release line on each card.
 //
 // `refresh` re-issues the fetch without resetting `entries` to null first,
 // so a background re-sync (task 2's post-mutation refresh, plan 06-04's
 // post-add refresh) never flashes the loading skeletons over an already-
 // populated list -- only the very first mount renders them.
+const Q_WRITE_DEBOUNCE_MS = 300
+const COUNT_ANNOUNCE_DEBOUNCE_MS = 500
+
+function filterKeyOf(view: WatchlistView): string {
+  return `${view.sort}|${view.tagIds.join(",")}|${view.muted}|${view.custom}`
+}
+
 export default function Watchlist() {
   const [entries, setEntries] = useState<WatchlistEntry[] | null>(null)
   const [error, setError] = useState(false)
@@ -47,16 +72,195 @@ export default function Watchlist() {
   const [statusMessage, setStatusMessage] = useState("")
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
 
+  const { params, write } = useUrlParams()
+  const location = useLocation()
+  const navigationType = useNavigationType()
+  const view = parseWatchlistParams(params)
+  const filterKey = filterKeyOf(view)
+  const [query, setQuery] = useState(view.q)
+  const lastWrittenQ = useRef(view.q)
+  const qTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const filterInputRef = useRef<HTMLInputElement | null>(null)
+  const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const countRef = useRef({ n: 0, m: 0 })
+  // Cards the user just touched or added stay visible past a filter (G4). Keyed
+  // to the filter: the router commits the URL in a transition, so the reset must
+  // happen in that same render.
+  const [sticky, setSticky] = useState<StickyState>(() => ({
+    key: filterKey,
+    loc: location.key,
+    ids: EMPTY_IDS,
+    carryTo: null,
+  }))
+  const current = reconcileSticky(sticky, {
+    key: filterKey,
+    loc: location.key,
+    replace: navigationType === NavigationType.Replace,
+  })
+  if (current !== sticky) setSticky(current)
+  const stickyIds = current.ids
+
+  // Last known name per tag id, so a chip survives its last carrier leaving.
+  const tagNamesRef = useRef(new Map<number, string>())
+  // Deleted -> null, merged -> target id; maps a Back-resurrected id (D-13).
+  const retiredTagIdsRef = useRef(new Map<number, number | null>())
+  const tagIdsValidatedRef = useRef(false)
+
+  function markSticky(id: number) {
+    setSticky((prev) =>
+      prev.ids.has(id) ? prev : { ...prev, ids: new Set(prev.ids).add(id) }
+    )
+  }
+
+  function clearSticky() {
+    setSticky((prev) =>
+      prev.ids.size === 0 ? prev : { ...prev, ids: EMPTY_IDS }
+    )
+  }
+
+  function settleTagIds(ids: number[]): number[] {
+    const out = new Set<number>()
+    for (const id of ids) {
+      const retired = retiredTagIdsRef.current
+      const next = retired.has(id) ? retired.get(id) : id
+      if (next != null && tagNamesRef.current.has(next)) out.add(next)
+    }
+    return [...out].sort((a, b) => a - b)
+  }
+
+  // The route's own tag rewrites keep sticky cards across their landing (WR-03).
+  function writeKeepingSticky(
+    mutate: (next: URLSearchParams) => void,
+    opts: { replace?: boolean }
+  ) {
+    write((p) => {
+      const from = filterKeyOf(parseWatchlistParams(p))
+      mutate(p)
+      const to = filterKeyOf(parseWatchlistParams(p))
+      setSticky((prev) => carrySticky(prev, from, to))
+    }, opts)
+  }
+
+  function writeTagIds(ids: number[]) {
+    writeKeepingSticky(
+      (p) => {
+        if (ids.length === 0) p.delete("tags")
+        else p.set("tags", ids.join(","))
+      },
+      { replace: true }
+    )
+  }
+
+  function scheduleCountAnnouncement() {
+    if (countTimer.current) clearTimeout(countTimer.current)
+    countTimer.current = setTimeout(() => {
+      const { n, m } = countRef.current
+      announce(
+        n > 0
+          ? `Showing ${formatArtistCount(n, m)}.`
+          : "No artists match these filters."
+      )
+    }, COUNT_ANNOUNCE_DEBOUNCE_MS)
+  }
+
+  // Filtering uses the local value; the URL only follows, debounced (D-12).
+  function handleQueryChange(next: string) {
+    setQuery(next)
+    clearSticky()
+    scheduleCountAnnouncement()
+    if (qTimer.current) clearTimeout(qTimer.current)
+    qTimer.current = setTimeout(() => {
+      lastWrittenQ.current = next
+      write(
+        (p) => {
+          if (next === "") p.delete("q")
+          else p.set("q", next)
+        },
+        { replace: true }
+      )
+    }, Q_WRITE_DEBOUNCE_MS)
+  }
+
+  // Re-sync the input only for Back/forward or external URL changes, never
+  // for an echo of our own write.
+  useEffect(() => {
+    if (view.q !== lastWrittenQ.current) {
+      if (qTimer.current) clearTimeout(qTimer.current)
+      lastWrittenQ.current = view.q
+      setQuery(view.q)
+      clearSticky()
+    }
+  }, [view.q])
+
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  // G-25-12: after a keyboard toggle removes its card, focus the fallback card's chip, else the heading.
+  function focusAfterCardLeaves(fallback: HTMLElement | null) {
+    const target =
+      fallback?.querySelector<HTMLElement>(
+        '[data-chip-label][aria-pressed="true"]'
+      ) ?? fallback?.querySelector<HTMLElement>("[data-chip-label]")
+    ;(target ?? headingRef.current)?.focus({ preventScroll: true })
+  }
+
+  const captureScrollAnchor = useScrollAnchor(filterKey, focusAfterCardLeaves)
+
+  // Drop an unknown or default sort, bad tag ids, and non-"1" flags from the
+  // URL without a history entry. Once validated, retired and unknown tag ids go too.
+  useEffect(() => {
+    const canonical = canonicalWatchlistParams(params)
+    if (tagIdsValidatedRef.current) {
+      const settled = settleTagIds(parseWatchlistParams(canonical).tagIds)
+      if (settled.length === 0) canonical.delete("tags")
+      else canonical.set("tags", settled.join(","))
+    }
+    if (canonical.toString() === params.toString()) return
+    writeKeepingSticky(
+      (p) => {
+        for (const key of ["sort", "tags", "muted", "custom"]) {
+          const value = canonical.get(key)
+          if (value === null) p.delete(key)
+          else p.set(key, value)
+        }
+      },
+      { replace: true }
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- settleTagIds and writeKeepingSticky only read refs and setters
+  }, [params, write])
+
+  useEffect(() => {
+    return () => {
+      if (qTimer.current) clearTimeout(qTimer.current)
+      if (countTimer.current) clearTimeout(countTimer.current)
+    }
+  }, [])
+
+  // Resolves with the loaded rows (null on failure); never touches the sticky set.
   const refresh = useCallback(() => {
     setError(false)
-    listWatchlist()
-      .then((rows) => setEntries(rows))
-      .catch(() => setError(true))
+    return listWatchlist()
+      .then((rows) => {
+        setEntries(rows)
+        return rows
+      })
+      .catch(() => {
+        setError(true)
+        return null
+      })
   }, [])
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // Runs once on the first successful load; later refreshes never prune (D-13).
+  useEffect(() => {
+    if (!entries || tagIdsValidatedRef.current) return
+    tagIdsValidatedRef.current = true
+    const carried = new Set(entries.flatMap((r) => r.tags.map((t) => t.id)))
+    const kept = view.tagIds.filter((id) => carried.has(id))
+    if (kept.length !== view.tagIds.length) writeTagIds(kept)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- first load only
+  }, [entries])
 
   // handleEntryChange is passed down to PreferenceToggles (via
   // WatchlistRow) so its optimistic-update-then-rollback logic writes
@@ -68,6 +272,7 @@ export default function Watchlist() {
   // concurrent single-axis PATCHes must never let one axis's response
   // clobber the other axis's already-applied value.
   function handleEntryChange(id: number, patch: Partial<WatchlistEntry>) {
+    markSticky(id)
     setEntries((rows) =>
       rows ? rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) : rows
     )
@@ -77,6 +282,7 @@ export default function Watchlist() {
   // don't clobber each other (D-24). addTag is idempotent and restores the
   // chip's position on rollback.
   function addTag(entryId: number, tag: TagRef, index?: number) {
+    markSticky(entryId)
     setEntries((rows) =>
       rows
         ? rows.map((r) => {
@@ -96,6 +302,7 @@ export default function Watchlist() {
   }
 
   function removeTag(entryId: number, tagId: number) {
+    markSticky(entryId)
     setEntries((rows) =>
       rows
         ? rows.map((r) =>
@@ -107,8 +314,33 @@ export default function Watchlist() {
     )
   }
 
+  // Swap or drop one selected tag id, de-duplicated and ascending.
+  function replaceSelectedTag(from: number, to: number | null) {
+    writeKeepingSticky(
+      (p) => {
+        const ids = parseWatchlistParams(p).tagIds
+        if (!ids.includes(from)) return
+        const next = new Set(ids.filter((id) => id !== from))
+        if (to !== null) next.add(to)
+        if (next.size === 0) p.delete("tags")
+        else p.set("tags", [...next].sort((a, b) => a - b).join(","))
+      },
+      { replace: true }
+    )
+  }
+
   // The only place rows' tags change for a Manage tags rename/merge/delete.
   function applyTagChange(change: TagChange) {
+    if (change.kind === "renamed") {
+      tagNamesRef.current.set(change.tag.id, change.tag.name)
+    } else if (change.kind === "deleted") {
+      retiredTagIdsRef.current.set(change.tagId, null)
+      replaceSelectedTag(change.tagId, null)
+    } else {
+      retiredTagIdsRef.current.set(change.sourceId, change.target.id)
+      tagNamesRef.current.set(change.target.id, change.target.name)
+      replaceSelectedTag(change.sourceId, change.target.id)
+    }
     setEntries((rows) =>
       rows
         ? rows.map((r) => {
@@ -159,17 +391,20 @@ export default function Watchlist() {
       return
     }
     try {
-      await addWatchlist({
+      const added = await addWatchlist({
         mbid: result.id,
         name: result.name,
         imageUrl: result.image_url ?? undefined,
         disambiguation: result.disambiguation ?? undefined,
         deezerId: undefined,
       })
+      markSticky(added.id)
       refresh()
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        refresh()
+        const rows = await refresh()
+        const existing = rows?.find((r) => r.mbid === result.id)
+        if (existing) markSticky(existing.id)
         return
       }
       toast.error("Couldn't add this artist. Try again in a moment.")
@@ -211,7 +446,10 @@ export default function Watchlist() {
             imageUrl: entry.image_url ?? undefined,
             note: entry.note ?? undefined,
           })
-            .then(refresh)
+            .then((restored) => {
+              markSticky(restored.id)
+              return refresh()
+            })
             .catch(() => {
               toast.error(
                 `Couldn't restore ${entry.name}. Try adding it again.`
@@ -220,6 +458,80 @@ export default function Watchlist() {
         },
       },
     })
+  }
+
+  if (entries) {
+    for (const r of entries) {
+      for (const t of r.tags) tagNamesRef.current.set(t.id, t.name)
+    }
+  }
+  const tagOptions = entries ? tagFilterOptions(entries) : []
+  const selectedTags = sortTagsByName(
+    view.tagIds.flatMap((id) => {
+      const name = tagNamesRef.current.get(id)
+      if (name === undefined) return []
+      return [
+        { id, name, count: tagOptions.find((o) => o.id === id)?.count ?? 0 },
+      ]
+    })
+  )
+
+  const filterTagIds = new Set(view.tagIds)
+  const visible = entries
+    ? selectVisible(entries, { ...view, q: query }, stickyIds)
+    : []
+  countRef.current = { n: visible.length, m: entries?.length ?? 0 }
+
+  function handleTagsChange(ids: number[]) {
+    write((p) => {
+      if (ids.length === 0) p.delete("tags")
+      else p.set("tags", ids.join(","))
+    })
+    scheduleCountAnnouncement()
+  }
+
+  function handleFlagChange(key: "muted" | "custom", next: boolean) {
+    write((p) => {
+      if (next) p.set(key, "1")
+      else p.delete(key)
+    })
+    scheduleCountAnnouncement()
+  }
+
+  function toggleFilterTag(
+    tag: TagRef,
+    anchor?: HTMLElement,
+    viaKeyboard?: boolean
+  ) {
+    if (anchor) captureScrollAnchor(anchor, viaKeyboard)
+    tagNamesRef.current.set(tag.id, tag.name)
+    const ids = new Set(view.tagIds)
+    if (!ids.delete(tag.id)) ids.add(tag.id)
+    handleTagsChange([...ids].sort((a, b) => a - b))
+  }
+
+  function handleSortChange(next: SortKey) {
+    write((p) => {
+      if (next === DEFAULT_SORT) p.delete("sort")
+      else p.set("sort", next)
+    })
+    if (countTimer.current) clearTimeout(countTimer.current)
+    const label = SORT_OPTIONS.find((o) => o.value === next)!.label
+    announce(`Sorted by ${label}.`)
+  }
+
+  function clearFilters() {
+    if (qTimer.current) clearTimeout(qTimer.current)
+    if (countTimer.current) clearTimeout(countTimer.current)
+    setQuery("")
+    lastWrittenQ.current = ""
+    write((p) => {
+      for (const key of CLEAR_FILTER_KEYS) p.delete(key)
+    })
+    if (view.tagIds.length === 0 && !view.muted && !view.custom) clearSticky()
+    filterInputRef.current?.focus()
+    const m = entries?.length ?? 0
+    announce(`Filters cleared. Showing ${formatArtistCount(m, m)}.`)
   }
 
   return (
@@ -279,18 +591,67 @@ export default function Watchlist() {
         )}
 
         {!error && entries !== null && entries.length > 0 && (
-          <ul className="flex flex-col gap-4">
-            {entries.map((entry) => (
-              <WatchlistRow
-                key={entry.id}
-                entry={entry}
-                onEntryChange={handleEntryChange}
-                onRemove={handleRemove}
-                tagActions={{ addTag, removeTag }}
-                announce={announce}
+          <section
+            aria-labelledby="watchlist-artists-heading"
+            className="flex flex-col gap-4"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2
+                id="watchlist-artists-heading"
+                ref={headingRef}
+                tabIndex={-1}
+                className="text-heading font-semibold text-foreground outline-none"
+              >
+                Your artists
+              </h2>
+              <p className="text-label text-muted-foreground tabular-nums">
+                {formatArtistCount(visible.length, entries.length)}
+              </p>
+            </div>
+            <WatchlistToolbar
+              query={query}
+              onQueryChange={handleQueryChange}
+              filterInputRef={filterInputRef}
+              showClear={
+                isFiltered({ ...view, q: query }) && visible.length > 0
+              }
+              onClearFilters={clearFilters}
+              sort={view.sort}
+              onSortChange={handleSortChange}
+              tagOptions={tagOptions}
+              selectedTags={selectedTags}
+              onSelectedTagsChange={handleTagsChange}
+              muted={view.muted}
+              onMutedChange={(next) => handleFlagChange("muted", next)}
+              custom={view.custom}
+              onCustomChange={(next) => handleFlagChange("custom", next)}
+            />
+            {visible.length === 0 ? (
+              <EmptyState
+                heading="No artists match these filters"
+                body={`Try a different name or fewer filters, or clear them to see all ${entries.length} artist${entries.length === 1 ? "" : "s"}.`}
+                action={<Button onClick={clearFilters}>Clear filters</Button>}
               />
-            ))}
-          </ul>
+            ) : (
+              <ul className="flex flex-col gap-4">
+                {visible.map((entry) => (
+                  <WatchlistRow
+                    key={entry.id}
+                    entry={entry}
+                    onEntryChange={handleEntryChange}
+                    onRemove={handleRemove}
+                    tagActions={{
+                      addTag,
+                      removeTag,
+                      filterTagIds,
+                      toggleFilterTag,
+                    }}
+                    announce={announce}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
         )}
       </div>
     </TagVocabularyProvider>

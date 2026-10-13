@@ -2018,3 +2018,65 @@ func TestWatchlist_Patch_ReturnsTagsAndNote(t *testing.T) {
 // -- kept file-local since it is unexported and this is a different
 // package.
 func ptr(s string) *string { return &s }
+
+// TestWatchlist_List_LatestRelease proves GET /watchlist carries the latest
+// and next release dates from its single query, with null (not a 500) for an
+// artist without releases (WLVW-03, G1-G3).
+func TestWatchlist_List_LatestRelease(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "watchlist_release_http_test")
+	ctx := context.Background()
+
+	watchlistSvc := watchlist.NewService(sqlc.New(pool))
+	srv := httpserver.New(pool, watchlistSvc, stubEventsStore{}, nil, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	released, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-released", Name: "Released Artist"})
+	if err != nil {
+		t.Fatalf("seed released entry: %v", err)
+	}
+	quiet, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-quiet", Name: "Quiet Artist"})
+	if err != nil {
+		t.Fatalf("seed quiet entry: %v", err)
+	}
+	insertTestEventWithDate(t, pool, released.ArtistID, testMBID(t)+"-past", datePtr("1999-05-17"))
+	insertTestEventWithDate(t, pool, released.ArtistID, testMBID(t)+"-future", datePtr("2999"))
+
+	resp, err := http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET /watchlist: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var entries []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	byID := map[int64]map[string]any{}
+	for _, e := range entries {
+		byID[int64(e["id"].(float64))] = e
+	}
+	rel, ok := byID[released.ID]
+	if !ok {
+		t.Fatalf("released entry %d missing from list", released.ID)
+	}
+	if got := rel["latest_release_date"]; got != "1999-05-17" {
+		t.Errorf("latest_release_date = %v, want 1999-05-17", got)
+	}
+	if got := rel["next_release_date"]; got != "2999" {
+		t.Errorf("next_release_date = %v, want 2999", got)
+	}
+	q, ok := byID[quiet.ID]
+	if !ok {
+		t.Fatalf("quiet entry %d missing from list", quiet.ID)
+	}
+	for _, key := range []string{"latest_release_date", "next_release_date"} {
+		v, present := q[key]
+		if !present || v != nil {
+			t.Errorf("quiet %s = %v (present=%v), want present null", key, v, present)
+		}
+	}
+}

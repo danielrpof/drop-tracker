@@ -81,3 +81,15 @@ export function buildTagSuggestions({
 
   return { state: "items", items }
 }
+
+const tagCollator = new Intl.Collator(undefined, { sensitivity: "base" })
+
+// sortTagsByName orders tags for pickers: base-sensitivity collation, id
+// ascending on ties (D-11). Returns a new array.
+export function sortTagsByName<T extends { id: number; name: string }>(
+  tags: readonly T[]
+): T[] {
+  return [...tags].sort(
+    (a, b) => tagCollator.compare(a.name, b.name) || a.id - b.id
+  )
+}

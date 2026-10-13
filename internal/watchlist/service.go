@@ -83,19 +83,21 @@ type TagRef struct {
 
 // Entry is the API-facing joined artist + watchlist row.
 type Entry struct {
-	ID              int64     `json:"id"`
-	ArtistID        int64     `json:"artist_id"`
-	MBID            string    `json:"mbid"`
-	Name            string    `json:"name"`
-	DeezerID        *string   `json:"deezer_id"`
-	Disambiguation  *string   `json:"disambiguation"`
-	ImageURL        *string   `json:"image_url"`
-	ReleaseTypes    []string  `json:"release_types"`
-	MutedEventTypes []string  `json:"muted_event_types"`
-	Tags            []TagRef  `json:"tags"`
-	Note            *string   `json:"note"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                int64     `json:"id"`
+	ArtistID          int64     `json:"artist_id"`
+	MBID              string    `json:"mbid"`
+	Name              string    `json:"name"`
+	DeezerID          *string   `json:"deezer_id"`
+	Disambiguation    *string   `json:"disambiguation"`
+	ImageURL          *string   `json:"image_url"`
+	ReleaseTypes      []string  `json:"release_types"`
+	MutedEventTypes   []string  `json:"muted_event_types"`
+	Tags              []TagRef  `json:"tags"`
+	Note              *string   `json:"note"`
+	LatestReleaseDate *string   `json:"latest_release_date"`
+	NextReleaseDate   *string   `json:"next_release_date"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // AddParams carries the fields needed to add a new artist to the
@@ -346,19 +348,21 @@ func entryFromRow(row sqlc.ListWatchlistRow) (Entry, error) {
 		return Entry{}, err
 	}
 	return Entry{
-		ID:              row.ID,
-		ArtistID:        row.ArtistID,
-		MBID:            row.Mbid,
-		Name:            row.Name,
-		DeezerID:        row.DeezerID,
-		Disambiguation:  row.Disambiguation,
-		ImageURL:        row.ImageUrl,
-		ReleaseTypes:    row.ReleaseTypes,
-		MutedEventTypes: row.MutedEventTypes,
-		Tags:            tags,
-		Note:            row.Note,
-		CreatedAt:       row.CreatedAt.Time,
-		UpdatedAt:       row.UpdatedAt.Time,
+		ID:                row.ID,
+		ArtistID:          row.ArtistID,
+		MBID:              row.Mbid,
+		Name:              row.Name,
+		DeezerID:          row.DeezerID,
+		Disambiguation:    row.Disambiguation,
+		ImageURL:          row.ImageUrl,
+		ReleaseTypes:      row.ReleaseTypes,
+		MutedEventTypes:   row.MutedEventTypes,
+		Tags:              tags,
+		Note:              row.Note,
+		LatestReleaseDate: row.LatestReleaseDate,
+		NextReleaseDate:   row.NextReleaseDate,
+		CreatedAt:         row.CreatedAt.Time,
+		UpdatedAt:         row.UpdatedAt.Time,
 	}, nil
 }
 

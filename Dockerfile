@@ -41,7 +41,7 @@ COPY web/ ./
 RUN pnpm run build
 
 # ---- Stage 2: build the Go binary ----
-FROM golang:1.26.6-alpine3.24@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83 AS go-build
+FROM golang:1.26.9-alpine3.24@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS go-build
 WORKDIR /src
 
 # Copy module files first so `go mod download` caches independently of

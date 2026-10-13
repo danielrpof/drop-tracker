@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 
 import { CoverArt } from "~/components/common/CoverArt"
 import { Button } from "~/components/ui/button"
@@ -131,6 +131,9 @@ interface SearchResultRowProps {
   onAdd: (sourceName: string, result: SearchArtist) => Promise<void>
 }
 
+export const DEEZER_ADD_HINT =
+  "This project can't yet match a Deezer artist to its MusicBrainz identity -- search MusicBrainz to add this artist and get release detection."
+
 // SearchResultRow renders one result: cover art, name, type, and a
 // one-line-truncated secondary label (disambiguation, falling back to
 // country when disambiguation is blank) when present, all as plain JSX
@@ -155,6 +158,7 @@ function SearchResultRow({
   alreadyWatching,
   onAdd,
 }: SearchResultRowProps) {
+  const hintId = useId()
   const [pending, setPending] = useState(false)
   const canAdd = isAddableSource(sourceName)
   const secondaryLabel = artist.disambiguation ?? artist.country
@@ -175,7 +179,9 @@ function SearchResultRow({
         <span className="truncate text-body font-medium text-foreground">
           {artist.name}
         </span>
-        <span className="text-label text-muted-foreground">{artist.type}</span>
+        <span className="truncate text-label text-muted-foreground">
+          {artist.type}
+        </span>
         {secondaryLabel !== null && (
           <span className="truncate text-label text-muted-foreground">
             {secondaryLabel}
@@ -187,15 +193,25 @@ function SearchResultRow({
           Already watching
         </Button>
       ) : !canAdd ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled
-          title="This project can't yet match a Deezer artist to its MusicBrainz identity -- search MusicBrainz to add this artist and get release detection."
-          className="shrink-0"
+        // WR-04: a disabled button gets no pointer events, so the title sits on the wrapper.
+        // aria-describedby gives screen readers the same hint (G-25-13).
+        <span
+          title={DEEZER_ADD_HINT}
+          className="max-w-[40%] shrink-0 lg:max-w-none"
         >
-          Search MusicBrainz to add
-        </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled
+            aria-describedby={hintId}
+            className="w-full"
+          >
+            <span className="truncate">Search MusicBrainz to add</span>
+          </Button>
+          <span id={hintId} className="sr-only">
+            {DEEZER_ADD_HINT}
+          </span>
+        </span>
       ) : (
         <Button
           size="sm"

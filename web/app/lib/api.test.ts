@@ -294,6 +294,8 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
       updated_at: "2026-01-01T00:00:00Z",
       tags: [],
       note: "crate digger",
+      latest_release_date: null,
+      next_release_date: null,
     }
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify(updatedEntry), {
@@ -407,6 +409,12 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
       expect(fetchMock.mock.calls[0][0]).toBe(
         "/events?artist_id=7&event_type=new_release&cursor=eyJpIjo0Mn0"
       )
+    })
+
+    it("sends tagId as tag_id", async () => {
+      await listEvents({ tagId: 3 })
+
+      expect(fetchMock.mock.calls[0][0]).toBe("/events?tag_id=3")
     })
   })
 })

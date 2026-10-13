@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { EmptyState } from "~/components/common/EmptyState"
 import {
@@ -9,7 +9,15 @@ import {
 import { EventCard } from "~/components/history/EventCard"
 import { Button } from "~/components/ui/button"
 import { Skeleton } from "~/components/ui/skeleton"
-import { listEvents, type EventItem } from "~/lib/api"
+import {
+  listEvents,
+  listTags,
+  type EventItem,
+  type TagSummary,
+  type WatchlistEntry,
+} from "~/lib/api"
+import { canonicalHistoryParams, parseHistoryParams } from "~/lib/historyParams"
+import { useUrlParams } from "~/lib/useUrlParams"
 
 // EventCardSkeleton is the loading placeholder for one card: a hero-art
 // block plus text bars (UI-SPEC "loading/History feed" backstop). Rendered
@@ -30,18 +38,35 @@ function EventCardSkeleton() {
 
 const SKELETON_COUNT = 3
 
-// emptyStateCopy selects the correct one of the three empty-state messages
-// (D-05, D-06). Order is locked by 10-UI-SPEC.md's Trigger condition and
-// supersedes 10-PATTERNS.md's opposite ordering: hasOlderEvents is checked
-// FIRST, ahead of isFiltered, because a filtered-and-retention-hidden view
-// is better explained by retention than by "no matching events." The
-// retention branch never names EVENT_RETENTION_DAYS or a day count -- the
-// API exposes only a boolean, so no configured window length reaches here.
-function emptyStateCopy(hasOlderEvents: boolean, isFiltered: boolean) {
+function setOrDelete(
+  p: URLSearchParams,
+  key: string,
+  v: string | number | null
+) {
+  if (v === null) p.delete(key)
+  else p.set(key, String(v))
+}
+
+// emptyStateCopy picks the empty-state message (D-05, D-06, D-10). Order is
+// locked by the UI-SPEC: retention first, since a filtered view that is
+// retention-hidden is better explained by retention than by "no matches".
+function emptyStateCopy(
+  hasOlderEvents: boolean,
+  tag: { name: string } | null,
+  isFiltered: boolean
+) {
   if (hasOlderEvents) {
     return {
       heading: "Older than your retention window",
       body: "There's release history for this view — it's just outside your retention window. Nothing was deleted.",
+    }
+  }
+  if (tag) {
+    return {
+      heading: `No events for “${tag.name}”`,
+      body: isFiltered
+        ? `Nothing matches “${tag.name}” with the current artist and event-type filters.`
+        : `None of the artists tagged “${tag.name}” have release activity in your retention window.`,
     }
   }
   if (isFiltered) {
@@ -63,6 +88,7 @@ function fetchHistoryPage(filters: HistoryFiltersValue, cursor: string | null) {
   return listEvents({
     artistId: filters.artistId ?? undefined,
     eventType: filters.eventType ?? undefined,
+    tagId: filters.tagId ?? undefined,
     cursor: cursor ?? undefined,
   })
 }
@@ -72,10 +98,15 @@ function fetchHistoryPage(filters: HistoryFiltersValue, cursor: string | null) {
 // and a distinct message for every empty/loading/partial/error state
 // (D-05 through D-08, D-16).
 export default function History() {
-  const [filters, setFilters] = useState<HistoryFiltersValue>({
-    artistId: null,
-    eventType: null,
-  })
+  const { params, write } = useUrlParams()
+  const paramsKey = params.toString()
+  // Keyed on the string so the page-one effect deps stay primitive.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const filters = useMemo(() => parseHistoryParams(params), [paramsKey])
+  const [tagsState, setTagsState] = useState<{
+    status: "loading" | "loaded" | "error"
+    tags: TagSummary[]
+  }>({ status: "loading", tags: [] })
   const [events, setEvents] = useState<EventItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   // hasOlderEvents (DATA-02, D-06) distinguishes "no release activity ever"
@@ -91,6 +122,68 @@ export default function History() {
   // reloadToken bumps to re-run the initial-fetch effect on Retry without
   // changing the filters themselves -- re-issuing the exact same request.
   const [reloadToken, setReloadToken] = useState(0)
+  const tagTriggerRef = useRef<HTMLButtonElement>(null)
+  const tagIdChecked = useRef(false)
+  const artistIdChecked = useRef(false)
+  const filtersRef = useRef(filters)
+  filtersRef.current = filters
+  // Identifies the active feed so a stale Load more response can be dropped.
+  const feedKeyRef = useRef("")
+  feedKeyRef.current = `${filters.artistId}|${filters.eventType}|${filters.tagId}|${reloadToken}`
+
+  // D-13: malformed params are rewritten away with replace.
+  useEffect(() => {
+    const canonical = canonicalHistoryParams(params)
+    if (canonical.toString() === paramsKey) return
+    write(
+      (p) => {
+        for (const key of ["artist", "type", "tag"]) {
+          const v = canonical.get(key)
+          if (v === null) p.delete(key)
+          else p.set(key, v)
+        }
+      },
+      { replace: true }
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramsKey, write])
+
+  // Once per source: a failed GET /tags is not proof the tag id is stale.
+  useEffect(() => {
+    if (tagsState.status !== "loaded" || tagIdChecked.current) return
+    tagIdChecked.current = true
+    if (
+      filters.tagId !== null &&
+      !tagsState.tags.some((t) => t.id === filters.tagId)
+    ) {
+      write((p) => p.delete("tag"), { replace: true })
+    }
+  }, [tagsState, filters.tagId, write])
+
+  // Same rule for the artist id, checked when HistoryFilters' watchlist loads.
+  const handleArtistsLoaded = (artists: WatchlistEntry[]) => {
+    if (artistIdChecked.current) return
+    artistIdChecked.current = true
+    const id = filtersRef.current.artistId
+    if (id !== null && !artists.some((a) => a.artist_id === id)) {
+      write((p) => p.delete("artist"), { replace: true })
+    }
+  }
+
+  // One GET /tags per mount; a failure degrades the Tag menu silently.
+  useEffect(() => {
+    let cancelled = false
+    listTags()
+      .then((tags) => {
+        if (!cancelled) setTagsState({ status: "loaded", tags })
+      })
+      .catch(() => {
+        if (!cancelled) setTagsState({ status: "error", tags: [] })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // On mount and on any filter change, reset the accumulated page list and
   // fetch page one -- appending filtered results onto unfiltered ones would
@@ -100,6 +193,7 @@ export default function History() {
     setInitialLoading(true)
     setError(null)
     setAppendError(null)
+    setAppendLoading(false)
     setEvents([])
     setNextCursor(null)
     setHasOlderEvents(false)
@@ -122,15 +216,17 @@ export default function History() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.artistId, filters.eventType, reloadToken])
+  }, [filters.artistId, filters.eventType, filters.tagId, reloadToken])
 
   const handleLoadMore = () => {
     if (nextCursor == null || appendLoading) return
+    const issuedFor = feedKeyRef.current
     setAppendLoading(true)
     setAppendError(null)
 
     fetchHistoryPage(filters, nextCursor)
       .then((page) => {
+        if (feedKeyRef.current !== issuedFor) return
         // Append, never replace -- and de-dupe defensively by id so a
         // double-fired request (should the disabled-button guard above
         // ever be bypassed) can never render the same event twice.
@@ -143,10 +239,12 @@ export default function History() {
         setHasOlderEvents(page.has_older_events)
       })
       .catch(() => {
-        setAppendError("Couldn't load release history.")
+        if (feedKeyRef.current === issuedFor) {
+          setAppendError("Couldn't load release history.")
+        }
       })
       .finally(() => {
-        setAppendLoading(false)
+        if (feedKeyRef.current === issuedFor) setAppendLoading(false)
       })
   }
 
@@ -156,11 +254,40 @@ export default function History() {
 
   const isFiltered = filters.artistId != null || filters.eventType != null
 
+  const activeTag =
+    filters.tagId === null
+      ? null
+      : {
+          name:
+            tagsState.tags.find((t) => t.id === filters.tagId)?.name ??
+            "this tag",
+        }
+
+  const handleFiltersChange = (next: HistoryFiltersValue) => {
+    write((p) => {
+      setOrDelete(p, "artist", next.artistId)
+      setOrDelete(p, "type", next.eventType)
+      setOrDelete(p, "tag", next.tagId)
+    })
+  }
+
+  const showAllTags = () => {
+    write((p) => p.delete("tag"))
+    tagTriggerRef.current?.focus()
+  }
+
   return (
     <div className="flex flex-col gap-6 p-8">
       <h1 className="text-display font-semibold text-foreground">History</h1>
 
-      <HistoryFilters value={filters} onChange={setFilters} />
+      <HistoryFilters
+        value={filters}
+        onChange={handleFiltersChange}
+        tags={tagsState.tags}
+        tagsStatus={tagsState.status}
+        tagTriggerRef={tagTriggerRef}
+        onArtistsLoaded={handleArtistsLoaded}
+      />
 
       {error && (
         <EmptyState
@@ -186,8 +313,19 @@ export default function History() {
         !initialLoading &&
         events.length === 0 &&
         (() => {
-          const { heading, body } = emptyStateCopy(hasOlderEvents, isFiltered)
-          return <EmptyState heading={heading} body={body} />
+          const { heading, body } = emptyStateCopy(
+            hasOlderEvents,
+            activeTag,
+            isFiltered
+          )
+          // The tag branch only applies when retention doesn't take over.
+          const action =
+            activeTag && !hasOlderEvents ? (
+              <Button variant="secondary" onClick={showAllTags}>
+                Show all tags
+              </Button>
+            ) : undefined
+          return <EmptyState heading={heading} body={body} action={action} />
         })()}
 
       {!error && !initialLoading && events.length > 0 && (

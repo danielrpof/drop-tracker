@@ -90,6 +90,10 @@ export interface WatchlistEntry {
   // when unset (D-28).
   tags: TagRef[]
   note: string | null
+  // Server-computed (G2/G3): the client only formats these, never compares
+  // them to today.
+  latest_release_date: string | null
+  next_release_date: string | null
 }
 
 // SearchArtist mirrors internal/httpserver/search.go's SearchArtist.
@@ -280,11 +284,13 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listEvents(params?: {
   artistId?: number
   eventType?: string
+  tagId?: number
   cursor?: string
 }): Promise<EventsPage> {
   const search = new URLSearchParams()
   if (params?.artistId != null) search.set("artist_id", String(params.artistId))
   if (params?.eventType) search.set("event_type", params.eventType)
+  if (params?.tagId != null) search.set("tag_id", String(params.tagId))
   if (params?.cursor != null) search.set("cursor", params.cursor)
   const qs = search.toString()
   return apiFetch<EventsPage>(`/events${qs ? `?${qs}` : ""}`)

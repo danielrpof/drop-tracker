@@ -1,17 +1,28 @@
 import { useEffect, useId, useRef, useState } from "react"
 
-import { listWatchlist, type EventItem, type WatchlistEntry } from "~/lib/api"
+import {
+  listWatchlist,
+  type EventItem,
+  type TagSummary,
+  type WatchlistEntry,
+} from "~/lib/api"
+import { sortTagsByName } from "~/lib/tags"
 
-// HistoryFiltersValue carries both filter axes -- null means "all" on that
-// axis (HIST-01, D-06). Both axes are independent and compose.
+// HistoryFiltersValue carries every filter axis -- null means "all" on that
+// axis (HIST-01, HIST-02, D-06). The axes are independent and compose.
 export interface HistoryFiltersValue {
   artistId: number | null
   eventType: EventItem["event_type"] | null
+  tagId: number | null
 }
 
 export interface HistoryFiltersProps {
   value: HistoryFiltersValue
   onChange: (value: HistoryFiltersValue) => void
+  tags: TagSummary[]
+  tagsStatus: "loading" | "loaded" | "error"
+  tagTriggerRef?: React.RefObject<HTMLButtonElement | null>
+  onArtistsLoaded?: (artists: WatchlistEntry[]) => void
 }
 
 // EVENT_TYPE_OPTIONS populates the event-type control from the three fixed
@@ -34,7 +45,7 @@ const EVENT_TYPE_OPTIONS: { value: EventItem["event_type"]; label: string }[] =
 // no-component-library constraint still holds; only the "native select is
 // fine" assumption was wrong).
 const triggerClassName =
-  "flex h-9 min-w-40 items-center justify-between gap-2 rounded-md border border-input bg-input/30 px-3 text-body text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+  "flex h-9 max-w-64 min-w-40 items-center justify-between gap-2 rounded-md border border-input bg-input/30 px-3 text-body text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
 
 const optionClassName =
   "cursor-pointer px-3 py-1.5 text-body text-popover-foreground data-[highlighted=true]:bg-accent"
@@ -49,6 +60,8 @@ interface ComboboxProps<TValue extends string> {
   options: ComboboxOption<TValue>[]
   value: TValue | null
   onSelect: (value: TValue | null) => void
+  triggerLabel?: string
+  triggerRef?: React.RefObject<HTMLButtonElement | null>
 }
 
 // Combobox is a small hand-rolled dropdown shared by the Artist and Event
@@ -60,11 +73,14 @@ function Combobox<TValue extends string>({
   options,
   value,
   onSelect,
+  triggerLabel,
+  triggerRef: suppliedTriggerRef,
 }: ComboboxProps<TValue>) {
   const [open, setOpen] = useState(false)
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
+  const internalTriggerRef = useRef<HTMLButtonElement>(null)
+  const triggerRef = suppliedTriggerRef ?? internalTriggerRef
   const listboxId = useId()
 
   const selectedIndex = options.findIndex((opt) =>
@@ -72,6 +88,16 @@ function Combobox<TValue extends string>({
   )
   const selectedOption = options[selectedIndex === -1 ? 0 : selectedIndex]
   const optionId = (index: number) => `${listboxId}-option-${index}`
+  const shownLabel = triggerLabel ?? selectedOption?.label
+
+  // jsdom has no scrollIntoView, hence the optional call.
+  useEffect(() => {
+    if (!open) return
+    document
+      .getElementById(optionId(highlightedIndex))
+      ?.scrollIntoView?.({ block: "nearest" })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, highlightedIndex])
 
   useEffect(() => {
     if (!open) return
@@ -148,7 +174,9 @@ function Combobox<TValue extends string>({
         }
         onKeyDown={handleTriggerKeyDown}
       >
-        <span>{selectedOption?.label}</span>
+        <span className="truncate" title={shownLabel}>
+          {shownLabel}
+        </span>
         <span aria-hidden="true" className="text-muted-foreground">
           {"▾"}
         </span>
@@ -159,7 +187,7 @@ function Combobox<TValue extends string>({
           id={listboxId}
           role="listbox"
           aria-label={label}
-          className="absolute top-full left-0 z-50 mt-1 min-w-full overflow-hidden rounded-md border border-input bg-popover text-popover-foreground shadow-md"
+          className="absolute top-full left-0 z-50 mt-1 max-h-72 min-w-full overflow-y-auto rounded-md border border-input bg-popover text-popover-foreground shadow-md"
         >
           {options.map((opt, index) => (
             <li
@@ -189,20 +217,36 @@ function Combobox<TValue extends string>({
 // no cross-tab state is shared. Changing either control reports the full
 // new value upward; history.tsx resets the accumulated page list and
 // refetches from the first page on any change.
-export function HistoryFilters({ value, onChange }: HistoryFiltersProps) {
+export function HistoryFilters({
+  value,
+  onChange,
+  tags,
+  tagsStatus,
+  tagTriggerRef,
+  onArtistsLoaded,
+}: HistoryFiltersProps) {
   const [artists, setArtists] = useState<WatchlistEntry[]>([])
+  const [artistsStatus, setArtistsStatus] = useState<
+    "loading" | "loaded" | "error"
+  >("loading")
+  const onArtistsLoadedRef = useRef(onArtistsLoaded)
+  onArtistsLoadedRef.current = onArtistsLoaded
 
   useEffect(() => {
     let cancelled = false
     listWatchlist()
       .then((entries) => {
-        if (!cancelled) setArtists(entries)
+        if (cancelled) return
+        setArtists(entries)
+        setArtistsStatus("loaded")
+        onArtistsLoadedRef.current?.(entries)
       })
       .catch(() => {
-        // The artist filter is a convenience control, not the primary
-        // feed -- a failed watchlist fetch just leaves the "All artists"
-        // option as the only choice rather than erroring the whole page.
-        if (!cancelled) setArtists([])
+        // A failed fetch leaves only "All artists" and must not look like
+        // proof that a selected artist is stale.
+        if (cancelled) return
+        setArtists([])
+        setArtistsStatus("error")
       })
     return () => {
       cancelled = true
@@ -217,9 +261,31 @@ export function HistoryFilters({ value, onChange }: HistoryFiltersProps) {
     })),
   ]
 
+  // Never show a silent "All artists" while a selected artist can't be named.
+  let artistTriggerLabel: string | undefined
+  if (value.artistId !== null && artistsStatus === "loading")
+    artistTriggerLabel = "Loading artists…"
+  else if (value.artistId !== null && artistsStatus === "error")
+    artistTriggerLabel = "Artist unavailable"
+
   const eventTypeOptions: ComboboxOption<EventItem["event_type"]>[] = [
     { value: "", label: "All event types" },
     ...EVENT_TYPE_OPTIONS,
+  ]
+
+  // Never show a silent "All tags" while a selected tag can't be named.
+  let tagTriggerLabel: string | undefined
+  if (value.tagId !== null && tagsStatus === "loading")
+    tagTriggerLabel = "Loading tags…"
+  else if (value.tagId !== null && tagsStatus === "error")
+    tagTriggerLabel = "Tag unavailable"
+
+  const tagOptions: ComboboxOption<string>[] = [
+    { value: "", label: "All tags" },
+    ...sortTagsByName(tags).map((tag) => ({
+      value: String(tag.id),
+      label: tag.name,
+    })),
   ]
 
   return (
@@ -230,6 +296,7 @@ export function HistoryFilters({ value, onChange }: HistoryFiltersProps) {
           label="Artist"
           options={artistOptions}
           value={value.artistId === null ? null : String(value.artistId)}
+          triggerLabel={artistTriggerLabel}
           onSelect={(raw) =>
             onChange({ ...value, artistId: raw === null ? null : Number(raw) })
           }
@@ -243,6 +310,20 @@ export function HistoryFilters({ value, onChange }: HistoryFiltersProps) {
           options={eventTypeOptions}
           value={value.eventType}
           onSelect={(raw) => onChange({ ...value, eventType: raw })}
+        />
+      </label>
+
+      <label className="flex flex-col gap-1 text-label text-muted-foreground">
+        Tag
+        <Combobox
+          label="Tag"
+          options={tagOptions}
+          value={value.tagId === null ? null : String(value.tagId)}
+          triggerLabel={tagTriggerLabel}
+          triggerRef={tagTriggerRef}
+          onSelect={(raw) =>
+            onChange({ ...value, tagId: raw === null ? null : Number(raw) })
+          }
         />
       </label>
     </div>

@@ -88,7 +88,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 **Milestone Goal:** Keep a 50+ artist watchlist manageable. The user can label, annotate, find, bulk-change, and bulk-add artists, with no new background API polling.
 
 - [x] **Phase 24: Artist Tags & Notes** - Free-form, case-insensitive tags with autocomplete and a plain-text note on each Watchlist card, global tag rename/merge/delete, and tags that belong to the artist so they survive a remove and re-add (completed 2026-10-06)
-- [ ] **Phase 25: Find & Filter — Watchlist and History** - Client-side name search, stable sorts (including latest release), and tag/preference filters over the fully loaded watchlist, plus a retention-aware tag filter on the History feed
+- [x] **Phase 25: Find & Filter — Watchlist and History** - Client-side name search, stable sorts (including latest release), and tag/preference filters over the fully loaded watchlist, plus a retention-aware tag filter on the History feed (completed 2026-10-12)
 - [ ] **Phase 26: Bulk Edit & Remove** - Multi-select on the Watchlist with one-action tag add/remove, preference changes, and a count-confirmed all-or-nothing remove, backed by set-based transactional endpoints
 - [ ] **Phase 27: Paste-a-List Bulk Add** - Paste names one per line, watch them resolve one search at a time within the existing rate limits, review best matches by confidence, and add the confirmed set in one request
 - [ ] **Phase 28: Tags on Discord Notifications** - Tags on real-time embeds and digest lines, with markdown escaping added to the real-time path and the digest's chunking guarantees re-proven against longer lines
@@ -193,36 +193,71 @@ Plans:
   4. The user can filter History by a tag alongside the existing filters. It lists events for artists carrying that tag, including artists since removed from the watchlist, and it never shows an event older than the retention window, either on the first page or via "load older".
   5. Opening the Watchlist makes one request regardless of watchlist size. Searching, sorting, and filtering then happen instantly with no further requests.
 
-**Plans:** 10 plans
+**Plans:** 21/21 plans complete
 
 Plans:
 **Wave 1**
 
-- [ ] 25-01-PLAN.md — GET /watchlist gains `latest_release_date` and `next_release_date` from two lateral joins in its single query (G1–G3), with semantics and projection-parity tests
-- [ ] 25-03-PLAN.md — Cards show `Latest release: {date}` / `No releases yet` and `Upcoming: {date}`, `formatReleaseDate`, and the `makeEntry` fixture builder
+- [x] 25-01-PLAN.md — GET /watchlist gains `latest_release_date` and `next_release_date` from two lateral joins in its single query (G1–G3), with semantics and projection-parity tests
+- [x] 25-03-PLAN.md — Cards show `Latest release: {date}` / `No releases yet` and `Upcoming: {date}`, `formatReleaseDate`, and the `makeEntry` fixture builder
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 25-02-PLAN.md — GET /events `tag_id` filter inside the retention-aware ListEvents and HasOlderEvents, with retention, paging, and validation tests
-- [ ] 25-04-PLAN.md — Watchlist name filter (accent and `$ø æ ß` folding), "N of M artists", URL state helper, Clear filters and filtered-to-zero state, live announcements, and sticky cards (G4)
-- [ ] 25-06-PLAN.md — History Tag control (D-11), `Combobox<T>` hardening, loading/unavailable labels, and the tag empty state with `Show all tags`
+- [x] 25-02-PLAN.md — GET /events `tag_id` filter inside the retention-aware ListEvents and HasOlderEvents, with retention, paging, and validation tests
+- [x] 25-04-PLAN.md — Watchlist name filter (accent and `$ø æ ß` folding), "N of M artists", URL state helper, Clear filters and filtered-to-zero state, live announcements, and sticky cards (G4)
+- [x] 25-06-PLAN.md — History Tag control (D-11), `Combobox<T>` hardening, loading/unavailable labels, and the tag empty state with `Show all tags`
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 25-05-PLAN.md — Sort by name, date added, or latest release with id-stable ties and null-last ordering, URL `sort`, and the sort announcement
-- [ ] 25-09-PLAN.md — History filters move to URL params (`artist`, `type`, `tag`), with stale and malformed params dropped once their source loads (G6)
+- [x] 25-05-PLAN.md — Sort by name, date added, or latest release with id-stable ties and null-last ordering, URL `sort`, and the sort announcement
+- [x] 25-09-PLAN.md — History filters move to URL params (`artist`, `type`, `tag`), with stale and malformed params dropped once their source loads (G6)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 25-07-PLAN.md — `Tags: any of` multi-select on the vendored base-ui Combobox, payload-derived options, and D-13 consistency (first-load validation, Manage tags delete/merge, Back)
+- [x] 25-07-PLAN.md — `Tags: any of` multi-select on the vendored base-ui Combobox, payload-derived options, and D-13 consistency (first-load validation, Manage tags delete/merge, Back)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 25-08-PLAN.md — `Has muted events` / `Custom release types` toggles with full AND composition, and the card chip label as a filter toggle (D-08)
+- [x] 25-08-PLAN.md — `Has muted events` / `Custom release types` toggles with full AND composition, and the card chip label as a filter toggle (D-08)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 25-10-PLAN.md — Embedded bundle rebuild, the phase-closing Definition of Done, and the blast-radius gate
+- [x] 25-10-PLAN.md — Embedded bundle rebuild, the phase-closing Definition of Done, and the blast-radius gate
+
+**UAT gap closure — Wave 1** *(from 25-UAT.md gaps G-25-4, G-25-7, G-25-9, with the user's 2026-10-11 decisions)*
+
+- [x] 25-11-PLAN.md — A chip-label click anchors the clicked card. `useScrollAnchor` records the chip's on-screen position and scrolls by the drift after the filtered re-render, clamped by the browser on short pages. Includes jsdom tests with stubbed layout for both directions and the disconnected case (G-25-4)
+- [x] 25-12-PLAN.md — History cards show `Detected {date}` from `created_at`, the date retention counts from (D-01 kept), plus an integration test for "detected recently, released long ago" under a tag filter (G-25-7)
+- [x] 25-13-PLAN.md — The Deezer search-result button is capped at 40% of the row below lg and truncates its label, and the type line truncates, so the artist name stays readable at 375px and 640px (G-25-9)
+
+**UAT gap closure — Wave 2** *(blocked on UAT gap closure Wave 1)*
+
+- [x] 25-14-PLAN.md — Embedded bundle rebuild, the reworded UI-SPEC D-12, UAT tests 4/7/9, and verification checks 4/7, plus the Definition of Done and a blast-radius gate against `461267f`
+
+**Verification gap closure — Wave 1** *(from 25-VERIFICATION.md gap G-25-4 and 25-REVIEW WR-01..WR-04, with the user's 2026-10-11 gap-planning decisions)*
+
+- [x] 25-15-PLAN.md — Sticky cards are keyed to the filter and reset during render, so a chip click on a sticky card keeps its anchor and focus (G-25-4, WR-01). Back drops stale stickies in the same commit. The route's own Manage tags merge/delete and canonical rewrites carry the sticky set (WR-03)
+- [x] 25-16-PLAN.md — The Deezer hint's `title` and 40% cap move to a wrapper span that receives pointer events, so the truncated pill explains itself on hover (WR-04)
+
+**Verification gap closure — Wave 2** *(blocked on 25-15)*
+
+- [x] 25-17-PLAN.md — Fallback scroll anchor: when the clicked card leaves the list, the next and then the previous sibling card stays in place (WR-02)
+
+**Verification gap closure — Wave 3** *(blocked on 25-15, 25-16, 25-17)*
+
+- [x] 25-18-PLAN.md — Embedded bundle rebuild with marker counts, the WR-01..WR-04 decisions recorded in three UI-SPEC lines, the Definition of Done, and a blast-radius gate against `8ccde67`
+
+**UAT gap closure (round 3) — Wave 1** *(from 25-UAT.md gaps G-25-11, G-25-12, G-25-13, with the user's 2026-10-12 decisions; waves are sequential because each plan edits its own 25-UI-SPEC line)*
+
+- [x] 25-19-PLAN.md — When the clicked card leaves, the scroll anchor falls back to the nearest surviving card in either direction (next before previous at each distance), so a run of leaving cards never collapses the page. Includes hook and route run-case tests and the widened UI-SPEC D-12 rule (G-25-11)
+
+**UAT gap closure (round 3) — Wave 2** *(blocked on 25-19)*
+
+- [x] 25-20-PLAN.md — A keyboard toggle that removes its card moves focus to the fallback card's pressed chip label, or to the `Your artists` heading when nothing survives. Uses `useEffectEvent` in `useScrollAnchor`, adds `data-chip-label`, and adds the "Toggled, card leaves" focus row (G-25-12)
+
+**UAT gap closure (round 3) — Wave 3** *(blocked on 25-19, 25-20)*
+
+- [x] 25-21-PLAN.md — The disabled Deezer button gets its hint as an accessible description (sr-only span, per-row `useId`, `aria-describedby`) (G-25-13). Then the embedded bundle is rebuilt with marker counts, and the Definition of Done and a blast-radius gate run against `9d3413f`
 
 **UI hint**: yes
 
@@ -265,7 +300,7 @@ Plans:
 ### Phase 27: Paste-a-List Bulk Add
 
 **Goal**: The user can paste a list of artist names and add the right artists in one reviewed batch. They see what each line matched and can fix or skip the doubtful ones, and nothing is added until they confirm.
-**Depends on**: Phase 26 (the confirm step reuses its bulk-endpoint conventions: protected route group, per-item outcomes, refresh without reload)
+**Depends on**: Phase 26 (the confirm step reuses its bulk-endpoint conventions: protected route group, bounded id lists, refresh without reload. It may reuse Phase 26's per-id outcome shape, but it isn't committed to: Phase 27 confirms by external id, and its skip reasons differ)
 **Requirements**: IMPT-01, IMPT-02, IMPT-03, IMPT-04, IMPT-05
 **Success Criteria** (what must be TRUE):
 
@@ -327,7 +362,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
-| 25. Find & Filter — Watchlist and History | 0/? | Not started | - |
+| 25. Find & Filter — Watchlist and History | 21/21 | Complete    | 2026-10-12 |
 | 26. Bulk Edit & Remove | 0/? | Not started | - |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |

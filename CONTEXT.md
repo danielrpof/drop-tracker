@@ -9,7 +9,7 @@ Every event that has been detected but not yet delivered or acknowledged — the
 _Avoid_: queue, digest queue
 
 **Pending event**:
-One event in the outbox.
+One event in the outbox. Removing its artist from the watchlist does not withdraw it, so it is still delivered.
 _Avoid_: queued event, held event, unnotified event
 
 **Digest mode**:
@@ -83,6 +83,10 @@ _Avoid_: announced release, future release
 **Filter**:
 Narrowing the watchlist you already have, by name, tag, or preference.
 _Avoid_: search (that finds new artists)
+
+**Selection**:
+The watchlist artists the user has checked for a bulk action. Only the selected artists the current filter shows take part (the **effective selection**). A selected artist that a filter hides stays selected but is left out until it shows again. Any bulk action or Clear empties the whole selection, hidden artists included.
+_Avoid_: checked artists, batch
 
 **Search**:
 Looking up artists on MusicBrainz and Deezer to add to the watchlist.

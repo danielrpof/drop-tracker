@@ -2,20 +2,20 @@
 gsd_state_version: "1.0"
 milestone: v1.6
 milestone_name: Watchlist Organization
-current_phase: 25
-current_phase_name: Find & Filter — Watchlist and History
+current_phase: 26
+current_phase_name: Bulk Edit & Remove
 status: planning
-stopped_at: Phase 24 complete, ready to plan Phase 25
-last_updated: "2026-10-06T21:40:10.711Z"
-last_activity: 2026-10-06
-last_activity_desc: Phase 24 complete, transitioned to Phase 25
-state_head: 43f00c104424775675eecba8545aeb3045255c0f
+stopped_at: Phase 25 complete, ready to plan Phase 26
+last_updated: "2026-10-13T02:17:52.713Z"
+last_activity: 2026-10-12
+last_activity_desc: Phase 25 complete, transitioned to Phase 26
+state_head: aa235f1e00be1b78be6cbea284f996b550c2fd43
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 24
-  completed_plans: 14
-  percent: 20
+  completed_phases: 2
+  total_plans: 35
+  completed_plans: 35
+  percent: 40
 ---
 
 # Project State
@@ -29,16 +29,16 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 
 ## Current Position
 
-Phase: 25 — Find & Filter — Watchlist and History
+Phase: 26 — Bulk Edit & Remove
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-07 - Completed quick task 261007-lc4: Phase 24 comment cleanup
+Last activity: 2026-10-12 — Phase 25 complete, transitioned to Phase 26
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 113
+- Total plans completed: 134
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -70,6 +70,7 @@ Last activity: 2026-10-07 - Completed quick task 261007-lc4: Phase 24 comment cl
 | 22 | 4 | - | - |
 | 23 | 4 | - | - |
 | 24 | 14 | - | - |
+| 25 | 21 | - | - |
 
 **Recent Trend:**
 
@@ -162,6 +163,27 @@ Last activity: 2026-10-07 - Completed quick task 261007-lc4: Phase 24 comment cl
 | Phase 24 P12 | 6 min | 3 tasks | 4 files |
 | Phase 24 P13 | 7 min | 2 tasks | 4 files |
 | Phase 24 P14 | 20 min | 3 tasks | 5 files |
+| Phase 25 P01 | 25 min | 2 tasks | 6 files |
+| Phase 25 P03 | 8 min | 2 tasks | 14 files |
+| Phase 25 P02 | 25min | 2 tasks | 5 files |
+| Phase 25 P04 | 18 min | 3 tasks | 9 files |
+| Phase 25 P06 | 14 min | 3 tasks | 8 files |
+| Phase 25 P05 | 5 min | 2 tasks | 6 files |
+| Phase 25 P09 | 4 min | 2 tasks | 6 files |
+| Phase 25 P07 | 40 min | 3 tasks | 9 files |
+| Phase 25 P08 | 25 min | 2 tasks | 8 files |
+| Phase 25 P10 | 15min | 2 tasks | 1 files |
+| Phase 25 P11 | 5 min | 2 tasks | 6 files |
+| Phase 25 P12 | 6 min | 2 tasks | 5 files |
+| Phase 25 P13 | 5 min | 2 tasks | 2 files |
+| Phase 25 P14 | 4 min | 3 tasks | 17 files |
+| Phase 25 P15 | 8 min | 2 tasks | 4 files |
+| Phase 25 P16 | 4 min | 1 tasks | 2 files |
+| Phase 25 P17 | 5 min | 2 tasks | 3 files |
+| Phase 25 P18 | 5 min | 3 tasks | 3 files |
+| Phase 25 P19 | 2 min | 2 tasks | 4 files |
+| Phase 25 P20 | 10 min | 3 tasks | 7 files |
+| Phase 25 P21 | 9 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -389,6 +411,24 @@ Recent decisions affecting current work:
 - [Phase 24]: 24-12: ManageTagsDialog guards load() with a generation ref; invalidateLoad() on delete/rename/merge success bumps it and refetches only when a load was in flight (no skeleton strand)
 - [Phase 24]: 24-13: wrap-anywhere on ConfirmDialog title/description (not break-word) so unspaced 32-char tag names wrap in the centered header grid (G-24-5)
 - [Phase 24]: 24-14: overflow latch via dependency-plus-early-return in ArtistNote; Manage tags hand-off consumed only by a successful load (G-24-9..11)
+- [Phase 25]: 25-01: ListWatchlist keeps zero-arg signature; latest/next release dates need no retention setting (G1)
+- [Phase 25]: Release dates render via string-only formatReleaseDate; malformed values pass through as plain text — No Date construction avoids timezone shifts; server decides upcoming (G2/G3)
+- [Phase 25]: 25-04: Watchlist q filters from local state per keystroke, URL write debounced 300ms with replace; input resyncs only when URL differs from last own write — Avoids history flooding and echo loops (Pitfall 6)
+- [Phase 25]: 25-04: refresh() resolves with loaded rows so the 409 add path can mark the existing artist sticky; sticky set cleared only by search change or Clear filters — G4: add/Undo never succeed invisibly under a filter
+- [Phase 25]: 25-06: History Tag degraded trigger labels apply only when a tag is selected — With no selection a failed GET /tags still reads All tags; matches the plan behavior block
+- [Phase 25]: 25-05: Latest-release sort compares raw text (2024 before 2024-05), nulls last in both directions, artist_id ascending tie-break in every mode
+- [Phase 25]: 25-09: History stale artist/tag ids are checked once per source per mount, only after a successful load; a failed fetch keeps the filter and the trigger reads Artist unavailable / Tag unavailable — A failed fetch is not proof an id is stale (UI-SPEC History Tag filter)
+- [Phase 25]: 25-07: Esc on a closed tag-filter popup is cancelled (escape-key reason) so it cannot clear every chip; tags URL param serializes commas as %2C
+- [Phase 25]: 25-08: Custom release types is a set comparison against the default four; chip label click reuses handleTagsChange and the x remains the only detach
+- [Phase 25]: 25-11: only the chip-label path anchors scroll (useScrollAnchor); no expiry on unconsumed anchor — Toolbar toggles have no card to keep; a timer or same-key clear would race the router commit
+- [Phase 25]: 25-12: History cards show a per-card Detected date (created_at); retention stays on created_at (D-01), no SQL change
+- [Phase 25]: 25-15: sticky set keyed to filterKey and reset during render (not a derived key compare, which revives cards when a filter is turned off); route-own tag rewrites carry via a single-landing, replace-only carry
+- [Phase 25]: 25-16: Deezer hint title and 40% cap live on a wrapper span (a disabled button gets no pointer events); Button is w-full inside it (WR-04)
+- [Phase 25]: 25-17: useScrollAnchor falls back to the clicked card's next, then previous, sibling when the chip leaves the DOM (WR-02, user decision 2026-10-11); list heading excluded
+- [Phase 25]: 25-18: WR-01..WR-04 decisions recorded in UI-SPEC; CONTEXT G4 amended for WR-03 (user decision 2026-10-11)
+- [Phase 25]: [Phase 25-19]: G-25-11 scroll anchor fallback widened to the nearest surviving card (no distance cap, next before previous at each distance), user decision 2026-10-12
+- [Phase 25]: G-25-12 (2026-10-12): keyboard-only focus move (click detail 0) to fallback card's chip label, else Your artists heading, via useScrollAnchor onFocusLost/useEffectEvent
+- [Phase 25]: G-25-13 (user decision 2026-10-12): disabled Deezer button described via aria-describedby to a per-row useId sr-only hint; no visual change
 
 ### Pending Todos
 
@@ -447,6 +487,8 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 261007-ka1 | Tag and note error contract: services are the single validation point, coded error envelope, single limits module, code-point length checks (Phase 24 review candidates 2+3) | 2026-10-07 | 71d3bb1 | [261007-ka1-tag-and-note-error-contract-single-valid](./quick/261007-ka1-tag-and-note-error-contract-single-valid/) |
 | 261007-kt1 | Single owner for the tag vocabulary on the web: useTagVocabulary provider with one stale-response rule, fixes rememberTag race (Phase 24 review candidate 1) | 2026-10-07 | 7455c40 | [261007-kt1-single-owner-for-the-tag-vocabulary-on-t](./quick/261007-kt1-single-owner-for-the-tag-vocabulary-on-t/) |
 | 261007-lc4 | Phase 24 comment cleanup: comment-only trim to 1-3 line why-notes with one doc ref, fixed inaccurate WithTags/merge-trigger/buildTagSuggestions comments, removed plan narration | 2026-10-07 | be98a62 | [261007-lc4-phase-24-comment-cleanup](./quick/261007-lc4-phase-24-comment-cleanup/) |
+| 261011-gq7 | Amend Phase 26 CONTEXT and UI-SPEC with grill decisions Q1–Q10 (derived selection, outcome-only bulk responses + refresh, ordered-lock bulk tag attach, single-statement remove/preferences, pending-alert disclosure) and add withdraw-pending-events todo | 2026-10-11 | 6408d28 | [261011-gq7-amend-phase-26-docs-with-grill-decisions](./quick/261011-gq7-amend-phase-26-docs-with-grill-decisions/) |
+| 261011-moj | Amend Phase 26 CONTEXT and UI-SPEC with UI review U1–U4 (route-level confirm + close→clear→focus order, scroll-padding focus clearance, one-row phone bar, remove-tag Undo) | 2026-10-11 | 9ac478c | [261011-moj-amend-phase-26-ui-spec-and-context-with-](./quick/261011-moj-amend-phase-26-ui-spec-and-context-with-/) |
 
 ### Roadmap Evolution
 
@@ -482,8 +524,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-06T21:45:00Z
-Stopped at: Phase 24 complete, ready to plan Phase 25
+Last session: 2026-10-12T22:25:32.998Z
+Stopped at: Phase 25 complete, ready to plan Phase 26
 Resume file: None
 
 ## Operator Next Steps

@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react"
+import { createRef } from "react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { HistoryFilters, type HistoryFiltersValue } from "./HistoryFilters"
 import { listWatchlist, type WatchlistEntry } from "~/lib/api"
@@ -26,6 +27,8 @@ const artists: WatchlistEntry[] = [
     updated_at: "2026-01-01T00:00:00Z",
     tags: [],
     note: null,
+    latest_release_date: null,
+    next_release_date: null,
   },
   {
     id: 2,
@@ -41,10 +44,18 @@ const artists: WatchlistEntry[] = [
     updated_at: "2026-01-02T00:00:00Z",
     tags: [],
     note: null,
+    latest_release_date: null,
+    next_release_date: null,
   },
 ]
 
-const emptyValue: HistoryFiltersValue = { artistId: null, eventType: null }
+const emptyValue: HistoryFiltersValue = {
+  artistId: null,
+  eventType: null,
+  tagId: null,
+}
+
+const baseProps = { tags: [], tagsStatus: "loaded" as const }
 
 // getArtistSelect / getEventTypeSelect return the trigger button (D-13: a
 // hand-rolled combobox, not a native <select> -- see HistoryFilters.tsx's
@@ -71,12 +82,19 @@ async function chooseOption(
 }
 
 describe("HistoryFilters", () => {
+  // jsdom has no scrollIntoView, and mockReset clears stubs between tests.
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn()
+  })
+
   it("populates the artist combobox from listWatchlist", async () => {
     mockListWatchlist.mockResolvedValue(artists)
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     await user.click(getArtistSelect())
 
     expect(
@@ -92,7 +110,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
 
     await chooseOption(user, getArtistSelect(), "Drake")
 
@@ -104,8 +124,17 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    const selectedValue: HistoryFiltersValue = { artistId: 10, eventType: null }
-    render(<HistoryFilters value={selectedValue} onChange={onChange} />)
+    const selectedValue: HistoryFiltersValue = {
+      ...emptyValue,
+      artistId: 10,
+    }
+    render(
+      <HistoryFilters
+        {...baseProps}
+        value={selectedValue}
+        onChange={onChange}
+      />
+    )
 
     await chooseOption(user, getArtistSelect(), "All artists")
 
@@ -120,7 +149,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
 
     await chooseOption(user, getEventTypeSelect(), "New release")
 
@@ -136,10 +167,16 @@ describe("HistoryFilters", () => {
     const user = userEvent.setup()
 
     const selectedValue: HistoryFiltersValue = {
-      artistId: null,
+      ...emptyValue,
       eventType: "new_release",
     }
-    render(<HistoryFilters value={selectedValue} onChange={onChange} />)
+    render(
+      <HistoryFilters
+        {...baseProps}
+        value={selectedValue}
+        onChange={onChange}
+      />
+    )
 
     await chooseOption(user, getEventTypeSelect(), "All event types")
 
@@ -157,7 +194,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     const trigger = getArtistSelect()
 
     await user.click(trigger)
@@ -175,7 +214,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     const trigger = getEventTypeSelect()
     trigger.focus()
 
@@ -201,7 +242,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     const trigger = getEventTypeSelect()
 
     await user.click(trigger)
@@ -221,7 +264,9 @@ describe("HistoryFilters", () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<HistoryFilters value={emptyValue} onChange={onChange} />)
+    render(
+      <HistoryFilters {...baseProps} value={emptyValue} onChange={onChange} />
+    )
     await user.click(getArtistSelect())
 
     expect(
@@ -230,5 +275,175 @@ describe("HistoryFilters", () => {
     expect(
       screen.queryByRole("option", { name: "Drake" })
     ).not.toBeInTheDocument()
+  })
+
+  describe("Artist source states", () => {
+    const artistValue: HistoryFiltersValue = { ...emptyValue, artistId: 42 }
+
+    it("reads 'Loading artists…' while the watchlist loads with an artist selected, and 'All artists' with none", () => {
+      mockListWatchlist.mockReturnValue(new Promise(() => {}))
+      const { rerender } = render(
+        <HistoryFilters {...baseProps} value={artistValue} onChange={vi.fn()} />
+      )
+      expect(getArtistSelect()).toHaveTextContent("Loading artists…")
+
+      rerender(
+        <HistoryFilters {...baseProps} value={emptyValue} onChange={vi.fn()} />
+      )
+      expect(getArtistSelect()).toHaveTextContent("All artists")
+    })
+
+    it("reads 'Artist unavailable' after a failed watchlist load with an artist selected", async () => {
+      mockListWatchlist.mockRejectedValue(new Error("network down"))
+      render(
+        <HistoryFilters {...baseProps} value={artistValue} onChange={vi.fn()} />
+      )
+      expect(await screen.findByText("Artist unavailable")).toBeInTheDocument()
+    })
+
+    it("calls onArtistsLoaded once with the entries on success", async () => {
+      mockListWatchlist.mockResolvedValue(artists)
+      const onArtistsLoaded = vi.fn()
+      render(
+        <HistoryFilters
+          {...baseProps}
+          value={emptyValue}
+          onChange={vi.fn()}
+          onArtistsLoaded={onArtistsLoaded}
+        />
+      )
+      await waitFor(() => expect(onArtistsLoaded).toHaveBeenCalledTimes(1))
+      expect(onArtistsLoaded).toHaveBeenCalledWith(artists)
+    })
+
+    it("never calls onArtistsLoaded when the watchlist fetch fails", async () => {
+      mockListWatchlist.mockRejectedValue(new Error("network down"))
+      const onArtistsLoaded = vi.fn()
+      render(
+        <HistoryFilters
+          {...baseProps}
+          value={artistValue}
+          onChange={vi.fn()}
+          onArtistsLoaded={onArtistsLoaded}
+        />
+      )
+      await screen.findByText("Artist unavailable")
+      expect(onArtistsLoaded).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("Tag control", () => {
+    const tagValue: HistoryFiltersValue = { ...emptyValue, tagId: 3 }
+    const getTagSelect = () => screen.getByRole("combobox", { name: "Tag" })
+
+    it("reads 'Loading tags…' while tags load with a tag selected, and 'All tags' with none", () => {
+      mockListWatchlist.mockResolvedValue([])
+      const { rerender } = render(
+        <HistoryFilters
+          value={tagValue}
+          onChange={vi.fn()}
+          tags={[]}
+          tagsStatus="loading"
+        />
+      )
+      expect(getTagSelect()).toHaveTextContent("Loading tags…")
+
+      rerender(
+        <HistoryFilters
+          value={emptyValue}
+          onChange={vi.fn()}
+          tags={[]}
+          tagsStatus="loading"
+        />
+      )
+      expect(getTagSelect()).toHaveTextContent("All tags")
+    })
+
+    it("reads 'Tag unavailable' after a failed load with a tag selected, and 'All tags' with none", async () => {
+      mockListWatchlist.mockResolvedValue([])
+      const user = userEvent.setup()
+      const { rerender } = render(
+        <HistoryFilters
+          value={tagValue}
+          onChange={vi.fn()}
+          tags={[]}
+          tagsStatus="error"
+        />
+      )
+      expect(getTagSelect()).toHaveTextContent("Tag unavailable")
+
+      rerender(
+        <HistoryFilters
+          value={emptyValue}
+          onChange={vi.fn()}
+          tags={[]}
+          tagsStatus="error"
+        />
+      )
+      expect(getTagSelect()).toHaveTextContent("All tags")
+
+      await user.click(getTagSelect())
+      expect(await screen.findAllByRole("option")).toHaveLength(1)
+    })
+
+    it("points a supplied tagTriggerRef at the Tag trigger", () => {
+      mockListWatchlist.mockResolvedValue([])
+      const ref = createRef<HTMLButtonElement>()
+      render(
+        <HistoryFilters
+          {...baseProps}
+          value={emptyValue}
+          onChange={vi.fn()}
+          tagTriggerRef={ref}
+        />
+      )
+      expect(ref.current).toBe(getTagSelect())
+    })
+
+    it("sets a title and truncation on the trigger label, and caps the trigger width", () => {
+      mockListWatchlist.mockResolvedValue([])
+      const longName = "x".repeat(32)
+      render(
+        <HistoryFilters
+          value={tagValue}
+          onChange={vi.fn()}
+          tags={[{ id: 3, name: longName, carrier_count: 1 }]}
+          tagsStatus="loaded"
+        />
+      )
+      const label = screen.getByTitle(longName)
+      expect(label).toHaveClass("truncate")
+      expect(getTagSelect()).toHaveClass("max-w-64")
+    })
+  })
+
+  describe("listbox hardening", () => {
+    it("caps every listbox height and scrolls on overflow", async () => {
+      mockListWatchlist.mockResolvedValue(artists)
+      const user = userEvent.setup()
+      render(
+        <HistoryFilters {...baseProps} value={emptyValue} onChange={vi.fn()} />
+      )
+
+      await user.click(getEventTypeSelect())
+      const listbox = screen.getByRole("listbox", { name: "Event type" })
+      expect(listbox).toHaveClass("max-h-72", "overflow-y-auto")
+    })
+
+    it("scrolls the newly highlighted option into view on ArrowDown", async () => {
+      mockListWatchlist.mockResolvedValue(artists)
+      const user = userEvent.setup()
+      render(
+        <HistoryFilters {...baseProps} value={emptyValue} onChange={vi.fn()} />
+      )
+
+      await user.click(getEventTypeSelect())
+      await user.keyboard("{ArrowDown}")
+
+      const highlighted = screen.getByRole("option", { name: "New release" })
+      const scroll = vi.mocked(Element.prototype.scrollIntoView)
+      expect(scroll).toHaveBeenCalledWith({ block: "nearest" })
+      expect(scroll.mock.contexts).toContain(highlighted)
+    })
   })
 })

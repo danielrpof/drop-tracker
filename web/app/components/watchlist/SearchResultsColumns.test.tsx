@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import type { SearchArtist, SearchResponse, WatchlistEntry } from "~/lib/api"
 
-import { SearchResultsColumns } from "./SearchResultsColumns"
+import { DEEZER_ADD_HINT, SearchResultsColumns } from "./SearchResultsColumns"
 
 // This component takes its API data as props and reports actions via the
 // onAdd callback prop -- it never imports ~/lib/api itself, so no module
@@ -74,6 +74,8 @@ const watchlistEntry: WatchlistEntry = {
   updated_at: "2026-01-01T00:00:00Z",
   tags: [],
   note: null,
+  latest_release_date: null,
+  next_release_date: null,
 }
 
 describe("SearchResultsColumns", () => {
@@ -162,6 +164,129 @@ describe("SearchResultsColumns", () => {
     ).toBeDisabled()
   })
 
+  it("caps the Deezer hint wrapper, titles it, and truncates the button label (G-25-9, WR-04)", () => {
+    const response: SearchResponse = {
+      query: "deezer only",
+      sources: {
+        deezer: { status: "ok", artists: [deezerArtist] },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={null}
+        onAdd={vi.fn()}
+      />
+    )
+
+    const button = screen.getByRole("button", {
+      name: "Search MusicBrainz to add",
+    })
+    const wrapper = button.parentElement as HTMLElement
+    expect(wrapper.tagName).toBe("SPAN")
+    expect(wrapper).toHaveClass("max-w-[40%]", "shrink-0", "lg:max-w-none")
+    expect(wrapper).not.toHaveClass("pointer-events-none")
+    expect(wrapper.getAttribute("title")).toContain("MusicBrainz identity")
+    expect(button).toBeDisabled()
+    expect(button).toHaveClass("w-full")
+    expect(button).not.toHaveClass("max-w-[40%]")
+    expect(button).not.toHaveAttribute("title")
+    expect(button.children).toHaveLength(1)
+    const label = button.children[0]
+    expect(label.tagName).toBe("SPAN")
+    expect(label).toHaveClass("truncate")
+    expect(label.textContent).toBe("Search MusicBrainz to add")
+    expect(button).toHaveAccessibleDescription(DEEZER_ADD_HINT)
+  })
+
+  it("describes each Deezer button with its own sr-only hint (G-25-13)", () => {
+    const secondDeezer: SearchArtist = {
+      ...deezerArtist,
+      id: "deezer-2",
+      name: "Second Deezer Artist",
+    }
+    const response: SearchResponse = {
+      query: "deezer",
+      sources: {
+        deezer: { status: "ok", artists: [deezerArtist, secondDeezer] },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={null}
+        onAdd={vi.fn()}
+      />
+    )
+
+    const buttons = screen.getAllByRole("button", {
+      name: "Search MusicBrainz to add",
+    })
+    expect(buttons).toHaveLength(2)
+    const ids = buttons.map((b) => b.getAttribute("aria-describedby"))
+    expect(ids[0]).toBeTruthy()
+    expect(ids[1]).toBeTruthy()
+    expect(ids[0]).not.toBe(ids[1])
+    for (const [i, button] of buttons.entries()) {
+      const hint = document.getElementById(ids[i] as string) as HTMLElement
+      expect(hint.textContent).toBe(DEEZER_ADD_HINT)
+      expect(hint).toHaveClass("sr-only")
+      expect(button.contains(hint)).toBe(false)
+      expect(button.closest("li")?.contains(hint)).toBe(true)
+    }
+  })
+
+  it("truncates the type line in Deezer and MusicBrainz rows (G-25-9)", () => {
+    const response: SearchResponse = {
+      query: "mixed",
+      sources: {
+        musicbrainz: { status: "ok", artists: [addableArtist] },
+        deezer: { status: "ok", artists: [deezerArtist] },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={null}
+        onAdd={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Artist")).toHaveClass("truncate")
+    expect(screen.getByText("Group")).toHaveClass("truncate")
+  })
+
+  it("leaves the Add to Watchlist and Already watching buttons uncapped", () => {
+    const response: SearchResponse = {
+      query: "mixed",
+      sources: {
+        musicbrainz: {
+          status: "ok",
+          artists: [addableArtist, watchedArtist],
+        },
+      },
+    }
+
+    render(
+      <SearchResultsColumns
+        response={response}
+        watchlistEntries={[watchlistEntry]}
+        onAdd={vi.fn()}
+      />
+    )
+
+    for (const name of ["Add to Watchlist", "Already watching"]) {
+      const button = screen.getByRole("button", { name })
+      expect(button).not.toHaveClass("max-w-[40%]")
+      expect(button.textContent).toBe(name)
+      expect(button.children).toHaveLength(0)
+      expect(button).not.toHaveAttribute("aria-describedby")
+    }
+  })
+
   it("falls back to the country code when disambiguation is blank", () => {
     const response: SearchResponse = {
       query: "drake",
@@ -219,7 +344,7 @@ describe("SearchResultsColumns", () => {
 
     const row = screen.getByRole("listitem")
     expect(row.textContent).toBe(
-      `${deezerArtist.name}${deezerArtist.type}Search MusicBrainz to add`
+      `${deezerArtist.name}${deezerArtist.type}Search MusicBrainz to add${DEEZER_ADD_HINT}`
     )
   })
 

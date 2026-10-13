@@ -4,11 +4,13 @@ import {
   screen,
   waitFor,
   waitForElementToBeRemoved,
+  within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { createRoutesStub } from "react-router"
+import { useLayoutEffect } from "react"
+import { createRoutesStub, useLocation, useNavigate } from "react-router"
 import { toast } from "sonner"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import App from "~/root"
 import { authStore } from "~/lib/authStore"
@@ -17,15 +19,19 @@ import {
   attachTag,
   deleteTag,
   detachTag,
+  listEvents,
   listTags,
   listWatchlist,
   mergeTag,
   removeWatchlist,
   renameTag,
+  searchArtists,
   type TagSummary,
   type WatchlistEntry,
+  updateWatchlistPreferences,
 } from "~/lib/api"
-import { renderRoute } from "~/lib/test/routeStub"
+import { makeEntry } from "~/lib/test/fixtures"
+import { LocationProbe, renderRoute } from "~/lib/test/routeStub"
 
 import Watchlist from "./watchlist"
 
@@ -60,6 +66,8 @@ const entry: WatchlistEntry = {
   updated_at: "2026-01-01T00:00:00Z",
   tags: [],
   note: null,
+  latest_release_date: null,
+  next_release_date: null,
 }
 
 // Lets a test hold a mocked request open and settle it at a chosen moment.
@@ -924,5 +932,1670 @@ describe("Watchlist route under the passphrase gate (GATE-05 / UI-SPEC E6)", () 
     await screen.findByRole("heading", {
       name: "Enter the instance passphrase",
     })
+  })
+
+  it("renders each card's latest release and a conditional Upcoming segment (D-03)", async () => {
+    mockListWatchlist.mockResolvedValue([
+      {
+        ...entry,
+        id: 1,
+        name: "Drake",
+        latest_release_date: "2024-05-17",
+        next_release_date: "2027",
+      },
+      { ...entry, id: 2, name: "Kendrick" },
+    ])
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    const [drake, kendrick] = screen.getAllByRole("listitem")
+
+    expect(
+      within(drake).getByText("Latest release: 17 May 2024")
+    ).toBeInTheDocument()
+    expect(within(drake).getByText("Upcoming: 2027")).toBeInTheDocument()
+    expect(within(kendrick).getByText("No releases yet")).toBeInTheDocument()
+    expect(within(kendrick).queryByText(/Upcoming:/)).not.toBeInTheDocument()
+  })
+
+  it("shows Upcoming alongside No releases yet when only next_release_date is set", async () => {
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake", next_release_date: "2026-11" }),
+    ])
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    const card = screen.getByRole("listitem")
+    expect(within(card).getByText("No releases yet")).toBeInTheDocument()
+    expect(within(card).getByText("Upcoming: Nov 2026")).toBeInTheDocument()
+  })
+
+  it("renders a release date containing markup as literal text (T-25-09)", async () => {
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake", latest_release_date: "<b>2024</b>" }),
+    ])
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Drake")
+    const card = screen.getByRole("listitem")
+    expect(
+      within(card).getByText("Latest release: <b>2024</b>")
+    ).toBeInTheDocument()
+    expect(card.querySelector("b")).toBeNull()
+  })
+})
+
+describe("Watchlist name filter (WLVW-01)", () => {
+  const filterEntries = [
+    makeEntry({ id: 1, name: "Bad Bunny" }),
+    makeEntry({ id: 2, name: "Beyoncé", disambiguation: "bad influence" }),
+    makeEntry({ id: 3, name: "A$AP Rocky" }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  it("narrows the list on every keystroke, ignores disambiguation, and keeps the count in step", async () => {
+    mockListWatchlist.mockResolvedValue(filterEntries)
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByText("Bad Bunny")
+    expect(screen.getByText("3 of 3 artists")).toBeInTheDocument()
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Filter watchlist" }),
+      "bad"
+    )
+
+    expect(screen.getByText("Bad Bunny")).toBeInTheDocument()
+    expect(screen.queryByText("Beyoncé")).not.toBeInTheDocument()
+    expect(screen.queryByText("A$AP Rocky")).not.toBeInTheDocument()
+    expect(screen.getByText("1 of 3 artists")).toBeInTheDocument()
+  })
+
+  it("writes q to the URL after the debounce", async () => {
+    mockListWatchlist.mockResolvedValue(filterEntries)
+
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Filter watchlist" }),
+      "bad"
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent("?q=bad")
+    )
+  })
+
+  it("reproduces the filtered view from ?q= on load, with the input pre-filled", async () => {
+    mockListWatchlist.mockResolvedValue(filterEntries)
+
+    renderRoute(Watchlist, "/", "/?q=bey")
+
+    await screen.findByText("Beyoncé")
+    expect(screen.queryByText("Bad Bunny")).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("textbox", { name: "Filter watchlist" })
+    ).toHaveValue("bey")
+  })
+
+  it("issues exactly one GET /watchlist while filtering and never asks for tags or events (SC5)", async () => {
+    mockListWatchlist.mockResolvedValue(filterEntries)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Filter watchlist" }),
+      "beyonce"
+    )
+
+    expect(screen.getByText("Beyoncé")).toBeInTheDocument()
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(listTags)).not.toHaveBeenCalled()
+    expect(vi.mocked(listEvents)).not.toHaveBeenCalled()
+  })
+})
+
+describe("Watchlist filtered state (WLVW-06)", () => {
+  const three = [
+    makeEntry({ id: 1, name: "Bad Bunny" }),
+    makeEntry({ id: 2, name: "Beyoncé" }),
+    makeEntry({ id: 3, name: "A$AP Rocky" }),
+  ]
+  const filterBox = () =>
+    screen.getByRole("textbox", { name: "Filter watchlist" })
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  // LocationProbe's <output> is also an implicit status role.
+  function status() {
+    const region = screen
+      .getAllByRole("status")
+      .find((el) => el.getAttribute("aria-atomic") === "true")
+    if (!region) throw new Error("route status region not found")
+    return region
+  }
+
+  function lastUndo() {
+    const calls = vi.mocked(toast.success).mock.calls
+    const call = calls[calls.length - 1] as [
+      string,
+      { action?: { onClick: () => void } },
+    ]
+    return call[1].action
+  }
+
+  it("replaces the list with the filtered-to-zero state and clears everything but sort", async () => {
+    mockListWatchlist.mockResolvedValue(three)
+
+    renderRoute(WatchlistWithProbe, "/", "/?q=zzz&sort=latest-desc")
+
+    await screen.findByRole("heading", {
+      name: "No artists match these filters",
+    })
+    expect(
+      screen.getByText(
+        "Try a different name or fewer filters, or clear them to see all 3 artists."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("0 of 3 artists")).toBeInTheDocument()
+    expect(screen.queryByRole("list")).not.toBeInTheDocument()
+    const clearButtons = screen.getAllByRole("button", {
+      name: "Clear filters",
+    })
+    expect(clearButtons).toHaveLength(1)
+
+    await userEvent.click(clearButtons[0])
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        /^\?sort=latest-desc$/
+      )
+    )
+    expect(filterBox()).toHaveValue("")
+    expect(filterBox()).toHaveFocus()
+    expect(status()).toHaveTextContent(
+      "Filters cleared. Showing 3 of 3 artists."
+    )
+    expect(screen.getByText("Bad Bunny")).toBeInTheDocument()
+  })
+
+  it("shows the toolbar Clear filters only for a non-blank query with results", async () => {
+    mockListWatchlist.mockResolvedValue(three)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Bad Bunny")
+    const clear = () =>
+      screen.queryAllByRole("button", { name: "Clear filters" })
+    expect(clear()).toHaveLength(0)
+
+    await userEvent.type(filterBox(), "   ")
+    expect(clear()).toHaveLength(0)
+
+    await userEvent.clear(filterBox())
+    await userEvent.type(filterBox(), "bad")
+    expect(clear()).toHaveLength(1)
+    expect(screen.getByText("Bad Bunny")).toBeInTheDocument()
+
+    await userEvent.type(filterBox(), "zzz")
+    await screen.findByRole("heading", {
+      name: "No artists match these filters",
+    })
+    expect(clear()).toHaveLength(1)
+    expect(
+      clear()[0].closest("[aria-label='Filter and sort artists']")
+    ).toBeNull()
+  })
+
+  it("announces the count 500ms after the last keystroke", async () => {
+    mockListWatchlist.mockResolvedValue(three)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Bad Bunny")
+    expect(status()).toHaveTextContent("")
+
+    await userEvent.type(filterBox(), "bad")
+    await waitFor(
+      () => expect(status()).toHaveTextContent("Showing 1 of 3 artists."),
+      { timeout: 2000 }
+    )
+  })
+
+  it("announces when nothing matches", async () => {
+    mockListWatchlist.mockResolvedValue(three)
+
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.type(filterBox(), "zzz")
+    await waitFor(
+      () =>
+        expect(status()).toHaveTextContent("No artists match these filters."),
+      { timeout: 2000 }
+    )
+  })
+
+  it("keeps an artist added from search visible under an active filter, until the search text changes", async () => {
+    const drizzy = makeEntry({ id: 99, name: "Drizzy", mbid: "mbid-99" })
+    mockListWatchlist
+      .mockResolvedValueOnce([three[0], three[1]])
+      .mockResolvedValueOnce([three[0], three[1], drizzy])
+    vi.mocked(searchArtists).mockResolvedValue({
+      query: "Drizzy",
+      sources: {
+        musicbrainz: {
+          status: "ok",
+          artists: [
+            {
+              source: "musicbrainz",
+              id: "mbid-99",
+              name: "Drizzy",
+              disambiguation: null,
+              country: null,
+              type: "Person",
+              image_url: null,
+            },
+          ],
+        },
+      },
+    })
+    mockAddWatchlist.mockResolvedValue(drizzy)
+
+    renderRoute(Watchlist, "/", "/?q=bad")
+    await screen.findByText("Bad Bunny")
+    expect(screen.queryByText("Beyoncé")).not.toBeInTheDocument()
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Search artists" }),
+      "Drizzy"
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add to Watchlist" })
+    )
+
+    await screen.findByRole("button", { name: "Remove Drizzy from watchlist" })
+    expect(screen.getByText("2 of 3 artists")).toBeInTheDocument()
+
+    await userEvent.type(filterBox(), "x")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Remove Drizzy from watchlist" })
+      ).not.toBeInTheDocument()
+    )
+  })
+
+  it("keeps an Undo-restored artist visible under an active filter", async () => {
+    const bunny = three[0]
+    const restored = makeEntry({ id: 77, name: "Bad Bunny", mbid: bunny.mbid })
+    mockListWatchlist
+      .mockResolvedValueOnce([bunny, three[1]])
+      .mockResolvedValueOnce([three[1], restored])
+    mockRemoveWatchlist.mockResolvedValueOnce(undefined)
+    mockAddWatchlist.mockResolvedValue(restored)
+
+    renderRoute(Watchlist, "/", "/?q=bad")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Bad Bunny from watchlist" })
+    )
+    await waitFor(() => expect(mockRemoveWatchlist).toHaveBeenCalled())
+    await userEvent.type(filterBox(), "x")
+
+    lastUndo()?.onClick()
+
+    await screen.findByRole("button", {
+      name: "Remove Bad Bunny from watchlist",
+    })
+    expect(screen.getByText("1 of 2 artists")).toBeInTheDocument()
+  })
+
+  it("renders no section or toolbar while loading or with no artists", async () => {
+    const pending = deferred<WatchlistEntry[]>()
+    mockListWatchlist.mockReturnValueOnce(pending.promise)
+
+    const view = renderRoute(Watchlist, "/")
+    expect(
+      screen.queryByRole("textbox", { name: "Filter watchlist" })
+    ).not.toBeInTheDocument()
+    expect(view.container.querySelectorAll(".h-24")).toHaveLength(3)
+
+    await act(async () => {
+      pending.resolve([])
+    })
+    await screen.findByRole("heading", { name: "No artists yet" })
+    expect(
+      screen.queryByRole("heading", { name: "Your artists" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("textbox", { name: "Filter watchlist" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows no toolbar when the load fails", async () => {
+    mockListWatchlist.mockRejectedValueOnce(new Error("down"))
+
+    renderRoute(Watchlist, "/")
+
+    await screen.findByRole("heading", {
+      name: "Couldn't load your watchlist.",
+    })
+    expect(
+      screen.queryByRole("textbox", { name: "Filter watchlist" })
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe("Watchlist sort (WLVW-02, WLVW-03)", () => {
+  const sortEntries = [
+    makeEntry({
+      id: 1,
+      name: "Alpha",
+      latest_release_date: "2023-01-01",
+      created_at: "2026-03-01T00:00:00Z",
+    }),
+    makeEntry({
+      id: 2,
+      name: "Bravo",
+      latest_release_date: null,
+      created_at: "2026-02-01T00:00:00Z",
+    }),
+    makeEntry({
+      id: 3,
+      name: "Charlie",
+      latest_release_date: "2025-06-01",
+      created_at: "2026-01-01T00:00:00Z",
+    }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const names = () =>
+    screen
+      .getAllByRole("listitem")
+      .map((li) => li.querySelector("span[title]")?.getAttribute("title"))
+
+  it("reorders the cards and writes the URL when a sort is chosen, without refetching", async () => {
+    mockListWatchlist.mockResolvedValue(sortEntries)
+
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Alpha")
+    expect(names()).toEqual(["Alpha", "Bravo", "Charlie"])
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Latest release (newest)" })
+    )
+
+    await waitFor(() => expect(names()).toEqual(["Charlie", "Alpha", "Bravo"]))
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      /^\?sort=latest-desc$/
+    )
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders the order from the URL on reload", async () => {
+    mockListWatchlist.mockResolvedValue(sortEntries)
+
+    renderRoute(Watchlist, "/", "/?sort=added-asc")
+
+    await screen.findByText("Alpha")
+    expect(names()).toEqual(["Charlie", "Bravo", "Alpha"])
+    expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveTextContent(
+      "Date added (oldest)"
+    )
+  })
+
+  // LocationProbe's <output> is also an implicit status role.
+  function status() {
+    const region = screen
+      .getAllByRole("status")
+      .find((el) => el.getAttribute("aria-atomic") === "true")
+    if (!region) throw new Error("route status region not found")
+    return region
+  }
+
+  it.each(["bogus", "name-asc"])(
+    "drops sort=%s from the URL and renders Name (A-Z)",
+    async (value) => {
+      mockListWatchlist.mockResolvedValue(sortEntries)
+
+      renderRoute(WatchlistWithProbe, "/", `/?sort=${value}`)
+
+      await screen.findByText("Alpha")
+      await waitFor(() =>
+        expect(screen.getByTestId("location-search")).toHaveTextContent(/^$/)
+      )
+      expect(names()).toEqual(["Alpha", "Bravo", "Charlie"])
+      expect(
+        screen.getByRole("combobox", { name: "Sort by" })
+      ).toHaveTextContent("Name (A–Z)")
+    }
+  )
+
+  // RTL's asyncWrapper awaits a real setTimeout, so shouldAdvanceTime is
+  // required; the extra advance after the pick is what trips the 500 ms timer.
+  async function pickSortWithFakeTimers(typed: string | null) {
+    mockListWatchlist.mockResolvedValue(sortEntries)
+    renderRoute(Watchlist, "/")
+    await screen.findByText("Alpha")
+
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    if (typed !== null) {
+      await user.type(
+        screen.getByRole("textbox", { name: "Filter watchlist" }),
+        typed
+      )
+    }
+    await user.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await user.click(
+      await screen.findByRole("option", { name: "Date added (newest)" })
+    )
+  }
+
+  it("announces the sort immediately with no count message after it", async () => {
+    try {
+      await pickSortWithFakeTimers(null)
+
+      expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+      expect(status()).not.toHaveTextContent("Showing")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("cancels a pending count announcement when the sort changes", async () => {
+    try {
+      await pickSortWithFakeTimers("a")
+
+      expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(status()).toHaveTextContent("Sorted by Date added (newest).")
+      expect(status()).not.toHaveTextContent("Showing")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps the sort when Clear filters runs", async () => {
+    mockListWatchlist.mockResolvedValue(sortEntries)
+
+    renderRoute(WatchlistWithProbe, "/", "/?q=alp&sort=latest-desc")
+    await screen.findByText("Alpha")
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        /^\?sort=latest-desc$/
+      )
+    )
+  })
+
+  it("drops a sticky card when the sort changes", async () => {
+    const drizzy = makeEntry({ id: 99, name: "Drizzy", mbid: "mbid-99" })
+    mockListWatchlist
+      .mockResolvedValueOnce(sortEntries)
+      .mockResolvedValueOnce([...sortEntries, drizzy])
+    vi.mocked(searchArtists).mockResolvedValue({
+      query: "Drizzy",
+      sources: {
+        musicbrainz: {
+          status: "ok",
+          artists: [
+            {
+              source: "musicbrainz",
+              id: "mbid-99",
+              name: "Drizzy",
+              disambiguation: null,
+              country: null,
+              type: "Person",
+              image_url: null,
+            },
+          ],
+        },
+      },
+    })
+    mockAddWatchlist.mockResolvedValue(drizzy)
+
+    renderRoute(Watchlist, "/", "/?q=alp")
+    await screen.findByText("Alpha")
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Search artists" }),
+      "Drizzy"
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add to Watchlist" })
+    )
+    await screen.findByRole("button", { name: "Remove Drizzy from watchlist" })
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Date added (newest)" })
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Remove Drizzy from watchlist" })
+      ).not.toBeInTheDocument()
+    )
+  })
+})
+
+describe("Watchlist tag filter (WLVW-04)", () => {
+  const reggaeton = { id: 3, name: "reggaeton" }
+  const trap = { id: 7, name: "trap" }
+  const tagEntries = [
+    makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton] }),
+    makeEntry({ id: 2, name: "Daddy Yankee", tags: [reggaeton] }),
+    makeEntry({ id: 3, name: "Travis Scott", tags: [trap] }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", {
+        name: /^Remove .* from watchlist$/,
+        hidden: true,
+      })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+
+  const tagInput = () => screen.getByLabelText("Filter by tags, any of")
+
+  it("narrows to the carriers of a picked tag, keeps count and URL in step, and never asks for tags", async () => {
+    mockListWatchlist.mockResolvedValue(tagEntries)
+
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(tagInput())
+    await userEvent.click(
+      await screen.findByRole("option", { name: /reggaeton/ })
+    )
+
+    await waitFor(() => expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"]))
+    expect(screen.getByText("2 of 3 artists")).toBeInTheDocument()
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      /^\?tags=3$/
+    )
+    expect(mockListTags).not.toHaveBeenCalled()
+    expect(mockListWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it("reproduces a multi-tag selection from the URL with any-of semantics", async () => {
+    mockListWatchlist.mockResolvedValue(tagEntries)
+
+    renderRoute(Watchlist, "/", "/?tags=3,7")
+    await screen.findByText("Bad Bunny")
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+    expect(
+      screen.getByRole("button", { name: "Remove trap from tag filter" })
+    ).toBeInTheDocument()
+    expect(mockListTags).not.toHaveBeenCalled()
+  })
+})
+
+describe("Watchlist tag filter consistency (D-13)", () => {
+  const rap = { id: 5, name: "rap" }
+  const trap = { id: 9, name: "trap" }
+  const rows = [
+    makeEntry({ id: 1, name: "Bad Bunny", tags: [rap] }),
+    makeEntry({ id: 2, name: "Daddy Yankee", tags: [trap] }),
+    makeEntry({ id: 3, name: "Travis Scott", tags: [trap] }),
+  ]
+
+  function BackButton() {
+    const navigate = useNavigate()
+    return <button onClick={() => navigate(-1)}>history back</button>
+  }
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <BackButton />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const search = () => screen.getByTestId("location-search").textContent
+  const shown = () =>
+    screen
+      .queryAllByRole("button", {
+        name: /^Remove .* from watchlist$/,
+        hidden: true,
+      })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+  const filterChip = (name: string) =>
+    screen.queryByRole("button", {
+      name: `Remove ${name} from tag filter`,
+      hidden: true,
+    })
+
+  async function openManageTags() {
+    await userEvent.click(screen.getByRole("button", { name: "Manage tags" }))
+    await screen.findByRole("heading", { name: "Manage tags" })
+  }
+
+  async function deleteTagInDialog(name: string) {
+    await userEvent.click(
+      screen.getByRole("button", { name: `Delete tag ${name}` })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete tag" })
+    )
+  }
+
+  async function mergeRapIntoTrap() {
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rename tag rap" })
+    )
+    const input = screen.getByRole("textbox", { name: "New name for rap" })
+    await userEvent.clear(input)
+    await userEvent.type(input, "trap{Enter}")
+    await screen.findByText("Merge “rap” into “trap”?")
+    await userEvent.click(screen.getByRole("button", { name: "Merge tags" }))
+  }
+
+  function mockVocabulary() {
+    mockListTags.mockResolvedValue([
+      { id: 5, name: "rap", carrier_count: 1 },
+      { id: 9, name: "trap", carrier_count: 2 },
+    ])
+  }
+
+  it("drops URL tag ids that no loaded artist carries, with replace", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5,99")
+    await screen.findByText("Bad Bunny")
+
+    await waitFor(() => expect(search()).toBe("?tags=5"))
+    expect(shown()).toEqual(["Bad Bunny"])
+  })
+
+  it("clears a tags param that matches nothing and shows the full list", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=99")
+
+    await waitFor(() => expect(search()).toBe(""))
+    await screen.findByText("Bad Bunny")
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+  })
+
+  it("drops a tag from the filter when Manage tags deletes it", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5")
+    await screen.findByText("Bad Bunny")
+    expect(filterChip("rap")).toBeInTheDocument()
+
+    await openManageTags()
+    await deleteTagInDialog("rap")
+
+    await waitFor(() => expect(search()).toBe(""))
+    expect(filterChip("rap")).not.toBeInTheDocument()
+  })
+
+  it("swaps a merged-away tag for its target in the filter", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: trap,
+      carrierCountAfterMerge: 3,
+    })
+    mockMergeTag.mockResolvedValueOnce({ ...trap, carrier_count: 3 })
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5")
+    await screen.findByText("Bad Bunny")
+
+    await openManageTags()
+    await mergeRapIntoTrap()
+
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    expect(filterChip("trap")).toBeInTheDocument()
+    expect(filterChip("rap")).not.toBeInTheDocument()
+  })
+
+  it("keeps a sticky card when Manage tags merges a selected tag away (WR-03)", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockDetachTag.mockResolvedValue(undefined)
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: trap,
+      carrierCountAfterMerge: 3,
+    })
+    mockMergeTag.mockResolvedValueOnce({ ...trap, carrier_count: 3 })
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5")
+    await screen.findByText("Bad Bunny")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove tag rap from Bad Bunny" })
+    )
+    expect(shown()).toEqual(["Bad Bunny"])
+
+    await openManageTags()
+    await mergeRapIntoTrap()
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    await userEvent.keyboard("{Escape}")
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Has muted events" })
+    )
+    expect(shown()).toEqual([])
+  })
+
+  it("keeps a sticky card when Manage tags deletes one of two selected tags (WR-03)", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockDetachTag.mockResolvedValue(undefined)
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5,9")
+    await screen.findByText("Bad Bunny")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove tag rap from Bad Bunny" })
+    )
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+
+    await openManageTags()
+    await deleteTagInDialog("rap")
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    await userEvent.keyboard("{Escape}")
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+  })
+
+  it("de-duplicates when both sides of a merge were selected", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: trap,
+      carrierCountAfterMerge: 3,
+    })
+    mockMergeTag.mockResolvedValueOnce({ ...trap, carrier_count: 3 })
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5,9")
+    await screen.findByText("Bad Bunny")
+
+    await openManageTags()
+    await mergeRapIntoTrap()
+
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+  })
+
+  it("drops a deleted tag again when Back brings it into the URL", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockDeleteTag.mockResolvedValueOnce({ carrier_count: 1 })
+
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(screen.getByLabelText("Filter by tags, any of"))
+    await userEvent.click(await screen.findByRole("option", { name: /^rap/ }))
+    await userEvent.click(await screen.findByRole("option", { name: /^trap/ }))
+    await waitFor(() => expect(search()).toBe("?tags=5%2C9"))
+    await userEvent.keyboard("{Escape}")
+
+    await openManageTags()
+    await deleteTagInDialog("rap")
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    await userEvent.keyboard("{Escape}")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "history back", hidden: true })
+    )
+
+    // Back lands on ?tags=5, whose only id is retired, so it is dropped.
+    await waitFor(() => expect(search()).toBe(""))
+    expect(filterChip("rap")).not.toBeInTheDocument()
+  })
+
+  it("swaps a merged-away tag again when Back brings it into the URL", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockVocabulary()
+    mockRenameTag.mockResolvedValueOnce({
+      kind: "collision",
+      target: trap,
+      carrierCountAfterMerge: 3,
+    })
+    mockMergeTag.mockResolvedValueOnce({ ...trap, carrier_count: 3 })
+
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(screen.getByLabelText("Filter by tags, any of"))
+    await userEvent.click(await screen.findByRole("option", { name: /^rap/ }))
+    await userEvent.click(await screen.findByRole("option", { name: /^trap/ }))
+    await userEvent.keyboard("{Escape}")
+
+    await openManageTags()
+    await mergeRapIntoTrap()
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    await userEvent.keyboard("{Escape}")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "history back", hidden: true })
+    )
+
+    // Back lands on ?tags=5, which swaps to the merge target.
+    await waitFor(() => expect(search()).toBe("?tags=9"))
+    expect(filterChip("trap")).toBeInTheDocument()
+  })
+
+  it("keeps the filter, its chip, and the card when the last carrier is detached in-session", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockDetachTag.mockResolvedValue(undefined)
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove tag rap from Bad Bunny" })
+    )
+
+    expect(search()).toBe("?tags=5")
+    expect(filterChip("rap")).toBeInTheDocument()
+    expect(shown()).toEqual(["Bad Bunny"])
+    expect(mockDetachTag).toHaveBeenCalledWith(1, 5)
+  })
+
+  it("keeps the tag filter and the sticky added card across the refresh after an add", async () => {
+    const drizzy = makeEntry({ id: 99, name: "Drizzy", mbid: "mbid-99" })
+    mockListWatchlist
+      .mockResolvedValueOnce(rows)
+      .mockResolvedValueOnce([...rows, drizzy])
+    vi.mocked(searchArtists).mockResolvedValue({
+      query: "Drizzy",
+      sources: {
+        musicbrainz: {
+          status: "ok",
+          artists: [
+            {
+              source: "musicbrainz",
+              id: "mbid-99",
+              name: "Drizzy",
+              disambiguation: null,
+              country: null,
+              type: "Person",
+              image_url: null,
+            },
+          ],
+        },
+      },
+    })
+    mockAddWatchlist.mockResolvedValue(drizzy)
+
+    renderRoute(WatchlistWithProbe, "/", "/?tags=5")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Search artists" }),
+      "Drizzy"
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add to Watchlist" })
+    )
+
+    await screen.findByRole("button", { name: "Remove Drizzy from watchlist" })
+    expect(search()).toBe("?tags=5")
+    expect(filterChip("rap")).toBeInTheDocument()
+    expect(shown()).toEqual(["Bad Bunny", "Drizzy"])
+    expect(mockListWatchlist).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("Watchlist preference toggles (WLVW-05)", () => {
+  const rap = { id: 3, name: "rap" }
+  const mutedTypes = ["guest_feature"]
+  const rows = [
+    makeEntry({
+      id: 1,
+      name: "Bad Bunny",
+      tags: [rap],
+      muted_event_types: mutedTypes,
+      release_types: ["album"],
+    }),
+    makeEntry({
+      id: 2,
+      name: "Bad Two",
+      tags: [rap],
+      muted_event_types: mutedTypes,
+    }),
+    makeEntry({
+      id: 3,
+      name: "Bad Three",
+      tags: [rap],
+      release_types: ["album"],
+    }),
+    makeEntry({
+      id: 4,
+      name: "Drake",
+      muted_event_types: mutedTypes,
+      release_types: ["album"],
+    }),
+    makeEntry({ id: 5, name: "Eminem" }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", { name: /^Remove .* from watchlist$/ })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+  const search = () => screen.getByTestId("location-search").textContent
+  const mutedToggle = () =>
+    screen.getByRole("button", { name: "Has muted events" })
+  const customToggle = () =>
+    screen.getByRole("button", { name: "Custom release types" })
+
+  it("narrows to muted artists, updates count and URL, and keeps focus on the button", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(mutedToggle())
+
+    expect(shown()).toEqual(["Bad Bunny", "Bad Two", "Drake"])
+    expect(screen.getByText("3 of 5 artists")).toBeInTheDocument()
+    expect(search()).toBe("?muted=1")
+    expect(mutedToggle()).toHaveAttribute("aria-pressed", "true")
+    expect(mutedToggle()).toHaveFocus()
+
+    await userEvent.click(mutedToggle())
+
+    expect(shown()).toHaveLength(5)
+    expect(search()).toBe("")
+  })
+
+  it("narrows to custom release types independently of the mute toggle", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(customToggle())
+
+    expect(shown()).toEqual(["Bad Bunny", "Bad Three", "Drake"])
+    expect(search()).toBe("?custom=1")
+  })
+
+  it("composes name, tag, muted and custom with AND", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?q=b&tags=3&muted=1&custom=1")
+    await screen.findByText("Bad Bunny")
+
+    expect(shown()).toEqual(["Bad Bunny"])
+    expect(screen.getByText("1 of 5 artists")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Clear filters" })
+    ).toBeInTheDocument()
+  })
+
+  it("shows Clear filters for a lone toggle and Clear filters resets both", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?muted=1&custom=1")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+
+    expect(search()).toBe("")
+    expect(mutedToggle()).toHaveAttribute("aria-pressed", "false")
+    expect(customToggle()).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("keeps a card whose last mute was just unchecked until the next filter change", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    vi.mocked(updateWatchlistPreferences).mockResolvedValue({
+      ...rows[0],
+      muted_event_types: [],
+    })
+    renderRoute(WatchlistWithProbe, "/", "/?muted=1")
+    await screen.findByText("Bad Bunny")
+    expect(shown()).toEqual(["Bad Bunny", "Bad Two", "Drake"])
+
+    const card = screen.getByText("Bad Bunny").closest("li")!
+    await userEvent.click(
+      within(card).getByRole("checkbox", { name: /^Mute guest feature alerts/ })
+    )
+
+    await waitFor(() =>
+      expect(updateWatchlistPreferences).toHaveBeenCalledWith(1, {
+        mutedEventTypes: [],
+      })
+    )
+    expect(shown()).toEqual(["Bad Bunny", "Bad Two", "Drake"])
+    expect(screen.getByText("3 of 5 artists")).toBeInTheDocument()
+
+    await userEvent.click(customToggle())
+
+    expect(shown()).toEqual(["Drake"])
+  })
+
+  it("drops a sticky card when Back restores a filter it does not match", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    vi.mocked(updateWatchlistPreferences).mockResolvedValue({
+      ...rows[0],
+      muted_event_types: [],
+    })
+    function WithBack() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button onClick={() => navigate(-1)}>history back</button>
+          <WatchlistWithProbe />
+        </>
+      )
+    }
+    renderRoute(WithBack, "/", "/?muted=1")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(customToggle())
+    expect(shown()).toEqual(["Bad Bunny", "Drake"])
+
+    const card = screen.getByText("Bad Bunny").closest("li")!
+    await userEvent.click(
+      within(card).getByRole("checkbox", { name: /^Mute guest feature alerts/ })
+    )
+    await waitFor(() => expect(updateWatchlistPreferences).toHaveBeenCalled())
+    expect(shown()).toEqual(["Bad Bunny", "Drake"])
+
+    await userEvent.click(screen.getByRole("button", { name: "history back" }))
+
+    await waitFor(() => expect(shown()).toEqual(["Bad Two", "Drake"]))
+  })
+
+  it("drops a sticky card in the same commit as Back's URL change", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    vi.mocked(updateWatchlistPreferences).mockResolvedValue({
+      ...rows[0],
+      muted_event_types: [],
+    })
+    const commits: { search: string; shown: (string | undefined)[] }[] = []
+    function CommitProbe() {
+      const location = useLocation()
+      useLayoutEffect(() => {
+        commits.push({ search: location.search, shown: shown() })
+      }, [location])
+      return null
+    }
+    function WithBack() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <CommitProbe />
+          <button onClick={() => navigate(-1)}>history back</button>
+          <WatchlistWithProbe />
+        </>
+      )
+    }
+    renderRoute(WithBack, "/", "/?muted=1")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(customToggle())
+    const card = screen.getByText("Bad Bunny").closest("li")!
+    await userEvent.click(
+      within(card).getByRole("checkbox", { name: /^Mute guest feature alerts/ })
+    )
+    await waitFor(() => expect(updateWatchlistPreferences).toHaveBeenCalled())
+    expect(shown()).toEqual(["Bad Bunny", "Drake"])
+
+    commits.length = 0
+    await userEvent.click(screen.getByRole("button", { name: "history back" }))
+
+    await waitFor(() => expect(shown()).toEqual(["Bad Two", "Drake"]))
+    expect(commits[0]).toEqual({
+      search: "?muted=1",
+      shown: ["Bad Two", "Drake"],
+    })
+  })
+
+  it("does not bring a sticky card back when a toggle is turned off again", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    vi.mocked(updateWatchlistPreferences).mockResolvedValue({
+      ...rows[0],
+      muted_event_types: [],
+    })
+    renderRoute(WatchlistWithProbe, "/", "/?muted=1")
+    await screen.findByText("Bad Bunny")
+
+    const card = screen.getByText("Bad Bunny").closest("li")!
+    await userEvent.click(
+      within(card).getByRole("checkbox", { name: /^Mute guest feature alerts/ })
+    )
+    await waitFor(() => expect(updateWatchlistPreferences).toHaveBeenCalled())
+    expect(shown()).toEqual(["Bad Bunny", "Bad Two", "Drake"])
+
+    await userEvent.click(customToggle())
+    expect(shown()).toEqual(["Drake"])
+
+    await userEvent.click(customToggle())
+    expect(search()).toBe("?muted=1")
+    expect(shown()).toEqual(["Bad Two", "Drake"])
+  })
+
+  it("drops an invalid muted or custom param with replace", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?muted=yes&custom=2&q=b")
+    await screen.findByText("Bad Bunny")
+
+    await waitFor(() => expect(search()).toBe("?q=b"))
+    expect(mutedToggle()).toHaveAttribute("aria-pressed", "false")
+  })
+})
+
+describe("Watchlist card chip click-to-filter (D-08)", () => {
+  const reggaeton = { id: 3, name: "reggaeton" }
+  const trap = { id: 7, name: "trap" }
+  const rows = [
+    makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton] }),
+    makeEntry({ id: 2, name: "Daddy Yankee", tags: [reggaeton] }),
+    makeEntry({ id: 3, name: "Travis Scott", tags: [trap] }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", { name: /^Remove .* from watchlist$/ })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+  const search = () => screen.getByTestId("location-search").textContent
+  const firstLabel = () =>
+    screen.getAllByRole("button", { name: "Filter by reggaeton" })[0]
+
+  it("filters to the tag's carriers, mirrors it in the toolbar, and keeps focus on the label", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+
+    const label = firstLabel()
+    await userEvent.click(label)
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+    expect(search()).toBe("?tags=3")
+    expect(
+      screen.getByRole("button", { name: "Remove reggaeton from tag filter" })
+    ).toBeInTheDocument()
+    expect(firstLabel()).toBe(label)
+    expect(label).toHaveFocus()
+    expect(label).toHaveAttribute("aria-pressed", "true")
+    expect(mockAttachTag).not.toHaveBeenCalled()
+    expect(mockDetachTag).not.toHaveBeenCalled()
+  })
+
+  it("clears the filter when the active label is clicked again", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3")
+    await screen.findByText("Bad Bunny")
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+
+    await userEvent.click(firstLabel())
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+    expect(search()).toBe("")
+  })
+
+  it("keeps detaching through the x and never changes the tags param", async () => {
+    mockListWatchlist.mockResolvedValue(rows)
+    mockDetachTag.mockResolvedValue(undefined)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Remove tag reggaeton from Bad Bunny",
+      })
+    )
+
+    expect(mockDetachTag).toHaveBeenCalledWith(1, 3)
+    expect(search()).toBe("?tags=3")
+  })
+})
+
+describe("chip click keeps the clicked card on screen (G-25-4)", () => {
+  const reggaeton = { id: 3, name: "reggaeton" }
+  const rows = [
+    makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton] }),
+    makeEntry({ id: 2, name: "Daddy Yankee", tags: [reggaeton] }),
+    makeEntry({ id: 3, name: "Travis Scott", tags: [{ id: 7, name: "trap" }] }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", { name: /^Remove .* from watchlist$/ })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+  const search = () => screen.getByTestId("location-search").textContent
+
+  // Reports a different top while the label is pressed vs not, so the
+  // before/after reads differ however often the DOM is measured.
+  function stubTop(el: HTMLElement, whenOff: number, whenOn: number) {
+    vi.spyOn(el, "getBoundingClientRect").mockImplementation(() => {
+      const top = el.getAttribute("aria-pressed") === "true" ? whenOn : whenOff
+      return {
+        top,
+        bottom: top + 24,
+        left: 0,
+        right: 80,
+        width: 80,
+        height: 24,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }
+    })
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("scrolls by the chip's drift after a filter that shrinks the list", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/")
+    await screen.findByText("Bad Bunny")
+    const label = screen.getAllByRole("button", {
+      name: "Filter by reggaeton",
+    })[0]
+    stubTop(label, 400, 120)
+
+    await userEvent.click(label)
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+    expect(search()).toBe("?tags=3")
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -280)
+  })
+
+  it("scrolls the other way after a filter that grows the list", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3")
+    await screen.findByText("Bad Bunny")
+    const label = screen.getAllByRole("button", {
+      name: "Filter by reggaeton",
+    })[0]
+    stubTop(label, 400, 120)
+
+    await userEvent.click(label)
+
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+    expect(search()).toBe("")
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, 280)
+  })
+
+  // The card's rect depends on whether it still has a sibling on `side`, so
+  // the before/after reads differ however often the DOM is measured.
+  function stubCardTop(
+    card: HTMLElement,
+    side: "next" | "previous",
+    withSibling: number,
+    alone: number
+  ) {
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(() => {
+      const sibling =
+        side === "next" ? card.nextElementSibling : card.previousElementSibling
+      const top = sibling ? withSibling : alone
+      return {
+        top,
+        bottom: top + 100,
+        left: 0,
+        right: 300,
+        width: 300,
+        height: 100,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }
+    })
+  }
+
+  it("corrects by the previous card's drift when the last clicked card leaves the list (WR-02)", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Bad Bunny")
+    const label = screen.getByRole("button", { name: "Filter by trap" })
+    // The label detaches, so key the rect on read order: 400 first, then 120.
+    let reads = 0
+    vi.spyOn(label, "getBoundingClientRect").mockImplementation(() => {
+      const top = reads++ === 0 ? 400 : 120
+      return {
+        top,
+        bottom: top + 24,
+        left: 0,
+        right: 80,
+        width: 80,
+        height: 24,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }
+    })
+    stubCardTop(
+      screen.getByText("Daddy Yankee").closest("li")!,
+      "next",
+      500,
+      300
+    )
+
+    await userEvent.click(label)
+
+    expect(search()).toBe("?tags=3")
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -200)
+  })
+
+  it("corrects by the next card's drift when a middle clicked card leaves the list (WR-02)", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Bad Bunny")
+    stubCardTop(
+      screen.getByText("Travis Scott").closest("li")!,
+      "previous",
+      600,
+      200
+    )
+
+    await userEvent.click(
+      within(screen.getByText("Daddy Yankee").closest("li")!).getByRole(
+        "button",
+        { name: "Filter by reggaeton" }
+      )
+    )
+
+    expect(search()).toBe("?tags=7")
+    expect(shown()).toEqual(["Travis Scott"])
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -400)
+  })
+
+  it("corrects by the nearest survivor's drift when a run of cards leaves (G-25-11)", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    const trap = { id: 7, name: "trap" }
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Arcangel", tags: [trap] }),
+      makeEntry({ id: 2, name: "Bad Bunny", tags: [reggaeton] }),
+      makeEntry({ id: 3, name: "Chencho Corleone", tags: [reggaeton] }),
+      makeEntry({ id: 4, name: "Daddy Yankee", tags: [reggaeton] }),
+      makeEntry({ id: 5, name: "Eladio Carrion", tags: [trap] }),
+    ])
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Eladio Carrion")
+    const eladio = screen.getByText("Eladio Carrion").closest("li")!
+    // Keyed on the list's child count so the reads differ however often measured.
+    vi.spyOn(eladio, "getBoundingClientRect").mockImplementation(() => {
+      const top = eladio.parentElement!.children.length === 5 ? 900 : 300
+      return {
+        top,
+        bottom: top + 100,
+        left: 0,
+        right: 300,
+        width: 300,
+        height: 100,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }
+    })
+
+    await userEvent.click(
+      within(screen.getByText("Chencho Corleone").closest("li")!).getByRole(
+        "button",
+        { name: "Filter by reggaeton" }
+      )
+    )
+
+    expect(search()).toBe("?tags=7")
+    expect(shown()).toEqual(["Arcangel", "Eladio Carrion"])
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -600)
+  })
+
+  it("keeps a sticky card's chip anchored and focused when the chip filters (WR-01)", async () => {
+    const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    const trap = { id: 7, name: "trap" }
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton, trap] }),
+      rows[1],
+      rows[2],
+    ])
+    mockDetachTag.mockResolvedValue(undefined)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3")
+    await screen.findByText("Bad Bunny")
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Remove tag reggaeton from Bad Bunny",
+      })
+    )
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee"])
+    const cardOf = () => screen.getByText("Bad Bunny").closest("li")!
+    const label = within(cardOf()).getByRole("button", {
+      name: "Filter by trap",
+    })
+    stubTop(label, 400, 120)
+
+    await userEvent.click(label)
+
+    expect(search()).toBe("?tags=3%2C7")
+    expect(shown()).toEqual(["Bad Bunny", "Daddy Yankee", "Travis Scott"])
+    expect(label.isConnected).toBe(true)
+    expect(
+      within(cardOf()).getByRole("button", { name: "Filter by trap" })
+    ).toBe(label)
+    expect(label).toHaveFocus()
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(scrollBy).toHaveBeenCalledWith(0, -280)
+  })
+})
+
+describe("chip toggle moves focus to the fallback card when its card leaves (G-25-12)", () => {
+  const reggaeton = { id: 3, name: "reggaeton" }
+  const trap = { id: 7, name: "trap" }
+  const rows = [
+    makeEntry({ id: 1, name: "Bad Bunny", tags: [reggaeton] }),
+    makeEntry({ id: 2, name: "Daddy Yankee", tags: [reggaeton] }),
+    makeEntry({ id: 3, name: "Travis Scott", tags: [trap] }),
+  ]
+
+  function WatchlistWithProbe() {
+    return (
+      <>
+        <LocationProbe />
+        <Watchlist />
+      </>
+    )
+  }
+
+  const shown = () =>
+    screen
+      .queryAllByRole("button", { name: /^Remove .* from watchlist$/ })
+      .map((b) => b.getAttribute("aria-label")?.slice(7, -15))
+  const search = () => screen.getByTestId("location-search").textContent
+  const labelOf = (artist: string, tag: string) =>
+    within(screen.getByText(artist).closest("li")!).getByRole("button", {
+      name: `Filter by ${tag}`,
+    })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("Enter on the last card's chip lands focus on the previous card's pressed label", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Travis Scott")
+    const trapLabel = labelOf("Travis Scott", "trap")
+    const target = labelOf("Daddy Yankee", "reggaeton")
+    const focus = vi.spyOn(target, "focus")
+
+    trapLabel.focus()
+    await userEvent.keyboard("{Enter}")
+
+    expect(search()).toBe("?tags=3")
+    expect(trapLabel.isConnected).toBe(false)
+    expect(target).toHaveFocus()
+    expect(target).toHaveAttribute("aria-pressed", "true")
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
+  it("Enter on a middle card's chip lands focus on the next card's pressed label", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Travis Scott")
+    const target = labelOf("Travis Scott", "trap")
+    const focus = vi.spyOn(target, "focus")
+
+    labelOf("Daddy Yankee", "reggaeton").focus()
+    await userEvent.keyboard("{Enter}")
+
+    expect(search()).toBe("?tags=7")
+    expect(shown()).toEqual(["Travis Scott"])
+    expect(target).toHaveFocus()
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
+  it("a mouse click that removes the card moves no focus", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue(rows)
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Travis Scott")
+    const trapLabel = labelOf("Travis Scott", "trap")
+    const target = labelOf("Daddy Yankee", "reggaeton")
+    const focus = vi.spyOn(target, "focus")
+
+    await userEvent.click(trapLabel)
+
+    expect(search()).toBe("?tags=3")
+    expect(trapLabel.isConnected).toBe(false)
+    expect(focus).not.toHaveBeenCalled()
+    expect(document.body).toHaveFocus()
+  })
+
+  it("focuses the Your artists heading when no card survives", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({
+        id: 1,
+        name: "Bad Bunny",
+        tags: [reggaeton],
+        muted_event_types: ["guest_feature"],
+      }),
+      makeEntry({ id: 3, name: "Travis Scott", tags: [trap] }),
+    ])
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7&muted=1")
+    await screen.findByText("Bad Bunny")
+    expect(shown()).toEqual(["Bad Bunny"])
+
+    labelOf("Bad Bunny", "reggaeton").focus()
+    await userEvent.keyboard("{Enter}")
+
+    expect(
+      await screen.findByText("No artists match these filters")
+    ).toBeInTheDocument()
+    const heading = screen.getByRole("heading", { name: "Your artists" })
+    expect(heading).toHaveFocus()
+    expect(heading).toHaveAttribute("tabindex", "-1")
+  })
+
+  it("lands on the same card the scroll anchor uses when a run of cards leaves", async () => {
+    vi.spyOn(window, "scrollBy").mockImplementation(() => {})
+    mockListWatchlist.mockResolvedValue([
+      makeEntry({ id: 1, name: "Arcangel", tags: [trap] }),
+      makeEntry({ id: 2, name: "Bad Bunny", tags: [reggaeton] }),
+      makeEntry({ id: 3, name: "Chencho Corleone", tags: [reggaeton] }),
+      makeEntry({ id: 4, name: "Daddy Yankee", tags: [reggaeton] }),
+      makeEntry({ id: 5, name: "Eladio Carrion", tags: [trap] }),
+    ])
+    renderRoute(WatchlistWithProbe, "/", "/?tags=3,7")
+    await screen.findByText("Eladio Carrion")
+
+    labelOf("Chencho Corleone", "reggaeton").focus()
+    await userEvent.keyboard("{Enter}")
+
+    expect(search()).toBe("?tags=7")
+    expect(labelOf("Eladio Carrion", "trap")).toHaveFocus()
   })
 })

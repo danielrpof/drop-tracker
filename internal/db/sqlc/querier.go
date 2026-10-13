@@ -98,6 +98,10 @@ type Querier interface {
 	GetWatchlistArtistID(ctx context.Context, id int64) (int64, error)
 	// ListWatchlist's select list narrowed to one row (D-26); Service.get only
 	// compiles while the projections stay identical.
+	// latest/upcoming new_release dates (G1-G3): no retention window; Postgres
+	// decides "upcoming" at the date's own precision against UTC today; malformed
+	// or placeholder dates (e.g. 0000-00-00) are skipped. Plain
+	// columns, not aggregates, so sqlc emits *string and no-release artists scan NULL.
 	GetWatchlistEntry(ctx context.Context, id int64) (GetWatchlistEntryRow, error)
 	// D-14's implicit seed-mode check, scoped per-source per D-15: zero
 	// existing event rows for this artist+source means seed mode.
@@ -225,6 +229,10 @@ type Querier interface {
 	// tag_ids/tag_names (D-26): parallel ARRAY(...) subqueries, not json_agg
 	// (sqlc#3438 emits interface{}). They must stay identical but for the column,
 	// or zipTags would mispair ids and names.
+	// latest/upcoming new_release dates (G1-G3): no retention window; Postgres
+	// decides "upcoming" at the date's own precision against UTC today; malformed
+	// or placeholder dates (e.g. 0000-00-00) are skipped. Plain
+	// columns, not aggregates, so sqlc emits *string and no-release artists scan NULL.
 	ListWatchlist(ctx context.Context) ([]ListWatchlistRow, error)
 	// Merge statement order and why it never inserts: ADR 0004.
 	// Locks both tags in id order so concurrent merges cannot deadlock; it also

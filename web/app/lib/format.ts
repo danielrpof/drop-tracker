@@ -144,6 +144,44 @@ export function formatDuration(ms: number | null): string {
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`
 }
 
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+]
+
+const YEAR_RE = /^(\d{4})$/
+const YEAR_MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/
+const YEAR_MONTH_DAY_RE = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
+
+// formatReleaseDate renders a stored release date at its own precision (D-15).
+// String-only on purpose: no Date, so no timezone shift and no ICU "Sept".
+export function formatReleaseDate(raw: string): string {
+  if (YEAR_RE.test(raw)) return raw
+  const ym = YEAR_MONTH_RE.exec(raw)
+  if (ym) return `${MONTHS[Number(ym[2]) - 1]} ${ym[1]}`
+  const ymd = YEAR_MONTH_DAY_RE.exec(raw)
+  if (ymd) return `${Number(ymd[3])} ${MONTHS[Number(ymd[2]) - 1]} ${ymd[1]}`
+  return raw
+}
+
+// formatDetectedDate renders created_at (the date retention counts from) as
+// a local `D Mon YYYY`, matching formatReleaseDate. Unparseable -> null.
+export function formatDetectedDate(iso: string): string | null {
+  const d = new Date(iso)
+  if (!isValidDate(d)) return null
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+}
+
 // formatPollInterval turns poll_interval_seconds (SYS-02, D-06) into human
 // text for the About block's "Every {…}" row and the first-run copy. Returns
 // a bare phrase with no leading preposition -- both call sites supply their

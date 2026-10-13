@@ -102,13 +102,15 @@ SELECT EXISTS(
     SELECT 1 FROM events
     WHERE ($1::bigint IS NULL OR artist_id = $1::bigint)
       AND ($2::text IS NULL OR event_type = $2::text)
-      AND created_at < $3::timestamptz
+      AND ($3::bigint IS NULL OR EXISTS (SELECT 1 FROM artist_tags link WHERE link.artist_id = events.artist_id AND link.tag_id = $3::bigint))
+      AND created_at < $4::timestamptz
 ) AS has_older
 `
 
 type HasOlderEventsParams struct {
 	ArtistID  *int64             `json:"artist_id"`
 	EventType *string            `json:"event_type"`
+	TagID     *int64             `json:"tag_id"`
 	Cutoff    pgtype.Timestamptz `json:"cutoff"`
 }
 
@@ -128,7 +130,12 @@ type HasOlderEventsParams struct {
 // row exactly at the boundary is never double-counted as both visible and
 // older (D-04 stays consistent across both queries).
 func (q *Queries) HasOlderEvents(ctx context.Context, arg HasOlderEventsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasOlderEvents, arg.ArtistID, arg.EventType, arg.Cutoff)
+	row := q.db.QueryRow(ctx, hasOlderEvents,
+		arg.ArtistID,
+		arg.EventType,
+		arg.TagID,
+		arg.Cutoff,
+	)
 	var has_older bool
 	err := row.Scan(&has_older)
 	return has_older, err
@@ -206,26 +213,29 @@ SELECT id, artist_id, source, event_type, external_id, release_group_mbid,
 FROM events
 WHERE ($1::bigint IS NULL OR artist_id = $1::bigint)
   AND ($2::text IS NULL OR event_type = $2::text)
+  -- HIST-02: tag filter lives in this retention-aware query, never a separate one (PITFALLS #9).
+  AND ($3::bigint IS NULL OR EXISTS (SELECT 1 FROM artist_tags link WHERE link.artist_id = events.artist_id AND link.tag_id = $3::bigint))
   AND (
-        $3::bigint IS NULL
+        $4::bigint IS NULL
         OR CASE
-             WHEN $4::text IS NULL
+             WHEN $5::text IS NULL
                THEN release_date IS NULL
-                    AND id < $3::bigint
+                    AND id < $4::bigint
              ELSE release_date IS NULL
-                  OR release_date < $4::text
-                  OR (release_date = $4::text
-                      AND id < $3::bigint)
+                  OR release_date < $5::text
+                  OR (release_date = $5::text
+                      AND id < $4::bigint)
            END
       )
-  AND created_at >= $5::timestamptz
+  AND created_at >= $6::timestamptz
 ORDER BY release_date DESC NULLS LAST, id DESC
-LIMIT $6
+LIMIT $7
 `
 
 type ListEventsParams struct {
 	ArtistID          *int64             `json:"artist_id"`
 	EventType         *string            `json:"event_type"`
+	TagID             *int64             `json:"tag_id"`
 	CursorID          *int64             `json:"cursor_id"`
 	CursorReleaseDate *string            `json:"cursor_release_date"`
 	Cutoff            pgtype.Timestamptz `json:"cutoff"`
@@ -304,6 +314,7 @@ func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListE
 	rows, err := q.db.Query(ctx, listEvents,
 		arg.ArtistID,
 		arg.EventType,
+		arg.TagID,
 		arg.CursorID,
 		arg.CursorReleaseDate,
 		arg.Cutoff,

@@ -69,8 +69,8 @@ func parseOptionalPageSize(r *http.Request) (int32, bool) {
 	return int32(v), true //nolint:gosec // int32 wraparound from a huge v is harmless here: every reachable output is either <=0 or >MaxPageSize (caught by events.Service.List's clamp, see comment above) or lands directly in the already-valid [1,MaxPageSize] range
 }
 
-// handleListEvents implements GET /events (HIST-01, UI-03): reads four
-// optional query params -- artist_id, event_type, cursor, limit -- and
+// handleListEvents implements GET /events (HIST-01, UI-03): reads five
+// optional query params -- artist_id, event_type, tag_id, cursor, limit -- and
 // builds a populated events.ListParams, rejecting any malformed value with a
 // 400 before ever calling the store (T-06-06 through T-06-10). On a store
 // error, this mirrors every other handler exactly: log the raw error to the
@@ -81,6 +81,12 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	artistID, ok := parseOptionalPositiveInt64(r, "artist_id")
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid artist_id")
+		return
+	}
+
+	tagID, ok := parseOptionalPositiveInt64(r, "tag_id")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid tag_id")
 		return
 	}
 
@@ -118,6 +124,7 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	page, err := s.events.List(r.Context(), events.ListParams{
 		ArtistID:  artistID,
 		EventType: eventType,
+		TagID:     tagID,
 		Cursor:    cursor,
 		PageSize:  pageSize,
 	})
