@@ -84,7 +84,7 @@ covered_files:
   - web/app/routes/watchlist.test.tsx
   - web/app/routes/watchlist.tsx
 
-covered_digest: "v1:sha256:e7a9a4f63dd3f9851369da1e716c2defbf07ef6e98985b73de70a439c6f5dcca"
+covered_digest: "v1:sha256:37b251adcb19d8cfeb450d38a1c8f8ecc3a9da19c7e901faf94b76f4c2343129"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
@@ -114,7 +114,7 @@ human_verification:
 
 **Phase Goal:** With a 50+ artist watchlist, the user can find any artist or group of artists in seconds, by name, tag, or preference state and in the order they choose, and can narrow the History feed to the same tags.
 **Verified:** 2026-10-12T22:41:48Z
-**Status:** human_needed
+**Status:** passed (human items resolved by UAT tests 11-13, 2026-10-12)
 **Re-verification:** Yes. This run follows gap-closure plans 25-19, 25-20, and 25-21, which closed UAT gaps G-25-11, G-25-12, and G-25-13.
 
 ## Goal Achievement
@@ -267,7 +267,7 @@ All three gaps from the prior round are closed in code and covered by passing te
 
 The UI-SPEC records all three decisions. The embedded bundle carries all three fixes, and the blast radius is empty. Every original success criterion still holds: in this run the Go History, retention, and latest-release tests re-ran green against Postgres, and the full web suite exited 0 above its coverage thresholds.
 
-No blocker remains. The status is human_needed because:
+No blocker remains. Reconciled after UAT completed (13/13 pass, 0 issues): human items 1-3 map to UAT tests 11-13, all `pass` (test 4 passed under a no-browser waiver). The status was human_needed because:
 
 - G-25-11, G-25-12, and G-25-13 need the real-browser and screen-reader re-tests that jsdom cannot perform.
 - Two review warnings ride along as decisions inside those re-tests:
