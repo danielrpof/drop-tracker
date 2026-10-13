@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: complete
 phase: 25-find-filter-watchlist-and-history
 source: [25-VERIFICATION.md]
 started: 2026-10-10T18:15:00Z
-updated: 2026-10-12T21:40:00Z
+updated: 2026-10-12T23:30:00Z
 ---
 
 ## Current Test
@@ -53,29 +53,24 @@ previous_result: issue (reported: "on 375px, when searching an artist, only the 
 expected: Filter by a tag, remove it from a card, then open Manage tags and merge that tag into another (or delete it while another tag stays selected). The edited card stays visible. Separately, make a card sticky under a toggled filter, then press Back. Back never shows the stale card, not even for one frame.
 result: pass
 
-### 11. Decision — run of adjacent leaving cards (review WR-01)
-expected: At `?tags=A,B`, un-press a chip on a card whose next and previous cards also have only that tag. Today no correction runs and the page can collapse under the viewport. Decide whether to accept this as a documented limitation or widen the search to the nearest surviving card.
-result: issue
-reported: "widen"
-severity: minor
-
-### 12. Decision — focus when the clicked card leaves (review WR-03)
-expected: With two tags selected, press Enter on a chip label so the card leaves the list. Today focus falls to <body>. Decide whether to accept this, or move focus to the surviving fallback card's chip label (or the list heading) and add a 'Toggled, card leaves' focus row.
-result: issue
-reported: "anchor"
-severity: minor
-
-### 13. Decision — Deezer hint accessible description (review WR-02)
-expected: With a screen reader on a Deezer result row, the disabled button announces only 'Search MusicBrainz to add, button, unavailable', without the reason. Decide whether to add aria-describedby pointing at an sr-only hint, or accept the current behaviour.
-result: issue
-reported: "describe"
-severity: minor
+### 11. Run of leaving cards keeps the page anchored (re-test after 25-19)
+expected: At `?tags=A,B` with several adjacent cards that have only tag A, un-press the A chip on a card in the middle of that run. Its neighbours leave too, but the nearest surviving card (next side first, then previous) stays where it was on screen. The page never collapses under the viewport, apart from the browser clamp when the filtered page is shorter than the window.
+result: pass
+previous_result: issue (decision: "widen") — gap resolved, re-testing
+### 12. Keyboard focus follows the fallback card (re-test after 25-20)
+expected: With two tags selected, Tab to a chip label and press Enter so the card leaves. Focus lands on a chip label of the surviving fallback card (a pressed one if it has one) with a visible focus ring, and never on <body>. If no card survives, focus goes to the list heading. A mouse click does not move focus.
+result: pass
+previous_result: issue (decision: "anchor") — gap resolved, re-testing
+### 13. Deezer hint announced to screen readers (re-test after 25-21)
+expected: Search `Bad Bunny` and move a screen reader (NVDA/Narrator, or the browser accessibility tree) onto a Deezer result's disabled `Search MusicBrainz to add` button. It announces the button plus the reason (the Deezer hint text) as its description. Nothing changes visually, and hovering still shows the native tooltip.
+result: pass
+previous_result: issue (decision: "describe") — gap resolved, re-testing
 
 ## Summary
 
 total: 13
-passed: 10
-issues: 3
+passed: 13
+issues: 0
 pending: 0
 skipped: 0
 blocked: 0
@@ -149,7 +144,9 @@ blocked: 0
 
 - gap_id: G-25-11
   truth: "When the clicked card leaves under a multi-tag filter, the anchor falls back to the nearest surviving card in either direction, not just the two immediate neighbours, so a run of adjacent leaving cards never collapses the page under the viewport (clamped only when the filtered page is shorter than the window)."
-  status: failed
+  status: resolved
+  resolved_by: 25-19-PLAN.md
+  resolved_at: 2026-10-12
   reason: "User decision (review WR-01): widen. User reported: widen"
   severity: minor
   test: 11
@@ -167,7 +164,9 @@ blocked: 0
 
 - gap_id: G-25-12
   truth: "When a keyboard user toggles a chip label and the card leaves the list, focus moves to a chip label on the fallback anchor card (the same surviving card the scroll anchor uses), never to <body>. The UI-SPEC focus table has a 'Toggled, card leaves' row."
-  status: failed
+  status: resolved
+  resolved_by: 25-20-PLAN.md
+  resolved_at: 2026-10-12
   reason: "User decision (review WR-03): anchor. User reported: anchor"
   severity: minor
   test: 12
@@ -188,7 +187,9 @@ blocked: 0
 
 - gap_id: G-25-13
   truth: "A screen reader on a Deezer search-result row announces the disabled 'Search MusicBrainz to add' button together with the reason (DEEZER_ADD_HINT) through its accessible description, with no visual change."
-  status: failed
+  status: resolved
+  resolved_by: 25-21-PLAN.md
+  resolved_at: 2026-10-12
   reason: "User decision (review WR-02): describe. User reported: describe"
   severity: minor
   test: 13
