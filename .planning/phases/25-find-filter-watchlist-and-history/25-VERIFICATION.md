@@ -1,9 +1,10 @@
 ---
 phase: 25-find-filter-watchlist-and-history
-verified: 2026-10-12T22:41:48Z
-status: human_needed
+verified: 2026-10-13T02:17:13Z
+status: passed
 score: 23/24 must-haves verified
 covered_files:
+
   - .planning/phases/25-find-filter-watchlist-and-history/25-01-PLAN.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-02-PLAN.md
   - .planning/phases/25-find-filter-watchlist-and-history/25-03-PLAN.md
@@ -82,6 +83,7 @@ covered_files:
   - web/app/routes/history.tsx
   - web/app/routes/watchlist.test.tsx
   - web/app/routes/watchlist.tsx
+
 covered_digest: "v1:sha256:e7a9a4f63dd3f9851369da1e716c2defbf07ef6e98985b73de70a439c6f5dcca"
 behavior_unverified: 0
 overrides_applied: 0
@@ -96,6 +98,7 @@ re_verification:
   gaps_remaining: []
   regressions: []
 human_verification:
+
   - test: "G-25-11 re-test, plus review WR-02 (distant survivor). Run the rebuilt binary with 50+ artists, scroll far down, and select two tags. (a) Un-press a chip on a card whose immediate neighbours also leave, a run of two or three on each side. (b) Un-press a tag that removes a long run, five or more cards on each side, so the nearest survivor was below the fold before the click."
     expected: "(a) The nearest surviving card keeps its on-screen position and the page does not collapse. (b) Today the code pins the survivor at its old viewport offset (`useScrollAnchor.ts:55`), even when that offset was off-screen. The viewport can then show cards from far above the click point, and neither nearest survivor is visible. Record what you see, then decide: accept D-12 literally ('where it was on screen'), or aim the fallback at the click position or clamp it into the viewport, as review WR-02 proposes. Also note any fight with native `overflow-anchor`."
     why_human: "jsdom has no layout. Every anchor test stubs getBoundingClientRect and scrollBy. The distant-survivor contract is undecided. The committed route test even uses a survivor top of 900, below jsdom's 768px fold, so it pins this behaviour without asserting it. UAT test 4 was passed under a no-browser waiver, before 25-19 widened the search."
