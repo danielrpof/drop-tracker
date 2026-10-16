@@ -1828,3 +1828,185 @@ func TestBulkTags_RemoveEndToEnd(t *testing.T) {
 		t.Fatalf("beat missing from /tags after bulk remove: %+v", vocab)
 	}
 }
+
+func TestBulkTags_RemoveValidation(t *testing.T) {
+	manyIDs := make([]string, 1001)
+	for i := range manyIDs {
+		manyIDs[i] = strconv.Itoa(i + 1)
+	}
+
+	t.Run("rejected before the store", func(t *testing.T) {
+		cases := []struct {
+			name, body, code, msg string
+		}{
+			{"tag id missing", `{"ids":[1]}`, "", "invalid tag id"},
+			{"tag id zero", `{"ids":[1],"tag_id":0}`, "", "invalid tag id"},
+			{"tag id negative", `{"ids":[1],"tag_id":-1}`, "", "invalid tag id"},
+			{"empty ids", `{"ids":[],"tag_id":1}`, "bulk_ids_required", ""},
+			{"too many ids", `{"ids":[` + strings.Join(manyIDs, ",") + `],"tag_id":1}`, "bulk_too_many_ids", ""},
+			{"unknown field", `{"ids":[1],"tag_id":1,"extra":1}`, "", "invalid request body"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				var calls int32
+				ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkDetachCalls: &calls}})
+				resp, raw := postBulkRemoveTag(t, ts, tc.body)
+				if resp.StatusCode != http.StatusBadRequest {
+					t.Fatalf("status = %d, want 400", resp.StatusCode)
+				}
+				var eb errorBody
+				if err := json.Unmarshal(raw, &eb); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				if eb.Code != tc.code || (tc.msg != "" && eb.Error != tc.msg) {
+					t.Fatalf("body = %s, want code %q error %q", raw, tc.code, tc.msg)
+				}
+				if tc.code == "bulk_too_many_ids" {
+					var limit struct {
+						Max int `json:"max"`
+					}
+					if err := json.Unmarshal(raw, &limit); err != nil || limit.Max != 1000 {
+						t.Fatalf("body %s lacks max 1000", raw)
+					}
+				}
+				if got := atomic.LoadInt32(&calls); got != 0 {
+					t.Fatalf("store called %d times, want 0", got)
+				}
+			})
+		}
+	})
+
+	t.Run("store errors map through tagErrors", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			err    error
+			status int
+			code   string
+		}{
+			{"tag not found", tags.ErrTagNotFound, http.StatusNotFound, "tag_not_found"},
+			{"unmapped", errors.New("pq: secret detail"), http.StatusInternalServerError, ""},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkDetachFunc: func(context.Context, []int64, int64) (tags.BulkDetachResult, error) {
+					return tags.BulkDetachResult{}, tc.err
+				}}})
+				resp, raw := postBulkRemoveTag(t, ts, `{"ids":[1],"tag_id":1}`)
+				if resp.StatusCode != tc.status {
+					t.Fatalf("status = %d, want %d", resp.StatusCode, tc.status)
+				}
+				var eb errorBody
+				if err := json.Unmarshal(raw, &eb); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				if eb.Code != tc.code {
+					t.Fatalf("code = %q, want %q", eb.Code, tc.code)
+				}
+				if tc.status == http.StatusNotFound && eb.Error != "tag not found" {
+					t.Fatalf("error = %q, want %q", eb.Error, "tag not found")
+				}
+				if tc.status == http.StatusInternalServerError {
+					if eb.Error != "internal error" || strings.Contains(string(raw), "secret detail") {
+						t.Fatalf("body %s leaks the error text", raw)
+					}
+				}
+			})
+		}
+	})
+}
+
+func TestBulkTags_RemoveGated(t *testing.T) {
+	var calls int32
+	ts := newTagsServer(t, tagsServerOpts{passphrase: settingsTestPassphrase, store: fakeTagStore{bulkDetachCalls: &calls}})
+
+	resp, _ := postBulkRemoveTag(t, ts, `{"ids":[1],"tag_id":1}`)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no cookie: status = %d, want 401", resp.StatusCode)
+	}
+
+	cookie := loginForSettings(t, ts)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/watchlist/bulk/tags/remove", strings.NewReader(`{"ids":[1],"tag_id":1}`))
+	if err != nil {
+		t.Fatalf("build POST: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	csrf, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = csrf.Body.Close() }()
+	if csrf.StatusCode != http.StatusForbidden {
+		t.Fatalf("no CSRF header: status = %d, want 403", csrf.StatusCode)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("store.BulkDetach called %d times, want 0", got)
+	}
+}
+
+func TestBulkTags_RemoveUnavailableWithoutTags(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{omitTags: true})
+
+	resp, raw := postBulkRemoveTag(t, ts, `{"ids":[1],"tag_id":1}`)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	var eb errorBody
+	if err := json.Unmarshal(raw, &eb); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if eb.Error != "tags not available" {
+		t.Fatalf("error = %q, want %q", eb.Error, "tags not available")
+	}
+}
+
+// The literal bulk path must reach BulkDetach, never DELETE /watchlist/{id}/tags/{tag_id}.
+func TestBulkTags_RemoveReachesBulkHandler(t *testing.T) {
+	var bulkCalls, detachCalls int32
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkDetachCalls: &bulkCalls, detachCalls: &detachCalls}})
+
+	resp, _ := postBulkRemoveTag(t, ts, `{"ids":[4],"tag_id":2}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&bulkCalls); got != 1 {
+		t.Fatalf("BulkDetach called %d times, want 1", got)
+	}
+	if got := atomic.LoadInt32(&detachCalls); got != 0 {
+		t.Fatalf("Detach called %d times, want 0", got)
+	}
+}
+
+func TestBulkTags_RemoveWireShape(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkDetachFunc: func(context.Context, []int64, int64) (tags.BulkDetachResult, error) {
+		return tags.BulkDetachResult{Applied: []int64{3, 5}, Gone: []int64{9}}, nil
+	}}})
+
+	resp, raw := postBulkRemoveTag(t, ts, `{"ids":[3,5,9],"tag_id":1}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got bulkRemoveTagWire
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Carried != 2 || !reflect.DeepEqual(got.Applied, []int64{3, 5}) {
+		t.Fatalf("body %s, want applied [3 5] carried 2", raw)
+	}
+	if len(got.Skipped) != 1 || got.Skipped[0]["id"] != float64(9) || got.Skipped[0]["reason"] != "gone" {
+		t.Fatalf("skipped = %v, want one gone skip for 9", got.Skipped)
+	}
+	if _, has := got.Skipped[0]["name"]; has {
+		t.Fatalf("gone skip %v carries a name key", got.Skipped[0])
+	}
+
+	empty := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkDetachFunc: func(context.Context, []int64, int64) (tags.BulkDetachResult, error) {
+		return tags.BulkDetachResult{}, nil
+	}}})
+	_, raw = postBulkRemoveTag(t, empty, `{"ids":[1],"tag_id":1}`)
+	for _, want := range []string{`"applied":[]`, `"carried":0`, `"skipped":[]`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("body %s lacks %s", raw, want)
+		}
+	}
+}

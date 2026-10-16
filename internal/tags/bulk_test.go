@@ -364,3 +364,123 @@ func TestService_BulkAttach_WaitsOnConcurrentTenthLink(t *testing.T) {
 		t.Fatalf("busy artist links = %d, want exactly 10", n)
 	}
 }
+
+func TestService_BulkDetach(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_bulk_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	t.Run("removes from carriers only and keeps the tag", func(t *testing.T) {
+		a, aArtist := seedEntry(t, ctx, pool, "carrier-a")
+		b, bArtist := seedEntry(t, ctx, pool, "non-carrier")
+		c, _ := seedEntry(t, ctx, pool, "carrier-c")
+		d, dArtist := seedEntry(t, ctx, pool, "unselected")
+		var tagID int64
+		for _, id := range []int64{a, c, d} {
+			res, err := svc.Attach(ctx, id, "detach-keep")
+			if err != nil {
+				t.Fatalf("attach: %v", err)
+			}
+			tagID = res.Tag.ID
+		}
+		if _, err := svc.Attach(ctx, b, "detach-other"); err != nil {
+			t.Fatalf("attach other: %v", err)
+		}
+		bBefore := countLinks(t, ctx, pool, bArtist)
+		dBefore := countLinks(t, ctx, pool, dArtist)
+
+		got, err := svc.BulkDetach(ctx, []int64{c, b, a}, tagID)
+		if err != nil {
+			t.Fatalf("BulkDetach: %v", err)
+		}
+		if want := []int64{a, c}; !reflect.DeepEqual(got.Applied, want) {
+			t.Fatalf("Applied = %v, want %v", got.Applied, want)
+		}
+		if len(got.Gone) != 0 {
+			t.Fatalf("Gone = %v, want empty", got.Gone)
+		}
+		if n := countLinks(t, ctx, pool, aArtist); n != 0 {
+			t.Fatalf("carrier A links = %d, want 0", n)
+		}
+		if n := countLinks(t, ctx, pool, bArtist); n != bBefore {
+			t.Fatalf("non-carrier links = %d, want unchanged %d", n, bBefore)
+		}
+		if n := countLinks(t, ctx, pool, dArtist); n != dBefore {
+			t.Fatalf("unselected carrier links = %d, want unchanged %d", n, dBefore)
+		}
+		if n := countTagsByLowerName(t, ctx, pool, "detach-keep"); n != 1 {
+			t.Fatalf("tag rows = %d, want the tag kept", n)
+		}
+	})
+
+	t.Run("repeat and non-carriers apply nothing", func(t *testing.T) {
+		a, _ := seedEntry(t, ctx, pool, "repeat-a")
+		b, _ := seedEntry(t, ctx, pool, "repeat-b")
+		res, err := svc.Attach(ctx, a, "detach-repeat")
+		if err != nil {
+			t.Fatalf("attach: %v", err)
+		}
+		if got, err := svc.BulkDetach(ctx, []int64{a}, res.Tag.ID); err != nil || !reflect.DeepEqual(got.Applied, []int64{a}) {
+			t.Fatalf("first = %+v, %v; want applied [%d]", got, err, a)
+		}
+		got, err := svc.BulkDetach(ctx, []int64{a}, res.Tag.ID)
+		if err != nil {
+			t.Fatalf("second BulkDetach: %v", err)
+		}
+		if got.Applied == nil || len(got.Applied) != 0 {
+			t.Fatalf("second Applied = %#v, want empty non-nil", got.Applied)
+		}
+		got, err = svc.BulkDetach(ctx, []int64{b}, res.Tag.ID)
+		if err != nil || len(got.Applied) != 0 {
+			t.Fatalf("non-carrier = %+v, %v; want nothing applied", got, err)
+		}
+	})
+
+	t.Run("gone ids are reported", func(t *testing.T) {
+		a, _ := seedEntry(t, ctx, pool, "gone-a")
+		g, _ := seedEntry(t, ctx, pool, "gone-g")
+		res, err := svc.Attach(ctx, a, "detach-gone")
+		if err != nil {
+			t.Fatalf("attach: %v", err)
+		}
+		deleteEntry(t, ctx, pool, g)
+
+		got, err := svc.BulkDetach(ctx, []int64{g, a, g}, res.Tag.ID)
+		if err != nil {
+			t.Fatalf("BulkDetach: %v", err)
+		}
+		if !reflect.DeepEqual(got.Applied, []int64{a}) || !reflect.DeepEqual(got.Gone, []int64{g}) {
+			t.Fatalf("result = %+v, want applied [%d] gone [%d]", got, a, g)
+		}
+	})
+
+	t.Run("empty ids", func(t *testing.T) {
+		got, err := svc.BulkDetach(ctx, nil, 1)
+		if err != nil {
+			t.Fatalf("BulkDetach: %v", err)
+		}
+		if got.Applied == nil || got.Gone == nil || len(got.Applied)+len(got.Gone) != 0 {
+			t.Fatalf("result = %#v, want empty non-nil slices", got)
+		}
+	})
+}
+
+func TestService_BulkDetach_UnknownTag(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "tags_bulk_test")
+	ctx := context.Background()
+	svc := tags.NewService(pool)
+
+	a, _ := seedEntry(t, ctx, pool, "unknown-tag")
+	if _, err := svc.Attach(ctx, a, "stays"); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	before := countAllLinks(t, ctx, pool)
+
+	_, err := svc.BulkDetach(ctx, []int64{a}, 999999999)
+	if !errors.Is(err, tags.ErrTagNotFound) {
+		t.Fatalf("err = %v, want ErrTagNotFound", err)
+	}
+	if after := countAllLinks(t, ctx, pool); after != before {
+		t.Fatalf("links = %d, want unchanged %d", after, before)
+	}
+}
