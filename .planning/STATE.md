@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 26
 current_phase_name: Bulk Edit & Remove
 status: executing
-stopped_at: Completed 26-04-PLAN.md
-last_updated: "2026-10-16T22:37:02.787Z"
+stopped_at: Completed 26-05-PLAN.md
+last_updated: "2026-10-16T22:44:53.050Z"
 last_activity: 2026-10-16
 last_activity_desc: Phase 26 execution started
-state_head: 9c0d6b6c2bbc4663aab36775d499609a7e2569f2
+state_head: 697ae05a74b7fc2c84afb4d049a9f033b5ec69e2
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 47
-  completed_plans: 39
+  completed_plans: 40
   percent: 40
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 26 (Bulk Edit & Remove) — EXECUTING
-Plan: 5 of 12
+Plan: 6 of 12
 Status: Ready to execute
 Last activity: 2026-10-16 — Phase 26 execution started
 
@@ -188,6 +188,7 @@ Last activity: 2026-10-16 — Phase 26 execution started
 | Phase 26 P02 | 14min | 3 tasks | 10 files |
 | Phase 26 P03 | 8 min | 2 tasks | 8 files |
 | Phase 26 P04 | 10min | 3 tasks | 5 files |
+| Phase 26 P05 | 12min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -437,6 +438,7 @@ Recent decisions affecting current work:
 - [Phase 26]: [Phase 26-02] Bulk add-tag lives on tags.Service/TagStore; all-capped or all-gone batches roll back and report tag id 0 so no orphan tags row
 - [Phase 26]: 26-03: confirmRemove records the outcome in a ref; the dialog close handler applies it (close, then clear) so the route-hosted dialog never unmounts with the bar
 - [Phase 26]: 26-04: Select all visible name comes from its wrapping label text only; disabled Base UI checkboxes expose data-disabled
+- [Phase 26]: 26-05: bulk preferences is PATCH /watchlist/bulk/preferences; omitted axis means empty lists; validation precedes empty-ids shortcut
 
 ### Pending Todos
 
@@ -532,8 +534,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-16T22:37:02.607Z
-Stopped at: Completed 26-04-PLAN.md
+Last session: 2026-10-16T22:44:52.882Z
+Stopped at: Completed 26-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
