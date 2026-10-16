@@ -284,7 +284,7 @@ Plans:
   4. Removing the selection first asks for confirmation stating how many artists will be removed. Confirming removes all of them, or none of them if any part fails.
   5. After any bulk action the selection clears and the Watchlist shows the result immediately, with no page reload and no checkbox left pointing at a removed artist.
 
-**Plans:** 6/12 plans executed
+**Plans:** 7/12 plans executed
 
 Plans:
 **Wave 1**
@@ -304,7 +304,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 26-06-PLAN.md — Close → clear → focus fallback (U1), selection announcements and Esc, and the measured bar clearance for the page, toasts, and focus (U2, U3)
-- [ ] 26-07-PLAN.md — `POST /watchlist/bulk/tags/remove` by tag id with a 404 for a missing tag (D-22) and an `applied`/`carried` outcome for Undo
+- [x] 26-07-PLAN.md — `POST /watchlist/bulk/tags/remove` by tag id with a 404 for a missing tag (D-22) and an `applied`/`carried` outcome for Undo
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -404,7 +404,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
 | 25. Find & Filter — Watchlist and History | 21/21 | Complete    | 2026-10-12 |
-| 26. Bulk Edit & Remove | 6/12 | In Progress|  |
+| 26. Bulk Edit & Remove | 7/12 | In Progress|  |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |
 

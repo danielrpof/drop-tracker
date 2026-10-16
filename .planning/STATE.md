@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 26
 current_phase_name: Bulk Edit & Remove
 status: executing
-stopped_at: Completed 26-06-PLAN.md
-last_updated: "2026-10-16T22:53:44.819Z"
+stopped_at: Completed 26-07-PLAN.md
+last_updated: "2026-10-16T23:00:09.022Z"
 last_activity: 2026-10-16
 last_activity_desc: Phase 26 execution started
-state_head: deddf810c9f8c3e9a4c55a1754a8bf4042d12192
+state_head: 3580ccd5c8ae7a3f0df775d5d6a315a332055e0b
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 47
-  completed_plans: 41
+  completed_plans: 42
   percent: 40
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 26 (Bulk Edit & Remove) — EXECUTING
-Plan: 7 of 12
+Plan: 8 of 12
 Status: Ready to execute
 Last activity: 2026-10-16 — Phase 26 execution started
 
@@ -190,6 +190,7 @@ Last activity: 2026-10-16 — Phase 26 execution started
 | Phase 26 P04 | 10min | 3 tasks | 5 files |
 | Phase 26 P05 | 12min | 3 tasks | 8 files |
 | Phase 26 P06 | 12min | 3 tasks | 8 files |
+| Phase 26 P07 | 12 min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -441,6 +442,7 @@ Recent decisions affecting current work:
 - [Phase 26]: 26-04: Select all visible name comes from its wrapping label text only; disabled Base UI checkboxes expose data-disabled
 - [Phase 26]: 26-05: bulk preferences is PATCH /watchlist/bulk/preferences; omitted axis means empty lists; validation precedes empty-ids shortcut
 - [Phase 26]: 26-06: finalFocus function reads a close-kind ref so focus target is chosen at close; pendingFocus effect is a backstop
+- [Phase 26]: 26-07: bulk remove-tag lives on tags.Service/TagStore with no transaction; missing tag is 404, applied is exactly what Undo re-adds
 
 ### Pending Todos
 
@@ -536,8 +538,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-16T22:53:44.657Z
-Stopped at: Completed 26-06-PLAN.md
+Last session: 2026-10-16T23:00:08.825Z
+Stopped at: Completed 26-07-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
