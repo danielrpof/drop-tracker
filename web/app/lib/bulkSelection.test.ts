@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest"
 
 import {
   applyRange,
+  buildAxisDelta,
+  cycleTriState,
   effectiveSelection,
+  initialTriStates,
   selectAllState,
   tagsOnEvery,
   toggleAllVisible,
+  type TriState,
 } from "~/lib/bulkSelection"
 import { makeEntry } from "~/lib/test/fixtures"
 
@@ -138,5 +142,125 @@ describe("tagsOnEvery", () => {
     expect(
       tagsOnEvery([makeEntry({ id: 1, name: "A1", tags: [rap, latin] })])
     ).toEqual([rap, latin])
+  })
+})
+
+describe("initialTriStates", () => {
+  const types = ["album", "ep", "deluxe"]
+
+  it("is checked when all have it, unchecked when none, indeterminate when mixed", () => {
+    const out = initialTriStates(
+      [
+        makeEntry({ id: 1, name: "A1", release_types: ["album", "ep"] }),
+        makeEntry({ id: 2, name: "A2", release_types: ["album"] }),
+      ],
+      "release_types",
+      types
+    )
+    expect(out).toEqual({
+      album: "checked",
+      ep: "indeterminate",
+      deluxe: "unchecked",
+    })
+  })
+
+  it("never reports indeterminate for a single artist", () => {
+    const out = initialTriStates(
+      [makeEntry({ id: 1, name: "A1", release_types: ["ep"] })],
+      "release_types",
+      types
+    )
+    expect(Object.values(out)).not.toContain("indeterminate")
+  })
+
+  it("reads the mute axis independently of release types", () => {
+    const out = initialTriStates(
+      [
+        makeEntry({ id: 1, name: "A1", muted_event_types: ["guest_feature"] }),
+        makeEntry({ id: 2, name: "A2" }),
+      ],
+      "muted_event_types",
+      ["new_release", "guest_feature"]
+    )
+    expect(out).toEqual({
+      new_release: "unchecked",
+      guest_feature: "indeterminate",
+    })
+  })
+})
+
+describe("cycleTriState", () => {
+  function walk(initial: TriState, clicks: number): TriState[] {
+    const seen: TriState[] = []
+    let current = initial
+    for (let i = 0; i < clicks; i++) {
+      current = cycleTriState(initial, current)
+      seen.push(current)
+    }
+    return seen
+  }
+
+  it("cycles a mixed start through checked, unchecked, indeterminate", () => {
+    expect(walk("indeterminate", 4)).toEqual([
+      "checked",
+      "unchecked",
+      "indeterminate",
+      "checked",
+    ])
+  })
+
+  it("toggles a checked start between unchecked and checked", () => {
+    expect(walk("checked", 3)).toEqual(["unchecked", "checked", "unchecked"])
+  })
+
+  it("toggles an unchecked start between checked and unchecked", () => {
+    expect(walk("unchecked", 3)).toEqual(["checked", "unchecked", "checked"])
+  })
+})
+
+describe("buildAxisDelta", () => {
+  const types = ["album", "single", "ep", "deluxe"]
+  const initial: Record<string, TriState> = {
+    album: "checked",
+    single: "unchecked",
+    ep: "indeterminate",
+    deluxe: "checked",
+  }
+
+  it("is empty when nothing changed", () => {
+    expect(buildAxisDelta(types, initial, { ...initial })).toEqual({
+      set: [],
+      unset: [],
+    })
+  })
+
+  it("emits changed types in canonical order, whatever the click order", () => {
+    const current: Record<string, TriState> = {
+      ...initial,
+      deluxe: "unchecked",
+      album: "unchecked",
+    }
+    expect(buildAxisDelta(types, initial, current)).toEqual({
+      set: [],
+      unset: ["album", "deluxe"],
+    })
+  })
+
+  it("sets checked and unsets unchecked", () => {
+    const current: Record<string, TriState> = {
+      ...initial,
+      single: "checked",
+      ep: "unchecked",
+    }
+    expect(buildAxisDelta(types, initial, current)).toEqual({
+      set: ["single"],
+      unset: ["ep"],
+    })
+  })
+
+  it("omits a mixed type cycled back to indeterminate", () => {
+    expect(
+      buildAxisDelta(types, initial, { ...initial, ep: "indeterminate" })
+    ).toEqual({ set: [], unset: [] })
   })
 })
