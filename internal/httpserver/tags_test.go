@@ -603,6 +603,9 @@ type fakeTagStore struct {
 	renameCalls *int32
 	deleteCalls *int32
 	mergeCalls  *int32
+
+	bulkAttachFunc  func(ctx context.Context, entryIDs []int64, name string) (tags.BulkAttachResult, error)
+	bulkAttachCalls *int32
 }
 
 func (f fakeTagStore) Attach(ctx context.Context, entryID int64, name string) (tags.AttachResult, error) {
@@ -660,6 +663,16 @@ func (f fakeTagStore) Merge(ctx context.Context, sourceID, targetID int64) (tags
 		return f.mergeFunc(ctx, sourceID, targetID)
 	}
 	return tags.Summary{ID: targetID, Name: "merged", CarrierCount: 0}, nil
+}
+
+func (f fakeTagStore) BulkAttach(ctx context.Context, entryIDs []int64, name string) (tags.BulkAttachResult, error) {
+	if f.bulkAttachCalls != nil {
+		atomic.AddInt32(f.bulkAttachCalls, 1)
+	}
+	if f.bulkAttachFunc != nil {
+		return f.bulkAttachFunc(ctx, entryIDs, name)
+	}
+	return tags.BulkAttachResult{Tag: tags.Tag{ID: 1, Name: name}, Applied: entryIDs, Skipped: []tags.BulkSkip{}}, nil
 }
 
 var _ httpserver.TagStore = fakeTagStore{}
@@ -1376,4 +1389,99 @@ func doTagsRequest(t *testing.T, ts *httptest.Server, method, path, body string)
 		t.Fatalf("decode body: %v", err)
 	}
 	return resp.StatusCode, out
+}
+
+// --- Bulk add tag (BULK-02) ---
+
+type bulkAddTagWire struct {
+	Tag     tagWire          `json:"tag"`
+	Applied []int64          `json:"applied"`
+	Skipped []map[string]any `json:"skipped"`
+}
+
+func TestBulkTags_AddEndToEnd(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "bulk_tags_http_test")
+	ctx := context.Background()
+
+	watchlistSvc := watchlist.NewService(sqlc.New(pool))
+	tagsSvc := tags.NewService(pool)
+	srv := httpserver.New(pool, watchlistSvc, stubEventsStore{}, nil, discardLogger(), httpserver.WithTags(tagsSvc))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	add := func(suffix, name string) watchlist.Entry {
+		e, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-" + suffix, Name: name})
+		if err != nil {
+			t.Fatalf("seed %s: %v", suffix, err)
+		}
+		return e
+	}
+	a := add("a", "Room Artist")
+	b := add("b", "Capped Artist")
+	c := add("c", "Tagged Artist")
+	d := add("d", "Gone Artist")
+
+	for i := 0; i < tags.MaxTagsPerArtist; i++ {
+		if _, err := tagsSvc.Attach(ctx, b.ID, fmt.Sprintf("cap-%02d", i)); err != nil {
+			t.Fatalf("fill B tag %d: %v", i, err)
+		}
+	}
+	if _, err := tagsSvc.Attach(ctx, c.ID, "rap"); err != nil {
+		t.Fatalf("pre-tag C: %v", err)
+	}
+	if err := watchlistSvc.Remove(ctx, d.ID); err != nil {
+		t.Fatalf("remove D: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"ids":[%d,%d,%d,%d],"name":" Rap "}`, a.ID, b.ID, c.ID, d.ID)
+	resp, err := http.Post(ts.URL+"/watchlist/bulk/tags/add", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST bulk add: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got bulkAddTagWire
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Tag.Name != "rap" || got.Tag.ID == 0 {
+		t.Fatalf("tag = %+v, want name rap with a real id", got.Tag)
+	}
+	if want := []int64{a.ID, c.ID}; !reflect.DeepEqual(got.Applied, want) {
+		t.Fatalf("applied = %v, want %v", got.Applied, want)
+	}
+	wantSkipped := []map[string]any{
+		{"id": float64(b.ID), "name": "Capped Artist", "reason": "cap"},
+		{"id": float64(d.ID), "reason": "gone"},
+	}
+	if !reflect.DeepEqual(got.Skipped, wantSkipped) {
+		t.Fatalf("skipped = %v, want %v", got.Skipped, wantSkipped)
+	}
+
+	listResp, err := http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET /watchlist: %v", err)
+	}
+	defer func() { _ = listResp.Body.Close() }()
+	var entries []watchlistTagsEntryBody
+	if err := json.NewDecoder(listResp.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	hasRap := func(e watchlistTagsEntryBody) bool {
+		return slices.ContainsFunc(e.Tags, func(tg tagWire) bool { return tg.Name == "rap" })
+	}
+	for _, e := range entries {
+		switch e.ID {
+		case a.ID, c.ID:
+			if !hasRap(e) {
+				t.Fatalf("entry %d lacks rap: %+v", e.ID, e.Tags)
+			}
+		case b.ID:
+			if hasRap(e) || len(e.Tags) != tags.MaxTagsPerArtist {
+				t.Fatalf("capped entry tags = %+v, want the original %d without rap", e.Tags, tags.MaxTagsPerArtist)
+			}
+		}
+	}
 }

@@ -60,6 +60,8 @@ type Querier interface {
 	// 1 row = new link, 0 = already linked (D-21). The cap trigger enforces the
 	// 10-tag limit; this statement never counts.
 	AttachTag(ctx context.Context, arg AttachTagParams) (int64, error)
+	// Inserts only where the artist has room; the literal 10 mirrors MaxTagsPerArtist.
+	BulkAttachTag(ctx context.Context, arg BulkAttachTagParams) ([]BulkAttachTagRow, error)
 	// One statement is all-or-nothing; an id it does not return was already gone (D-03).
 	BulkDeleteWatchlist(ctx context.Context, ids []int64) ([]int64, error)
 	// Watched carriers of one tag, for the merge target's post-merge count.
@@ -240,6 +242,8 @@ type Querier interface {
 	// Locks both tags in id order so concurrent merges cannot deadlock; it also
 	// parks a concurrent attach/rename until commit.
 	LockTagsForMerge(ctx context.Context, ids []int64) ([]LockTagsForMergeRow, error)
+	// Locks the cap trigger's artist rows in id order before any insert (ADR 0004 bulk amendment).
+	LockWatchlistArtistsForBulkTag(ctx context.Context, entryIds []int64) ([]LockWatchlistArtistsForBulkTagRow, error)
 	// Precondition: only ever called after discord.Client.Send has confirmed a
 	// 204 for this row (D-09) -- never before. The AND notified_at IS NULL
 	// predicate is load-bearing, not decorative: it makes the ack idempotent, so

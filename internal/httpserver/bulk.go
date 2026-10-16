@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/httplog/v3"
 
+	"github.com/danielrpof/drop-tracker/internal/tags"
 	"github.com/danielrpof/drop-tracker/internal/watchlist"
 )
 
@@ -133,4 +134,69 @@ func (s *Server) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// bulkSkipWire is one skipped selection; name is set only for cap skips.
+type bulkSkipWire struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name,omitempty"`
+	Reason string `json:"reason"`
+}
+
+// toSkipWire converts skips to the wire shape and never returns nil.
+func toSkipWire(skips []tags.BulkSkip) []bulkSkipWire {
+	out := make([]bulkSkipWire, 0, len(skips))
+	for _, sk := range skips {
+		out = append(out, bulkSkipWire{ID: sk.ID, Name: sk.Name, Reason: sk.Reason})
+	}
+	return out
+}
+
+type bulkAddTagRequest struct {
+	IDs  []int64 `json:"ids"`
+	Name string  `json:"name"`
+}
+
+type bulkAddTagResponse struct {
+	Tag     tagResponse    `json:"tag"`
+	Applied []int64        `json:"applied"`
+	Skipped []bulkSkipWire `json:"skipped"`
+}
+
+// handleBulkAddTag implements POST /watchlist/bulk/tags/add (BULK-02).
+func (s *Server) handleBulkAddTag(w http.ResponseWriter, r *http.Request) {
+	if s.tags == nil {
+		writeError(w, http.StatusServiceUnavailable, "tags not available")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBulkBodyBytes)
+	var req bulkAddTagRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ids, err := validateBulkIDs(req.IDs)
+	if err != nil {
+		writeBulkIDsError(w, err)
+		return
+	}
+
+	result, err := s.tags.BulkAttach(r.Context(), ids, req.Name)
+	if err != nil {
+		writeTagError(w, r, err)
+		return
+	}
+
+	applied := result.Applied
+	if applied == nil {
+		applied = []int64{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(bulkAddTagResponse{
+		Tag:     tagResponse{ID: result.Tag.ID, Name: result.Tag.Name},
+		Applied: applied,
+		Skipped: toSkipWire(result.Skipped),
+	})
 }

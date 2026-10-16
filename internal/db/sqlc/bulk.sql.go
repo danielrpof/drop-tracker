@@ -9,6 +9,58 @@ import (
 	"context"
 )
 
+const bulkAttachTag = `-- name: BulkAttachTag :many
+WITH targets AS (
+  SELECT unnest($1::bigint[]) AS artist_id
+), had AS (
+  SELECT l.artist_id FROM artist_tags l
+  WHERE l.tag_id = $2::bigint AND l.artist_id = ANY($1::bigint[])
+), ins AS (
+  INSERT INTO artist_tags (artist_id, tag_id)
+  SELECT t.artist_id, $2::bigint FROM targets t
+  WHERE t.artist_id NOT IN (SELECT artist_id FROM had)
+    AND (SELECT count(*) FROM artist_tags l WHERE l.artist_id = t.artist_id) < 10
+  ON CONFLICT (artist_id, tag_id) DO NOTHING
+  RETURNING artist_id
+)
+SELECT t.artist_id::bigint AS artist_id,
+       (t.artist_id IN (SELECT artist_id FROM had))::boolean AS had_tag,
+       (t.artist_id IN (SELECT artist_id FROM ins))::boolean AS inserted
+FROM targets t ORDER BY t.artist_id
+`
+
+type BulkAttachTagParams struct {
+	ArtistIds []int64 `json:"artist_ids"`
+	TagID     int64   `json:"tag_id"`
+}
+
+type BulkAttachTagRow struct {
+	ArtistID int64 `json:"artist_id"`
+	HadTag   bool  `json:"had_tag"`
+	Inserted bool  `json:"inserted"`
+}
+
+// Inserts only where the artist has room; the literal 10 mirrors MaxTagsPerArtist.
+func (q *Queries) BulkAttachTag(ctx context.Context, arg BulkAttachTagParams) ([]BulkAttachTagRow, error) {
+	rows, err := q.db.Query(ctx, bulkAttachTag, arg.ArtistIds, arg.TagID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BulkAttachTagRow
+	for rows.Next() {
+		var i BulkAttachTagRow
+		if err := rows.Scan(&i.ArtistID, &i.HadTag, &i.Inserted); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const bulkDeleteWatchlist = `-- name: BulkDeleteWatchlist :many
 DELETE FROM watchlist
 WHERE id = ANY($1::bigint[])
@@ -29,6 +81,41 @@ func (q *Queries) BulkDeleteWatchlist(ctx context.Context, ids []int64) ([]int64
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockWatchlistArtistsForBulkTag = `-- name: LockWatchlistArtistsForBulkTag :many
+SELECT w.id AS entry_id, a.id AS artist_id, a.name
+FROM watchlist w JOIN artists a ON a.id = w.artist_id
+WHERE w.id = ANY($1::bigint[])
+ORDER BY a.id
+FOR NO KEY UPDATE OF a
+`
+
+type LockWatchlistArtistsForBulkTagRow struct {
+	EntryID  int64  `json:"entry_id"`
+	ArtistID int64  `json:"artist_id"`
+	Name     string `json:"name"`
+}
+
+// Locks the cap trigger's artist rows in id order before any insert (ADR 0004 bulk amendment).
+func (q *Queries) LockWatchlistArtistsForBulkTag(ctx context.Context, entryIds []int64) ([]LockWatchlistArtistsForBulkTagRow, error) {
+	rows, err := q.db.Query(ctx, lockWatchlistArtistsForBulkTag, entryIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LockWatchlistArtistsForBulkTagRow
+	for rows.Next() {
+		var i LockWatchlistArtistsForBulkTagRow
+		if err := rows.Scan(&i.EntryID, &i.ArtistID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

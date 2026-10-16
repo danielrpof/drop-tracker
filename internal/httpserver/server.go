@@ -295,6 +295,7 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	r.Post("/tags/{id}/merge", s.handleMergeTag)
 	// Literal bulk paths inherit the gate and outrank /watchlist/{id}.
 	r.Post("/watchlist/bulk/delete", s.handleBulkDelete)
+	r.Post("/watchlist/bulk/tags/add", s.handleBulkAddTag)
 }
 
 // securityResponseHeaders sets response headers that apply to every route in
