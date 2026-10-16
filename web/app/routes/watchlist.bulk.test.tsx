@@ -297,4 +297,71 @@ describe("Watchlist select all visible", () => {
       screen.getByRole("checkbox", { name: "Select SZA" })
     ).toHaveAttribute("aria-checked", "false")
   })
+  it("keeps a hidden selection inert and brings it back with the filter", async () => {
+    await renderWatchlist(trio())
+    await check("Drake", "SZA")
+
+    await userEvent.type(filterBox(), "dra")
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+
+    await userEvent.clear(filterBox())
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+  })
+
+  it("keeps a hidden selection when select all is checked then unchecked", async () => {
+    await renderWatchlist(trio())
+    await check("SZA")
+    await userEvent.type(filterBox(), "dra")
+
+    await userEvent.click(selectAll())
+    expect(selectAll()).toHaveAttribute("aria-checked", "true")
+    await userEvent.click(selectAll())
+    expect(bar()).not.toBeInTheDocument()
+
+    await userEvent.clear(filterBox())
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "Select SZA" })).toBeChecked()
+  })
+
+  it("disables select all when the filter matches nothing", async () => {
+    await renderWatchlist(trio())
+    await userEvent.type(filterBox(), "zzz")
+
+    expect(selectAll()).toHaveAttribute("data-disabled")
+    expect(screen.getByText("No artists match these filters")).toBeVisible()
+  })
+
+  it("never shows indeterminate for a single card", async () => {
+    await renderWatchlist([makeEntry({ id: 1, name: "Drake" })])
+    expect(selectAll()).toHaveAttribute("aria-checked", "false")
+    await check("Drake")
+    expect(selectAll()).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("shows mixed when only some visible cards are selected", async () => {
+    await renderWatchlist(trio())
+    await check("Drake")
+    expect(selectAll()).toHaveAttribute("aria-checked", "mixed")
+
+    await userEvent.click(selectAll())
+    expect(screen.getByText("3 selected")).toBeInTheDocument()
+  })
+
+  it("empties hidden selections too when Clear is pressed", async () => {
+    await renderWatchlist(trio())
+    await check("SZA")
+    await userEvent.type(filterBox(), "dra")
+    await check("Drake")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Clear selection" })
+    )
+    await userEvent.clear(filterBox())
+
+    for (const name of ["Drake", "SZA", "Bad Bunny"]) {
+      expect(
+        screen.getByRole("checkbox", { name: `Select ${name}` })
+      ).toHaveAttribute("aria-checked", "false")
+    }
+  })
 })
