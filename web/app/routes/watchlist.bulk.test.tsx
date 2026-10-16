@@ -832,7 +832,15 @@ describe("Watchlist bulk add tag", () => {
         { id: 1, reason: "gone" },
       ],
     })
-    await createFromBar(3, "rap")
+    // The vocabulary now holds `rap`, so the second pick is an existing option.
+    await userEvent.click(screen.getByRole("button", { name: "Add tag" }))
+    await userEvent.type(
+      await screen.findByRole("combobox", {
+        name: "Add tag to 3 selected artists",
+      }),
+      "rap"
+    )
+    await userEvent.click(await screen.findByRole("option", { name: "rap" }))
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1))
     expect(toast.warning).toHaveBeenCalledWith("Added “rap” to 1 artist.", {
       description: `1 already has 10 tags: SZA. ${GONE_ONE}`,

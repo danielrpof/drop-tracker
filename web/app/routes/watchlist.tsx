@@ -585,9 +585,45 @@ export default function Watchlist() {
     toast.error(fallbackMessage)
   }
 
-  function reportBulkAddOutcome(outcome: BulkAddTagOutcome) {
+  // Cap skips are named in the order sent (visible order), not the server's id order (D-01).
+  function reportBulkAddOutcome(outcome: BulkAddTagOutcome, sentIds: number[]) {
     const n = outcome.applied.length
-    toast.success(`Added “${outcome.tag.name}” to ${n} artist${plural(n)}.`)
+    const tag = `“${outcome.tag.name}”`
+    const caps = outcome.skipped
+      .filter((s) => s.reason === "cap")
+      .sort((a, b) => sentIds.indexOf(a.id) - sentIds.indexOf(b.id))
+    const names = caps.map(
+      (s) => s.name ?? entries?.find((e) => e.id === s.id)?.name ?? ""
+    )
+    const g = outcome.skipped.filter((s) => s.reason === "gone").length
+    const gone = g > 0 ? formatAlreadyRemoved(g) : ""
+    const join = (...parts: string[]) => parts.filter(Boolean).join(" ")
+
+    if (caps.length > 0 && n === 0) {
+      toast.warning(
+        `Couldn't add ${tag} — every selected artist already has 10 tags.`,
+        {
+          description: join(`${formatNameList(names)}.`, gone),
+          duration: 8000,
+        }
+      )
+      return
+    }
+    const title = `Added ${tag} to ${n} artist${plural(n)}.`
+    if (caps.length > 0) {
+      const k = caps.length
+      toast.warning(title, {
+        description: join(
+          `${k} already ${k === 1 ? "has" : "have"} 10 tags: ${formatNameList(names)}.`,
+          gone
+        ),
+        duration: 8000,
+      })
+    } else if (gone) {
+      toast.success(title, { description: gone })
+    } else {
+      toast.success(title)
+    }
   }
 
   // One request for the whole selection; null tells the bar to stay selected.
@@ -610,7 +646,7 @@ export default function Watchlist() {
     setBulkInFlight(false)
     markStickyMany(out.applied)
     refresh()
-    reportBulkAddOutcome(out)
+    reportBulkAddOutcome(out, sentIds)
     return out
   }
 
