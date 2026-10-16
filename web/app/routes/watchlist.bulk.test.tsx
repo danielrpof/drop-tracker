@@ -14,6 +14,7 @@ import {
   ApiError,
   type WatchlistEntry,
   bulkAddTag,
+  bulkRemoveTag,
   bulkRemoveWatchlist,
   bulkUpdatePreferences,
   listTags,
@@ -41,6 +42,7 @@ const mockList = vi.mocked(listWatchlist)
 const mockBulkRemove = vi.mocked(bulkRemoveWatchlist)
 const mockAddTag = vi.mocked(bulkAddTag)
 const mockPrefs = vi.mocked(bulkUpdatePreferences)
+const mockRemoveTag = vi.mocked(bulkRemoveTag)
 const mockListTags = vi.mocked(listTags)
 
 async function renderWatchlist(entries: WatchlistEntry[]) {
@@ -1147,5 +1149,48 @@ describe("Watchlist bulk preferences", () => {
     expect(
       screen.queryByRole("checkbox", { name: "Select SZA" })
     ).not.toBeInTheDocument()
+  }, 30000)
+})
+
+describe("Watchlist bulk remove tag", () => {
+  const rap = { id: 7, name: "rap" }
+  const trap = { id: 8, name: "trap" }
+
+  it("removes one carried tag from the selection in one request", async () => {
+    await renderWatchlist([
+      makeEntry({ id: 1, name: "Drake", tags: [rap, trap] }),
+      makeEntry({ id: 2, name: "SZA", tags: [rap] }),
+      makeEntry({ id: 3, name: "Bad Bunny" }),
+    ])
+    mockRemoveTag.mockResolvedValue({
+      applied: [1, 2],
+      carried: 2,
+      skipped: [],
+    })
+    await check("Drake", "SZA")
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove tag" }))
+    await screen.findByRole("combobox", {
+      name: "Remove a tag from 2 selected artists",
+    })
+    const options = await screen.findAllByRole("option")
+    expect(options.map((o) => o.textContent)).toEqual([
+      "rap2 of 2",
+      "trap1 of 2",
+    ])
+
+    await userEvent.click(options[0])
+
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+    expect(mockRemoveTag).toHaveBeenCalledTimes(1)
+    expect(mockRemoveTag).toHaveBeenCalledWith([1, 2], 7)
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
+    expect(toast.success).toHaveBeenCalledWith(
+      "Removed “rap” from 2 artists.",
+      expect.objectContaining({
+        duration: 8000,
+        action: expect.objectContaining({ label: "Undo" }),
+      })
+    )
   }, 30000)
 })

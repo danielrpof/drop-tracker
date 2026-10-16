@@ -409,6 +409,23 @@ export async function bulkAddTag(
   })
 }
 
+export interface BulkRemoveTagOutcome extends BulkOutcome {
+  carried: number
+}
+
+// bulkRemoveTag unlinks one tag id from many entries (BULK-02); `applied` is
+// exactly the entries that carried it, so Undo can restore only those.
+export async function bulkRemoveTag(
+  ids: number[],
+  tagId: number
+): Promise<BulkRemoveTagOutcome> {
+  return apiFetch<BulkRemoveTagOutcome>("/watchlist/bulk/tags/remove", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, tag_id: tagId }),
+  })
+}
+
 export interface BulkAxisDelta {
   set: string[]
   unset: string[]

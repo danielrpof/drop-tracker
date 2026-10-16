@@ -23,9 +23,11 @@ import {
   type BulkAxisDelta,
   type BulkOutcome,
   type BulkRemoveOutcome,
+  type BulkRemoveTagOutcome,
   type WatchlistEntry,
   addWatchlist,
   bulkAddTag,
+  bulkRemoveTag,
   bulkRemoveWatchlist,
   bulkUpdatePreferences,
   listWatchlist,
@@ -128,6 +130,8 @@ export default function Watchlist() {
   const filterInputRef = useRef<HTMLInputElement | null>(null)
   const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const countRef = useRef({ n: 0, m: 0, k: 0 })
+  // Undo outlives the render that built it, so it reads the live visible order.
+  const visibleIdsRef = useRef<number[]>([])
   // Cards the user just touched or added stay visible past a filter (G4). Keyed
   // to the filter: the router commits the URL in a transition, so the reset must
   // happen in that same render.
@@ -589,7 +593,11 @@ export default function Watchlist() {
   }
 
   // Cap skips are named in the order sent (visible order), not the server's id order (D-01).
-  function reportBulkAddOutcome(outcome: BulkAddTagOutcome, sentIds: number[]) {
+  function reportBulkAddOutcome(
+    outcome: BulkAddTagOutcome,
+    sentIds: number[],
+    variant: "add" | "restore" = "add"
+  ) {
     const n = outcome.applied.length
     const tag = `“${outcome.tag.name}”`
     const caps = outcome.skipped
@@ -604,7 +612,9 @@ export default function Watchlist() {
 
     if (caps.length > 0 && n === 0) {
       toast.warning(
-        `Couldn't add ${tag} — every selected artist already has 10 tags.`,
+        variant === "restore"
+          ? `Couldn't restore ${tag} — every artist already has 10 tags.`
+          : `Couldn't add ${tag} — every selected artist already has 10 tags.`,
         {
           description: join(`${formatNameList(names)}.`, gone),
           duration: 8000,
@@ -612,7 +622,7 @@ export default function Watchlist() {
       )
       return
     }
-    const title = `Added ${tag} to ${n} artist${plural(n)}.`
+    const title = `${variant === "restore" ? "Restored" : "Added"} ${tag} ${variant === "restore" ? "on" : "to"} ${n} artist${plural(n)}.`
     if (caps.length > 0) {
       const k = caps.length
       toast.warning(title, {
@@ -651,6 +661,61 @@ export default function Watchlist() {
     refresh()
     reportBulkAddOutcome(out, sentIds)
     return out
+  }
+
+  // One request for the selection; null keeps it selected. Undo (U4) re-adds by name.
+  async function handleBulkRemoveTag(
+    tag: TagRef
+  ): Promise<BulkRemoveTagOutcome | null> {
+    const sentIds = effective.map((e) => e.id)
+    setBulkInFlight(true)
+    let out: BulkRemoveTagOutcome
+    try {
+      out = await bulkRemoveTag(sentIds, tag.id)
+    } catch (error) {
+      setBulkInFlight(false)
+      showBulkFailure(
+        error,
+        `Couldn't remove “${tag.name}” from the selected artists — try again.`
+      )
+      if (error instanceof ApiError && error.status === 404) refresh()
+      return null
+    }
+    setBulkInFlight(false)
+    markStickyMany(out.applied)
+    refresh()
+    const g = out.skipped.filter((s) => s.reason === "gone").length
+    toast.success(
+      `Removed “${tag.name}” from ${out.carried} artist${plural(out.carried)}.`,
+      {
+        duration: 8000,
+        ...(g > 0 && { description: formatAlreadyRemoved(g) }),
+        ...(out.applied.length > 0 && {
+          action: {
+            label: "Undo",
+            onClick: () => undoRemoveTag(tag.name, out.applied),
+          },
+        }),
+      }
+    )
+    return out
+  }
+
+  // Touches neither the selection nor the bar; only the removed-link ids get the tag back.
+  async function undoRemoveTag(name: string, ids: number[]) {
+    let out: BulkAddTagOutcome
+    try {
+      out = await bulkAddTag(ids, name)
+    } catch {
+      toast.error(`Couldn't restore “${name}” — try again.`)
+      return
+    }
+    markStickyMany(out.applied)
+    refresh()
+    const order = visibleIdsRef.current
+    const shown = order.filter((id) => ids.includes(id))
+    const hidden = ids.filter((id) => !order.includes(id)).sort((a, b) => a - b)
+    reportBulkAddOutcome(out, [...shown, ...hidden], "restore")
   }
 
   // One request carrying only the changed types; null keeps the popover open.
@@ -742,6 +807,7 @@ export default function Watchlist() {
     ? selectVisible(entries, { ...view, q: query }, stickyIds)
     : []
   const effective = effectiveSelection(visible, selectedIds)
+  visibleIdsRef.current = visible.map((e) => e.id)
   countRef.current = {
     n: visible.length,
     m: entries?.length ?? 0,
@@ -984,6 +1050,7 @@ export default function Watchlist() {
                 inFlight={bulkInFlight}
                 onRemove={openRemoveConfirm}
                 onAddTag={handleBulkAddTag}
+                onRemoveTag={handleBulkRemoveTag}
                 onApplyPreferences={handleBulkPreferences}
                 onSucceeded={finishBulkSuccess}
                 onClear={clearSelection}

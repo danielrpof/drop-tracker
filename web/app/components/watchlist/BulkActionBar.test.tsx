@@ -32,6 +32,7 @@ function renderBar(overrides: Partial<BulkActionBarProps> = {}) {
     inFlight: false,
     onRemove: vi.fn(),
     onAddTag: vi.fn(),
+    onRemoveTag: vi.fn(),
     onApplyPreferences: vi.fn(),
     onSucceeded: vi.fn(),
     onClear: vi.fn(),

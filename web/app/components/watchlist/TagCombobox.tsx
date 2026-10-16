@@ -39,7 +39,7 @@ function itemLabel(item: TagSuggestion): string {
 
 // DISMISS_REASONS are the base-ui close reasons that mean the user wants the
 // editor gone. Reason "none" (Enter with nothing selectable) must not close it.
-const DISMISS_REASONS = new Set([
+export const DISMISS_REASONS = new Set([
   "escape-key",
   "outside-press",
   "focus-out",

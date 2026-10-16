@@ -1,4 +1,5 @@
 import type { BulkAxisDelta, TagRef, WatchlistEntry } from "~/lib/api"
+import { sortTagsByName } from "~/lib/tags"
 
 // Pure selection helpers: type-only imports, because route tests automock ~/lib/api.
 
@@ -64,6 +65,31 @@ export function tagsOnEvery(selected: readonly WatchlistEntry[]): TagRef[] {
   return selected[0].tags.filter((tag) =>
     selected.every((e) => e.tags.some((t) => t.id === tag.id))
   )
+}
+
+export interface RemovableTag {
+  id: number
+  name: string
+  count: number
+}
+
+// Union of tags carried by at least one selected entry, with carrier counts.
+export function removableTags(
+  selected: readonly WatchlistEntry[]
+): RemovableTag[] {
+  const byId = new Map<number, RemovableTag>()
+  for (const entry of selected) {
+    for (const tag of entry.tags) {
+      const found = byId.get(tag.id)
+      if (found) {
+        found.count += 1
+        found.name = tag.name
+      } else {
+        byId.set(tag.id, { id: tag.id, name: tag.name, count: 1 })
+      }
+    }
+  }
+  return sortTagsByName([...byId.values()])
 }
 
 export type TriState = "checked" | "unchecked" | "indeterminate"
