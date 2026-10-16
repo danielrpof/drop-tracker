@@ -655,3 +655,28 @@ describe("Watchlist selection announcements", () => {
     expect(status()).not.toHaveTextContent("Selection cleared.")
   })
 })
+
+describe("Watchlist bar clearance", () => {
+  it("pads the page bottom by the bar clearance", async () => {
+    await renderWatchlist(trio())
+    const page = screen
+      .getByRole("heading", { level: 1, name: "Watchlist" })
+      .closest("div")?.parentElement
+    expect(page).toHaveClass("pb-[calc(2rem+var(--bulk-bar-clearance,0px))]")
+  })
+
+  it("sets the clearance variable only while the bar is mounted", async () => {
+    await renderWatchlist(trio())
+    const read = () =>
+      document.documentElement.style.getPropertyValue("--bulk-bar-clearance")
+    expect(read()).toBe("")
+
+    await check("Drake")
+    expect(read()).not.toBe("")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Clear selection" })
+    )
+    expect(read()).toBe("")
+  })
+})
