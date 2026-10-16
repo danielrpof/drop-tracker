@@ -311,6 +311,8 @@ func run(ctx context.Context) error {
 		// tags.NewService(pool) backs every tag route (attach/detach and the
 		// /tags vocabulary routes); without it they answer 503.
 		httpserver.WithTags(tags.NewService(pool)),
+		// Same *watchlist.Service backs the bulk watchlist routes.
+		httpserver.WithWatchlistBulk(store),
 	)
 	// Close stops the gate's per-IP limiter-map sweeper goroutine (plan 14-02);
 	// a no-op when the gate is disabled. Deferred here so it runs on every

@@ -60,6 +60,8 @@ type Querier interface {
 	// 1 row = new link, 0 = already linked (D-21). The cap trigger enforces the
 	// 10-tag limit; this statement never counts.
 	AttachTag(ctx context.Context, arg AttachTagParams) (int64, error)
+	// One statement is all-or-nothing; an id it does not return was already gone (D-03).
+	BulkDeleteWatchlist(ctx context.Context, ids []int64) ([]int64, error)
 	// Watched carriers of one tag, for the merge target's post-merge count.
 	CountCarriers(ctx context.Context, tagID int64) (int64, error)
 	// Watched carriers across the given tags, each artist counted once (D-19).
