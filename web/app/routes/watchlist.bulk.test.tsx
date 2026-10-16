@@ -446,7 +446,9 @@ describe("Watchlist shift ranges and in-flight lock", () => {
         screen.getByRole("checkbox", { name: `Select ${name}`, ...lock })
       ).toHaveAttribute("data-disabled")
     }
-    expect(filterBox()).not.toBeDisabled()
+    expect(
+      screen.getByRole("textbox", { name: "Filter watchlist", hidden: true })
+    ).not.toBeDisabled()
 
     settle({ removed: [1], already_gone: [] })
     await waitFor(() =>

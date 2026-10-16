@@ -34,3 +34,26 @@ export function toggleAllVisible(
   }
   return out
 }
+
+// Sets the inclusive anchor..clicked span, in visible order, to `next`. Without
+// a usable anchor it toggles only the clicked id. Spans only `order` (T-26-45).
+export function applyRange(
+  order: readonly number[],
+  anchor: number | null,
+  clicked: number,
+  next: boolean,
+  selected: ReadonlySet<number>
+): Set<number> {
+  const out = new Set(selected)
+  const from = anchor === null ? -1 : order.indexOf(anchor)
+  const to = order.indexOf(clicked)
+  const ids =
+    from === -1 || to === -1
+      ? [clicked]
+      : order.slice(Math.min(from, to), Math.max(from, to) + 1)
+  for (const id of ids) {
+    if (next) out.add(id)
+    else out.delete(id)
+  }
+  return out
+}

@@ -27,6 +27,7 @@ import {
   removeWatchlist,
 } from "~/lib/api"
 import {
+  applyRange,
   effectiveSelection,
   selectAllState,
   toggleAllVisible,
@@ -103,6 +104,7 @@ export default function Watchlist() {
     names: string[]
   }>({ open: false, ids: [], names: [] })
   const removeOutcomeRef = useRef<RemoveOutcome | null>(null)
+  const anchorRef = useRef<number | null>(null)
 
   const { params, write } = useUrlParams()
   const location = useLocation()
@@ -223,6 +225,15 @@ export default function Watchlist() {
       clearSticky()
     }
   }, [view.q])
+
+  // A range never survives a change of what the user sees or an empty selection.
+  useEffect(() => {
+    anchorRef.current = null
+  }, [filterKey, query])
+
+  useEffect(() => {
+    if (selectedIds.size === 0) anchorRef.current = null
+  }, [selectedIds])
 
   const headingRef = useRef<HTMLHeadingElement>(null)
   // G-25-12: after a keyboard toggle removes its card, focus the fallback card's chip, else the heading.
@@ -492,14 +503,17 @@ export default function Watchlist() {
     })
   }
 
-  function handleSelectChange(id: number, next: boolean) {
+  function handleSelectChange(id: number, next: boolean, shift: boolean) {
+    const order = visible.map((e) => e.id)
     setSelectedIds((prev) => {
+      if (shift) return applyRange(order, anchorRef.current, id, next, prev)
       if (prev.has(id) === next) return prev
       const out = new Set(prev)
       if (next) out.add(id)
       else out.delete(id)
       return out
     })
+    anchorRef.current = id
   }
 
   // The box's own next value is ignored: the result depends on the visible set.
