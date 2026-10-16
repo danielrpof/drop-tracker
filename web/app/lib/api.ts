@@ -409,6 +409,28 @@ export async function bulkAddTag(
   })
 }
 
+export interface BulkAxisDelta {
+  set: string[]
+  unset: string[]
+}
+
+// bulkUpdatePreferences sends only the changed types per axis (BULK-03); the
+// server leaves every other type, and notes, untouched.
+export async function bulkUpdatePreferences(
+  ids: number[],
+  delta: { releaseTypes: BulkAxisDelta; mutedEventTypes: BulkAxisDelta }
+): Promise<BulkOutcome> {
+  return apiFetch<BulkOutcome>("/watchlist/bulk/preferences", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ids,
+      release_types: delta.releaseTypes,
+      muted_event_types: delta.mutedEventTypes,
+    }),
+  })
+}
+
 // detachTag removes one tag from an entry (TAG-02); idempotent server-side,
 // so an already-gone link still resolves 204.
 export async function detachTag(entryId: number, tagId: number): Promise<void> {

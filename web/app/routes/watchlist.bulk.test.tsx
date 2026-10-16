@@ -15,6 +15,7 @@ import {
   type WatchlistEntry,
   bulkAddTag,
   bulkRemoveWatchlist,
+  bulkUpdatePreferences,
   listTags,
   listWatchlist,
 } from "~/lib/api"
@@ -39,6 +40,7 @@ vi.mock("sonner", () => ({
 const mockList = vi.mocked(listWatchlist)
 const mockBulkRemove = vi.mocked(bulkRemoveWatchlist)
 const mockAddTag = vi.mocked(bulkAddTag)
+const mockPrefs = vi.mocked(bulkUpdatePreferences)
 const mockListTags = vi.mocked(listTags)
 
 async function renderWatchlist(entries: WatchlistEntry[]) {
@@ -940,4 +942,57 @@ describe("Watchlist bulk add tag", () => {
       screen.getByRole("checkbox", { name: "Select SZA" })
     ).toBeInTheDocument()
   })
+})
+
+describe("Watchlist bulk preferences", () => {
+  const mixed = () => [
+    makeEntry({ id: 1, name: "Drake", release_types: ["album"] }),
+    makeEntry({ id: 2, name: "SZA", release_types: ["album", "ep"] }),
+    makeEntry({ id: 3, name: "Bad Bunny" }),
+  ]
+
+  // The wrapping label's text joins the aria-label in the computed name.
+  const pref = (root: HTMLElement, name: string) =>
+    within(root).getByRole("checkbox", { name: new RegExp(`^${name}`) })
+
+  async function openPrefs() {
+    await userEvent.click(screen.getByRole("button", { name: "Preferences" }))
+    return screen.findByRole("dialog")
+  }
+
+  it("mutes one type on a mixed selection with a one-type delta", async () => {
+    await renderWatchlist(mixed())
+    mockPrefs.mockResolvedValue({ applied: [1, 2], skipped: [] })
+    await check("Drake", "SZA")
+
+    const popover = await openPrefs()
+    expect(pref(popover, "Album release type")).toHaveAttribute(
+      "aria-checked",
+      "true"
+    )
+    expect(pref(popover, "EP release type")).toHaveAttribute(
+      "aria-checked",
+      "mixed"
+    )
+    expect(pref(popover, "Mute guest feature alerts")).toHaveAttribute(
+      "aria-checked",
+      "false"
+    )
+
+    await userEvent.click(pref(popover, "Mute guest feature alerts"))
+    await userEvent.click(
+      within(popover).getByRole("button", { name: "Apply" })
+    )
+
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+    expect(mockPrefs).toHaveBeenCalledTimes(1)
+    expect(mockPrefs).toHaveBeenCalledWith([1, 2], {
+      releaseTypes: { set: [], unset: [] },
+      mutedEventTypes: { set: ["guest_feature"], unset: [] },
+    })
+    expect(toast.success).toHaveBeenCalledWith(
+      "Updated preferences for 2 artists."
+    )
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
+  }, 30000)
 })

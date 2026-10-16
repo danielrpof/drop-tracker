@@ -1,4 +1,4 @@
-import type { TagRef, WatchlistEntry } from "~/lib/api"
+import type { BulkAxisDelta, TagRef, WatchlistEntry } from "~/lib/api"
 
 // Pure selection helpers: type-only imports, because route tests automock ~/lib/api.
 
@@ -64,4 +64,58 @@ export function tagsOnEvery(selected: readonly WatchlistEntry[]): TagRef[] {
   return selected[0].tags.filter((tag) =>
     selected.every((e) => e.tags.some((t) => t.id === tag.id))
   )
+}
+
+export type TriState = "checked" | "unchecked" | "indeterminate"
+
+// Mirrors Go `EventTypes`.
+export const EVENT_TYPE_ORDER = [
+  "new_release",
+  "guest_feature",
+  "deluxe_change",
+] as const
+
+export type PreferenceAxis = "release_types" | "muted_event_types"
+
+// Checked when every entry has the type, unchecked when none does (D-06).
+export function initialTriStates(
+  selected: readonly WatchlistEntry[],
+  axis: PreferenceAxis,
+  types: readonly string[]
+): Record<string, TriState> {
+  const out: Record<string, TriState> = {}
+  for (const type of types) {
+    const on = selected.filter((e) => e[axis].includes(type)).length
+    out[type] =
+      on === 0
+        ? "unchecked"
+        : on === selected.length
+          ? "checked"
+          : "indeterminate"
+  }
+  return out
+}
+
+// A mixed start cycles through all three states; a uniform start toggles.
+export function cycleTriState(initial: TriState, current: TriState): TriState {
+  if (initial === "indeterminate") {
+    if (current === "indeterminate") return "checked"
+    return current === "checked" ? "unchecked" : "indeterminate"
+  }
+  return current === "checked" ? "unchecked" : "checked"
+}
+
+// Only types that moved off their initial state are sent, in canonical order.
+export function buildAxisDelta(
+  types: readonly string[],
+  initial: Record<string, TriState>,
+  current: Record<string, TriState>
+): BulkAxisDelta {
+  const delta: BulkAxisDelta = { set: [], unset: [] }
+  for (const type of types) {
+    if (current[type] === initial[type]) continue
+    if (current[type] === "checked") delta.set.push(type)
+    else if (current[type] === "unchecked") delta.unset.push(type)
+  }
+  return delta
 }

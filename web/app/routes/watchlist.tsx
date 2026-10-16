@@ -20,11 +20,14 @@ import {
   type SearchResponse,
   type TagRef,
   type BulkAddTagOutcome,
+  type BulkAxisDelta,
+  type BulkOutcome,
   type BulkRemoveOutcome,
   type WatchlistEntry,
   addWatchlist,
   bulkAddTag,
   bulkRemoveWatchlist,
+  bulkUpdatePreferences,
   listWatchlist,
   removeWatchlist,
 } from "~/lib/api"
@@ -650,6 +653,32 @@ export default function Watchlist() {
     return out
   }
 
+  // One request carrying only the changed types; null keeps the popover open.
+  async function handleBulkPreferences(delta: {
+    releaseTypes: BulkAxisDelta
+    mutedEventTypes: BulkAxisDelta
+  }): Promise<BulkOutcome | null> {
+    const sentIds = effective.map((e) => e.id)
+    setBulkInFlight(true)
+    let out: BulkOutcome
+    try {
+      out = await bulkUpdatePreferences(sentIds, delta)
+    } catch (error) {
+      setBulkInFlight(false)
+      showBulkFailure(error, "Couldn't update preferences — try again.")
+      return null
+    }
+    setBulkInFlight(false)
+    markStickyMany(out.applied)
+    refresh()
+    const n = out.applied.length
+    const g = out.skipped.filter((s) => s.reason === "gone").length
+    const msg = `Updated preferences for ${n} artist${plural(n)}.`
+    if (g > 0) toast.success(msg, { description: formatAlreadyRemoved(g) })
+    else toast.success(msg)
+    return out
+  }
+
   function openRemoveConfirm() {
     setRemoveConfirm({
       open: true,
@@ -955,6 +984,7 @@ export default function Watchlist() {
                 inFlight={bulkInFlight}
                 onRemove={openRemoveConfirm}
                 onAddTag={handleBulkAddTag}
+                onApplyPreferences={handleBulkPreferences}
                 onSucceeded={finishBulkSuccess}
                 onClear={clearSelection}
                 removeButtonRef={removeButtonRef}

@@ -1,4 +1,4 @@
-import { Loader2, TagPlus, Trash2, X } from "lucide-react"
+import { Loader2, SlidersHorizontal, TagPlus, Trash2, X } from "lucide-react"
 import {
   useEffect,
   useLayoutEffect,
@@ -8,17 +8,89 @@ import {
 } from "react"
 
 import { Button } from "~/components/ui/button"
+import { Checkbox } from "~/components/ui/checkbox"
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "~/components/ui/popover"
 import { Separator } from "~/components/ui/separator"
 import { TagCombobox } from "~/components/watchlist/TagCombobox"
-import type { BulkAddTagOutcome, WatchlistEntry } from "~/lib/api"
-import { tagsOnEvery } from "~/lib/bulkSelection"
+import type {
+  BulkAddTagOutcome,
+  BulkAxisDelta,
+  BulkOutcome,
+  WatchlistEntry,
+} from "~/lib/api"
+import {
+  EVENT_TYPE_ORDER,
+  buildAxisDelta,
+  cycleTriState,
+  initialTriStates,
+  tagsOnEvery,
+  type PreferenceAxis,
+  type TriState,
+} from "~/lib/bulkSelection"
 import { useTagVocabulary } from "~/lib/useTagVocabulary"
+import { DEFAULT_RELEASE_TYPES } from "~/lib/watchlistView"
+
+export interface PreferencesDelta {
+  releaseTypes: BulkAxisDelta
+  mutedEventTypes: BulkAxisDelta
+}
+
+type PrefStates = Record<PreferenceAxis, Record<string, TriState>>
+
+// Same options, order and aria-labels as the card's PreferenceToggles.
+const RELEASE_OPTIONS = [
+  { type: "album", label: "Album", aria: "Album release type" },
+  { type: "single", label: "Single", aria: "Single release type" },
+  { type: "ep", label: "EP", aria: "EP release type" },
+  { type: "deluxe", label: "Deluxe", aria: "Deluxe release type" },
+]
+
+const MUTE_OPTIONS = [
+  {
+    type: "new_release",
+    label: "New release",
+    aria: "Mute new release alerts",
+  },
+  {
+    type: "guest_feature",
+    label: "Guest feature",
+    aria: "Mute guest feature alerts",
+  },
+  {
+    type: "deluxe_change",
+    label: "Deluxe change",
+    aria: "Mute deluxe change alerts",
+  },
+]
+
+function computePrefStates(selected: WatchlistEntry[]): PrefStates {
+  return {
+    release_types: initialTriStates(
+      selected,
+      "release_types",
+      DEFAULT_RELEASE_TYPES
+    ),
+    muted_event_types: initialTriStates(
+      selected,
+      "muted_event_types",
+      EVENT_TYPE_ORDER
+    ),
+  }
+}
 
 export interface BulkActionBarProps {
   selected: WatchlistEntry[]
   inFlight: boolean
   onRemove: () => void
   onAddTag: (name: string) => Promise<BulkAddTagOutcome | null>
+  onApplyPreferences: (delta: PreferencesDelta) => Promise<BulkOutcome | null>
   onSucceeded: () => void
   onClear: () => void
   removeButtonRef: RefObject<HTMLButtonElement | null>
@@ -33,6 +105,7 @@ export function BulkActionBar({
   inFlight,
   onRemove,
   onAddTag,
+  onApplyPreferences,
   onSucceeded,
   onClear,
   removeButtonRef,
@@ -41,8 +114,17 @@ export function BulkActionBar({
   const addTagButtonRef = useRef<HTMLButtonElement>(null)
   const focusAddTagRef = useRef(false)
   const pendingRef = useRef(false)
+  const albumRef = useRef<HTMLElement | null>(null)
+  const applyRef = useRef<HTMLButtonElement>(null)
+  const focusApplyRef = useRef(false)
   const [mode, setMode] = useState<"idle" | "add-tag">("idle")
   const [pending, setPending] = useState(false)
+  const [prefsOpen, setPrefsOpen] = useState(false)
+  const [prefsPending, setPrefsPending] = useState(false)
+  const [prefsInitial, setPrefsInitial] = useState<PrefStates>(() =>
+    computePrefStates(selected)
+  )
+  const [prefsCurrent, setPrefsCurrent] = useState<PrefStates>(prefsInitial)
   // The bar renders inside TagVocabularyProvider, so the vocabulary lives here (D-12).
   const { vocabulary, ensureLoaded, remember } = useTagVocabulary()
   const count = selected.length
@@ -54,6 +136,91 @@ export function BulkActionBar({
       addTagButtonRef.current?.focus()
     }
   }, [mode])
+
+  // A failed apply disables then re-enables Apply, so refocus it after commit.
+  useEffect(() => {
+    if (!prefsPending && focusApplyRef.current) {
+      focusApplyRef.current = false
+      applyRef.current?.focus()
+    }
+  }, [prefsPending])
+
+  function handlePrefsOpenChange(open: boolean) {
+    if (prefsPending) return
+    if (open) {
+      const initial = computePrefStates(selected)
+      setPrefsInitial(initial)
+      setPrefsCurrent(initial)
+    }
+    setPrefsOpen(open)
+  }
+
+  function cyclePref(axis: PreferenceAxis, type: string) {
+    setPrefsCurrent((prev) => ({
+      ...prev,
+      [axis]: {
+        ...prev[axis],
+        [type]: cycleTriState(prefsInitial[axis][type], prev[axis][type]),
+      },
+    }))
+  }
+
+  const prefsDelta: PreferencesDelta = {
+    releaseTypes: buildAxisDelta(
+      DEFAULT_RELEASE_TYPES,
+      prefsInitial.release_types,
+      prefsCurrent.release_types
+    ),
+    mutedEventTypes: buildAxisDelta(
+      EVENT_TYPE_ORDER,
+      prefsInitial.muted_event_types,
+      prefsCurrent.muted_event_types
+    ),
+  }
+  const prefsChanged =
+    prefsDelta.releaseTypes.set.length +
+      prefsDelta.releaseTypes.unset.length +
+      prefsDelta.mutedEventTypes.set.length +
+      prefsDelta.mutedEventTypes.unset.length >
+    0
+
+  async function applyPreferences() {
+    if (prefsPending || !prefsChanged) return
+    setPrefsPending(true)
+    const outcome = await onApplyPreferences(prefsDelta)
+    setPrefsPending(false)
+    if (!outcome) {
+      focusApplyRef.current = true
+      return
+    }
+    setPrefsOpen(false)
+    onSucceeded()
+  }
+
+  function renderPrefOption(
+    axis: PreferenceAxis,
+    option: { type: string; label: string; aria: string },
+    ref?: RefObject<HTMLElement | null>
+  ) {
+    const state = prefsCurrent[axis][option.type]
+    return (
+      <label
+        key={option.type}
+        className="flex min-h-11 items-center gap-2 text-label text-foreground"
+      >
+        <Checkbox
+          ref={ref}
+          className="border-muted-foreground"
+          aria-label={option.aria}
+          checked={state === "checked"}
+          indeterminate={state === "indeterminate"}
+          disabled={prefsPending}
+          onCheckedChange={() => cyclePref(axis, option.type)}
+        />
+        {option.label}
+      </label>
+    )
+  }
 
   function exitAddTag(focusButton: boolean) {
     focusAddTagRef.current = focusButton
@@ -110,9 +277,9 @@ export function BulkActionBar({
       <div
         role="region"
         aria-label="Selection actions"
-        // Esc in an inline picker closes only that layer (26-10 extends this).
+        // Esc in an inline picker or the popover closes only that layer.
         onKeyDown={(e) => {
-          if (e.key === "Escape" && mode === "idle") onClear()
+          if (e.key === "Escape" && mode === "idle" && !prefsOpen) onClear()
         }}
         className="pointer-events-auto flex w-full flex-wrap items-center gap-1 rounded-2xl bg-popover p-2 text-popover-foreground shadow-2xl ring-1 ring-foreground/10 motion-safe:animate-in motion-safe:duration-150 motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 sm:w-auto sm:max-w-full sm:flex-nowrap sm:gap-2"
       >
@@ -127,12 +294,86 @@ export function BulkActionBar({
               ref={addTagButtonRef}
               title="Add tag"
               className={ACTION_CLASS}
-              disabled={inFlight}
+              disabled={inFlight || prefsOpen}
               onClick={openAddTag}
             >
               <TagPlus aria-hidden="true" />
               <span className="sr-only sm:not-sr-only">Add tag</span>
             </Button>
+            <Popover open={prefsOpen} onOpenChange={handlePrefsOpenChange}>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    title="Preferences"
+                    className={ACTION_CLASS}
+                    disabled={inFlight}
+                  />
+                }
+              >
+                <SlidersHorizontal aria-hidden="true" />
+                <span className="sr-only sm:not-sr-only">Preferences</span>
+              </PopoverTrigger>
+              <PopoverContent
+                side="top"
+                align="center"
+                sideOffset={8}
+                className="w-80"
+                initialFocus={albumRef}
+              >
+                <PopoverHeader>
+                  <PopoverTitle>
+                    Preferences for {count} artist{count === 1 ? "" : "s"}
+                  </PopoverTitle>
+                  <PopoverDescription>
+                    {
+                      "Only the types you change are updated. A dash means the selected artists differ."
+                    }
+                  </PopoverDescription>
+                </PopoverHeader>
+                <fieldset className="flex flex-col gap-1">
+                  <legend className="text-label text-muted-foreground">
+                    Release types
+                  </legend>
+                  <div className="grid grid-cols-2 gap-x-2">
+                    {RELEASE_OPTIONS.map((o) =>
+                      renderPrefOption(
+                        "release_types",
+                        o,
+                        o.type === "album" ? albumRef : undefined
+                      )
+                    )}
+                  </div>
+                </fieldset>
+                <fieldset className="flex flex-col gap-1">
+                  <legend className="text-label text-muted-foreground">
+                    Mute alerts
+                  </legend>
+                  <div className="grid grid-cols-2 gap-x-2">
+                    {MUTE_OPTIONS.map((o) =>
+                      renderPrefOption("muted_event_types", o)
+                    )}
+                  </div>
+                </fieldset>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="ghost"
+                    disabled={prefsPending}
+                    onClick={() => handlePrefsOpenChange(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    ref={applyRef}
+                    variant="default"
+                    disabled={!prefsChanged || prefsPending}
+                    onClick={applyPreferences}
+                  >
+                    {prefsPending ? "Applying…" : "Apply"}
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
             <Button
               variant="ghost"
               ref={removeButtonRef}
