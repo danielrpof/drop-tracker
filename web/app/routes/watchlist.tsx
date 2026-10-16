@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { ConfirmDialog } from "~/components/common/ConfirmDialog"
 import { EmptyState } from "~/components/common/EmptyState"
 import { Button } from "~/components/ui/button"
+import { Checkbox } from "~/components/ui/checkbox"
 import { Skeleton } from "~/components/ui/skeleton"
 import { BulkActionBar } from "~/components/watchlist/BulkActionBar"
 import { ManageTagsDialog } from "~/components/watchlist/ManageTagsDialog"
@@ -25,6 +26,11 @@ import {
   listWatchlist,
   removeWatchlist,
 } from "~/lib/api"
+import {
+  effectiveSelection,
+  selectAllState,
+  toggleAllVisible,
+} from "~/lib/bulkSelection"
 import { formatAlreadyRemoved, formatNameList } from "~/lib/format"
 import { isAddableSource } from "~/lib/sources"
 import { useScrollAnchor } from "~/lib/useScrollAnchor"
@@ -496,6 +502,11 @@ export default function Watchlist() {
     })
   }
 
+  // The box's own next value is ignored: the result depends on the visible set.
+  function handleSelectAllVisible() {
+    setSelectedIds(toggleAllVisible(visible, selectedIds))
+  }
+
   function finishBulkSuccess() {
     setSelectedIds(EMPTY_IDS)
   }
@@ -576,7 +587,8 @@ export default function Watchlist() {
     ? selectVisible(entries, { ...view, q: query }, stickyIds)
     : []
   countRef.current = { n: visible.length, m: entries?.length ?? 0 }
-  const effective = visible.filter((e) => selectedIds.has(e.id))
+  const effective = effectiveSelection(visible, selectedIds)
+  const allState = selectAllState(visible.length, effective.length)
 
   function handleTagsChange(ids: number[]) {
     write((p) => {
@@ -714,7 +726,7 @@ export default function Watchlist() {
             aria-labelledby="watchlist-artists-heading"
             className="flex flex-col gap-4"
           >
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2
                 id="watchlist-artists-heading"
                 ref={headingRef}
@@ -723,9 +735,21 @@ export default function Watchlist() {
               >
                 Your artists
               </h2>
-              <p className="text-label text-muted-foreground tabular-nums">
-                {formatArtistCount(visible.length, entries.length)}
-              </p>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex min-h-11 cursor-pointer items-center gap-2 text-label text-foreground select-none">
+                  <Checkbox
+                    className="border-muted-foreground"
+                    checked={allState === "checked"}
+                    indeterminate={allState === "indeterminate"}
+                    disabled={visible.length === 0 || bulkInFlight}
+                    onCheckedChange={handleSelectAllVisible}
+                  />
+                  Select all visible
+                </label>
+                <p className="text-label text-muted-foreground tabular-nums">
+                  {formatArtistCount(visible.length, entries.length)}
+                </p>
+              </div>
             </div>
             <WatchlistToolbar
               query={query}

@@ -141,7 +141,10 @@ describe("Watchlist bulk remove", () => {
       makeEntry({ id: i + 1, name: `Artist ${String(i).padStart(2, "0")}` })
     )
     await renderWatchlist(entries)
-    for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box)
+    for (const box of screen.getAllByRole("checkbox", {
+      name: /^Select Artist/,
+    }))
+      fireEvent.click(box)
 
     const dialog = await openRemove()
     const text = within(dialog).getByText(/and 11 more\./).textContent ?? ""
@@ -252,5 +255,46 @@ describe("Watchlist bulk remove", () => {
     expect(
       screen.getByRole("checkbox", { name: "Select Drake" })
     ).not.toBeChecked()
+  })
+})
+
+const filterBox = () =>
+  screen.getByRole("textbox", { name: "Filter watchlist" })
+const selectAll = () =>
+  screen.getByRole("checkbox", { name: "Select all visible" })
+
+describe("Watchlist select all visible", () => {
+  it("selects only the filtered view and removes exactly it", async () => {
+    await renderWatchlist(trio())
+    removeOutcome([1])
+    await check("SZA")
+
+    await userEvent.type(filterBox(), "dra")
+    expect(bar()).not.toBeInTheDocument()
+
+    await userEvent.click(selectAll())
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+
+    await userEvent.clear(filterBox())
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    expect(selectAll()).toHaveAttribute("aria-checked", "mixed")
+
+    await userEvent.type(filterBox(), "dra")
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }))
+    const dialog = await screen.findByRole("alertdialog")
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Remove 1 artist" })
+    )
+
+    await waitFor(() => expect(mockBulkRemove).toHaveBeenCalledTimes(1))
+    expect(mockBulkRemove).toHaveBeenCalledWith([1])
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    )
+
+    await userEvent.clear(filterBox())
+    expect(
+      screen.getByRole("checkbox", { name: "Select SZA" })
+    ).toHaveAttribute("aria-checked", "false")
   })
 })
