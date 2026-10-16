@@ -1,10 +1,17 @@
-import { render, screen, waitFor, within } from "@testing-library/react"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createRoutesStub } from "react-router"
 import { toast } from "sonner"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
+  ApiError,
   type WatchlistEntry,
   bulkRemoveWatchlist,
   listWatchlist,
@@ -103,5 +110,147 @@ describe("Watchlist bulk remove", () => {
       "Removed 2 artists from your watchlist."
     )
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
+  })
+
+  const SINGULAR =
+    "Their note is deleted but their tags are kept; alerts already found for them may still be sent, and re-adding them later may alert you about releases from while they were removed."
+  const PLURAL_TAIL =
+    "Their notes are deleted but their tags are kept; alerts already found for them may still be sent, and re-adding any of them later may alert you about releases from while they were removed."
+
+  async function openRemove() {
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }))
+    return screen.findByRole("alertdialog")
+  }
+
+  it("words the dialog for a single artist", async () => {
+    await renderWatchlist(trio())
+    await check("Drake")
+
+    const dialog = await openRemove()
+    expect(
+      within(dialog).getByText("Remove Drake from your watchlist?")
+    ).toBeInTheDocument()
+    expect(within(dialog).getByText(SINGULAR)).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("button", { name: "Remove 1 artist" })
+    ).toBeInTheDocument()
+  })
+
+  it("lists three names and a remainder for fourteen selected artists", async () => {
+    const entries = Array.from({ length: 14 }, (_, i) =>
+      makeEntry({ id: i + 1, name: `Artist ${String(i).padStart(2, "0")}` })
+    )
+    await renderWatchlist(entries)
+    for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box)
+
+    const dialog = await openRemove()
+    const text = within(dialog).getByText(/and 11 more\./).textContent ?? ""
+    expect(
+      text.startsWith("Artist 00, Artist 01, Artist 02 and 11 more.")
+    ).toBe(true)
+    expect(text.endsWith(PLURAL_TAIL)).toBe(true)
+    expect(
+      within(dialog).getByText("Remove 14 artists from your watchlist?")
+    ).toBeInTheDocument()
+  })
+
+  it("counts already-gone ids in the toast, which carries no action", async () => {
+    const entries = trio()
+    await renderWatchlist(entries)
+    removeOutcome([1], [2])
+    mockList.mockResolvedValue([entries[2]])
+    await check("Drake", "SZA")
+
+    const dialog = await openRemove()
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Remove 2 artists" })
+    )
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
+    expect(toast.success).toHaveBeenCalledWith(
+      "Removed 2 artists from your watchlist.",
+      { description: "1 artist was already removed from your watchlist." }
+    )
+    const options = vi.mocked(toast.success).mock.calls[0][1]
+    expect(options).not.toHaveProperty("action")
+  })
+
+  it("keeps the cards and selection when the request fails", async () => {
+    await renderWatchlist(trio())
+    mockBulkRemove.mockRejectedValue(new Error("network"))
+    await check("Drake", "SZA")
+
+    const dialog = await openRemove()
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Remove 2 artists" })
+    )
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't remove the selected artists — nothing was removed. Try again."
+      )
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    )
+    expect(screen.getByRole("checkbox", { name: "Select Drake" })).toBeChecked()
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    expect(mockList).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports the server's id cap and keeps the selection", async () => {
+    await renderWatchlist(trio())
+    mockBulkRemove.mockRejectedValue(
+      new ApiError(
+        400,
+        "too many ids",
+        { error: "too many ids", code: "bulk_too_many_ids", max: 1000 },
+        "bulk_too_many_ids"
+      )
+    )
+    await check("Drake")
+
+    const dialog = await openRemove()
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Remove 1 artist" })
+    )
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Too many artists selected — select at most 1000 and try again."
+      )
+    )
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+
+  it("sends nothing on Cancel and keeps the selection", async () => {
+    await renderWatchlist(trio())
+    await check("Drake", "SZA")
+
+    const dialog = await openRemove()
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Cancel" })
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    )
+    expect(mockBulkRemove).not.toHaveBeenCalled()
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+  })
+
+  it("clears the selection from the bar without sending anything", async () => {
+    await renderWatchlist(trio())
+    await check("Drake")
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Clear selection" })
+    )
+
+    expect(bar()).not.toBeInTheDocument()
+    expect(mockBulkRemove).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole("checkbox", { name: "Select Drake" })
+    ).not.toBeChecked()
   })
 })
