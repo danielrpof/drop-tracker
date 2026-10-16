@@ -284,7 +284,48 @@ Plans:
   4. Removing the selection first asks for confirmation stating how many artists will be removed. Confirming removes all of them, or none of them if any part fails.
   5. After any bulk action the selection clears and the Watchlist shows the result immediately, with no page reload and no checkbox left pointing at a removed artist.
 
-**Plans**: TBD
+**Plans:** 12 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 26-01-PLAN.md — `POST /watchlist/bulk/delete` as one atomic DELETE (D-03), the `WatchlistBulkStore`/`WithWatchlistBulk` seam (D-20), shared id and body bounds, and gate/CSRF/503/precedence tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 26-02-PLAN.md — `POST /watchlist/bulk/tags/add`: an ordered pre-lock plus a count-guarded insert that names at-cap artists and rolls back an orphan tag (D-01, D-19), concurrency tests, and the ADR 0004 amendment
+- [ ] 26-03-PLAN.md — Card checkboxes, the sticky action bar, and the count-stating route-level remove confirm with its copy and failure paths (D-09, D-10, D-16, D-17)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 26-04-PLAN.md — `Select all visible`, the derived (not trimmed) selection with hidden selections inert, Shift ranges, and the in-flight lock (D-09, D-11)
+- [ ] 26-05-PLAN.md — `PATCH /watchlist/bulk/preferences`: a locked-CTE per-type delta in canonical order with the nil-slice guard and the D-21 400s
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 26-06-PLAN.md — Close → clear → focus fallback (U1), selection announcements and Esc, and the measured bar clearance for the page, toasts, and focus (U2, U3)
+- [ ] 26-07-PLAN.md — `POST /watchlist/bulk/tags/remove` by tag id with a 404 for a missing tag (D-22) and an `applied`/`carried` outcome for Undo
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 26-08-PLAN.md — Bulk add-tag from the bar's inline picker (D-12), with named cap skips, gone notes, and sticky cards (D-13)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 26-09-PLAN.md — The entry-free `TagCombobox` shared by card and bar, and the inline add-tag mode's Esc/Cancel, pending, and vocabulary contract (D-12)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 26-10-PLAN.md — The vendored popover and the tri-state Preferences editor, which sends only changed types (D-05…D-08)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 26-11-PLAN.md — Bulk remove-tag from the bar (carried tags with counts) and Undo through bulk add-tag (U4)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 26-12-PLAN.md — Embedded bundle rebuild, the phase-closing Definition of Done (`make db-up` + `make test`, or their recipes), and the blast-radius gate
+
 **UI hint**: yes
 
 **Notes for the phase planner**
