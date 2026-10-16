@@ -613,7 +613,7 @@ export default function Watchlist() {
     if (caps.length > 0 && n === 0) {
       toast.warning(
         variant === "restore"
-          ? `Couldn't restore ${tag} — every artist already has 10 tags.`
+          ? `Couldn't restore “${outcome.tag.name}” — every artist already has 10 tags.`
           : `Couldn't add ${tag} — every selected artist already has 10 tags.`,
         {
           description: join(`${formatNameList(names)}.`, gone),

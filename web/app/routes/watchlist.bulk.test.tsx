@@ -1193,4 +1193,286 @@ describe("Watchlist bulk remove tag", () => {
       })
     )
   }, 30000)
+
+  const GONE_ONE = "1 artist was already removed from your watchlist."
+  const carriers = () => [
+    makeEntry({ id: 1, name: "Drake", tags: [rap] }),
+    makeEntry({ id: 2, name: "SZA", tags: [rap] }),
+    makeEntry({ id: 3, name: "Bad Bunny" }),
+  ]
+
+  async function pickRap() {
+    await userEvent.click(screen.getByRole("button", { name: "Remove tag" }))
+    await userEvent.click(await screen.findByRole("option", { name: /^rap/ }))
+  }
+
+  async function removeRap(
+    entries: WatchlistEntry[],
+    outcome: Parameters<typeof mockRemoveTag.mockResolvedValue>[0],
+    names = ["Drake", "SZA"]
+  ) {
+    await renderWatchlist(entries)
+    mockRemoveTag.mockResolvedValue(outcome)
+    await check(...names)
+    await pickRap()
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+  }
+
+  const REMOVED = { applied: [1, 2], carried: 2, skipped: [] }
+
+  function undo() {
+    const options = vi.mocked(toast.success).mock.calls[0][1] as unknown as {
+      action: { onClick: () => void }
+    }
+    options.action.onClick()
+  }
+
+  it("restores the tag to exactly the applied artists and leaves a newer selection alone", async () => {
+    await removeRap(carriers(), REMOVED)
+    await check("Bad Bunny")
+    mockAddTag.mockResolvedValue({ tag: rap, applied: [1, 2], skipped: [] })
+
+    undo()
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Restored “rap” on 2 artists.")
+    )
+    expect(mockAddTag).toHaveBeenCalledTimes(1)
+    expect(mockAddTag).toHaveBeenCalledWith([1, 2], "rap")
+    expect(mockRemoveTag).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(3))
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Select Bad Bunny" })
+    ).toBeChecked()
+  }, 30000)
+
+  it("keeps restored cards visible past the tag filter after Undo", async () => {
+    mockList.mockResolvedValue(carriers())
+    const Stub = createRoutesStub([{ path: "/", Component: Watchlist }])
+    render(<Stub initialEntries={["/?tags=7"]} />)
+    await screen.findByRole("checkbox", { name: "Select Drake" })
+    mockRemoveTag.mockResolvedValue(REMOVED)
+    mockList.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake" }),
+      makeEntry({ id: 2, name: "SZA" }),
+    ])
+    await check("Drake", "SZA")
+    await pickRap()
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+    expect(
+      screen.getByRole("checkbox", { name: "Select Drake" })
+    ).toBeInTheDocument()
+
+    await userEvent.type(filterBox(), "a")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("checkbox", { name: "Select Drake" })
+      ).not.toBeInTheDocument()
+    )
+    mockAddTag.mockResolvedValue({ tag: rap, applied: [1, 2], skipped: [] })
+    undo()
+
+    expect(
+      await screen.findByRole("checkbox", { name: "Select Drake" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Select SZA" })
+    ).toBeInTheDocument()
+  }, 30000)
+
+  it("warns with the capped artist named when Undo restores only some", async () => {
+    await removeRap(carriers(), REMOVED)
+    mockAddTag.mockResolvedValue({
+      tag: rap,
+      applied: [1],
+      skipped: [{ id: 2, name: "SZA", reason: "cap" }],
+    })
+
+    undo()
+
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        "Restored “rap” on 1 artist.",
+        {
+          description: "1 already has 10 tags: SZA.",
+          duration: 8000,
+        }
+      )
+    )
+  })
+
+  it("names capped artists in visible order on Undo", async () => {
+    const entries = [
+      makeEntry({ id: 1, name: "Drake", tags: [rap] }),
+      makeEntry({ id: 2, name: "SZA", tags: [rap] }),
+      makeEntry({ id: 3, name: "Bad Bunny", tags: [rap] }),
+    ]
+    await removeRap(entries, { applied: [1, 2, 3], carried: 3, skipped: [] }, [
+      "Bad Bunny",
+      "Drake",
+      "SZA",
+    ])
+    mockAddTag.mockResolvedValue({
+      tag: rap,
+      applied: [2],
+      skipped: [
+        { id: 1, name: "Drake", reason: "cap" },
+        { id: 3, name: "Bad Bunny", reason: "cap" },
+      ],
+    })
+
+    undo()
+
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        "Restored “rap” on 1 artist.",
+        {
+          description: "2 already have 10 tags: Bad Bunny and Drake.",
+          duration: 8000,
+        }
+      )
+    )
+  })
+
+  it("explains an all-at-cap Undo", async () => {
+    await removeRap(carriers(), REMOVED)
+    mockAddTag.mockResolvedValue({
+      tag: { id: 0, name: "rap" },
+      applied: [],
+      skipped: [
+        { id: 1, name: "Drake", reason: "cap" },
+        { id: 2, name: "SZA", reason: "cap" },
+      ],
+    })
+
+    undo()
+
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        "Couldn't restore “rap” — every artist already has 10 tags.",
+        { description: "Drake and SZA.", duration: 8000 }
+      )
+    )
+  })
+
+  it("reports a failed Undo", async () => {
+    await removeRap(carriers(), REMOVED)
+    mockAddTag.mockRejectedValue(new Error("network"))
+
+    undo()
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't restore “rap” — try again."
+      )
+    )
+    expect(mockAddTag).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers no Undo when no artist carried the tag", async () => {
+    await removeRap(carriers(), { applied: [], carried: 0, skipped: [] })
+
+    expect(toast.success).toHaveBeenCalledWith(
+      "Removed “rap” from 0 artists.",
+      {
+        duration: 8000,
+      }
+    )
+  })
+
+  it("appends the gone sentence to the remove-tag toast", async () => {
+    await removeRap(carriers(), {
+      applied: [1],
+      carried: 1,
+      skipped: [{ id: 2, reason: "gone" }],
+    })
+
+    expect(toast.success).toHaveBeenCalledWith(
+      "Removed “rap” from 1 artist.",
+      expect.objectContaining({ description: GONE_ONE, duration: 8000 })
+    )
+  })
+
+  it("keeps affected cards visible past the tag filter until the next filter change", async () => {
+    mockList.mockResolvedValue(carriers())
+    const Stub = createRoutesStub([{ path: "/", Component: Watchlist }])
+    render(<Stub initialEntries={["/?tags=7"]} />)
+    await screen.findByRole("checkbox", { name: "Select Drake" })
+    mockRemoveTag.mockResolvedValue(REMOVED)
+    mockList.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake" }),
+      makeEntry({ id: 2, name: "SZA" }),
+    ])
+    await check("Drake", "SZA")
+    await pickRap()
+
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
+    const drake = await screen.findByRole("checkbox", { name: "Select Drake" })
+    expect(drake.closest("li")).not.toHaveTextContent("rap")
+    expect(
+      screen.getByRole("checkbox", { name: "Select SZA" })
+    ).toBeInTheDocument()
+
+    await userEvent.type(filterBox(), "a")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("checkbox", { name: "Select Drake" })
+      ).not.toBeInTheDocument()
+    )
+  }, 30000)
+
+  it("fails cleanly with a refresh when the tag no longer exists", async () => {
+    await renderWatchlist(carriers())
+    mockRemoveTag.mockRejectedValue(
+      new ApiError(
+        404,
+        "tag not found",
+        { error: "tag not found", code: "tag_not_found" },
+        "tag_not_found"
+      )
+    )
+    await check("Drake", "SZA")
+    await pickRap()
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't remove “rap” from the selected artists — try again."
+      )
+    )
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Remove tag" })).toHaveFocus()
+    )
+  }, 30000)
+
+  it("keeps the selection and skips the refresh on any other failure", async () => {
+    await renderWatchlist(carriers())
+    mockRemoveTag.mockRejectedValue(new Error("network"))
+    await check("Drake")
+    await pickRap()
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't remove “rap” from the selected artists — try again."
+      )
+    )
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+    expect(mockList).toHaveBeenCalledTimes(1)
+  })
+
+  it("gives a bulk artist removal toast no Undo", async () => {
+    await renderWatchlist(trio())
+    removeOutcome([1, 2])
+    await check("Drake", "SZA")
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }))
+    const dialog = await screen.findByRole("alertdialog")
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Remove 2 artists" })
+    )
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(toast.success).mock.calls[0]).toHaveLength(1)
+  })
 })
