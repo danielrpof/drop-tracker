@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 26
 current_phase_name: Bulk Edit & Remove
 status: executing
-stopped_at: Completed 26-08-PLAN.md
-last_updated: "2026-10-16T23:11:42.324Z"
+stopped_at: Completed 26-09-PLAN.md
+last_updated: "2026-10-16T23:22:33.433Z"
 last_activity: 2026-10-16
 last_activity_desc: Phase 26 execution started
-state_head: 44904b341080519521333e54f4a988d41ee5e4db
+state_head: 55ded0e48b4c7b8e736281ab29c105e83d98bd10
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 47
-  completed_plans: 43
+  completed_plans: 44
   percent: 40
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 26 (Bulk Edit & Remove) — EXECUTING
-Plan: 9 of 12
+Plan: 10 of 12
 Status: Ready to execute
 Last activity: 2026-10-16 — Phase 26 execution started
 
@@ -192,6 +192,7 @@ Last activity: 2026-10-16 — Phase 26 execution started
 | Phase 26 P06 | 12min | 3 tasks | 8 files |
 | Phase 26 P07 | 12 min | 2 tasks | 9 files |
 | Phase 26 P08 | 11 min | 2 tasks | 8 files |
+| Phase 26 P09 | 14min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -445,6 +446,7 @@ Recent decisions affecting current work:
 - [Phase 26]: 26-06: finalFocus function reads a close-kind ref so focus target is chosen at close; pendingFocus effect is a backstop
 - [Phase 26]: 26-07: bulk remove-tag lives on tags.Service/TagStore with no transaction; missing tag is 404, applied is exactly what Undo re-adds
 - [Phase 26]: 26-08: bar picker onClose ignored while pending; Cancel exits on pointer-down and click; remember(tag) only when applied is non-empty
+- [Phase 26]: [26-09] Vocabulary memory in bar tests is observed via the reopened picker, not a provider spy
 
 ### Pending Todos
 
@@ -540,8 +542,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-16T23:11:42.162Z
-Stopped at: Completed 26-08-PLAN.md
+Last session: 2026-10-16T23:22:33.247Z
+Stopped at: Completed 26-09-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
