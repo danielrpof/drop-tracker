@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.6
 milestone_name: Watchlist Organization
 current_phase: 26
-current_phase_name: bulk-edit-remove
+current_phase_name: Bulk Edit & Remove
 status: executing
-stopped_at: Phase 25 complete, ready to plan Phase 26
-last_updated: "2026-10-16T00:45:44.253Z"
-last_activity: 2026-10-12
-last_activity_desc: Phase 25 complete, transitioned to Phase 26
-state_head: f793ffc20f56e0c85202b1f858b6df63f110dcfe
+stopped_at: Completed 26-01-PLAN.md
+last_updated: "2026-10-16T22:11:21.154Z"
+last_activity: 2026-10-16
+last_activity_desc: Phase 26 execution started
+state_head: aabb51dd7636d4e2b0f6998ac1b73c841b9ac42c
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 47
-  completed_plans: 35
+  completed_plans: 36
   percent: 40
 ---
 
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 25 — Find & Filter — Watchlist and History
+**Current focus:** Phase 26 — Bulk Edit & Remove
 
 ## Current Position
 
-Phase: 26 (bulk-edit-remove) — READY TO EXECUTE
-Plan: Not started
+Phase: 26 (Bulk Edit & Remove) — EXECUTING
+Plan: 2 of 12
 Status: Ready to execute
-Last activity: 2026-10-12 — Phase 25 complete, transitioned to Phase 26
+Last activity: 2026-10-16 — Phase 26 execution started
 
 ## Performance Metrics
 
@@ -184,6 +184,7 @@ Last activity: 2026-10-12 — Phase 25 complete, transitioned to Phase 26
 | Phase 25 P19 | 2 min | 2 tasks | 4 files |
 | Phase 25 P20 | 10 min | 3 tasks | 7 files |
 | Phase 25 P21 | 9 min | 3 tasks | 4 files |
+| Phase 26 P01 | 14 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -429,6 +430,7 @@ Recent decisions affecting current work:
 - [Phase 25]: [Phase 25-19]: G-25-11 scroll anchor fallback widened to the nearest surviving card (no distance cap, next before previous at each distance), user decision 2026-10-12
 - [Phase 25]: G-25-12 (2026-10-12): keyboard-only focus move (click detail 0) to fallback card's chip label, else Your artists heading, via useScrollAnchor onFocusLost/useEffectEvent
 - [Phase 25]: G-25-13 (user decision 2026-10-12): disabled Deezer button described via aria-describedby to a per-row useId sr-only hint; no visual change
+- [Phase 26]: 26-01: bulk delete is POST /watchlist/bulk/delete, max 1000 ids, 64 KiB body cap; max returned in the 400 body — Keeps the SPA independent of the constants; watchlist rows only, artists/tags/pending events survive (D-17, D-18)
 
 ### Pending Todos
 
@@ -524,8 +526,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-12T22:25:32.998Z
-Stopped at: Phase 25 complete, ready to plan Phase 26
+Last session: 2026-10-16T22:11:20.985Z
+Stopped at: Completed 26-01-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
