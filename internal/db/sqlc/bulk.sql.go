@@ -88,6 +88,50 @@ func (q *Queries) BulkDeleteWatchlist(ctx context.Context, ids []int64) ([]int64
 	return items, nil
 }
 
+const bulkDetachTag = `-- name: BulkDetachTag :many
+WITH existing AS (
+  SELECT w.id, w.artist_id FROM watchlist w WHERE w.id = ANY($1::bigint[])
+), removed AS (
+  DELETE FROM artist_tags l
+  WHERE l.tag_id = $2::bigint AND l.artist_id IN (SELECT artist_id FROM existing)
+  RETURNING l.artist_id
+)
+SELECT e.id AS entry_id,
+       (e.artist_id IN (SELECT artist_id FROM removed))::boolean AS removed
+FROM existing e ORDER BY e.id
+`
+
+type BulkDetachTagParams struct {
+	EntryIds []int64 `json:"entry_ids"`
+	TagID    int64   `json:"tag_id"`
+}
+
+type BulkDetachTagRow struct {
+	EntryID int64 `json:"entry_id"`
+	Removed bool  `json:"removed"`
+}
+
+// Deletes the tag's links on the selected entries' artists; removed marks entries that carried it.
+func (q *Queries) BulkDetachTag(ctx context.Context, arg BulkDetachTagParams) ([]BulkDetachTagRow, error) {
+	rows, err := q.db.Query(ctx, bulkDetachTag, arg.EntryIds, arg.TagID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BulkDetachTagRow
+	for rows.Next() {
+		var i BulkDetachTagRow
+		if err := rows.Scan(&i.EntryID, &i.Removed); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const bulkUpdateWatchlistPreferences = `-- name: BulkUpdateWatchlistPreferences :many
 WITH locked AS MATERIALIZED (
   SELECT id, release_types, muted_event_types FROM watchlist
@@ -153,6 +197,22 @@ func (q *Queries) BulkUpdateWatchlistPreferences(ctx context.Context, arg BulkUp
 		return nil, err
 	}
 	return items, nil
+}
+
+const getTagByID = `-- name: GetTagByID :one
+SELECT id, name FROM tags WHERE id = $1
+`
+
+type GetTagByIDRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func (q *Queries) GetTagByID(ctx context.Context, id int64) (GetTagByIDRow, error) {
+	row := q.db.QueryRow(ctx, getTagByID, id)
+	var i GetTagByIDRow
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
 }
 
 const lockWatchlistArtistsForBulkTag = `-- name: LockWatchlistArtistsForBulkTag :many

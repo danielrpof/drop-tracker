@@ -202,6 +202,62 @@ func (s *Server) handleBulkAddTag(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type bulkRemoveTagRequest struct {
+	IDs   []int64 `json:"ids"`
+	TagID int64   `json:"tag_id"`
+}
+
+type bulkRemoveTagResponse struct {
+	Applied []int64        `json:"applied"`
+	Carried int            `json:"carried"`
+	Skipped []bulkSkipWire `json:"skipped"`
+}
+
+// handleBulkRemoveTag implements POST /watchlist/bulk/tags/remove (BULK-02).
+func (s *Server) handleBulkRemoveTag(w http.ResponseWriter, r *http.Request) {
+	if s.tags == nil {
+		writeError(w, http.StatusServiceUnavailable, "tags not available")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBulkBodyBytes)
+	var req bulkRemoveTagRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ids, err := validateBulkIDs(req.IDs)
+	if err != nil {
+		writeBulkIDsError(w, err)
+		return
+	}
+	if req.TagID < 1 {
+		writeError(w, http.StatusBadRequest, "invalid tag id")
+		return
+	}
+
+	result, err := s.tags.BulkDetach(r.Context(), ids, req.TagID)
+	if err != nil {
+		writeTagError(w, r, err)
+		return
+	}
+
+	resp := bulkRemoveTagResponse{
+		Applied: result.Applied,
+		Carried: len(result.Applied),
+		Skipped: make([]bulkSkipWire, 0, len(result.Gone)),
+	}
+	if resp.Applied == nil {
+		resp.Applied = []int64{}
+	}
+	for _, id := range result.Gone {
+		resp.Skipped = append(resp.Skipped, bulkSkipWire{ID: id, Reason: tags.SkipReasonGone})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 const (
 	codeBulkNoPreferences      = "bulk_no_preferences"
 	codeBulkPreferenceConflict = "bulk_preference_conflict"

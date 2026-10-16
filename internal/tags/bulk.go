@@ -2,8 +2,11 @@ package tags
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/danielrpof/drop-tracker/internal/db/sqlc"
 )
@@ -67,15 +70,8 @@ func (s *Service) BulkAttach(ctx context.Context, entryIDs []int64, name string)
 		entryByArtist[row.ArtistID] = row
 		artistIDs = append(artistIDs, row.ArtistID)
 	}
-	seen := make(map[int64]struct{}, len(entryIDs))
-	for _, id := range entryIDs {
-		if _, dup := seen[id]; dup {
-			continue
-		}
-		seen[id] = struct{}{}
-		if _, ok := found[id]; !ok {
-			result.Skipped = append(result.Skipped, BulkSkip{ID: id, Reason: SkipReasonGone})
-		}
+	for _, id := range goneIDs(entryIDs, found) {
+		result.Skipped = append(result.Skipped, BulkSkip{ID: id, Reason: SkipReasonGone})
 	}
 
 	if len(artistIDs) > 0 {
@@ -113,5 +109,60 @@ func (s *Service) BulkAttach(ctx context.Context, entryIDs []int64, name string)
 		return BulkAttachResult{}, fmt.Errorf("commit bulk attach tx: %w", err)
 	}
 	result.Tag = Tag{ID: tag.ID, Name: tag.Name}
+	return result, nil
+}
+
+// goneIDs returns the distinct requested ids absent from found, in request order.
+func goneIDs(requested []int64, found map[int64]struct{}) []int64 {
+	seen := make(map[int64]struct{}, len(requested))
+	gone := []int64{}
+	for _, id := range requested {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, ok := found[id]; !ok {
+			gone = append(gone, id)
+		}
+	}
+	return gone
+}
+
+// BulkDetachResult is the outcome of BulkDetach. Applied is exactly the
+// entries whose link was deleted, which is what Undo re-adds.
+type BulkDetachResult struct {
+	Applied []int64
+	Gone    []int64
+}
+
+// BulkDetach removes one tag from many entries' artists in a single statement.
+// A tag gone before the lookup is ErrTagNotFound (D-22); gone in the gap is zero carriers.
+func (s *Service) BulkDetach(ctx context.Context, entryIDs []int64, tagID int64) (BulkDetachResult, error) {
+	result := BulkDetachResult{Applied: []int64{}, Gone: []int64{}}
+	if len(entryIDs) == 0 {
+		return result, nil
+	}
+
+	if _, err := s.q.GetTagByID(ctx, tagID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return BulkDetachResult{}, ErrTagNotFound
+		}
+		return BulkDetachResult{}, fmt.Errorf("resolve tag: %w", err)
+	}
+
+	rows, err := s.q.BulkDetachTag(ctx, sqlc.BulkDetachTagParams{EntryIds: entryIDs, TagID: tagID})
+	if err != nil {
+		return BulkDetachResult{}, fmt.Errorf("bulk detach tag: %w", err)
+	}
+	found := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		found[row.EntryID] = struct{}{}
+		if row.Removed {
+			result.Applied = append(result.Applied, row.EntryID)
+		}
+	}
+	result.Gone = goneIDs(entryIDs, found)
+	slices.Sort(result.Applied)
+	slices.Sort(result.Gone)
 	return result, nil
 }

@@ -59,3 +59,19 @@ WITH locked AS MATERIALIZED (
   RETURNING w.id
 )
 SELECT l.id AS id FROM locked l ORDER BY l.id;
+
+-- name: GetTagByID :one
+SELECT id, name FROM tags WHERE id = $1;
+
+-- name: BulkDetachTag :many
+-- Deletes the tag's links on the selected entries' artists; removed marks entries that carried it.
+WITH existing AS (
+  SELECT w.id, w.artist_id FROM watchlist w WHERE w.id = ANY(@entry_ids::bigint[])
+), removed AS (
+  DELETE FROM artist_tags l
+  WHERE l.tag_id = @tag_id::bigint AND l.artist_id IN (SELECT artist_id FROM existing)
+  RETURNING l.artist_id
+)
+SELECT e.id AS entry_id,
+       (e.artist_id IN (SELECT artist_id FROM removed))::boolean AS removed
+FROM existing e ORDER BY e.id;

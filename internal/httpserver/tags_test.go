@@ -606,6 +606,9 @@ type fakeTagStore struct {
 
 	bulkAttachFunc  func(ctx context.Context, entryIDs []int64, name string) (tags.BulkAttachResult, error)
 	bulkAttachCalls *int32
+
+	bulkDetachFunc  func(ctx context.Context, entryIDs []int64, tagID int64) (tags.BulkDetachResult, error)
+	bulkDetachCalls *int32
 }
 
 func (f fakeTagStore) Attach(ctx context.Context, entryID int64, name string) (tags.AttachResult, error) {
@@ -673,6 +676,16 @@ func (f fakeTagStore) BulkAttach(ctx context.Context, entryIDs []int64, name str
 		return f.bulkAttachFunc(ctx, entryIDs, name)
 	}
 	return tags.BulkAttachResult{Tag: tags.Tag{ID: 1, Name: name}, Applied: entryIDs, Skipped: []tags.BulkSkip{}}, nil
+}
+
+func (f fakeTagStore) BulkDetach(ctx context.Context, entryIDs []int64, tagID int64) (tags.BulkDetachResult, error) {
+	if f.bulkDetachCalls != nil {
+		atomic.AddInt32(f.bulkDetachCalls, 1)
+	}
+	if f.bulkDetachFunc != nil {
+		return f.bulkDetachFunc(ctx, entryIDs, tagID)
+	}
+	return tags.BulkDetachResult{Applied: entryIDs, Gone: []int64{}}, nil
 }
 
 var _ httpserver.TagStore = fakeTagStore{}
@@ -1690,5 +1703,128 @@ func TestBulkTags_AddSkipWireShape(t *testing.T) {
 	_, raw = postBulkAddTag(t, empty, `{"ids":[1],"name":"rap"}`)
 	if !strings.Contains(string(raw), `"applied":[]`) || !strings.Contains(string(raw), `"skipped":[]`) {
 		t.Fatalf("body %s must encode empty arrays, not null", raw)
+	}
+}
+
+// --- Bulk remove tag (BULK-02) ---
+
+type bulkRemoveTagWire struct {
+	Applied []int64          `json:"applied"`
+	Carried int              `json:"carried"`
+	Skipped []map[string]any `json:"skipped"`
+}
+
+func postBulkRemoveTag(t *testing.T, ts *httptest.Server, body string) (*http.Response, []byte) {
+	t.Helper()
+	resp, err := http.Post(ts.URL+"/watchlist/bulk/tags/remove", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /watchlist/bulk/tags/remove: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp, raw
+}
+
+func TestBulkTags_RemoveEndToEnd(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "bulk_tags_http_test")
+	ctx := context.Background()
+
+	watchlistSvc := watchlist.NewService(sqlc.New(pool))
+	tagsSvc := tags.NewService(pool)
+	srv := httpserver.New(pool, watchlistSvc, stubEventsStore{}, nil, discardLogger(), httpserver.WithTags(tagsSvc))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	add := func(suffix, name string) watchlist.Entry {
+		e, err := watchlistSvc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + "-" + suffix, Name: name})
+		if err != nil {
+			t.Fatalf("seed %s: %v", suffix, err)
+		}
+		return e
+	}
+	a := add("a", "Carrier One")
+	b := add("b", "Other Tag Artist")
+	c := add("c", "Carrier Two")
+	d := add("d", "Unselected Carrier")
+	e := add("e", "Gone Artist")
+
+	var beat tags.Tag
+	for _, id := range []int64{a.ID, c.ID, d.ID} {
+		res, err := tagsSvc.Attach(ctx, id, "beat")
+		if err != nil {
+			t.Fatalf("attach beat to %d: %v", id, err)
+		}
+		beat = res.Tag
+	}
+	if _, err := tagsSvc.Attach(ctx, b.ID, "other"); err != nil {
+		t.Fatalf("attach other: %v", err)
+	}
+	if err := watchlistSvc.Remove(ctx, e.ID); err != nil {
+		t.Fatalf("remove E: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"ids":[%d,%d,%d,%d],"tag_id":%d}`, a.ID, b.ID, c.ID, e.ID, beat.ID)
+	resp, raw := postBulkRemoveTag(t, ts, body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, raw)
+	}
+	var got bulkRemoveTagWire
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if want := []int64{a.ID, c.ID}; !reflect.DeepEqual(got.Applied, want) {
+		t.Fatalf("applied = %v, want %v", got.Applied, want)
+	}
+	if got.Carried != 2 {
+		t.Fatalf("carried = %d, want 2", got.Carried)
+	}
+	wantSkipped := []map[string]any{{"id": float64(e.ID), "reason": "gone"}}
+	if !reflect.DeepEqual(got.Skipped, wantSkipped) {
+		t.Fatalf("skipped = %v, want %v", got.Skipped, wantSkipped)
+	}
+
+	listResp, err := http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET /watchlist: %v", err)
+	}
+	defer func() { _ = listResp.Body.Close() }()
+	var entries []watchlistTagsEntryBody
+	if err := json.NewDecoder(listResp.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	has := func(e watchlistTagsEntryBody, name string) bool {
+		return slices.ContainsFunc(e.Tags, func(tg tagWire) bool { return tg.Name == name })
+	}
+	for _, en := range entries {
+		switch en.ID {
+		case a.ID, c.ID:
+			if has(en, "beat") {
+				t.Fatalf("entry %d still carries beat: %+v", en.ID, en.Tags)
+			}
+		case b.ID:
+			if !has(en, "other") {
+				t.Fatalf("non-carrier lost its other tag: %+v", en.Tags)
+			}
+		case d.ID:
+			if !has(en, "beat") {
+				t.Fatalf("unselected carrier lost beat: %+v", en.Tags)
+			}
+		}
+	}
+
+	tagsResp, err := http.Get(ts.URL + "/tags")
+	if err != nil {
+		t.Fatalf("GET /tags: %v", err)
+	}
+	defer func() { _ = tagsResp.Body.Close() }()
+	var vocab []tagWire
+	if err := json.NewDecoder(tagsResp.Body).Decode(&vocab); err != nil {
+		t.Fatalf("decode tags: %v", err)
+	}
+	if !slices.ContainsFunc(vocab, func(tg tagWire) bool { return tg.Name == "beat" }) {
+		t.Fatalf("beat missing from /tags after bulk remove: %+v", vocab)
 	}
 }
