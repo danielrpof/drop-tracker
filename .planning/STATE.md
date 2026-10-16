@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 26
 current_phase_name: Bulk Edit & Remove
 status: executing
-stopped_at: Completed 26-05-PLAN.md
-last_updated: "2026-10-16T22:44:53.050Z"
+stopped_at: Completed 26-06-PLAN.md
+last_updated: "2026-10-16T22:53:44.819Z"
 last_activity: 2026-10-16
 last_activity_desc: Phase 26 execution started
-state_head: 697ae05a74b7fc2c84afb4d049a9f033b5ec69e2
+state_head: deddf810c9f8c3e9a4c55a1754a8bf4042d12192
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 47
-  completed_plans: 40
+  completed_plans: 41
   percent: 40
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 26 (Bulk Edit & Remove) — EXECUTING
-Plan: 6 of 12
+Plan: 7 of 12
 Status: Ready to execute
 Last activity: 2026-10-16 — Phase 26 execution started
 
@@ -189,6 +189,7 @@ Last activity: 2026-10-16 — Phase 26 execution started
 | Phase 26 P03 | 8 min | 2 tasks | 8 files |
 | Phase 26 P04 | 10min | 3 tasks | 5 files |
 | Phase 26 P05 | 12min | 3 tasks | 8 files |
+| Phase 26 P06 | 12min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -439,6 +440,7 @@ Recent decisions affecting current work:
 - [Phase 26]: 26-03: confirmRemove records the outcome in a ref; the dialog close handler applies it (close, then clear) so the route-hosted dialog never unmounts with the bar
 - [Phase 26]: 26-04: Select all visible name comes from its wrapping label text only; disabled Base UI checkboxes expose data-disabled
 - [Phase 26]: 26-05: bulk preferences is PATCH /watchlist/bulk/preferences; omitted axis means empty lists; validation precedes empty-ids shortcut
+- [Phase 26]: 26-06: finalFocus function reads a close-kind ref so focus target is chosen at close; pendingFocus effect is a backstop
 
 ### Pending Todos
 
@@ -534,8 +536,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-16T22:44:52.882Z
-Stopped at: Completed 26-05-PLAN.md
+Last session: 2026-10-16T22:53:44.657Z
+Stopped at: Completed 26-06-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
