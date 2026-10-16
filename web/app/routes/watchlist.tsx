@@ -500,7 +500,17 @@ export default function Watchlist() {
     setSelectedIds(EMPTY_IDS)
   }
 
+  // `max` comes from the response body; Go and TS share no constant.
   function showBulkFailure(error: unknown, fallbackMessage: string) {
+    if (error instanceof ApiError && error.code === "bulk_too_many_ids") {
+      const max = (error.body as { max?: unknown } | undefined)?.max
+      if (typeof max === "number") {
+        toast.error(
+          `Too many artists selected — select at most ${max} and try again.`
+        )
+        return
+      }
+    }
     toast.error(fallbackMessage)
   }
 

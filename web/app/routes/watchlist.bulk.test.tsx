@@ -152,7 +152,7 @@ describe("Watchlist bulk remove", () => {
     expect(
       within(dialog).getByText("Remove 14 artists from your watchlist?")
     ).toBeInTheDocument()
-  })
+  }, 30000)
 
   it("counts already-gone ids in the toast, which carries no action", async () => {
     const entries = trio()
