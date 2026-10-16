@@ -26,13 +26,26 @@ const entry: WatchlistEntry = {
 
 function renderCombobox(
   vocabulary: TagRef[] | null = null,
-  overrides: { onArtist?: TagRef[]; pendingNames?: string[] } = {}
+  overrides: {
+    onArtist?: TagRef[]
+    pendingNames?: string[]
+    inputLabel?: string
+    alreadyOnMessage?: (name: string) => string
+    disabled?: boolean
+    inputClassName?: string
+  } = {}
 ) {
   const onCommit = vi.fn()
   const onClose = vi.fn()
   render(
     <TagCombobox
-      entry={entry}
+      inputLabel={overrides.inputLabel ?? `Add tag to ${entry.name}`}
+      alreadyOnMessage={
+        overrides.alreadyOnMessage ??
+        ((name) => `“${name}” is already on this artist`)
+      }
+      disabled={overrides.disabled}
+      inputClassName={overrides.inputClassName}
       vocabulary={vocabulary}
       onArtist={overrides.onArtist ?? []}
       pendingNames={overrides.pendingNames ?? []}
@@ -206,5 +219,43 @@ describe("TagCombobox", () => {
     await userEvent.type(input, "latin{Enter}")
 
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("names the input from inputLabel", () => {
+    renderCombobox(null, { inputLabel: "Add tag to 2 selected artists" })
+
+    expect(
+      screen.getByRole("combobox", { name: "Add tag to 2 selected artists" })
+    ).toBeInTheDocument()
+  })
+
+  it("renders alreadyOnMessage(name) when the typed tag is already on the artist", async () => {
+    renderCombobox([{ id: 1, name: "latin" }], {
+      onArtist: [{ id: 1, name: "latin" }],
+      alreadyOnMessage: (name) =>
+        `“${name}” is already on every selected artist`,
+    })
+
+    await userEvent.type(screen.getByRole("combobox"), "latin")
+
+    expect(
+      await screen.findByText(/^“latin” is already on every selected artist/)
+    ).toBeInTheDocument()
+  })
+
+  it("disables the input when disabled is set", () => {
+    renderCombobox(null, { disabled: true })
+
+    expect(screen.getByLabelText("Add tag to Drake")).toBeDisabled()
+  })
+
+  it("merges inputClassName into the input's group classes", () => {
+    renderCombobox(null, { inputClassName: "sm:w-60" })
+
+    // ComboboxInput applies className to its input-group wrapper.
+    const wrapper = screen
+      .getByRole("combobox")
+      .closest('[data-slot="input-group"]')
+    expect(wrapper).toHaveClass("sm:w-60")
   })
 })

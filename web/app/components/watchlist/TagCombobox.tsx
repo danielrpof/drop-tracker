@@ -10,7 +10,7 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "~/components/ui/combobox"
-import type { TagRef, WatchlistEntry } from "~/lib/api"
+import type { TagRef } from "~/lib/api"
 import { cn } from "~/lib/utils"
 import {
   MAX_TAG_LENGTH,
@@ -20,10 +20,8 @@ import {
 import { buildTagSuggestions, type TagSuggestion } from "~/lib/tags"
 
 export interface TagComboboxProps {
-  // The card passes `entry`; the bulk bar passes the label and copy instead.
-  entry?: WatchlistEntry
-  inputLabel?: string
-  alreadyOnMessage?: (name: string) => string
+  inputLabel: string
+  alreadyOnMessage: (name: string) => string
   disabled?: boolean
   inputClassName?: string
   vocabulary: TagRef[] | null
@@ -51,7 +49,6 @@ const DISMISS_REASONS = new Set([
 // TagCombobox is the "+ tag" editor (TAG-01): a creatable base-ui Combobox
 // that only renders what buildTagSuggestions returns.
 export function TagCombobox({
-  entry,
   inputLabel,
   alreadyOnMessage,
   disabled,
@@ -141,7 +138,7 @@ export function TagCombobox({
       <div className="flex items-center gap-1">
         <ComboboxInput
           placeholder="Tag name"
-          aria-label={inputLabel ?? `Add tag to ${entry?.name}`}
+          aria-label={inputLabel}
           aria-describedby={counterId}
           className={cn("h-8 w-full max-w-60 text-label", inputClassName)}
           disabled={disabled}
@@ -186,10 +183,7 @@ export function TagCombobox({
         </ComboboxList>
         <ComboboxEmpty>
           {suggestions.state === "already-on"
-            ? (
-                alreadyOnMessage ??
-                ((name) => `“${name}” is already on this artist`)
-              )(suggestions.name)
+            ? alreadyOnMessage(suggestions.name)
             : overLimit
               ? `Tags can be at most ${MAX_TAG_LENGTH} characters.`
               : "Type a name to create a tag"}
