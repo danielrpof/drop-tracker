@@ -3,9 +3,11 @@ import { Tags } from "lucide-react"
 import { NavigationType, useLocation, useNavigationType } from "react-router"
 import { toast } from "sonner"
 
+import { ConfirmDialog } from "~/components/common/ConfirmDialog"
 import { EmptyState } from "~/components/common/EmptyState"
 import { Button } from "~/components/ui/button"
 import { Skeleton } from "~/components/ui/skeleton"
+import { BulkActionBar } from "~/components/watchlist/BulkActionBar"
 import { ManageTagsDialog } from "~/components/watchlist/ManageTagsDialog"
 import { SearchBox } from "~/components/watchlist/SearchBox"
 import { SearchResultsColumns } from "~/components/watchlist/SearchResultsColumns"
@@ -16,11 +18,14 @@ import {
   type SearchArtist,
   type SearchResponse,
   type TagRef,
+  type BulkRemoveOutcome,
   type WatchlistEntry,
   addWatchlist,
+  bulkRemoveWatchlist,
   listWatchlist,
   removeWatchlist,
 } from "~/lib/api"
+import { formatAlreadyRemoved, formatNameList } from "~/lib/format"
 import { isAddableSource } from "~/lib/sources"
 import { useScrollAnchor } from "~/lib/useScrollAnchor"
 import { useUrlParams } from "~/lib/useUrlParams"
@@ -59,6 +64,17 @@ import {
 const Q_WRITE_DEBOUNCE_MS = 300
 const COUNT_ANNOUNCE_DEBOUNCE_MS = 500
 
+const BULK_REMOVE_FAILED =
+  "Couldn't remove the selected artists — nothing was removed. Try again."
+
+type RemoveOutcome =
+  | { ok: true; out: BulkRemoveOutcome }
+  | { ok: false; error: unknown }
+
+function plural(n: number): string {
+  return n === 1 ? "" : "s"
+}
+
 function filterKeyOf(view: WatchlistView): string {
   return `${view.sort}|${view.tagIds.join(",")}|${view.muted}|${view.custom}`
 }
@@ -71,6 +87,16 @@ export default function Watchlist() {
   )
   const [statusMessage, setStatusMessage] = useState("")
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
+  // Never trimmed to the visible set; the effective selection is derived (D-11).
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(EMPTY_IDS)
+  const [bulkInFlight, setBulkInFlight] = useState(false)
+  // ids and names are snapshotted at open and kept while the dialog closes.
+  const [removeConfirm, setRemoveConfirm] = useState<{
+    open: boolean
+    ids: number[]
+    names: string[]
+  }>({ open: false, ids: [], names: [] })
+  const removeOutcomeRef = useRef<RemoveOutcome | null>(null)
 
   const { params, write } = useUrlParams()
   const location = useLocation()
@@ -460,6 +486,65 @@ export default function Watchlist() {
     })
   }
 
+  function handleSelectChange(id: number, next: boolean) {
+    setSelectedIds((prev) => {
+      if (prev.has(id) === next) return prev
+      const out = new Set(prev)
+      if (next) out.add(id)
+      else out.delete(id)
+      return out
+    })
+  }
+
+  function finishBulkSuccess() {
+    setSelectedIds(EMPTY_IDS)
+  }
+
+  function showBulkFailure(error: unknown, fallbackMessage: string) {
+    toast.error(fallbackMessage)
+  }
+
+  function openRemoveConfirm() {
+    setRemoveConfirm({
+      open: true,
+      ids: effective.map((e) => e.id),
+      names: effective.map((e) => e.name),
+    })
+  }
+
+  // Never throws and never touches selection or entries: those wait for the
+  // dialog to close (U1).
+  async function confirmRemove() {
+    setBulkInFlight(true)
+    try {
+      const out = await bulkRemoveWatchlist(removeConfirm.ids)
+      removeOutcomeRef.current = { ok: true, out }
+    } catch (error) {
+      removeOutcomeRef.current = { ok: false, error }
+    }
+  }
+
+  function handleRemoveDialogOpenChange(open: boolean) {
+    if (open) return
+    const outcome = removeOutcomeRef.current
+    removeOutcomeRef.current = null
+    setRemoveConfirm((prev) => ({ ...prev, open: false }))
+    setBulkInFlight(false)
+    if (!outcome) return
+    if (!outcome.ok) {
+      showBulkFailure(outcome.error, BULK_REMOVE_FAILED)
+      return
+    }
+    const gone = new Set([...outcome.out.removed, ...outcome.out.already_gone])
+    setEntries((rows) => (rows ? rows.filter((r) => !gone.has(r.id)) : rows))
+    finishBulkSuccess()
+    const g = outcome.out.already_gone.length
+    const msg = `Removed ${gone.size} artist${plural(gone.size)} from your watchlist.`
+    if (g > 0) toast.success(msg, { description: formatAlreadyRemoved(g) })
+    else toast.success(msg)
+    refresh()
+  }
+
   if (entries) {
     for (const r of entries) {
       for (const t of r.tags) tagNamesRef.current.set(t.id, t.name)
@@ -481,6 +566,7 @@ export default function Watchlist() {
     ? selectVisible(entries, { ...view, q: query }, stickyIds)
     : []
   countRef.current = { n: visible.length, m: entries?.length ?? 0 }
+  const effective = visible.filter((e) => selectedIds.has(e.id))
 
   function handleTagsChange(ids: number[]) {
     write((p) => {
@@ -554,6 +640,29 @@ export default function Watchlist() {
         <ManageTagsDialog
           open={manageTagsOpen}
           onOpenChange={setManageTagsOpen}
+        />
+
+        <ConfirmDialog
+          open={removeConfirm.open}
+          onOpenChange={handleRemoveDialogOpenChange}
+          title={
+            removeConfirm.ids.length === 1
+              ? `Remove ${removeConfirm.names[0]} from your watchlist?`
+              : `Remove ${removeConfirm.ids.length} artists from your watchlist?`
+          }
+          description={
+            removeConfirm.ids.length === 1
+              ? "Their note is deleted but their tags are kept; alerts already found for them may still be sent, and re-adding them later may alert you about releases from while they were removed."
+              : `${formatNameList(removeConfirm.names)}. Their notes are deleted but their tags are kept; alerts already found for them may still be sent, and re-adding any of them later may alert you about releases from while they were removed.`
+          }
+          actionLabel={
+            removeConfirm.ids.length === 1
+              ? "Remove 1 artist"
+              : `Remove ${removeConfirm.ids.length} artists`
+          }
+          pendingLabel="Removing…"
+          variant="destructive"
+          onConfirm={confirmRemove}
         />
 
         <div className="flex flex-col gap-6">
@@ -647,9 +756,20 @@ export default function Watchlist() {
                       toggleFilterTag,
                     }}
                     announce={announce}
+                    selected={selectedIds.has(entry.id)}
+                    selectionDisabled={bulkInFlight}
+                    onSelectChange={handleSelectChange}
                   />
                 ))}
               </ul>
+            )}
+            {effective.length > 0 && (
+              <BulkActionBar
+                selected={effective}
+                inFlight={bulkInFlight}
+                onRemove={openRemoveConfirm}
+                onClear={() => setSelectedIds(EMPTY_IDS)}
+              />
             )}
           </section>
         )}

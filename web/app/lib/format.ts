@@ -201,3 +201,18 @@ export function formatPollInterval(seconds: number): string {
   }
   return `${seconds} seconds`
 }
+
+// formatNameList joins names for confirm dialogs: "A", "A and B",
+// "A, B and C", then the first `max` plus "and {r} more".
+export function formatNameList(names: readonly string[], max = 3): string {
+  if (names.length <= 1) return names.join("")
+  if (names.length <= max) {
+    return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+  }
+  return `${names.slice(0, max).join(", ")} and ${names.length - max} more`
+}
+
+// formatAlreadyRemoved is the bulk-remove note for ids that were already gone.
+export function formatAlreadyRemoved(count: number): string {
+  return `${count} ${count === 1 ? "artist was" : "artists were"} already removed from your watchlist.`
+}

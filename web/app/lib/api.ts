@@ -364,6 +364,23 @@ export async function removeWatchlist(id: number): Promise<void> {
   await apiFetch<void>(`/watchlist/${id}`, { method: "DELETE" })
 }
 
+export interface BulkRemoveOutcome {
+  removed: number[]
+  already_gone: number[]
+}
+
+// bulkRemoveWatchlist deletes many entries in one request (BULK-04); ids
+// already gone come back in already_gone rather than failing the call.
+export async function bulkRemoveWatchlist(
+  ids: number[]
+): Promise<BulkRemoveOutcome> {
+  return apiFetch<BulkRemoveOutcome>("/watchlist/bulk/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  })
+}
+
 // detachTag removes one tag from an entry (TAG-02); idempotent server-side,
 // so an already-gone link still resolves 204.
 export async function detachTag(entryId: number, tagId: number): Promise<void> {
