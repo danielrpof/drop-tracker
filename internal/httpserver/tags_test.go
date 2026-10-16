@@ -1485,3 +1485,210 @@ func TestBulkTags_AddEndToEnd(t *testing.T) {
 		}
 	}
 }
+
+func postBulkAddTag(t *testing.T, ts *httptest.Server, body string) (*http.Response, []byte) {
+	t.Helper()
+	resp, err := http.Post(ts.URL+"/watchlist/bulk/tags/add", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /watchlist/bulk/tags/add: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp, raw
+}
+
+func TestBulkTags_AddGated401NoCookie(t *testing.T) {
+	var calls int32
+	ts := newTagsServer(t, tagsServerOpts{passphrase: settingsTestPassphrase, store: fakeTagStore{bulkAttachCalls: &calls}})
+
+	resp, _ := postBulkAddTag(t, ts, `{"ids":[1],"name":"rap"}`)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("store.BulkAttach called %d times, want 0", got)
+	}
+}
+
+func TestBulkTags_AddGatedForbiddenWithoutCSRFHeader(t *testing.T) {
+	var calls int32
+	ts := newTagsServer(t, tagsServerOpts{passphrase: settingsTestPassphrase, store: fakeTagStore{bulkAttachCalls: &calls}})
+	cookie := loginForSettings(t, ts)
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/watchlist/bulk/tags/add", strings.NewReader(`{"ids":[1],"name":"rap"}`))
+	if err != nil {
+		t.Fatalf("build POST: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("store.BulkAttach called %d times, want 0", got)
+	}
+}
+
+func TestBulkTags_AddUnavailableWithoutTags(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{omitTags: true})
+
+	resp, raw := postBulkAddTag(t, ts, `{"ids":[1],"name":"rap"}`)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	var eb errorBody
+	if err := json.Unmarshal(raw, &eb); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if eb.Error != "tags not available" {
+		t.Fatalf("error = %q, want %q", eb.Error, "tags not available")
+	}
+}
+
+// The literal bulk path must reach BulkAttach, never POST /watchlist/{id}/tags.
+func TestBulkTags_AddReachesBulkHandler(t *testing.T) {
+	var bulkCalls, attachCalls int32
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkAttachCalls: &bulkCalls, attachCalls: &attachCalls}})
+
+	resp, _ := postBulkAddTag(t, ts, `{"ids":[4],"name":"rap"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&bulkCalls); got != 1 {
+		t.Fatalf("BulkAttach called %d times, want 1", got)
+	}
+	if got := atomic.LoadInt32(&attachCalls); got != 0 {
+		t.Fatalf("Attach called %d times, want 0", got)
+	}
+}
+
+func TestBulkTags_AddValidation(t *testing.T) {
+	manyIDs := make([]string, 1001)
+	for i := range manyIDs {
+		manyIDs[i] = strconv.Itoa(i + 1)
+	}
+
+	t.Run("rejected before the store", func(t *testing.T) {
+		cases := []struct {
+			name, body, code string
+		}{
+			{"empty ids", `{"ids":[],"name":"rap"}`, "bulk_ids_required"},
+			{"too many ids", `{"ids":[` + strings.Join(manyIDs, ",") + `],"name":"rap"}`, "bulk_too_many_ids"},
+			{"unknown field", `{"ids":[1],"name":"rap","extra":1}`, ""},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				var calls int32
+				ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkAttachCalls: &calls}})
+				resp, raw := postBulkAddTag(t, ts, tc.body)
+				if resp.StatusCode != http.StatusBadRequest {
+					t.Fatalf("status = %d, want 400", resp.StatusCode)
+				}
+				var eb errorBody
+				if err := json.Unmarshal(raw, &eb); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				if eb.Code != tc.code {
+					t.Fatalf("code = %q, want %q", eb.Code, tc.code)
+				}
+				if tc.code == "bulk_too_many_ids" {
+					var limit struct {
+						Max int `json:"max"`
+					}
+					if err := json.Unmarshal(raw, &limit); err != nil || limit.Max != 1000 {
+						t.Fatalf("body %s lacks max 1000", raw)
+					}
+				}
+				if got := atomic.LoadInt32(&calls); got != 0 {
+					t.Fatalf("store called %d times, want 0", got)
+				}
+			})
+		}
+	})
+
+	t.Run("store errors map through tagErrors", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			err    error
+			status int
+			code   string
+		}{
+			{"name required", tags.ErrNameRequired, http.StatusBadRequest, "tag_name_required"},
+			{"name too long", tags.ErrNameTooLong, http.StatusBadRequest, "tag_name_too_long"},
+			{"cap reached", tags.ErrTagCapReached, http.StatusConflict, "tag_cap_reached"},
+			{"unmapped", errors.New("pq: secret detail"), http.StatusInternalServerError, ""},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkAttachFunc: func(context.Context, []int64, string) (tags.BulkAttachResult, error) {
+					return tags.BulkAttachResult{}, tc.err
+				}}})
+				resp, raw := postBulkAddTag(t, ts, `{"ids":[1],"name":"rap"}`)
+				if resp.StatusCode != tc.status {
+					t.Fatalf("status = %d, want %d", resp.StatusCode, tc.status)
+				}
+				var eb errorBody
+				if err := json.Unmarshal(raw, &eb); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				if eb.Code != tc.code {
+					t.Fatalf("code = %q, want %q", eb.Code, tc.code)
+				}
+				if tc.status == http.StatusInternalServerError {
+					if eb.Error != "internal error" || strings.Contains(string(raw), "secret detail") {
+						t.Fatalf("body %s leaks the error text", raw)
+					}
+				}
+			})
+		}
+	})
+}
+
+func TestBulkTags_AddSkipWireShape(t *testing.T) {
+	ts := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkAttachFunc: func(context.Context, []int64, string) (tags.BulkAttachResult, error) {
+		return tags.BulkAttachResult{
+			Tag:     tags.Tag{ID: 7, Name: "rap"},
+			Applied: []int64{1},
+			Skipped: []tags.BulkSkip{
+				{ID: 2, Name: "Drake", Reason: tags.SkipReasonCap},
+				{ID: 3, Reason: tags.SkipReasonGone},
+			},
+		}, nil
+	}}})
+
+	resp, raw := postBulkAddTag(t, ts, `{"ids":[1,2,3],"name":"rap"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		Skipped []map[string]any `json:"skipped"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Skipped) != 2 {
+		t.Fatalf("skipped = %v, want 2 entries", got.Skipped)
+	}
+	if got.Skipped[0]["name"] != "Drake" || got.Skipped[0]["reason"] != "cap" {
+		t.Fatalf("cap skip = %v, want name Drake and reason cap", got.Skipped[0])
+	}
+	if _, has := got.Skipped[1]["name"]; has {
+		t.Fatalf("gone skip %v carries a name key", got.Skipped[1])
+	}
+
+	empty := newTagsServer(t, tagsServerOpts{store: fakeTagStore{bulkAttachFunc: func(context.Context, []int64, string) (tags.BulkAttachResult, error) {
+		return tags.BulkAttachResult{Tag: tags.Tag{Name: "rap"}}, nil
+	}}})
+	_, raw = postBulkAddTag(t, empty, `{"ids":[1],"name":"rap"}`)
+	if !strings.Contains(string(raw), `"applied":[]`) || !strings.Contains(string(raw), `"skipped":[]`) {
+		t.Fatalf("body %s must encode empty arrays, not null", raw)
+	}
+}

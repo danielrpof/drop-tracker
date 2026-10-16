@@ -83,3 +83,10 @@ The gap: the skip-existing checks only tested visibility, so a link being delete
 The fix: 000012 locks the existing link `FOR KEY SHARE`. That lock waits for an in-flight delete or key-changing update, and when the row is gone it falls through to the artist lock and the count. Uncommitted inserts stay invisible, so two same-tag attaches at 9 still both succeed.
 With this, the 000011 amendment's "every way a link can reach an artist" also holds under concurrency.
 Pinned by `TestSchema_TagCapTrigger_ConcurrentDetachRace`, `TestSchema_TagCapTrigger_DistinctTagConcurrentAt9`, and `TestSchema_Migration000012_DownUpRoundTrip`.
+
+## Amendment (Phase 26): bulk attach
+
+Bulk attach first locks the target artist rows `FOR NO KEY UPDATE`, ordered by artist id, in its own statement. That is the lock mode the trigger takes, and a transaction never conflicts with itself, so the trigger's lock is then free. The fixed id order means two overlapping bulk attaches cannot deadlock.
+The guarded insert is a separate statement, so its link count reads a fresh READ COMMITTED snapshot after the locks are granted. Without the pre-lock, a concurrent 10th link aborted the whole batch (reproduced in Phase 26 research). The trigger remains the backstop.
+When no selected artist ends up carrying the tag, the transaction rolls back, so a tag created on the fly is never orphaned.
+Pinned by `TestService_BulkAttach_ConcurrentOverlappingNoDeadlock`, `TestService_BulkAttach_WaitsOnConcurrentTenthLink`, and `TestService_BulkAttach_AllCappedLeavesNoTag`.
