@@ -6,6 +6,7 @@ import {
   cycleTriState,
   effectiveSelection,
   initialTriStates,
+  removableTags,
   selectAllState,
   tagsOnEvery,
   toggleAllVisible,
@@ -262,5 +263,49 @@ describe("buildAxisDelta", () => {
     expect(
       buildAxisDelta(types, initial, { ...initial, ep: "indeterminate" })
     ).toEqual({ set: [], unset: [] })
+  })
+})
+
+describe("removableTags", () => {
+  const tag = (id: number, name: string) => ({ id, name })
+
+  it("is empty when no selected artist has a tag", () => {
+    expect(removableTags([])).toEqual([])
+    expect(removableTags([makeEntry({ id: 1, name: "Drake" })])).toEqual([])
+  })
+
+  it("returns the union of carried tags with carrier counts", () => {
+    const x = tag(1, "x")
+    const y = tag(2, "y")
+    expect(
+      removableTags([
+        makeEntry({ id: 1, name: "A", tags: [x, y] }),
+        makeEntry({ id: 2, name: "B", tags: [x] }),
+        makeEntry({ id: 3, name: "C" }),
+      ])
+    ).toEqual([
+      { id: 1, name: "x", count: 2 },
+      { id: 2, name: "y", count: 1 },
+    ])
+  })
+
+  it("orders by the collator and breaks name ties by id", () => {
+    const out = removableTags([
+      makeEntry({
+        id: 1,
+        name: "A",
+        tags: [tag(1, "trap"), tag(2, "beat"), tag(3, "Rap"), tag(9, "rap")],
+      }),
+    ])
+    expect(out.map((t) => t.id)).toEqual([2, 3, 9, 1])
+  })
+
+  it("keeps the last-seen name for an id", () => {
+    expect(
+      removableTags([
+        makeEntry({ id: 1, name: "A", tags: [tag(1, "old")] }),
+        makeEntry({ id: 2, name: "B", tags: [tag(1, "new")] }),
+      ])
+    ).toEqual([{ id: 1, name: "new", count: 2 }])
   })
 })

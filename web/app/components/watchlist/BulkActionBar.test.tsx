@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event"
 import { createRef } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { listTags, type BulkAddTagOutcome, type BulkOutcome } from "~/lib/api"
+import {
+  listTags,
+  type BulkAddTagOutcome,
+  type BulkOutcome,
+  type BulkRemoveTagOutcome,
+} from "~/lib/api"
 import { TagVocabularyProvider } from "~/lib/useTagVocabulary"
 import { makeEntry } from "~/lib/test/fixtures"
 
@@ -506,5 +511,174 @@ describe("BulkActionBar preferences popover", () => {
     expect(
       screen.getByRole("button", { name: "Add tag", hidden: true })
     ).toBeDisabled()
+  })
+})
+
+describe("BulkActionBar inline remove-tag mode", () => {
+  const rap = { id: 7, name: "rap" }
+  const trap = { id: 8, name: "trap" }
+  const beat = { id: 9, name: "beat" }
+  const pair = () => [
+    makeEntry({ id: 1, name: "Drake", tags: [rap, trap, beat] }),
+    makeEntry({ id: 2, name: "SZA", tags: [rap] }),
+  ]
+  const removeTagButton = () =>
+    screen.getByRole("button", { name: "Remove tag" })
+  const texts = () => screen.getAllByRole("option").map((o) => o.textContent)
+
+  async function openPicker(overrides: Partial<BulkActionBarProps> = {}) {
+    renderBar({ selected: pair(), ...overrides })
+    await userEvent.click(removeTagButton())
+    return screen.findByRole("combobox")
+  }
+
+  it("orders the idle controls Add tag, Remove tag, Preferences, Remove, Clear", () => {
+    renderBar()
+    const region = screen.getByRole("region", { name: "Selection actions" })
+    expect(
+      within(region)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("title"))
+    ).toEqual([
+      "Add tag",
+      "Remove tag",
+      "Preferences",
+      "Remove",
+      "Clear selection",
+    ])
+    expect(screen.getByText("Remove tag")).toHaveClass(
+      "sr-only",
+      "sm:not-sr-only"
+    )
+  })
+
+  it("names the input by count and swaps the other actions for Cancel", async () => {
+    const input = await openPicker()
+
+    expect(input).toHaveAccessibleName("Remove a tag from 2 selected artists")
+    expect(input).toHaveAttribute("placeholder", "Tag to remove")
+    for (const name of ["Add tag", "Preferences", "Remove"]) {
+      expect(screen.queryByRole("button", { name, hidden: true })).toBeNull()
+    }
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    expect(screen.getByTitle("Clear selection")).toBeVisible()
+    expect(screen.getByText("Cancel")).toBeVisible()
+  })
+
+  it("uses the singular label and reads 1 of 1 for a single artist", async () => {
+    const input = await openPicker({ selected: [pair()[0]] })
+
+    expect(input).toHaveAccessibleName("Remove a tag from 1 selected artist")
+    expect(texts()).toEqual(["beat1 of 1", "rap1 of 1", "trap1 of 1"])
+  })
+
+  it("lists carried tags by name with carrier counts", async () => {
+    await openPicker()
+
+    expect(texts()).toEqual(["beat1 of 2", "rap2 of 2", "trap1 of 2"])
+  })
+
+  it("narrows by case-insensitive contains", async () => {
+    const input = await openPicker()
+
+    await userEvent.type(input, "RA")
+
+    await waitFor(() => expect(texts()).toEqual(["rap2 of 2", "trap1 of 2"]))
+  })
+
+  it("says so when nothing matches the query", async () => {
+    const input = await openPicker()
+
+    await userEvent.type(input, "zz")
+
+    expect(
+      await screen.findByText("No selected artist has a tag matching “zz”")
+    ).toBeInTheDocument()
+    expect(screen.queryAllByRole("option")).toHaveLength(0)
+  })
+
+  it("says so when no selected artist has tags", async () => {
+    await openPicker({
+      selected: [
+        makeEntry({ id: 1, name: "Drake" }),
+        makeEntry({ id: 2, name: "SZA" }),
+      ],
+    })
+
+    expect(
+      await screen.findByText("None of the selected artists have tags.")
+    ).toBeInTheDocument()
+    expect(screen.queryAllByRole("option")).toHaveLength(0)
+  })
+
+  it("caps the list height and truncates names while keeping the count visible", async () => {
+    await openPicker()
+
+    const list = screen.getByRole("listbox")
+    expect(list).toHaveClass("max-h-72", "overflow-y-auto")
+    const option = screen.getByRole("option", { name: /^rap/ })
+    expect(within(option).getByText("rap")).toHaveClass("min-w-0", "truncate")
+    expect(within(option).getByText("2 of 2")).toHaveClass(
+      "ml-auto",
+      "shrink-0",
+      "tabular-nums"
+    )
+  })
+
+  it("closes on Esc without sending or clearing, and focuses Remove tag", async () => {
+    const onRemoveTag = vi.fn()
+    const onClear = vi.fn()
+    await openPicker({ onRemoveTag, onClear })
+
+    await userEvent.keyboard("{Escape}")
+
+    await waitFor(() => expect(removeTagButton()).toHaveFocus())
+    expect(onRemoveTag).not.toHaveBeenCalled()
+    expect(onClear).not.toHaveBeenCalled()
+  })
+
+  it("closes on Cancel without sending or clearing, and focuses Remove tag", async () => {
+    const onRemoveTag = vi.fn()
+    const onClear = vi.fn()
+    await openPicker({ onRemoveTag, onClear })
+
+    await userEvent.click(screen.getByText("Cancel"))
+
+    await waitFor(() => expect(removeTagButton()).toHaveFocus())
+    expect(onRemoveTag).not.toHaveBeenCalled()
+    expect(onClear).not.toHaveBeenCalled()
+  })
+
+  it("sends the picked tag and reports success", async () => {
+    const onRemoveTag = vi
+      .fn()
+      .mockResolvedValue({ applied: [1, 2], carried: 2, skipped: [] })
+    const onSucceeded = vi.fn()
+    await openPicker({ onRemoveTag, onSucceeded })
+
+    await userEvent.click(await screen.findByRole("option", { name: /^rap/ }))
+
+    await waitFor(() => expect(onSucceeded).toHaveBeenCalledTimes(1))
+    expect(onRemoveTag).toHaveBeenCalledTimes(1)
+    expect(onRemoveTag).toHaveBeenCalledWith({ id: 7, name: "rap" })
+  })
+
+  it("disables the input and shows Removing tag… while pending, then refocuses on null", async () => {
+    let resolve: (o: BulkRemoveTagOutcome | null) => void = () => {}
+    const onRemoveTag = vi.fn(
+      () => new Promise<BulkRemoveTagOutcome | null>((r) => (resolve = r))
+    )
+    await openPicker({ onRemoveTag })
+
+    await userEvent.click(await screen.findByRole("option", { name: /^rap/ }))
+
+    expect(screen.getByText("Removing tag…")).toBeInTheDocument()
+    expect(
+      screen.getByLabelText("Remove a tag from 2 selected artists")
+    ).toBeDisabled()
+    expect(screen.queryByText("Cancel")).toBeNull()
+
+    resolve(null)
+    await waitFor(() => expect(removeTagButton()).toHaveFocus())
   })
 })
