@@ -105,6 +105,12 @@ export default function Watchlist() {
   }>({ open: false, ids: [], names: [] })
   const removeOutcomeRef = useRef<RemoveOutcome | null>(null)
   const anchorRef = useRef<number | null>(null)
+  const pageHeadingRef = useRef<HTMLHeadingElement>(null)
+  const selectAllRef = useRef<HTMLElement | null>(null)
+  const clearFiltersRef = useRef<HTMLButtonElement | null>(null)
+  const removeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const removeCloseKindRef = useRef<"success" | "return">("return")
+  const [pendingFocus, setPendingFocus] = useState(false)
 
   const { params, write } = useUrlParams()
   const location = useLocation()
@@ -523,6 +529,22 @@ export default function Watchlist() {
 
   function finishBulkSuccess() {
     setSelectedIds(EMPTY_IDS)
+    anchorRef.current = null
+    setPendingFocus(true)
+  }
+
+  // First of: Select all visible, the filtered-to-zero Clear filters, the h1.
+  function resolveFallbackTarget(): HTMLElement | null {
+    if (entries && entries.length > 0) {
+      return visible.length > 0 ? selectAllRef.current : clearFiltersRef.current
+    }
+    return pageHeadingRef.current
+  }
+
+  function clearSelection() {
+    setSelectedIds(EMPTY_IDS)
+    anchorRef.current = null
+    setPendingFocus(true)
   }
 
   // `max` comes from the response body; Go and TS share no constant.
@@ -563,6 +585,7 @@ export default function Watchlist() {
     if (open) return
     const outcome = removeOutcomeRef.current
     removeOutcomeRef.current = null
+    removeCloseKindRef.current = outcome?.ok ? "success" : "return"
     setRemoveConfirm((prev) => ({ ...prev, open: false }))
     setBulkInFlight(false)
     if (!outcome) return
@@ -603,6 +626,14 @@ export default function Watchlist() {
   countRef.current = { n: visible.length, m: entries?.length ?? 0 }
   const effective = effectiveSelection(visible, selectedIds)
   const allState = selectAllState(visible.length, effective.length)
+
+  // Focus moves only once the bar has unmounted and nothing is in flight (F4).
+  useEffect(() => {
+    if (!pendingFocus || bulkInFlight || effective.length > 0) return
+    setPendingFocus(false)
+    resolveFallbackTarget()?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resolveFallbackTarget reads this render's values
+  }, [pendingFocus, bulkInFlight, effective.length])
 
   function handleTagsChange(ids: number[]) {
     write((p) => {
@@ -660,7 +691,11 @@ export default function Watchlist() {
     <TagVocabularyProvider onChange={applyTagChange}>
       <div className="flex flex-col gap-6 p-8">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h1 className="text-display font-semibold text-foreground">
+          <h1
+            ref={pageHeadingRef}
+            tabIndex={-1}
+            className="text-display font-semibold text-foreground outline-none"
+          >
             Watchlist
           </h1>
           <Button variant="secondary" onClick={() => setManageTagsOpen(true)}>
@@ -699,6 +734,11 @@ export default function Watchlist() {
           pendingLabel="Removing…"
           variant="destructive"
           onConfirm={confirmRemove}
+          finalFocus={() =>
+            removeCloseKindRef.current === "success"
+              ? resolveFallbackTarget()
+              : removeButtonRef.current
+          }
         />
 
         <div className="flex flex-col gap-6">
@@ -752,6 +792,7 @@ export default function Watchlist() {
               <div className="flex flex-wrap items-center gap-4">
                 <label className="flex min-h-11 cursor-pointer items-center gap-2 text-label text-foreground select-none">
                   <Checkbox
+                    ref={selectAllRef}
                     className="border-muted-foreground"
                     checked={allState === "checked"}
                     indeterminate={allState === "indeterminate"}
@@ -787,7 +828,11 @@ export default function Watchlist() {
               <EmptyState
                 heading="No artists match these filters"
                 body={`Try a different name or fewer filters, or clear them to see all ${entries.length} artist${entries.length === 1 ? "" : "s"}.`}
-                action={<Button onClick={clearFilters}>Clear filters</Button>}
+                action={
+                  <Button ref={clearFiltersRef} onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                }
               />
             ) : (
               <ul className="flex flex-col gap-4">
@@ -816,7 +861,8 @@ export default function Watchlist() {
                 selected={effective}
                 inFlight={bulkInFlight}
                 onRemove={openRemoveConfirm}
-                onClear={() => setSelectedIds(EMPTY_IDS)}
+                onClear={clearSelection}
+                removeButtonRef={removeButtonRef}
               />
             )}
           </section>

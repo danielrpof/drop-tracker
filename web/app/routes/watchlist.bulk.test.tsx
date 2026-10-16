@@ -464,3 +464,94 @@ async function openBulkRemove() {
 
 const selectAllHidden = () =>
   screen.getByRole("checkbox", { name: "Select all visible", hidden: true })
+
+describe("Watchlist focus after bulk actions", () => {
+  const removeBtn = () => screen.getByRole("button", { name: "Remove" })
+
+  async function removeSelected(label: string) {
+    const dialog = await openBulkRemove()
+    await userEvent.click(within(dialog).getByRole("button", { name: label }))
+  }
+
+  it("focuses Select all visible when artists remain", async () => {
+    const entries = trio()
+    await renderWatchlist(entries)
+    removeOutcome([1, 2])
+    mockList.mockResolvedValue([entries[2]])
+    await check("Drake", "SZA")
+    await removeSelected("Remove 2 artists")
+
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+    await waitFor(() => expect(selectAll()).toHaveFocus())
+  })
+
+  it("focuses Clear filters when the removal empties the filtered view", async () => {
+    const entries = trio()
+    await renderWatchlist(entries)
+    removeOutcome([1])
+    mockList.mockResolvedValue([entries[1], entries[2]])
+    await userEvent.type(filterBox(), "dra")
+    await userEvent.click(selectAll())
+    await removeSelected("Remove 1 artist")
+
+    const clear = await screen.findByRole("button", { name: "Clear filters" })
+    await waitFor(() => expect(clear).toHaveFocus())
+  })
+
+  it("focuses the page heading when every artist is removed", async () => {
+    const entries = [makeEntry({ id: 1, name: "Drake" })]
+    await renderWatchlist(entries)
+    removeOutcome([1])
+    mockList.mockResolvedValue([])
+    await check("Drake")
+    await removeSelected("Remove 1 artist")
+
+    expect(await screen.findByText("No artists yet")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Watchlist" })
+      ).toHaveFocus()
+    )
+  })
+
+  it("returns focus to Remove on Cancel", async () => {
+    await renderWatchlist(trio())
+    await check("Drake")
+    const dialog = await openBulkRemove()
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Cancel" })
+    )
+
+    await waitFor(() => expect(removeBtn()).toHaveFocus())
+  })
+
+  it("returns focus to Remove on Esc", async () => {
+    await renderWatchlist(trio())
+    await check("Drake")
+    await openBulkRemove()
+    await userEvent.keyboard("{Escape}")
+
+    await waitFor(() => expect(removeBtn()).toHaveFocus())
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+
+  it("returns focus to Remove when the request fails", async () => {
+    await renderWatchlist(trio())
+    mockBulkRemove.mockRejectedValue(new Error("network"))
+    await check("Drake")
+    await removeSelected("Remove 1 artist")
+
+    await waitFor(() => expect(removeBtn()).toHaveFocus())
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+
+  it("focuses Select all visible after Clear", async () => {
+    await renderWatchlist(trio())
+    await check("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Clear selection" })
+    )
+
+    await waitFor(() => expect(selectAll()).toHaveFocus())
+  })
+})

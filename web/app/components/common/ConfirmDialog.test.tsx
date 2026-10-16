@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react"
+import { useState } from "react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -103,5 +104,34 @@ describe("ConfirmDialog", () => {
     d.reject(new Error("network down"))
 
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  it("moves focus to the element a function finalFocus returns on close", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      return (
+        <>
+          <button type="button" data-testid="target">
+            target
+          </button>
+          <ConfirmDialog
+            open={open}
+            onOpenChange={setOpen}
+            title="Delete?"
+            description="Gone."
+            actionLabel="Delete"
+            pendingLabel="Deleting…"
+            variant="destructive"
+            onConfirm={() => Promise.resolve()}
+            finalFocus={() => screen.getByTestId("target")}
+          />
+        </>
+      )
+    }
+    render(<Harness />)
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.getByTestId("target")).toHaveFocus())
   })
 })

@@ -1,4 +1,5 @@
 import { Trash2, X } from "lucide-react"
+import type { RefObject } from "react"
 
 import { Button } from "~/components/ui/button"
 import { Separator } from "~/components/ui/separator"
@@ -9,6 +10,7 @@ export interface BulkActionBarProps {
   inFlight: boolean
   onRemove: () => void
   onClear: () => void
+  removeButtonRef: RefObject<HTMLButtonElement | null>
 }
 
 const ACTION_CLASS = "size-11 px-0 sm:h-9 sm:w-auto sm:px-3"
@@ -20,6 +22,7 @@ export function BulkActionBar({
   inFlight,
   onRemove,
   onClear,
+  removeButtonRef,
 }: BulkActionBarProps) {
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-2 z-40 flex justify-center px-2 sm:bottom-6 sm:px-8">
@@ -34,6 +37,7 @@ export function BulkActionBar({
         <Separator orientation="vertical" className="hidden h-6 sm:block" />
         <Button
           variant="ghost"
+          ref={removeButtonRef}
           title="Remove"
           className={`${ACTION_CLASS} hover:text-destructive`}
           disabled={inFlight}
