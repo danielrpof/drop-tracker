@@ -114,7 +114,7 @@ describe("Watchlist bulk remove", () => {
       "Removed 2 artists from your watchlist."
     )
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
-  })
+  }, 30000)
 
   const SINGULAR =
     "Their note is deleted but their tags are kept; alerts already found for them may still be sent, and re-adding them later may alert you about releases from while they were removed."

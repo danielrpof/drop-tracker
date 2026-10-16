@@ -1,7 +1,9 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { createRef } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { listTags, type BulkAddTagOutcome } from "~/lib/api"
 import { TagVocabularyProvider } from "~/lib/useTagVocabulary"
 import { makeEntry } from "~/lib/test/fixtures"
 
@@ -48,6 +50,12 @@ function stubHeight(height: number) {
     height,
   } as DOMRect)
 }
+
+beforeEach(() => {
+  vi.mocked(listTags).mockResolvedValue([
+    { id: 10, name: "reggaeton", carrier_count: 4 },
+  ])
+})
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -127,5 +135,169 @@ describe("BulkActionBar clearance variable", () => {
 
     unmount()
     expect(rootVar()).toBe("")
+  })
+})
+
+describe("BulkActionBar inline add-tag mode", () => {
+  const addButton = () => screen.getByRole("button", { name: "Add tag" })
+
+  async function openPicker() {
+    await userEvent.click(addButton())
+    return screen.findByRole("combobox")
+  }
+
+  function outcome(applied: number[]): BulkAddTagOutcome {
+    return {
+      applied,
+      skipped: [],
+      tag: { id: 99, name: "hyperpop" },
+    }
+  }
+
+  it("labels the input by count and swaps the other actions for Cancel", async () => {
+    renderBar()
+    const input = await openPicker()
+
+    expect(input).toHaveAccessibleName("Add tag to 2 selected artists")
+    // hidden:true because the open popup aria-hides the rest of the page.
+    expect(
+      screen.queryByRole("button", { name: "Remove", hidden: true })
+    ).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Add tag", hidden: true })
+    ).toBeNull()
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    expect(screen.getByTitle("Clear selection")).toBeVisible()
+    expect(screen.getByText("Cancel")).toBeVisible()
+  })
+
+  it("uses the singular label for one selected artist", async () => {
+    renderBar({ selected: [makeEntry({ id: 1, name: "Drake" })] })
+    const input = await openPicker()
+
+    expect(input).toHaveAccessibleName("Add tag to 1 selected artist")
+  })
+
+  it("closes on Esc without sending or clearing, and focuses Add tag", async () => {
+    const onAddTag = vi.fn()
+    const onClear = vi.fn()
+    renderBar({ onAddTag, onClear })
+    await openPicker()
+
+    await userEvent.keyboard("{Escape}")
+
+    await waitFor(() => expect(addButton()).toHaveFocus())
+    expect(onAddTag).not.toHaveBeenCalled()
+    expect(onClear).not.toHaveBeenCalled()
+  })
+
+  it("closes on Cancel without sending or clearing, and focuses Add tag", async () => {
+    const onAddTag = vi.fn()
+    const onClear = vi.fn()
+    renderBar({ onAddTag, onClear })
+    await openPicker()
+
+    await userEvent.click(screen.getByText("Cancel"))
+
+    await waitFor(() => expect(addButton()).toHaveFocus())
+    expect(onAddTag).not.toHaveBeenCalled()
+    expect(onClear).not.toHaveBeenCalled()
+  })
+
+  it("disables the input and shows Adding… while the request is pending", async () => {
+    let resolve: (o: BulkAddTagOutcome | null) => void = () => {}
+    const onAddTag = vi.fn(
+      () => new Promise<BulkAddTagOutcome | null>((r) => (resolve = r))
+    )
+    renderBar({ onAddTag })
+    const input = await openPicker()
+
+    await userEvent.type(input, "hyperpop{Enter}")
+
+    expect(onAddTag).toHaveBeenCalledWith("hyperpop")
+    expect(screen.getByText("Adding…")).toBeInTheDocument()
+    expect(
+      screen.getByLabelText("Add tag to 2 selected artists")
+    ).toBeDisabled()
+    expect(screen.queryByText("Cancel")).toBeNull()
+
+    resolve(null)
+    await waitFor(() => expect(addButton()).toHaveFocus())
+  })
+
+  it("closes the picker and focuses Add tag when the request fails", async () => {
+    const onSucceeded = vi.fn()
+    renderBar({ onAddTag: vi.fn().mockResolvedValue(null), onSucceeded })
+    const input = await openPicker()
+
+    await userEvent.type(input, "hyperpop{Enter}")
+
+    await waitFor(() => expect(addButton()).toHaveFocus())
+    expect(onSucceeded).not.toHaveBeenCalled()
+  })
+
+  it("does not remember a tag that landed nowhere", async () => {
+    const onSucceeded = vi.fn()
+    renderBar({
+      onAddTag: vi.fn().mockResolvedValue(outcome([])),
+      onSucceeded,
+    })
+    const input = await openPicker()
+    await userEvent.type(input, "hyperpop{Enter}")
+    await waitFor(() => expect(onSucceeded).toHaveBeenCalledTimes(1))
+
+    await userEvent.click(addButton())
+    await userEvent.type(await screen.findByRole("combobox"), "hyper")
+
+    expect(await screen.findByText("Create “hyper”")).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "hyperpop" })).toBeNull()
+  })
+
+  it("remembers the returned tag once it lands on an artist", async () => {
+    const onSucceeded = vi.fn()
+    renderBar({
+      onAddTag: vi.fn().mockResolvedValue(outcome([1])),
+      onSucceeded,
+    })
+    const input = await openPicker()
+    await screen.findByRole("option", { name: "reggaeton" })
+    await userEvent.type(input, "hyperpop{Enter}")
+    await waitFor(() => expect(onSucceeded).toHaveBeenCalledTimes(1))
+
+    await userEvent.click(addButton())
+    await userEvent.type(await screen.findByRole("combobox"), "hyper")
+
+    expect(
+      await screen.findByRole("option", { name: "hyperpop" })
+    ).toBeInTheDocument()
+  })
+
+  it("lists a tag already on every selected artist as already-on", async () => {
+    const shared = { id: 10, name: "reggaeton" }
+    renderBar({
+      selected: [
+        makeEntry({ id: 1, name: "Drake", tags: [shared] }),
+        makeEntry({ id: 2, name: "SZA", tags: [shared] }),
+      ],
+    })
+    const input = await openPicker()
+
+    await userEvent.type(input, "reggaeton")
+
+    expect(
+      await screen.findByText(
+        /^“reggaeton” is already on every selected artist/
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("still clears on Esc from a bar button while idle", async () => {
+    const onClear = vi.fn()
+    renderBar({ onClear })
+    addButton().focus()
+
+    await userEvent.keyboard("{Escape}")
+
+    expect(onClear).toHaveBeenCalledTimes(1)
   })
 })

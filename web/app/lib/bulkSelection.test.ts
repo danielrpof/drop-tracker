@@ -4,6 +4,7 @@ import {
   applyRange,
   effectiveSelection,
   selectAllState,
+  tagsOnEvery,
   toggleAllVisible,
 } from "~/lib/bulkSelection"
 import { makeEntry } from "~/lib/test/fixtures"
@@ -104,5 +105,38 @@ describe("applyRange", () => {
     const selected = new Set([10])
     applyRange(order, 10, 30, true, selected)
     expect([...selected]).toEqual([10])
+  })
+})
+
+describe("tagsOnEvery", () => {
+  const rap = { id: 1, name: "rap" }
+  const latin = { id: 2, name: "latin" }
+  const rnb = { id: 3, name: "rnb" }
+
+  it("is empty for an empty selection", () => {
+    expect(tagsOnEvery([])).toEqual([])
+  })
+
+  it("keeps only shared tags, in the first entry's order", () => {
+    const out = tagsOnEvery([
+      makeEntry({ id: 1, name: "A1", tags: [latin, rap] }),
+      makeEntry({ id: 2, name: "A2", tags: [rap, rnb, latin] }),
+    ])
+    expect(out).toEqual([latin, rap])
+  })
+
+  it("is empty when nothing is shared", () => {
+    expect(
+      tagsOnEvery([
+        makeEntry({ id: 1, name: "A1", tags: [rap] }),
+        makeEntry({ id: 2, name: "A2", tags: [rnb] }),
+      ])
+    ).toEqual([])
+  })
+
+  it("returns every tag of a single entry", () => {
+    expect(
+      tagsOnEvery([makeEntry({ id: 1, name: "A1", tags: [rap, latin] })])
+    ).toEqual([rap, latin])
   })
 })
