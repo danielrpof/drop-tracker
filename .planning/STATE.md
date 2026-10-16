@@ -5,16 +5,16 @@ milestone_name: Watchlist Organization
 current_phase: 26
 current_phase_name: Bulk Edit & Remove
 status: executing
-stopped_at: Completed 26-10-PLAN.md
-last_updated: "2026-10-16T23:37:11.392Z"
+stopped_at: Completed 26-11-PLAN.md
+last_updated: "2026-10-16T23:51:19.808Z"
 last_activity: 2026-10-16
 last_activity_desc: Phase 26 execution started
-state_head: a5156955fff04b2243c7c866040c2b3e1878406a
+state_head: f5cf37238307cc7c92d127ff7a49959fe48d7370
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 47
-  completed_plans: 45
+  completed_plans: 46
   percent: 40
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: 26 (Bulk Edit & Remove) — EXECUTING
-Plan: 11 of 12
+Plan: 12 of 12
 Status: Ready to execute
 Last activity: 2026-10-16 — Phase 26 execution started
 
@@ -194,6 +194,7 @@ Last activity: 2026-10-16 — Phase 26 execution started
 | Phase 26 P08 | 11 min | 2 tasks | 8 files |
 | Phase 26 P09 | 14min | 2 tasks | 6 files |
 | Phase 26 P10 | 35 min | 3 tasks | 9 files |
+| Phase 26 P11 | 40min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -450,6 +451,7 @@ Recent decisions affecting current work:
 - [Phase 26]: [26-09] Vocabulary memory in bar tests is observed via the reopened picker, not a provider spy
 - [Phase 26]: 26-10: popover.tsx hand-written from registry source; shadcn CLI tried to pnpm add a bogus cn package
 - [Phase 26]: 26-10: Add tag disabled while Preferences popover is open (one-surface rule)
+- [Phase 26]: 26-11: Remove-tag Undo re-adds by name to the remove response's applied ids only; picker owns its query and filters with filter={null}; DISMISS_REASONS shared from TagCombobox
 
 ### Pending Todos
 
@@ -545,8 +547,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-16T23:37:11.129Z
-Stopped at: Completed 26-10-PLAN.md
+Last session: 2026-10-16T23:51:19.530Z
+Stopped at: Completed 26-11-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
