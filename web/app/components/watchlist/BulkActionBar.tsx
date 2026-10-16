@@ -29,6 +29,10 @@ export function BulkActionBar({
       <div
         role="region"
         aria-label="Selection actions"
+        // 26-08/26-10 guard this so Esc in an inline picker or popover closes only that layer.
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onClear()
+        }}
         className="pointer-events-auto flex w-full flex-wrap items-center gap-1 rounded-2xl bg-popover p-2 text-popover-foreground shadow-2xl ring-1 ring-foreground/10 motion-safe:animate-in motion-safe:duration-150 motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 sm:w-auto sm:max-w-full sm:flex-nowrap sm:gap-2"
       >
         <p className="min-w-0 flex-1 px-0 text-label text-foreground tabular-nums sm:flex-none sm:px-2">

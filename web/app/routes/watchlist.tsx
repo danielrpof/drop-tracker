@@ -122,7 +122,7 @@ export default function Watchlist() {
   const qTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const filterInputRef = useRef<HTMLInputElement | null>(null)
   const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const countRef = useRef({ n: 0, m: 0 })
+  const countRef = useRef({ n: 0, m: 0, k: 0 })
   // Cards the user just touched or added stay visible past a filter (G4). Keyed
   // to the filter: the router commits the URL in a transition, so the reset must
   // happen in that same render.
@@ -194,10 +194,10 @@ export default function Watchlist() {
   function scheduleCountAnnouncement() {
     if (countTimer.current) clearTimeout(countTimer.current)
     countTimer.current = setTimeout(() => {
-      const { n, m } = countRef.current
+      const { n, m, k } = countRef.current
       announce(
         n > 0
-          ? `Showing ${formatArtistCount(n, m)}.`
+          ? `Showing ${formatArtistCount(n, m)}.${k > 0 ? ` ${k} selected.` : ""}`
           : "No artists match these filters."
       )
     }, COUNT_ANNOUNCE_DEBOUNCE_MS)
@@ -511,20 +511,33 @@ export default function Watchlist() {
 
   function handleSelectChange(id: number, next: boolean, shift: boolean) {
     const order = visible.map((e) => e.id)
-    setSelectedIds((prev) => {
-      if (shift) return applyRange(order, anchorRef.current, id, next, prev)
-      if (prev.has(id) === next) return prev
-      const out = new Set(prev)
+    let result: ReadonlySet<number>
+    if (shift) {
+      result = applyRange(order, anchorRef.current, id, next, selectedIds)
+    } else if (selectedIds.has(id) === next) {
+      result = selectedIds
+    } else {
+      const out = new Set(selectedIds)
       if (next) out.add(id)
       else out.delete(id)
-      return out
-    })
+      result = out
+    }
+    setSelectedIds(result)
     anchorRef.current = id
+    const n = effectiveSelection(visible, result).length
+    if (effective.length === 0 && n > 0) {
+      announce(`${n} selected. Selection actions follow the artist list.`)
+    }
   }
 
   // The box's own next value is ignored: the result depends on the visible set.
   function handleSelectAllVisible() {
-    setSelectedIds(toggleAllVisible(visible, selectedIds))
+    const next = toggleAllVisible(visible, selectedIds)
+    setSelectedIds(next)
+    const n = effectiveSelection(visible, next).length
+    announce(
+      n > 0 ? `Selected ${n} visible artist${plural(n)}.` : "Selection cleared."
+    )
   }
 
   function finishBulkSuccess() {
@@ -545,6 +558,7 @@ export default function Watchlist() {
     setSelectedIds(EMPTY_IDS)
     anchorRef.current = null
     setPendingFocus(true)
+    announce("Selection cleared.")
   }
 
   // `max` comes from the response body; Go and TS share no constant.
@@ -623,8 +637,12 @@ export default function Watchlist() {
   const visible = entries
     ? selectVisible(entries, { ...view, q: query }, stickyIds)
     : []
-  countRef.current = { n: visible.length, m: entries?.length ?? 0 }
   const effective = effectiveSelection(visible, selectedIds)
+  countRef.current = {
+    n: visible.length,
+    m: entries?.length ?? 0,
+    k: effective.length,
+  }
   const allState = selectAllState(visible.length, effective.length)
 
   // Focus moves only once the bar has unmounted and nothing is in flight (F4).
