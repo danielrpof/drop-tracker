@@ -995,4 +995,157 @@ describe("Watchlist bulk preferences", () => {
     )
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
   }, 30000)
+
+  it("adds the gone sentence to the success toast", async () => {
+    await renderWatchlist(mixed())
+    mockPrefs.mockResolvedValue({
+      applied: [1],
+      skipped: [{ id: 2, reason: "gone" }],
+    })
+    await check("Drake", "SZA")
+    const popover = await openPrefs()
+    await userEvent.click(pref(popover, "Mute guest feature alerts"))
+    await userEvent.click(
+      within(popover).getByRole("button", { name: "Apply" })
+    )
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Updated preferences for 1 artist.",
+        { description: "1 artist was already removed from your watchlist." }
+      )
+    )
+  }, 30000)
+
+  it("keeps the popover, the choices and the selection when the request fails, then retries the same delta", async () => {
+    await renderWatchlist(mixed())
+    mockPrefs.mockRejectedValueOnce(new Error("network"))
+    mockPrefs.mockResolvedValueOnce({ applied: [1, 2], skipped: [] })
+    await check("Drake", "SZA")
+    const popover = await openPrefs()
+    await userEvent.click(pref(popover, "Mute guest feature alerts"))
+    await userEvent.click(pref(popover, "EP release type"))
+    await userEvent.click(
+      within(popover).getByRole("button", { name: "Apply" })
+    )
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't update preferences — try again."
+      )
+    )
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(pref(popover, "Mute guest feature alerts")).toHaveAttribute(
+      "aria-checked",
+      "true"
+    )
+    expect(pref(popover, "EP release type")).toHaveAttribute(
+      "aria-checked",
+      "true"
+    )
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    expect(mockList).toHaveBeenCalledTimes(1)
+
+    await userEvent.click(
+      within(popover).getByRole("button", { name: "Apply" })
+    )
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+    expect(mockPrefs).toHaveBeenCalledTimes(2)
+    expect(mockPrefs.mock.calls[1]).toEqual(mockPrefs.mock.calls[0])
+    expect(mockPrefs.mock.calls[0][1]).toEqual({
+      releaseTypes: { set: ["ep"], unset: [] },
+      mutedEventTypes: { set: ["guest_feature"], unset: [] },
+    })
+  }, 30000)
+
+  it("reports the id cap of the server and keeps the popover open", async () => {
+    await renderWatchlist(mixed())
+    mockPrefs.mockRejectedValue(
+      new ApiError(
+        400,
+        "too many ids",
+        { error: "too many ids", code: "bulk_too_many_ids", max: 1000 },
+        "bulk_too_many_ids"
+      )
+    )
+    await check("Drake")
+    const popover = await openPrefs()
+    await userEvent.click(pref(popover, "Mute guest feature alerts"))
+    await userEvent.click(
+      within(popover).getByRole("button", { name: "Apply" })
+    )
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Too many artists selected — select at most 1000 and try again."
+      )
+    )
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+  }, 30000)
+
+  it("sends only Deluxe when only Deluxe was toggled, in one request", async () => {
+    await renderWatchlist(mixed())
+    mockPrefs.mockResolvedValue({ applied: [1, 2, 3], skipped: [] })
+    await check("Drake", "SZA", "Bad Bunny")
+    const popover = await openPrefs()
+    expect(pref(popover, "Deluxe release type")).toHaveAttribute(
+      "aria-checked",
+      "mixed"
+    )
+    await userEvent.click(pref(popover, "Deluxe release type"))
+    await userEvent.click(
+      within(popover).getByRole("button", { name: "Apply" })
+    )
+
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+    expect(mockPrefs).toHaveBeenCalledTimes(1)
+    // Ids go in visible (name) order: Bad Bunny, Drake, SZA.
+    expect(mockPrefs).toHaveBeenCalledWith([3, 1, 2], {
+      releaseTypes: { set: ["deluxe"], unset: [] },
+      mutedEventTypes: { set: [], unset: [] },
+    })
+  }, 30000)
+
+  it("keeps cards visible past the muted filter until the next filter change", async () => {
+    const muted = ["guest_feature"]
+    mockList.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake", muted_event_types: muted }),
+      makeEntry({ id: 2, name: "SZA", muted_event_types: muted }),
+    ])
+    const Stub = createRoutesStub([{ path: "/", Component: Watchlist }])
+    render(<Stub initialEntries={["/?muted=1"]} />)
+    await screen.findByRole("checkbox", { name: "Select Drake" })
+
+    mockPrefs.mockResolvedValue({ applied: [1, 2], skipped: [] })
+    // The refresh returns both artists unmuted, so neither matches the filter.
+    mockList.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake" }),
+      makeEntry({ id: 2, name: "SZA" }),
+    ])
+    await check("Drake", "SZA")
+    const popover = await openPrefs()
+    await userEvent.click(pref(popover, "Mute guest feature alerts"))
+    await userEvent.click(
+      within(popover).getByRole("button", { name: "Apply" })
+    )
+
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+    expect(
+      screen.getByRole("checkbox", { name: "Select Drake" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Select SZA" })
+    ).toBeInTheDocument()
+
+    await userEvent.type(filterBox(), "a")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("checkbox", { name: "Select Drake" })
+      ).not.toBeInTheDocument()
+    )
+    expect(
+      screen.queryByRole("checkbox", { name: "Select SZA" })
+    ).not.toBeInTheDocument()
+  }, 30000)
 })

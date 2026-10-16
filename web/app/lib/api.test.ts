@@ -6,6 +6,7 @@ import {
   attachTag,
   bulkAddTag,
   bulkRemoveWatchlist,
+  bulkUpdatePreferences,
   deleteTag,
   detachTag,
   listEvents,
@@ -188,6 +189,35 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       ids: [1, 2],
       name: "rap",
+    })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("bulkUpdatePreferences PATCHes the snake_case delta to /watchlist/bulk/preferences with the CSRF header and resolves the outcome", async () => {
+    const outcome = { applied: [1], skipped: [{ id: 2, reason: "gone" }] }
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(outcome), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(
+      bulkUpdatePreferences([1, 2], {
+        releaseTypes: { set: ["ep"], unset: ["deluxe"] },
+        mutedEventTypes: { set: [], unset: ["guest_feature"] },
+      })
+    ).resolves.toEqual(outcome)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/bulk/preferences")
+    expect(init.method).toBe("PATCH")
+    expect(JSON.parse(init.body as string)).toEqual({
+      ids: [1, 2],
+      release_types: { set: ["ep"], unset: ["deluxe"] },
+      muted_event_types: { set: [], unset: ["guest_feature"] },
     })
     expect(new Headers(init.headers).get("X-Requested-With")).toBe(
       "drop-tracker"
