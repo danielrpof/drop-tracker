@@ -33,7 +33,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </head>
       <body className="min-h-screen bg-background text-foreground">
         {children}
-        <Toaster theme="dark" />
+        <Toaster
+          theme="dark"
+          offset={{ bottom: "calc(24px + var(--bulk-bar-clearance, 0px))" }}
+          mobileOffset={{
+            bottom: "calc(16px + var(--bulk-bar-clearance, 0px))",
+          }}
+        />
         <ScrollRestoration />
         <Scripts />
       </body>

@@ -1,5 +1,5 @@
 import { Trash2, X } from "lucide-react"
-import type { RefObject } from "react"
+import { useLayoutEffect, useRef, type RefObject } from "react"
 
 import { Button } from "~/components/ui/button"
 import { Separator } from "~/components/ui/separator"
@@ -24,8 +24,34 @@ export function BulkActionBar({
   onClear,
   removeButtonRef,
 }: BulkActionBarProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null)
+
+  // Publishes the bar's height so the page, toasts and scroll padding clear it (U2).
+  useLayoutEffect(() => {
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+    const root = document.documentElement
+    const measure = () => {
+      const inset = parseFloat(getComputedStyle(wrapper).bottom)
+      const bottom = Number.isFinite(inset) ? inset : 0
+      const height = wrapper.getBoundingClientRect().height
+      root.style.setProperty("--bulk-bar-clearance", `${height + bottom + 8}px`)
+    }
+    measure()
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure)
+    observer?.observe(wrapper)
+    return () => {
+      observer?.disconnect()
+      root.style.removeProperty("--bulk-bar-clearance")
+    }
+  }, [])
+
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-2 z-40 flex justify-center px-2 sm:bottom-6 sm:px-8">
+    <div
+      ref={wrapperRef}
+      className="pointer-events-none fixed inset-x-0 bottom-2 z-40 flex justify-center px-2 sm:bottom-6 sm:px-8"
+    >
       <div
         role="region"
         aria-label="Selection actions"

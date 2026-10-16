@@ -179,5 +179,6 @@
     }
   html {
     @apply font-sans;
+    scroll-padding-bottom: var(--bulk-bar-clearance, 0px);
     }
 }

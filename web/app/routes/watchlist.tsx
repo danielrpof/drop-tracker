@@ -707,7 +707,7 @@ export default function Watchlist() {
 
   return (
     <TagVocabularyProvider onChange={applyTagChange}>
-      <div className="flex flex-col gap-6 p-8">
+      <div className="flex flex-col gap-6 p-8 pb-[calc(2rem+var(--bulk-bar-clearance,0px))]">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h1
             ref={pageHeadingRef}
