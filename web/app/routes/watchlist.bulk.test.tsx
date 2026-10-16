@@ -719,4 +719,217 @@ describe("Watchlist bulk add tag", () => {
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(selectAll()).toHaveFocus())
   })
+
+  const RAP = { id: 7, name: "rap" }
+  const GONE_ONE = "1 artist was already removed from your watchlist."
+
+  async function addRap(
+    names: string[],
+    outcome: Parameters<typeof mockAddTag.mockResolvedValue>[0]
+  ) {
+    mockListTags.mockResolvedValue([])
+    mockAddTag.mockResolvedValue(outcome)
+    await check(...names)
+    await createFromBar(names.length, "rap")
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+  }
+
+  it("reports a plain success without a warning when every artist took the tag", async () => {
+    await renderWatchlist(trio())
+    await addRap(["Drake", "SZA"], { tag: RAP, applied: [1, 2], skipped: [] })
+
+    expect(toast.success).toHaveBeenCalledWith("Added “rap” to 2 artists.")
+    expect(toast.warning).not.toHaveBeenCalled()
+  })
+
+  it("warns with the at-cap artist named when only some took the tag", async () => {
+    await renderWatchlist(trio())
+    await addRap(["Drake", "SZA"], {
+      tag: RAP,
+      applied: [1],
+      skipped: [{ id: 2, name: "SZA", reason: "cap" }],
+    })
+
+    expect(toast.warning).toHaveBeenCalledWith("Added “rap” to 1 artist.", {
+      description: "1 already has 10 tags: SZA.",
+      duration: 8000,
+    })
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("names at-cap artists in visible order, not the id order the server uses", async () => {
+    const entries = [
+      makeEntry({ id: 1, name: "Drake" }),
+      makeEntry({ id: 2, name: "SZA" }),
+      makeEntry({ id: 3, name: "Bad Bunny" }),
+      makeEntry({ id: 4, name: "Future" }),
+    ]
+    await renderWatchlist(entries)
+    await addRap(["Bad Bunny", "Drake", "Future", "SZA"], {
+      tag: RAP,
+      applied: [1],
+      // Future carries no server name, so its entry name is used.
+      skipped: [
+        { id: 2, name: "SZA", reason: "cap" },
+        { id: 3, name: "Bad Bunny", reason: "cap" },
+        { id: 4, reason: "cap" },
+      ],
+    })
+
+    expect(mockAddTag).toHaveBeenCalledWith([3, 1, 4, 2], "rap")
+    expect(toast.warning).toHaveBeenCalledWith("Added “rap” to 1 artist.", {
+      description: "3 already have 10 tags: Bad Bunny, Future and SZA.",
+      duration: 8000,
+    })
+  })
+
+  it("explains an all-at-cap outcome and does not teach the vocabulary the tag", async () => {
+    await renderWatchlist(trio())
+    await addRap(["Drake", "SZA"], {
+      tag: { id: 0, name: "rap" },
+      applied: [],
+      skipped: [
+        { id: 1, name: "Drake", reason: "cap" },
+        { id: 2, name: "SZA", reason: "cap" },
+      ],
+    })
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      "Couldn't add “rap” — every selected artist already has 10 tags.",
+      { description: "Drake and SZA.", duration: 8000 }
+    )
+
+    await check("Drake")
+    await userEvent.click(screen.getByRole("button", { name: "Add tag" }))
+    await userEvent.type(
+      await screen.findByRole("combobox", {
+        name: "Add tag to 1 selected artist",
+      }),
+      "rap"
+    )
+    expect(
+      await screen.findByRole("option", { name: "Create “rap”" })
+    ).toBeInTheDocument()
+  })
+
+  it("appends the gone sentence to a success, or to the cap sentence", async () => {
+    await renderWatchlist(trio())
+    await addRap(["Drake", "SZA"], {
+      tag: RAP,
+      applied: [1],
+      skipped: [{ id: 2, reason: "gone" }],
+    })
+    expect(toast.success).toHaveBeenCalledWith("Added “rap” to 1 artist.", {
+      description: GONE_ONE,
+    })
+
+    await check("Bad Bunny", "Drake", "SZA")
+    mockAddTag.mockResolvedValue({
+      tag: RAP,
+      applied: [3],
+      skipped: [
+        { id: 2, name: "SZA", reason: "cap" },
+        { id: 1, reason: "gone" },
+      ],
+    })
+    await createFromBar(3, "rap")
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1))
+    expect(toast.warning).toHaveBeenCalledWith("Added “rap” to 1 artist.", {
+      description: `1 already has 10 tags: SZA. ${GONE_ONE}`,
+      duration: 8000,
+    })
+  })
+
+  it("reports zero when every selected artist was already removed", async () => {
+    await renderWatchlist(trio())
+    await addRap(["Drake", "SZA"], {
+      tag: { id: 0, name: "rap" },
+      applied: [],
+      skipped: [
+        { id: 1, reason: "gone" },
+        { id: 2, reason: "gone" },
+      ],
+    })
+
+    expect(toast.success).toHaveBeenCalledWith("Added “rap” to 0 artists.", {
+      description: "2 artists were already removed from your watchlist.",
+    })
+  })
+
+  it("keeps the selection and returns focus to Add tag when the request fails", async () => {
+    await renderWatchlist(trio())
+    mockListTags.mockResolvedValue([])
+    mockAddTag.mockRejectedValue(new Error("network"))
+    await check("Drake", "SZA")
+    await createFromBar(2, "rap")
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't add “rap” to the selected artists — try again."
+      )
+    )
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Add tag" })).toHaveFocus()
+    )
+    expect(mockList).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports the id cap of the server instead of the generic failure", async () => {
+    await renderWatchlist(trio())
+    mockListTags.mockResolvedValue([])
+    mockAddTag.mockRejectedValue(
+      new ApiError(
+        400,
+        "too many ids",
+        { error: "too many ids", code: "bulk_too_many_ids", max: 1000 },
+        "bulk_too_many_ids"
+      )
+    )
+    await check("Drake")
+    await createFromBar(1, "rap")
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Too many artists selected — select at most 1000 and try again."
+      )
+    )
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+
+  it("keeps an affected card visible past the tag filter until the next filter change", async () => {
+    const old = { id: 5, name: "old" }
+    mockList.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake", tags: [old] }),
+      makeEntry({ id: 2, name: "SZA", tags: [old] }),
+    ])
+    const Stub = createRoutesStub([{ path: "/", Component: Watchlist }])
+    render(<Stub initialEntries={["/?tags=5"]} />)
+    await screen.findByRole("checkbox", { name: "Select Drake" })
+
+    mockListTags.mockResolvedValue([{ ...old, carrier_count: 2 }])
+    mockAddTag.mockResolvedValue({ tag: RAP, applied: [1, 2], skipped: [] })
+    // Another tab dropped `old` from Drake before the refresh lands.
+    mockList.mockResolvedValue([
+      makeEntry({ id: 1, name: "Drake", tags: [RAP] }),
+      makeEntry({ id: 2, name: "SZA", tags: [old, RAP] }),
+    ])
+    await check("Drake", "SZA")
+    await createFromBar(2, "rap")
+
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
+    const drake = await screen.findByRole("checkbox", { name: "Select Drake" })
+    await waitFor(() => expect(drake.closest("li")).toHaveTextContent("rap"))
+    expect(drake.closest("li")).not.toHaveTextContent("old")
+
+    await userEvent.type(filterBox(), "a")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("checkbox", { name: "Select Drake" })
+      ).not.toBeInTheDocument()
+    )
+    expect(
+      screen.getByRole("checkbox", { name: "Select SZA" })
+    ).toBeInTheDocument()
+  })
 })

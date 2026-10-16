@@ -4,6 +4,7 @@ import {
   ApiError,
   addWatchlist,
   attachTag,
+  bulkAddTag,
   bulkRemoveWatchlist,
   deleteTag,
   detachTag,
@@ -161,6 +162,33 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     expect(url).toBe("/watchlist/42/tags")
     expect(init.method).toBe("POST")
     expect(JSON.parse(init.body as string)).toEqual({ name: "Reggaeton" })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("bulkAddTag POSTs the ids and name to /watchlist/bulk/tags/add with the CSRF header and resolves the outcome", async () => {
+    const outcome = {
+      tag: { id: 7, name: "rap" },
+      applied: [1],
+      skipped: [{ id: 2, name: "SZA", reason: "cap" }],
+    }
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(outcome), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(bulkAddTag([1, 2], "rap")).resolves.toEqual(outcome)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/bulk/tags/add")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({
+      ids: [1, 2],
+      name: "rap",
+    })
     expect(new Headers(init.headers).get("X-Requested-With")).toBe(
       "drop-tracker"
     )
