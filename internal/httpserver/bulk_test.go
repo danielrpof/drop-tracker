@@ -474,3 +474,270 @@ func TestBulk_PreferencesEndToEnd(t *testing.T) {
 		}
 	}
 }
+
+func TestBulk_PreferencesValidation(t *testing.T) {
+	t.Run("store errors map to wire codes", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			err    error
+			status int
+			code   string
+		}{
+			{"conflict", watchlist.ErrPreferenceConflict, http.StatusBadRequest, "bulk_preference_conflict"},
+			{"wrapped release type", fmt.Errorf("%w: %q", watchlist.ErrInvalidReleaseType, "vinyl"), http.StatusBadRequest, "invalid_release_type"},
+			{"event type", watchlist.ErrInvalidEventType, http.StatusBadRequest, "invalid_event_type"},
+			{"no preferences", watchlist.ErrNoPreferencesSupplied, http.StatusBadRequest, "bulk_no_preferences"},
+			{"unmapped", errors.New("pq: connection refused to 10.0.0.9"), http.StatusInternalServerError, ""},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				store := fakeBulkStore{updateFunc: func(context.Context, []int64, watchlist.PreferencesDelta) (watchlist.BulkUpdateResult, error) {
+					return watchlist.BulkUpdateResult{}, tc.err
+				}}
+				ts := newBulkServer(t, bulkServerOpts{store: store})
+
+				resp, raw := patchBulkPreferences(t, ts, `{"ids":[1],"release_types":{"set":["ep"]}}`)
+				if resp.StatusCode != tc.status {
+					t.Fatalf("status = %d, want %d (body %s)", resp.StatusCode, tc.status, raw)
+				}
+				var eb errorBody
+				if err := json.Unmarshal(raw, &eb); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				if eb.Code != tc.code {
+					t.Fatalf("code = %q, want %q", eb.Code, tc.code)
+				}
+				if tc.status == http.StatusInternalServerError {
+					if eb.Error != "internal error" || strings.Contains(string(raw), "connection refused") {
+						t.Fatalf("500 body = %s, want a generic internal error", raw)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("real service rejects contradictory and empty deltas", func(t *testing.T) {
+		pool := testutil.NewIsolatedTestPool(t, "bulk_prefs_http_test")
+		svc := watchlist.NewService(sqlc.New(pool))
+		e, err := svc.Add(t.Context(), watchlist.AddParams{MBID: testMBID(t), Name: "Prefs Validation"})
+		if err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		ts := newBulkServer(t, bulkServerOpts{store: svc})
+
+		cases := []struct{ name, body, code string }{
+			{"set and unset the same type", fmt.Sprintf(`{"ids":[%d],"release_types":{"set":["ep"],"unset":["ep"]}}`, e.ID), "bulk_preference_conflict"},
+			{"no axes at all", fmt.Sprintf(`{"ids":[%d]}`, e.ID), "bulk_no_preferences"},
+			{"empty lists", fmt.Sprintf(`{"ids":[%d],"release_types":{"set":[],"unset":[]},"muted_event_types":{}}`, e.ID), "bulk_no_preferences"},
+			{"unknown release type", fmt.Sprintf(`{"ids":[%d],"release_types":{"set":["vinyl"]}}`, e.ID), "invalid_release_type"},
+			{"unknown event type", fmt.Sprintf(`{"ids":[%d],"muted_event_types":{"unset":["tweet"]}}`, e.ID), "invalid_event_type"},
+		}
+		for _, tc := range cases {
+			resp, raw := patchBulkPreferences(t, ts, tc.body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("%s: status = %d, want 400 (body %s)", tc.name, resp.StatusCode, raw)
+			}
+			var eb errorBody
+			if err := json.Unmarshal(raw, &eb); err != nil {
+				t.Fatalf("%s: decode: %v", tc.name, err)
+			}
+			if eb.Code != tc.code {
+				t.Fatalf("%s: code = %q, want %q", tc.name, eb.Code, tc.code)
+			}
+		}
+
+		var release, mute []string
+		row := pool.QueryRow(t.Context(), "SELECT release_types, muted_event_types FROM watchlist WHERE id = $1", e.ID)
+		if err := row.Scan(&release, &mute); err != nil {
+			t.Fatalf("read row: %v", err)
+		}
+		if !slices.Equal(release, []string{"album", "single", "ep", "deluxe"}) || len(mute) != 0 {
+			t.Fatalf("row changed by rejected requests: release %v mute %v", release, mute)
+		}
+	})
+
+	t.Run("decode and id failures never reach the store", func(t *testing.T) {
+		idsBody := func(n int) string {
+			ids := make([]string, n)
+			for i := range ids {
+				ids[i] = fmt.Sprint(i + 1)
+			}
+			return `{"ids":[` + strings.Join(ids, ",") + `],"release_types":{"set":["ep"]}}`
+		}
+		cases := []struct {
+			name string
+			body string
+			code string
+			max  int
+		}{
+			{"over-posted note", `{"ids":[1],"release_types":{"set":["ep"]},"note":"x"}`, "", 0},
+			{"old full-set shape", `{"ids":[1],"release_types":["album"]}`, "", 0},
+			{"unknown nested key", `{"ids":[1],"release_types":{"add":["ep"]}}`, "", 0},
+			{"concatenated objects", `{"ids":[1],"release_types":{"set":["ep"]}}{"ids":[2]}`, "", 0},
+			{"empty ids", `{"ids":[],"release_types":{"set":["ep"]}}`, "bulk_ids_required", 0},
+			{"1001 ids", idsBody(1001), "bulk_too_many_ids", 1000},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				var calls int32
+				ts := newBulkServer(t, bulkServerOpts{store: fakeBulkStore{updateCalls: &calls}})
+
+				resp, raw := patchBulkPreferences(t, ts, tc.body)
+				if resp.StatusCode != http.StatusBadRequest {
+					t.Fatalf("status = %d, want 400 (body %.200s)", resp.StatusCode, raw)
+				}
+				var got struct {
+					Error string `json:"error"`
+					Code  string `json:"code"`
+					Max   int    `json:"max"`
+				}
+				if err := json.Unmarshal(raw, &got); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				if tc.code == "" {
+					if got.Error != "invalid request body" {
+						t.Fatalf("error = %q, want %q", got.Error, "invalid request body")
+					}
+				} else if got.Code != tc.code {
+					t.Fatalf("code = %q, want %q", got.Code, tc.code)
+				}
+				if got.Max != tc.max {
+					t.Fatalf("max = %d, want %d", got.Max, tc.max)
+				}
+				if n := atomic.LoadInt32(&calls); n != 0 {
+					t.Fatalf("store called %d times on a rejected body, want 0", n)
+				}
+			})
+		}
+	})
+}
+
+func TestBulk_PreferencesGated(t *testing.T) {
+	const body = `{"ids":[1],"release_types":{"set":["ep"]}}`
+
+	t.Run("401 without a session", func(t *testing.T) {
+		var calls int32
+		ts := newBulkServer(t, bulkServerOpts{passphrase: settingsTestPassphrase, store: fakeBulkStore{updateCalls: &calls}})
+
+		resp, _ := patchBulkPreferences(t, ts, body)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", resp.StatusCode)
+		}
+		if n := atomic.LoadInt32(&calls); n != 0 {
+			t.Fatalf("store called %d times, want 0", n)
+		}
+	})
+
+	t.Run("403 without the CSRF header", func(t *testing.T) {
+		var calls int32
+		ts := newBulkServer(t, bulkServerOpts{passphrase: settingsTestPassphrase, store: fakeBulkStore{updateCalls: &calls}})
+		cookie := loginForSettings(t, ts)
+
+		req, err := http.NewRequest(http.MethodPatch, ts.URL+"/watchlist/bulk/preferences", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("build PATCH: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(cookie)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PATCH: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", resp.StatusCode)
+		}
+		if n := atomic.LoadInt32(&calls); n != 0 {
+			t.Fatalf("store called %d times, want 0", n)
+		}
+	})
+}
+
+func TestBulk_PreferencesUnavailableWithoutOption(t *testing.T) {
+	ts := newBulkServer(t, bulkServerOpts{omitBulk: true})
+
+	resp, raw := patchBulkPreferences(t, ts, `{"ids":[1],"release_types":{"set":["ep"]}}`)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	var eb errorBody
+	if err := json.Unmarshal(raw, &eb); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if eb.Error != "watchlist bulk not available" {
+		t.Fatalf("error = %q, want %q", eb.Error, "watchlist bulk not available")
+	}
+}
+
+// The literal bulk path must reach the bulk handler, never PATCH /watchlist/{id}.
+func TestBulk_PreferencesReachesBulkHandler(t *testing.T) {
+	var calls int32
+	wl := stubStore{updateFunc: func(context.Context, int64, watchlist.PreferencesParams) (watchlist.Entry, error) {
+		t.Errorf("single-entry UpdatePreferences reached by the bulk path")
+		return watchlist.Entry{}, nil
+	}}
+	ts := newBulkServer(t, bulkServerOpts{store: fakeBulkStore{updateCalls: &calls}, watchlist: wl})
+
+	resp, raw := patchBulkPreferences(t, ts, `{"ids":[4],"release_types":{"set":["ep"]}}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, raw)
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Fatalf("bulk store called %d times, want 1", n)
+	}
+}
+
+func TestBulk_PreferencesWireShape(t *testing.T) {
+	t.Run("gone ids encode without a name", func(t *testing.T) {
+		store := fakeBulkStore{updateFunc: func(context.Context, []int64, watchlist.PreferencesDelta) (watchlist.BulkUpdateResult, error) {
+			return watchlist.BulkUpdateResult{Applied: []int64{1}, Gone: []int64{9}}, nil
+		}}
+		ts := newBulkServer(t, bulkServerOpts{store: store})
+
+		_, raw := patchBulkPreferences(t, ts, `{"ids":[1,9],"release_types":{"set":["ep"]}}`)
+		var got struct {
+			Applied []int64          `json:"applied"`
+			Skipped []map[string]any `json:"skipped"`
+		}
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(got.Skipped) != 1 {
+			t.Fatalf("skipped = %v, want one entry", got.Skipped)
+		}
+		sk := got.Skipped[0]
+		if sk["id"] != float64(9) || sk["reason"] != "gone" {
+			t.Fatalf("skip = %v, want id 9 reason gone", sk)
+		}
+		if _, ok := sk["name"]; ok {
+			t.Fatalf("skip %v carries a name key", sk)
+		}
+	})
+
+	t.Run("nil result encodes empty arrays", func(t *testing.T) {
+		store := fakeBulkStore{updateFunc: func(context.Context, []int64, watchlist.PreferencesDelta) (watchlist.BulkUpdateResult, error) {
+			return watchlist.BulkUpdateResult{}, nil
+		}}
+		ts := newBulkServer(t, bulkServerOpts{store: store})
+
+		_, raw := patchBulkPreferences(t, ts, `{"ids":[1],"release_types":{"set":["ep"]}}`)
+		if got := strings.TrimSpace(string(raw)); got != `{"applied":[],"skipped":[]}` {
+			t.Fatalf("body = %s, want empty arrays", got)
+		}
+	})
+
+	t.Run("request lists map onto the delta", func(t *testing.T) {
+		var got watchlist.PreferencesDelta
+		store := fakeBulkStore{updateFunc: func(_ context.Context, _ []int64, d watchlist.PreferencesDelta) (watchlist.BulkUpdateResult, error) {
+			got = d
+			return watchlist.BulkUpdateResult{}, nil
+		}}
+		ts := newBulkServer(t, bulkServerOpts{store: store})
+
+		patchBulkPreferences(t, ts, `{"ids":[1],"release_types":{"set":["ep"],"unset":["deluxe"]},"muted_event_types":{"unset":["new_release"]}}`)
+		if !slices.Equal(got.ReleaseTypes.Set, []string{"ep"}) || !slices.Equal(got.ReleaseTypes.Unset, []string{"deluxe"}) ||
+			len(got.MutedEventTypes.Set) != 0 || !slices.Equal(got.MutedEventTypes.Unset, []string{"new_release"}) {
+			t.Fatalf("delta = %+v", got)
+		}
+	})
+}
