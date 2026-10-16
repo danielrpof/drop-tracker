@@ -36,7 +36,7 @@
 ### Bulk Edit
 
 - [ ] **BULK-01**: User can select multiple artists on the Watchlist, including "select all visible"
-- [ ] **BULK-02**: User can add or remove a tag on all selected artists in one action
+- [x] **BULK-02**: User can add or remove a tag on all selected artists in one action
 - [ ] **BULK-03**: User can set release-type filters and muted event types on all selected artists in one action
 - [ ] **BULK-04**: User can remove all selected artists after a confirmation stating the count; the removal is all-or-nothing
 - [ ] **BULK-05**: After a bulk action the selection clears and the watchlist reflects the result without a page reload
@@ -97,7 +97,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | WLVW-06 | Phase 25 | Complete |
 | HIST-02 | Phase 25 | Complete |
 | BULK-01 | Phase 26 | Pending |
-| BULK-02 | Phase 26 | Pending |
+| BULK-02 | Phase 26 | Complete |
 | BULK-03 | Phase 26 | Pending |
 | BULK-04 | Phase 26 | Pending |
 | BULK-05 | Phase 26 | Pending |
