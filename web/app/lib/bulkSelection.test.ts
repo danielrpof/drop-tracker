@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  applyRange,
   effectiveSelection,
   selectAllState,
   toggleAllVisible,
@@ -61,5 +62,47 @@ describe("toggleAllVisible", () => {
 
   it("leaves the selection alone for an empty view", () => {
     expect([...toggleAllVisible([], new Set([5]))]).toEqual([5])
+  })
+})
+
+describe("applyRange", () => {
+  const order = [10, 20, 30, 40, 50]
+
+  it("sets the inclusive span forward", () => {
+    const out = applyRange(order, 20, 40, true, new Set([20]))
+    expect([...out].sort((a, b) => a - b)).toEqual([20, 30, 40])
+  })
+
+  it("sets the inclusive span backward", () => {
+    const out = applyRange(order, 40, 20, true, new Set([40]))
+    expect([...out].sort((a, b) => a - b)).toEqual([20, 30, 40])
+  })
+
+  it("deselects the span when next is false", () => {
+    const out = applyRange(order, 10, 30, false, new Set([10, 20, 30, 99]))
+    expect([...out]).toEqual([99])
+  })
+
+  it.each([
+    ["null", null],
+    ["absent from order", 99],
+    ["equal to the clicked id", 30],
+  ])("toggles only the clicked id when the anchor is %s", (_, anchor) => {
+    const out = applyRange(order, anchor, 30, true, new Set([10]))
+    expect([...out].sort((a, b) => a - b)).toEqual([10, 30])
+    const off = applyRange(order, anchor, 30, false, new Set([10, 30]))
+    expect([...off]).toEqual([10])
+  })
+
+  it("never adds an id outside the order", () => {
+    const out = applyRange(order, 10, 50, true, new Set())
+    expect(out.has(99)).toBe(false)
+    expect(out.size).toBe(5)
+  })
+
+  it("does not mutate its input", () => {
+    const selected = new Set([10])
+    applyRange(order, 10, 30, true, selected)
+    expect([...selected]).toEqual([10])
   })
 })

@@ -365,3 +365,100 @@ describe("Watchlist select all visible", () => {
     }
   })
 })
+
+async function shiftClick(name: string) {
+  const user = userEvent.setup()
+  await user.keyboard("{Shift>}")
+  await user.click(screen.getByRole("checkbox", { name: `Select ${name}` }))
+  await user.keyboard("{/Shift}")
+}
+
+describe("Watchlist shift ranges and in-flight lock", () => {
+  it("selects the range in visible order, not id order", async () => {
+    await renderWatchlist(trio())
+    await check("Bad Bunny")
+    await shiftClick("SZA")
+
+    expect(screen.getByText("3 selected")).toBeInTheDocument()
+    for (const name of ["Bad Bunny", "Drake", "SZA"]) {
+      expect(
+        screen.getByRole("checkbox", { name: `Select ${name}` })
+      ).toBeChecked()
+    }
+  })
+
+  it("acts as a plain toggle with no anchor", async () => {
+    await renderWatchlist(trio())
+    await shiftClick("SZA")
+
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+
+  it("resets the anchor when the filter changes", async () => {
+    await renderWatchlist(trio())
+    await check("Bad Bunny")
+    await userEvent.type(filterBox(), "a")
+    await shiftClick("SZA")
+
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Select Drake" })
+    ).not.toBeChecked()
+  })
+
+  it("resets the anchor when the sort changes", async () => {
+    await renderWatchlist(trio())
+    await check("Bad Bunny")
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Name (Z–A)" })
+    )
+    await shiftClick("SZA")
+
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Select Drake" })
+    ).not.toBeChecked()
+  })
+
+  it("locks every selection control while a bulk request is in flight", async () => {
+    await renderWatchlist(trio())
+    let settle!: (v: { removed: number[]; already_gone: number[] }) => void
+    mockBulkRemove.mockReturnValue(new Promise((res) => (settle = res)))
+    await check("Drake")
+
+    const dialog = await openBulkRemove()
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Remove 1 artist" })
+    )
+
+    const pending = await within(dialog).findByRole("button", {
+      name: "Removing…",
+    })
+    expect(pending).toBeDisabled()
+    expect(
+      within(dialog).getByRole("button", { name: "Cancel" })
+    ).toBeDisabled()
+    const lock = { hidden: true } as const
+    expect(selectAllHidden()).toHaveAttribute("data-disabled")
+    for (const name of ["Drake", "SZA", "Bad Bunny"]) {
+      expect(
+        screen.getByRole("checkbox", { name: `Select ${name}`, ...lock })
+      ).toHaveAttribute("data-disabled")
+    }
+    expect(filterBox()).not.toBeDisabled()
+
+    settle({ removed: [1], already_gone: [] })
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    )
+  })
+})
+
+async function openBulkRemove() {
+  await userEvent.click(screen.getByRole("button", { name: "Remove" }))
+  return screen.findByRole("alertdialog")
+}
+
+const selectAllHidden = () =>
+  screen.getByRole("checkbox", { name: "Select all visible", hidden: true })
