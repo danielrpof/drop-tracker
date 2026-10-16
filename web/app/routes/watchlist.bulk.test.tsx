@@ -555,3 +555,103 @@ describe("Watchlist focus after bulk actions", () => {
     await waitFor(() => expect(selectAll()).toHaveFocus())
   })
 })
+
+describe("Watchlist selection announcements", () => {
+  const status = () => screen.getByRole("status")
+  const FIRST = "1 selected. Selection actions follow the artist list."
+
+  it("announces when the first card is checked, and not for the next", async () => {
+    await renderWatchlist(trio())
+    await check("Drake")
+    expect(status()).toHaveTextContent(FIRST)
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort by" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Name (Z–A)" })
+    )
+    expect(status()).toHaveTextContent("Sorted by")
+
+    await check("SZA")
+    expect(status()).toHaveTextContent("Sorted by")
+  })
+
+  it("announces the visible count for Select all visible", async () => {
+    await renderWatchlist(trio())
+    await userEvent.click(selectAll())
+    expect(status()).toHaveTextContent("Selected 3 visible artists.")
+
+    await userEvent.click(selectAll())
+    expect(status()).toHaveTextContent("Selection cleared.")
+
+    await userEvent.type(filterBox(), "dra")
+    await userEvent.click(selectAll())
+    expect(status()).toHaveTextContent("Selected 1 visible artist.")
+  })
+
+  it("announces Selection cleared on Clear", async () => {
+    await renderWatchlist(trio())
+    await check("Drake")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Clear selection" })
+    )
+    expect(status()).toHaveTextContent("Selection cleared.")
+  })
+
+  it("clears the whole selection on Esc in the bar and refocuses", async () => {
+    await renderWatchlist(trio())
+    await check("SZA")
+    await userEvent.type(filterBox(), "dra")
+    await check("Drake")
+
+    screen.getByRole("button", { name: "Remove" }).focus()
+    await userEvent.keyboard("{Escape}")
+
+    expect(bar()).not.toBeInTheDocument()
+    expect(status()).toHaveTextContent("Selection cleared.")
+    await waitFor(() => expect(selectAll()).toHaveFocus())
+    await userEvent.clear(filterBox())
+    expect(
+      screen.getByRole("checkbox", { name: "Select SZA" })
+    ).not.toBeChecked()
+  })
+
+  it("appends the selected count to the filter announcement", async () => {
+    await renderWatchlist(trio())
+    await check("Drake", "SZA")
+    await userEvent.type(filterBox(), "dra")
+
+    await waitFor(
+      () =>
+        expect(status()).toHaveTextContent(
+          "Showing 1 of 3 artists. 1 selected."
+        ),
+      { timeout: 2000 }
+    )
+  })
+
+  it("leaves the suffix off when nothing is selected", async () => {
+    await renderWatchlist(trio())
+    await userEvent.type(filterBox(), "dra")
+
+    await waitFor(
+      () => expect(status()).toHaveTextContent("Showing 1 of 3 artists."),
+      { timeout: 2000 }
+    )
+    expect(status()).not.toHaveTextContent("selected.")
+  })
+
+  it("does not write Selection cleared after a bulk remove", async () => {
+    const entries = trio()
+    await renderWatchlist(entries)
+    removeOutcome([1])
+    mockList.mockResolvedValue([entries[1], entries[2]])
+    await check("Drake")
+    const dialog = await openBulkRemove()
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Remove 1 artist" })
+    )
+
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+    expect(status()).not.toHaveTextContent("Selection cleared.")
+  })
+})
