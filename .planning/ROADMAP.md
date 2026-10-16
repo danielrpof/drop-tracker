@@ -284,7 +284,7 @@ Plans:
   4. Removing the selection first asks for confirmation stating how many artists will be removed. Confirming removes all of them, or none of them if any part fails.
   5. After any bulk action the selection clears and the Watchlist shows the result immediately, with no page reload and no checkbox left pointing at a removed artist.
 
-**Plans:** 9/12 plans executed
+**Plans:** 10/12 plans executed
 
 Plans:
 **Wave 1**
@@ -316,7 +316,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 26-10-PLAN.md — The vendored popover and the tri-state Preferences editor, which sends only changed types (D-05…D-08)
+- [x] 26-10-PLAN.md — The vendored popover and the tri-state Preferences editor, which sends only changed types (D-05…D-08)
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
@@ -404,7 +404,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
 | 25. Find & Filter — Watchlist and History | 21/21 | Complete    | 2026-10-12 |
-| 26. Bulk Edit & Remove | 9/12 | In Progress|  |
+| 26. Bulk Edit & Remove | 10/12 | In Progress|  |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |
 
