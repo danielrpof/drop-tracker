@@ -31,3 +31,31 @@ SELECT t.artist_id::bigint AS artist_id,
        (t.artist_id IN (SELECT artist_id FROM had))::boolean AS had_tag,
        (t.artist_id IN (SELECT artist_id FROM ins))::boolean AS inserted
 FROM targets t ORDER BY t.artist_id;
+
+-- name: BulkUpdateWatchlistPreferences :many
+-- Per-type delta: locks targets in id order, rebuilds each axis as (current + set) - unset in
+-- canonical order, and updates only changed rows (D-05). COALESCE keeps a nil array from wiping.
+WITH locked AS MATERIALIZED (
+  SELECT id, release_types, muted_event_types FROM watchlist
+  WHERE id = ANY(@ids::bigint[]) ORDER BY id FOR UPDATE
+), computed AS (
+  SELECT l.id,
+    ARRAY(SELECT u.t FROM unnest(@all_release_types::text[]) WITH ORDINALITY AS u(t, ord)
+          WHERE (u.t = ANY(l.release_types) OR u.t = ANY(COALESCE(@set_release_types::text[], '{}')))
+            AND NOT (u.t = ANY(COALESCE(@unset_release_types::text[], '{}')))
+          ORDER BY u.ord)::text[] AS release_types,
+    ARRAY(SELECT u.t FROM unnest(@all_event_types::text[]) WITH ORDINALITY AS u(t, ord)
+          WHERE (u.t = ANY(l.muted_event_types) OR u.t = ANY(COALESCE(@set_event_types::text[], '{}')))
+            AND NOT (u.t = ANY(COALESCE(@unset_event_types::text[], '{}')))
+          ORDER BY u.ord)::text[] AS muted_event_types
+  FROM locked l
+), updated AS (
+  UPDATE watchlist w
+  SET release_types = c.release_types, muted_event_types = c.muted_event_types, updated_at = now()
+  FROM computed c
+  WHERE w.id = c.id
+    AND (w.release_types IS DISTINCT FROM c.release_types
+         OR w.muted_event_types IS DISTINCT FROM c.muted_event_types)
+  RETURNING w.id
+)
+SELECT l.id AS id FROM locked l ORDER BY l.id;

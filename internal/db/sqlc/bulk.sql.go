@@ -88,6 +88,73 @@ func (q *Queries) BulkDeleteWatchlist(ctx context.Context, ids []int64) ([]int64
 	return items, nil
 }
 
+const bulkUpdateWatchlistPreferences = `-- name: BulkUpdateWatchlistPreferences :many
+WITH locked AS MATERIALIZED (
+  SELECT id, release_types, muted_event_types FROM watchlist
+  WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE
+), computed AS (
+  SELECT l.id,
+    ARRAY(SELECT u.t FROM unnest($2::text[]) WITH ORDINALITY AS u(t, ord)
+          WHERE (u.t = ANY(l.release_types) OR u.t = ANY(COALESCE($3::text[], '{}')))
+            AND NOT (u.t = ANY(COALESCE($4::text[], '{}')))
+          ORDER BY u.ord)::text[] AS release_types,
+    ARRAY(SELECT u.t FROM unnest($5::text[]) WITH ORDINALITY AS u(t, ord)
+          WHERE (u.t = ANY(l.muted_event_types) OR u.t = ANY(COALESCE($6::text[], '{}')))
+            AND NOT (u.t = ANY(COALESCE($7::text[], '{}')))
+          ORDER BY u.ord)::text[] AS muted_event_types
+  FROM locked l
+), updated AS (
+  UPDATE watchlist w
+  SET release_types = c.release_types, muted_event_types = c.muted_event_types, updated_at = now()
+  FROM computed c
+  WHERE w.id = c.id
+    AND (w.release_types IS DISTINCT FROM c.release_types
+         OR w.muted_event_types IS DISTINCT FROM c.muted_event_types)
+  RETURNING w.id
+)
+SELECT l.id AS id FROM locked l ORDER BY l.id
+`
+
+type BulkUpdateWatchlistPreferencesParams struct {
+	Ids               []int64  `json:"ids"`
+	AllReleaseTypes   []string `json:"all_release_types"`
+	SetReleaseTypes   []string `json:"set_release_types"`
+	UnsetReleaseTypes []string `json:"unset_release_types"`
+	AllEventTypes     []string `json:"all_event_types"`
+	SetEventTypes     []string `json:"set_event_types"`
+	UnsetEventTypes   []string `json:"unset_event_types"`
+}
+
+// Per-type delta: locks targets in id order, rebuilds each axis as (current + set) - unset in
+// canonical order, and updates only changed rows (D-05). COALESCE keeps a nil array from wiping.
+func (q *Queries) BulkUpdateWatchlistPreferences(ctx context.Context, arg BulkUpdateWatchlistPreferencesParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, bulkUpdateWatchlistPreferences,
+		arg.Ids,
+		arg.AllReleaseTypes,
+		arg.SetReleaseTypes,
+		arg.UnsetReleaseTypes,
+		arg.AllEventTypes,
+		arg.SetEventTypes,
+		arg.UnsetEventTypes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockWatchlistArtistsForBulkTag = `-- name: LockWatchlistArtistsForBulkTag :many
 SELECT w.id AS entry_id, a.id AS artist_id, a.name
 FROM watchlist w JOIN artists a ON a.id = w.artist_id

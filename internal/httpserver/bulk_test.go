@@ -93,6 +93,19 @@ type fakeBulkStore struct {
 	removeFunc  func(ctx context.Context, ids []int64) (watchlist.BulkRemoveResult, error)
 	removeCalls *int32
 	lastIDs     *[]int64
+
+	updateFunc  func(ctx context.Context, ids []int64, d watchlist.PreferencesDelta) (watchlist.BulkUpdateResult, error)
+	updateCalls *int32
+}
+
+func (f fakeBulkStore) BulkUpdatePreferences(ctx context.Context, ids []int64, d watchlist.PreferencesDelta) (watchlist.BulkUpdateResult, error) {
+	if f.updateCalls != nil {
+		atomic.AddInt32(f.updateCalls, 1)
+	}
+	if f.updateFunc != nil {
+		return f.updateFunc(ctx, ids, d)
+	}
+	return watchlist.BulkUpdateResult{Applied: ids, Gone: []int64{}}, nil
 }
 
 func (f fakeBulkStore) BulkRemove(ctx context.Context, ids []int64) (watchlist.BulkRemoveResult, error) {
@@ -359,5 +372,105 @@ func TestBulk_DeleteStoreErrorIs500(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "connection refused") {
 		t.Fatalf("body leaks the store error: %s", raw)
+	}
+}
+
+// bulkOutcomeWire is the JSON shape of a bulk preferences outcome.
+type bulkOutcomeWire struct {
+	Applied []int64 `json:"applied"`
+	Skipped []struct {
+		ID     int64  `json:"id"`
+		Reason string `json:"reason"`
+	} `json:"skipped"`
+}
+
+func patchBulkPreferences(t *testing.T, ts *httptest.Server, body string) (*http.Response, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/watchlist/bulk/preferences", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build PATCH: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /watchlist/bulk/preferences: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp, raw
+}
+
+// Tracer: a per-type delta over a mixed selection keeps each artist's own
+// untouched types, including a mute axis sent without unset (nil-slice guard).
+func TestBulk_PreferencesEndToEnd(t *testing.T) {
+	pool := testutil.NewIsolatedTestPool(t, "bulk_prefs_http_test")
+	ctx := t.Context()
+
+	svc := watchlist.NewService(sqlc.New(pool))
+	srv := httpserver.New(pool, svc, stubEventsStore{}, nil, discardLogger(), httpserver.WithWatchlistBulk(svc))
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	var ids []int64
+	for _, suffix := range []string{"-a", "-b", "-c"} {
+		e, err := svc.Add(ctx, watchlist.AddParams{MBID: testMBID(t) + suffix, Name: "Prefs Artist" + suffix})
+		if err != nil {
+			t.Fatalf("seed entry %s: %v", suffix, err)
+		}
+		ids = append(ids, e.ID)
+	}
+	a, b, c := ids[0], ids[1], ids[2]
+
+	rel, mute := []string{"single"}, []string{"new_release"}
+	if _, err := svc.UpdatePreferences(ctx, b, watchlist.PreferencesParams{ReleaseTypes: &rel, MutedEventTypes: &mute}); err != nil {
+		t.Fatalf("seed B preferences: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"ids":[%d,%d,999999999],"release_types":{"set":["ep"],"unset":["deluxe"]},"muted_event_types":{"set":["guest_feature"]}}`, a, b)
+	resp, raw := patchBulkPreferences(t, ts, body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, raw)
+	}
+	var got bulkOutcomeWire
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if want := []int64{a, b}; !slices.Equal(got.Applied, want) {
+		t.Fatalf("applied = %v, want %v", got.Applied, want)
+	}
+	if len(got.Skipped) != 1 || got.Skipped[0].ID != 999999999 || got.Skipped[0].Reason != "gone" {
+		t.Fatalf("skipped = %+v, want one gone entry for 999999999", got.Skipped)
+	}
+
+	listResp, err := http.Get(ts.URL + "/watchlist")
+	if err != nil {
+		t.Fatalf("GET /watchlist: %v", err)
+	}
+	defer func() { _ = listResp.Body.Close() }()
+	var entries []struct {
+		ID              int64    `json:"id"`
+		ReleaseTypes    []string `json:"release_types"`
+		MutedEventTypes []string `json:"muted_event_types"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	type prefs struct{ release, mute []string }
+	want := map[int64]prefs{
+		a: {[]string{"album", "single", "ep"}, []string{"guest_feature"}},
+		b: {[]string{"single", "ep"}, []string{"new_release", "guest_feature"}},
+		c: {[]string{"album", "single", "ep", "deluxe"}, []string{}},
+	}
+	if len(entries) != len(want) {
+		t.Fatalf("entries = %d, want %d", len(entries), len(want))
+	}
+	for _, e := range entries {
+		w := want[e.ID]
+		if !slices.Equal(e.ReleaseTypes, w.release) || !slices.Equal(e.MutedEventTypes, w.mute) {
+			t.Errorf("entry %d = release %v mute %v, want release %v mute %v", e.ID, e.ReleaseTypes, e.MutedEventTypes, w.release, w.mute)
+		}
 	}
 }

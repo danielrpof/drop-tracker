@@ -34,6 +34,7 @@ var (
 // WatchlistBulkStore is the narrow surface the bulk watchlist routes need.
 type WatchlistBulkStore interface {
 	BulkRemove(ctx context.Context, ids []int64) (watchlist.BulkRemoveResult, error)
+	BulkUpdatePreferences(ctx context.Context, ids []int64, d watchlist.PreferencesDelta) (watchlist.BulkUpdateResult, error)
 }
 
 // WithWatchlistBulk supplies the bulk store. Absent, the bulk watchlist routes
@@ -199,4 +200,82 @@ func (s *Server) handleBulkAddTag(w http.ResponseWriter, r *http.Request) {
 		Applied: applied,
 		Skipped: toSkipWire(result.Skipped),
 	})
+}
+
+const (
+	codeBulkNoPreferences      = "bulk_no_preferences"
+	codeBulkPreferenceConflict = "bulk_preference_conflict"
+	codeInvalidReleaseType     = "invalid_release_type"
+	codeInvalidEventType       = "invalid_event_type"
+	skipReasonGone             = "gone"
+)
+
+// bulkPreferenceErrors maps domain sentinels to the D-21 wire codes.
+var bulkPreferenceErrors = []domainError{
+	{watchlist.ErrNoPreferencesSupplied, http.StatusBadRequest, codeBulkNoPreferences},
+	{watchlist.ErrPreferenceConflict, http.StatusBadRequest, codeBulkPreferenceConflict},
+	{watchlist.ErrInvalidReleaseType, http.StatusBadRequest, codeInvalidReleaseType},
+	{watchlist.ErrInvalidEventType, http.StatusBadRequest, codeInvalidEventType},
+}
+
+type bulkAxisDelta struct {
+	Set   []string `json:"set"`
+	Unset []string `json:"unset"`
+}
+
+// bulkPreferencesRequest has no note field: DisallowUnknownFields rejects an
+// over-posted one (24 D-25).
+type bulkPreferencesRequest struct {
+	IDs             []int64       `json:"ids"`
+	ReleaseTypes    bulkAxisDelta `json:"release_types"`
+	MutedEventTypes bulkAxisDelta `json:"muted_event_types"`
+}
+
+type bulkOutcomeResponse struct {
+	Applied []int64        `json:"applied"`
+	Skipped []bulkSkipWire `json:"skipped"`
+}
+
+// handleBulkPreferences implements PATCH /watchlist/bulk/preferences (BULK-03).
+func (s *Server) handleBulkPreferences(w http.ResponseWriter, r *http.Request) {
+	if s.watchlistBulk == nil {
+		writeError(w, http.StatusServiceUnavailable, "watchlist bulk not available")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBulkBodyBytes)
+	var req bulkPreferencesRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ids, err := validateBulkIDs(req.IDs)
+	if err != nil {
+		writeBulkIDsError(w, err)
+		return
+	}
+
+	result, err := s.watchlistBulk.BulkUpdatePreferences(r.Context(), ids, watchlist.PreferencesDelta{
+		ReleaseTypes:    watchlist.AxisDelta{Set: req.ReleaseTypes.Set, Unset: req.ReleaseTypes.Unset},
+		MutedEventTypes: watchlist.AxisDelta{Set: req.MutedEventTypes.Set, Unset: req.MutedEventTypes.Unset},
+	})
+	if err != nil {
+		if writeDomainError(w, bulkPreferenceErrors, err) {
+			return
+		}
+		httplog.SetAttrs(r.Context(), slog.String("watchlist_bulk_error", err.Error()))
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	resp := bulkOutcomeResponse{Applied: result.Applied, Skipped: make([]bulkSkipWire, 0, len(result.Gone))}
+	if resp.Applied == nil {
+		resp.Applied = []int64{}
+	}
+	for _, id := range result.Gone {
+		resp.Skipped = append(resp.Skipped, bulkSkipWire{ID: id, Reason: skipReasonGone})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }

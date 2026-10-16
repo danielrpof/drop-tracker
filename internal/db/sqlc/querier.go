@@ -64,6 +64,9 @@ type Querier interface {
 	BulkAttachTag(ctx context.Context, arg BulkAttachTagParams) ([]BulkAttachTagRow, error)
 	// One statement is all-or-nothing; an id it does not return was already gone (D-03).
 	BulkDeleteWatchlist(ctx context.Context, ids []int64) ([]int64, error)
+	// Per-type delta: locks targets in id order, rebuilds each axis as (current + set) - unset in
+	// canonical order, and updates only changed rows (D-05). COALESCE keeps a nil array from wiping.
+	BulkUpdateWatchlistPreferences(ctx context.Context, arg BulkUpdateWatchlistPreferencesParams) ([]int64, error)
 	// Watched carriers of one tag, for the merge target's post-merge count.
 	CountCarriers(ctx context.Context, tagID int64) (int64, error)
 	// Watched carriers across the given tags, each artist counted once (D-19).
