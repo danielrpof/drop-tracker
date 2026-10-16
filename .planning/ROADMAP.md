@@ -284,7 +284,7 @@ Plans:
   4. Removing the selection first asks for confirmation stating how many artists will be removed. Confirming removes all of them, or none of them if any part fails.
   5. After any bulk action the selection clears and the Watchlist shows the result immediately, with no page reload and no checkbox left pointing at a removed artist.
 
-**Plans:** 2/12 plans executed
+**Plans:** 3/12 plans executed
 
 Plans:
 **Wave 1**
@@ -294,7 +294,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 26-02-PLAN.md — `POST /watchlist/bulk/tags/add`: an ordered pre-lock plus a count-guarded insert that names at-cap artists and rolls back an orphan tag (D-01, D-19), concurrency tests, and the ADR 0004 amendment
-- [ ] 26-03-PLAN.md — Card checkboxes, the sticky action bar, and the count-stating route-level remove confirm with its copy and failure paths (D-09, D-10, D-16, D-17)
+- [x] 26-03-PLAN.md — Card checkboxes, the sticky action bar, and the count-stating route-level remove confirm with its copy and failure paths (D-09, D-10, D-16, D-17)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -404,7 +404,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
 | 25. Find & Filter — Watchlist and History | 21/21 | Complete    | 2026-10-12 |
-| 26. Bulk Edit & Remove | 2/12 | In Progress|  |
+| 26. Bulk Edit & Remove | 3/12 | In Progress|  |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |
 
