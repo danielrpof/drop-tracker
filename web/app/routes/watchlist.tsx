@@ -19,9 +19,11 @@ import {
   type SearchArtist,
   type SearchResponse,
   type TagRef,
+  type BulkAddTagOutcome,
   type BulkRemoveOutcome,
   type WatchlistEntry,
   addWatchlist,
+  bulkAddTag,
   bulkRemoveWatchlist,
   listWatchlist,
   removeWatchlist,
@@ -149,6 +151,14 @@ export default function Watchlist() {
   function markSticky(id: number) {
     setSticky((prev) =>
       prev.ids.has(id) ? prev : { ...prev, ids: new Set(prev.ids).add(id) }
+    )
+  }
+
+  function markStickyMany(ids: readonly number[]) {
+    setSticky((prev) =>
+      ids.every((id) => prev.ids.has(id))
+        ? prev
+        : { ...prev, ids: new Set([...prev.ids, ...ids]) }
     )
   }
 
@@ -575,6 +585,35 @@ export default function Watchlist() {
     toast.error(fallbackMessage)
   }
 
+  function reportBulkAddOutcome(outcome: BulkAddTagOutcome) {
+    const n = outcome.applied.length
+    toast.success(`Added “${outcome.tag.name}” to ${n} artist${plural(n)}.`)
+  }
+
+  // One request for the whole selection; null tells the bar to stay selected.
+  async function handleBulkAddTag(
+    name: string
+  ): Promise<BulkAddTagOutcome | null> {
+    const sentIds = effective.map((e) => e.id)
+    setBulkInFlight(true)
+    let out: BulkAddTagOutcome
+    try {
+      out = await bulkAddTag(sentIds, name)
+    } catch (error) {
+      setBulkInFlight(false)
+      showBulkFailure(
+        error,
+        `Couldn't add “${name}” to the selected artists — try again.`
+      )
+      return null
+    }
+    setBulkInFlight(false)
+    markStickyMany(out.applied)
+    refresh()
+    reportBulkAddOutcome(out)
+    return out
+  }
+
   function openRemoveConfirm() {
     setRemoveConfirm({
       open: true,
@@ -879,6 +918,8 @@ export default function Watchlist() {
                 selected={effective}
                 inFlight={bulkInFlight}
                 onRemove={openRemoveConfirm}
+                onAddTag={handleBulkAddTag}
+                onSucceeded={finishBulkSuccess}
                 onClear={clearSelection}
                 removeButtonRef={removeButtonRef}
               />

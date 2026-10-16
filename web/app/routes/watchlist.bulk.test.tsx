@@ -13,7 +13,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   ApiError,
   type WatchlistEntry,
+  bulkAddTag,
   bulkRemoveWatchlist,
+  listTags,
   listWatchlist,
 } from "~/lib/api"
 import { makeEntry } from "~/lib/test/fixtures"
@@ -36,6 +38,8 @@ vi.mock("sonner", () => ({
 
 const mockList = vi.mocked(listWatchlist)
 const mockBulkRemove = vi.mocked(bulkRemoveWatchlist)
+const mockAddTag = vi.mocked(bulkAddTag)
+const mockListTags = vi.mocked(listTags)
 
 async function renderWatchlist(entries: WatchlistEntry[]) {
   mockList.mockResolvedValue(entries)
@@ -678,5 +682,41 @@ describe("Watchlist bar clearance", () => {
       screen.getByRole("button", { name: "Clear selection" })
     )
     expect(read()).toBe("")
+  })
+})
+
+describe("Watchlist bulk add tag", () => {
+  // Types a new tag into the bar's inline picker and picks Create.
+  async function createFromBar(count: number, tag: string) {
+    await userEvent.click(screen.getByRole("button", { name: "Add tag" }))
+    const input = await screen.findByRole("combobox", {
+      name: `Add tag to ${count} selected artist${count === 1 ? "" : "s"}`,
+    })
+    await userEvent.type(input, tag)
+    await userEvent.click(
+      await screen.findByRole("option", { name: `Create “${tag}”` })
+    )
+  }
+
+  it("tags two selected artists from the inline picker in one request", async () => {
+    await renderWatchlist(trio())
+    mockListTags.mockResolvedValue([])
+    mockAddTag.mockResolvedValue({
+      tag: { id: 7, name: "rap" },
+      applied: [1, 2],
+      skipped: [],
+    })
+    await check("Drake", "SZA")
+    expect(mockListTags).not.toHaveBeenCalled()
+
+    await createFromBar(2, "rap")
+
+    await waitFor(() => expect(bar()).not.toBeInTheDocument())
+    expect(mockListTags).toHaveBeenCalledTimes(1)
+    expect(mockAddTag).toHaveBeenCalledTimes(1)
+    expect(mockAddTag).toHaveBeenCalledWith([1, 2], "rap")
+    expect(toast.success).toHaveBeenCalledWith("Added “rap” to 2 artists.")
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(selectAll()).toHaveFocus())
   })
 })

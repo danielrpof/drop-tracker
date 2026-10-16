@@ -381,6 +381,34 @@ export async function bulkRemoveWatchlist(
   })
 }
 
+export interface BulkSkip {
+  id: number
+  name?: string
+  reason: "cap" | "gone"
+}
+
+export interface BulkOutcome {
+  applied: number[]
+  skipped: BulkSkip[]
+}
+
+export interface BulkAddTagOutcome extends BulkOutcome {
+  tag: TagRef
+}
+
+// bulkAddTag tags many entries in one request (BULK-02); cap and gone ids
+// come back in skipped rather than failing the call.
+export async function bulkAddTag(
+  ids: number[],
+  name: string
+): Promise<BulkAddTagOutcome> {
+  return apiFetch<BulkAddTagOutcome>("/watchlist/bulk/tags/add", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, name }),
+  })
+}
+
 // detachTag removes one tag from an entry (TAG-02); idempotent server-side,
 // so an already-gone link still resolves 204.
 export async function detachTag(entryId: number, tagId: number): Promise<void> {

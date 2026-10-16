@@ -1,4 +1,4 @@
-import type { WatchlistEntry } from "~/lib/api"
+import type { TagRef, WatchlistEntry } from "~/lib/api"
 
 // Pure selection helpers: type-only imports, because route tests automock ~/lib/api.
 
@@ -56,4 +56,12 @@ export function applyRange(
     else out.delete(id)
   }
   return out
+}
+
+// Tags carried by every selected entry, in the first entry's order.
+export function tagsOnEvery(selected: readonly WatchlistEntry[]): TagRef[] {
+  if (selected.length === 0) return []
+  return selected[0].tags.filter((tag) =>
+    selected.every((e) => e.tags.some((t) => t.id === tag.id))
+  )
 }
