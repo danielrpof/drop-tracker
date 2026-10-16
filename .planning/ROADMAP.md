@@ -284,7 +284,7 @@ Plans:
   4. Removing the selection first asks for confirmation stating how many artists will be removed. Confirming removes all of them, or none of them if any part fails.
   5. After any bulk action the selection clears and the Watchlist shows the result immediately, with no page reload and no checkbox left pointing at a removed artist.
 
-**Plans:** 11/12 plans executed
+**Plans:** 12/12 plans executed
 
 Plans:
 **Wave 1**
@@ -324,7 +324,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 26-12-PLAN.md — Embedded bundle rebuild, the phase-closing Definition of Done (`make db-up` + `make test`, or their recipes), and the blast-radius gate
+- [x] 26-12-PLAN.md — Embedded bundle rebuild, the phase-closing Definition of Done (`make db-up` + `make test`, or their recipes), and the blast-radius gate
 
 **UI hint**: yes
 
@@ -404,7 +404,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
 | 25. Find & Filter — Watchlist and History | 21/21 | Complete    | 2026-10-12 |
-| 26. Bulk Edit & Remove | 11/12 | In Progress|  |
+| 26. Bulk Edit & Remove | 12/12 | In Progress|  |
 | 27. Paste-a-List Bulk Add | 0/? | Not started | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |
 
