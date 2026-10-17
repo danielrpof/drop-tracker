@@ -410,4 +410,17 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 
 ## Backlog
 
-*(none currently)*
+### Phase 999.1: Terraform + Azure ephemeral deploy (BACKLOG)
+
+**Goal:** Terraform-managed Azure environment (Container Apps + Postgres Flexible Server) run as an apply -> smoke test -> destroy cycle, locally first, then from GitHub Actions. Gives the deferred Phase 17 deploy/health-gate work a target without a VPS or domain.
+
+**Plans**: TBD (proposed slices)
+
+- (a) Bootstrap module: state storage account + GitHub OIDC app registration, never destroyed
+- (b) Root module: resource group, Container App, Postgres Flexible Server, budget alert; applied locally
+- (c) Smoke-test script: `/health` + `/ready`, then POST /watchlist and re-GET
+- (d) CI: `terraform fmt`/`validate`, tflint, config scan, plan comment on PRs
+- (e) `workflow_dispatch` cycle: apply, smoke test, destroy under `if: always()`, image tag from the release job
+- (f) README/ADR covering cost and teardown
+
+Context: `.planning/notes/2026-10-17-terraform-azure-ephemeral-deploy.md`; open questions in `.planning/research/questions.md`.
