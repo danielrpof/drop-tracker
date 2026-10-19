@@ -18,7 +18,8 @@ result: pass
 
 ### 2. Shift+click range through the 44px label: click one card checkbox, Shift+click a card three rows down on the label area, then repeat after changing sort (26-04 backstop).
 expected: The inclusive range in visible order is selected. After the sort change, the anchor is reset and only the clicked card toggles.
-result: issue
+result: pass
+fixed: "shift+click fixed (debug shift-click-range-select); user confirmed 2026-10-19"
 reported: "part A fail, shift clicking only selects that box and not the boxes between. part B fail, the previous card before changing the sort is still selected as well"
 severity: major
 note: "Part B's retained prior selection is by design (selection persists across view changes; only the anchor resets). Part B cannot be meaningfully confirmed until Part A ranges work."
@@ -57,8 +58,8 @@ reason: branch not pushed; needs a push to run CI
 ## Summary
 
 total: 9
-passed: 7
-issues: 1
+passed: 8
+issues: 0
 pending: 0
 skipped: 0
 blocked: 1
@@ -66,11 +67,11 @@ blocked: 1
 ## Gaps
 
 - truth: "Shift+click selects the inclusive range in visible order; after a sort change the anchor resets and only the clicked card toggles"
-  status: failed
+  status: resolved
   reason: "User reported: part A fail, shift clicking only selects that box and not the boxes between. part B fail, the previous card before changing the sort is still selected as well (retained selection is by design; unconfirmable until part A works)"
   severity: major
   test: 2
-  root_cause: ""
-  artifacts: []
+  root_cause: "onKeyDownCapture in WatchlistRow cleared shiftRef on every keydown, including auto-repeat of the held Shift key, before the checkbox change handler read it"
+  artifacts: ["web/app/components/watchlist/WatchlistRow.tsx", "web/app/routes/watchlist.bulk.test.tsx"]
   missing: []
-  debug_session: ""
+  debug_session: ".planning/debug/resolved/shift-click-range-select.md"
