@@ -21,7 +21,7 @@ export function selectAllState(
   return effectiveCount >= visibleCount ? "checked" : "indeterminate"
 }
 
-// Unchecking drops only the visible ids; hidden selections survive (grill Q9).
+// Unchecking drops only the visible ids; hidden selections survive.
 export function toggleAllVisible(
   visible: WatchlistEntry[],
   selected: ReadonlySet<number>
@@ -37,7 +37,7 @@ export function toggleAllVisible(
 }
 
 // Sets the inclusive anchor..clicked span, in visible order, to `next`. Without
-// a usable anchor it toggles only the clicked id. Spans only `order` (T-26-45).
+// a usable anchor it toggles only the clicked id. Spans only `order`.
 export function applyRange(
   order: readonly number[],
   anchor: number | null,
