@@ -39,7 +39,15 @@ import {
   selectAllState,
   toggleAllVisible,
 } from "~/lib/bulkSelection"
-import { formatAlreadyRemoved, formatNameList } from "~/lib/format"
+import {
+  addTagToast,
+  failureToast,
+  preferencesToast,
+  removeTagToast,
+  removeWatchlistToast,
+  type ToastSpec,
+} from "~/lib/bulkOutcomeMessages"
+import { formatNameList } from "~/lib/format"
 import { isAddableSource } from "~/lib/sources"
 import { useScrollAnchor } from "~/lib/useScrollAnchor"
 import { useUrlParams } from "~/lib/useUrlParams"
@@ -87,6 +95,16 @@ type RemoveOutcome =
 
 function plural(n: number): string {
   return n === 1 ? "" : "s"
+}
+
+function showToast(
+  spec: ToastSpec,
+  action?: { label: string; onClick: () => void }
+) {
+  const { level, title, ...rest } = spec
+  const options = { ...rest, ...(action && { action }) }
+  if (Object.keys(options).length === 0) toast[level](title)
+  else toast[level](title, options)
 }
 
 function filterKeyOf(view: WatchlistView): string {
@@ -580,63 +598,22 @@ export default function Watchlist() {
 
   // `max` comes from the response body; Go and TS share no constant.
   function showBulkFailure(error: unknown, fallbackMessage: string) {
-    if (error instanceof ApiError && error.code === "bulk_too_many_ids") {
-      const max = (error.body as { max?: unknown } | undefined)?.max
-      if (typeof max === "number") {
-        toast.error(
-          `Too many artists selected — select at most ${max} and try again.`
-        )
-        return
-      }
-    }
-    toast.error(fallbackMessage)
+    const max =
+      error instanceof ApiError && error.code === "bulk_too_many_ids"
+        ? (error.body as { max?: unknown } | undefined)?.max
+        : undefined
+    showToast(
+      failureToast(typeof max === "number" ? max : null, fallbackMessage)
+    )
   }
 
-  // Cap skips are named in the order sent (visible order), not the server's id order (D-01).
   function reportBulkAddOutcome(
     outcome: BulkAddTagOutcome,
     sentIds: number[],
     variant: "add" | "restore" = "add"
   ) {
-    const n = outcome.applied.length
-    const tag = `“${outcome.tag.name}”`
-    const caps = outcome.skipped
-      .filter((s) => s.reason === "cap")
-      .sort((a, b) => sentIds.indexOf(a.id) - sentIds.indexOf(b.id))
-    const names = caps.map(
-      (s) => s.name ?? entries?.find((e) => e.id === s.id)?.name ?? ""
-    )
-    const g = outcome.skipped.filter((s) => s.reason === "gone").length
-    const gone = g > 0 ? formatAlreadyRemoved(g) : ""
-    const join = (...parts: string[]) => parts.filter(Boolean).join(" ")
-
-    if (caps.length > 0 && n === 0) {
-      toast.warning(
-        variant === "restore"
-          ? `Couldn't restore “${outcome.tag.name}” — every artist already has 10 tags.`
-          : `Couldn't add ${tag} — every selected artist already has 10 tags.`,
-        {
-          description: join(`${formatNameList(names)}.`, gone),
-          duration: 8000,
-        }
-      )
-      return
-    }
-    const title = `${variant === "restore" ? "Restored" : "Added"} ${tag} ${variant === "restore" ? "on" : "to"} ${n} artist${plural(n)}.`
-    if (caps.length > 0) {
-      const k = caps.length
-      toast.warning(title, {
-        description: join(
-          `${k} already ${k === 1 ? "has" : "have"} 10 tags: ${formatNameList(names)}.`,
-          gone
-        ),
-        duration: 8000,
-      })
-    } else if (gone) {
-      toast.success(title, { description: gone })
-    } else {
-      toast.success(title)
-    }
+    const nameOf = (id: number) => entries?.find((e) => e.id === id)?.name ?? ""
+    showToast(addTagToast(outcome, sentIds, nameOf, variant))
   }
 
   // One request for the whole selection; null tells the bar to stay selected.
@@ -684,19 +661,14 @@ export default function Watchlist() {
     setBulkInFlight(false)
     markStickyMany(out.applied)
     refresh()
-    const g = out.skipped.filter((s) => s.reason === "gone").length
-    toast.success(
-      `Removed “${tag.name}” from ${out.carried} artist${plural(out.carried)}.`,
-      {
-        duration: 8000,
-        ...(g > 0 && { description: formatAlreadyRemoved(g) }),
-        ...(out.applied.length > 0 && {
-          action: {
+    showToast(
+      removeTagToast(tag.name, out),
+      out.applied.length > 0
+        ? {
             label: "Undo",
             onClick: () => undoRemoveTag(tag.name, out.applied),
-          },
-        }),
-      }
+          }
+        : undefined
     )
     return out
   }
@@ -735,11 +707,7 @@ export default function Watchlist() {
     setBulkInFlight(false)
     markStickyMany(out.applied)
     refresh()
-    const n = out.applied.length
-    const g = out.skipped.filter((s) => s.reason === "gone").length
-    const msg = `Updated preferences for ${n} artist${plural(n)}.`
-    if (g > 0) toast.success(msg, { description: formatAlreadyRemoved(g) })
-    else toast.success(msg)
+    showToast(preferencesToast(out.applied.length, out.skipped))
     return out
   }
 
@@ -778,10 +746,7 @@ export default function Watchlist() {
     const gone = new Set([...outcome.out.removed, ...outcome.out.already_gone])
     setEntries((rows) => (rows ? rows.filter((r) => !gone.has(r.id)) : rows))
     finishBulkSuccess()
-    const g = outcome.out.already_gone.length
-    const msg = `Removed ${gone.size} artist${plural(gone.size)} from your watchlist.`
-    if (g > 0) toast.success(msg, { description: formatAlreadyRemoved(g) })
-    else toast.success(msg)
+    showToast(removeWatchlistToast(gone.size, outcome.out.already_gone.length))
     refresh()
   }
 
