@@ -1,5 +1,5 @@
 ---
-status: partial
+status: complete
 phase: 26-bulk-edit-remove
 source: [26-VERIFICATION.md]
 started: 2026-10-17T00:17:48Z
@@ -8,7 +8,7 @@ updated: 2026-10-19T00:00:00Z
 
 ## Current Test
 
-[testing paused — 2 items outstanding]
+[testing complete]
 
 ## Tests
 
@@ -51,18 +51,17 @@ note: accepted structural guarantee (single DELETE, no watchlist FKs) plus verif
 
 ### 9. Confirm `go test -race ./...` is green in CI for this branch.
 expected: The CI integration job passes with -race. It could not run locally because cgo is unavailable on this Windows host.
-result: blocked
-blocked_by: third-party
-reason: branch not pushed; needs a push to run CI
+result: pass
+note: CI run 39298714930 on test/phase-26-race green (integration job via make test, -race)
 
 ## Summary
 
 total: 9
-passed: 8
+passed: 9
 issues: 0
 pending: 0
 skipped: 0
-blocked: 1
+blocked: 0
 
 ## Gaps
 
