@@ -381,6 +381,22 @@ async function shiftClick(name: string) {
   await user.keyboard("{/Shift}")
 }
 
+// Windows re-fires keydown for a held Shift; the box is focused inside its label by then.
+async function shiftClickWithRepeat(name: string) {
+  const user = userEvent.setup()
+  const box = screen.getByRole("checkbox", { name: `Select ${name}` })
+  await user.keyboard("{Shift>}")
+  await user.pointer({ keys: "[MouseLeft>]", target: box })
+  fireEvent.keyDown(box, {
+    key: "Shift",
+    code: "ShiftLeft",
+    shiftKey: true,
+    repeat: true,
+  })
+  await user.pointer({ keys: "[/MouseLeft]", target: box })
+  await user.keyboard("{/Shift}")
+}
+
 describe("Watchlist shift ranges and in-flight lock", () => {
   it("selects the range in visible order, not id order", async () => {
     await renderWatchlist(trio())
@@ -393,6 +409,33 @@ describe("Watchlist shift ranges and in-flight lock", () => {
         screen.getByRole("checkbox", { name: `Select ${name}` })
       ).toBeChecked()
     }
+  })
+
+  it("keeps the range when the held Shift auto-repeats mid-click", async () => {
+    await renderWatchlist(trio())
+    await check("Bad Bunny")
+    await shiftClickWithRepeat("SZA")
+
+    expect(screen.getByText("3 selected")).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "Select Drake" })).toBeChecked()
+  })
+
+  it("treats a keyboard toggle as plain after an abandoned Shift press", async () => {
+    await renderWatchlist(trio())
+    await check("Bad Bunny")
+    const user = userEvent.setup()
+    const box = screen.getByRole("checkbox", { name: "Select SZA" })
+    await user.keyboard("{Shift>}")
+    await user.pointer({ keys: "[MouseLeft>]", target: box })
+    await user.pointer({ keys: "[/MouseLeft]", target: document.body })
+    await user.keyboard("{/Shift}")
+    box.focus()
+    await user.keyboard(" ")
+
+    expect(screen.getByText("2 selected")).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Select Drake" })
+    ).not.toBeChecked()
   })
 
   it("acts as a plain toggle with no anchor", async () => {

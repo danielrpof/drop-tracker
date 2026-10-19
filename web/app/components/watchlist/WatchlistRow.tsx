@@ -12,6 +12,8 @@ import { ArtistNote } from "./ArtistNote"
 import { PreferenceToggles } from "./PreferenceToggles"
 import { TagChips, type TagActions } from "./TagChips"
 
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta"])
+
 export interface WatchlistRowProps {
   entry: WatchlistEntry
   onEntryChange: (id: number, patch: Partial<WatchlistEntry>) => void
@@ -59,8 +61,9 @@ export function WatchlistRow({
           onPointerDownCapture={(e) => {
             shiftRef.current = e.shiftKey
           }}
-          onKeyDownCapture={() => {
-            shiftRef.current = false
+          onKeyDownCapture={(e) => {
+            // A held Shift re-fires keydown here (Windows); it must not void its own flag.
+            if (!MODIFIER_KEYS.has(e.key)) shiftRef.current = false
           }}
         >
           <Checkbox
