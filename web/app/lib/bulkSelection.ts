@@ -1,7 +1,7 @@
 import type { BulkAxisDelta, TagRef, WatchlistEntry } from "~/lib/api"
 import { sortTagsByName } from "~/lib/tags"
 
-// Pure selection helpers: type-only imports, because route tests automock ~/lib/api.
+// Pure helpers; type-only api imports because route tests automock ~/lib/api.
 
 export type SelectAllState = "checked" | "indeterminate" | "unchecked"
 
@@ -93,13 +93,6 @@ export function removableTags(
 }
 
 export type TriState = "checked" | "unchecked" | "indeterminate"
-
-// Mirrors Go `EventTypes`.
-export const EVENT_TYPE_ORDER = [
-  "new_release",
-  "guest_feature",
-  "deluxe_change",
-] as const
 
 export type PreferenceAxis = "release_types" | "muted_event_types"
 

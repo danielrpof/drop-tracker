@@ -42,11 +42,11 @@ import type {
   BulkAxisDelta,
   BulkOutcome,
   BulkRemoveTagOutcome,
+  PreferencesDelta,
   TagRef,
   WatchlistEntry,
 } from "~/lib/api"
 import {
-  EVENT_TYPE_ORDER,
   buildAxisDelta,
   cycleTriState,
   initialTriStates,
@@ -57,47 +57,21 @@ import {
   type TriState,
 } from "~/lib/bulkSelection"
 import { useTagVocabulary } from "~/lib/useTagVocabulary"
-import { DEFAULT_RELEASE_TYPES } from "~/lib/watchlistView"
-
-export interface PreferencesDelta {
-  releaseTypes: BulkAxisDelta
-  mutedEventTypes: BulkAxisDelta
-}
+import {
+  EVENT_TYPE_ORDER,
+  MUTE_OPTIONS,
+  RELEASE_OPTIONS,
+  RELEASE_TYPE_ORDER,
+} from "~/lib/preferenceOptions"
 
 type PrefStates = Record<PreferenceAxis, Record<string, TriState>>
-
-// Same options, order and aria-labels as the card's PreferenceToggles.
-const RELEASE_OPTIONS = [
-  { type: "album", label: "Album", aria: "Album release type" },
-  { type: "single", label: "Single", aria: "Single release type" },
-  { type: "ep", label: "EP", aria: "EP release type" },
-  { type: "deluxe", label: "Deluxe", aria: "Deluxe release type" },
-]
-
-const MUTE_OPTIONS = [
-  {
-    type: "new_release",
-    label: "New release",
-    aria: "Mute new release alerts",
-  },
-  {
-    type: "guest_feature",
-    label: "Guest feature",
-    aria: "Mute guest feature alerts",
-  },
-  {
-    type: "deluxe_change",
-    label: "Deluxe change",
-    aria: "Mute deluxe change alerts",
-  },
-]
 
 function computePrefStates(selected: WatchlistEntry[]): PrefStates {
   return {
     release_types: initialTriStates(
       selected,
       "release_types",
-      DEFAULT_RELEASE_TYPES
+      RELEASE_TYPE_ORDER
     ),
     muted_event_types: initialTriStates(
       selected,
@@ -268,7 +242,7 @@ export function BulkActionBar({
 
   const prefsDelta: PreferencesDelta = {
     releaseTypes: buildAxisDelta(
-      DEFAULT_RELEASE_TYPES,
+      RELEASE_TYPE_ORDER,
       prefsInitial.release_types,
       prefsCurrent.release_types
     ),

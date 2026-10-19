@@ -20,7 +20,7 @@ import {
   type SearchResponse,
   type TagRef,
   type BulkAddTagOutcome,
-  type BulkAxisDelta,
+  type PreferencesDelta,
   type BulkOutcome,
   type BulkRemoveOutcome,
   type BulkRemoveTagOutcome,
@@ -719,10 +719,9 @@ export default function Watchlist() {
   }
 
   // One request carrying only the changed types; null keeps the popover open.
-  async function handleBulkPreferences(delta: {
-    releaseTypes: BulkAxisDelta
-    mutedEventTypes: BulkAxisDelta
-  }): Promise<BulkOutcome | null> {
+  async function handleBulkPreferences(
+    delta: PreferencesDelta
+  ): Promise<BulkOutcome | null> {
     const sentIds = effective.map((e) => e.id)
     setBulkInFlight(true)
     let out: BulkOutcome
