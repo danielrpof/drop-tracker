@@ -3,6 +3,7 @@ import { toast } from "sonner"
 
 import { Checkbox } from "~/components/ui/checkbox"
 import { type WatchlistEntry, updateWatchlistPreferences } from "~/lib/api"
+import { MUTE_OPTIONS, RELEASE_OPTIONS } from "~/lib/preferenceOptions"
 
 // PreferenceToggles renders the two D-12 preference axes -- release-type
 // filters and muted event types -- as inline checkboxes directly in the
@@ -90,42 +91,21 @@ export function PreferenceToggles({
           Release types
         </legend>
         <div className="flex flex-wrap gap-3">
-          <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
-            <Checkbox
-              checked={entry.release_types.includes("album")}
-              onCheckedChange={(checked) => toggleReleaseType("album", checked)}
-              aria-label="Album release type"
-            />
-            Album
-          </label>
-          <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
-            <Checkbox
-              checked={entry.release_types.includes("single")}
-              onCheckedChange={(checked) =>
-                toggleReleaseType("single", checked)
-              }
-              aria-label="Single release type"
-            />
-            Single
-          </label>
-          <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
-            <Checkbox
-              checked={entry.release_types.includes("ep")}
-              onCheckedChange={(checked) => toggleReleaseType("ep", checked)}
-              aria-label="EP release type"
-            />
-            EP
-          </label>
-          <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
-            <Checkbox
-              checked={entry.release_types.includes("deluxe")}
-              onCheckedChange={(checked) =>
-                toggleReleaseType("deluxe", checked)
-              }
-              aria-label="Deluxe release type"
-            />
-            Deluxe
-          </label>
+          {RELEASE_OPTIONS.map((o) => (
+            <label
+              key={o.type}
+              className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground"
+            >
+              <Checkbox
+                checked={entry.release_types.includes(o.type)}
+                onCheckedChange={(checked) =>
+                  toggleReleaseType(o.type, checked)
+                }
+                aria-label={o.aria}
+              />
+              {o.label}
+            </label>
+          ))}
         </div>
       </fieldset>
 
@@ -134,36 +114,21 @@ export function PreferenceToggles({
           Mute alerts
         </legend>
         <div className="flex flex-wrap gap-3">
-          <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
-            <Checkbox
-              checked={entry.muted_event_types.includes("new_release")}
-              onCheckedChange={(checked) =>
-                toggleMutedEventType("new_release", checked)
-              }
-              aria-label="Mute new release alerts"
-            />
-            New release
-          </label>
-          <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
-            <Checkbox
-              checked={entry.muted_event_types.includes("guest_feature")}
-              onCheckedChange={(checked) =>
-                toggleMutedEventType("guest_feature", checked)
-              }
-              aria-label="Mute guest feature alerts"
-            />
-            Guest feature
-          </label>
-          <label className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground">
-            <Checkbox
-              checked={entry.muted_event_types.includes("deluxe_change")}
-              onCheckedChange={(checked) =>
-                toggleMutedEventType("deluxe_change", checked)
-              }
-              aria-label="Mute deluxe change alerts"
-            />
-            Deluxe change
-          </label>
+          {MUTE_OPTIONS.map((o) => (
+            <label
+              key={o.type}
+              className="flex min-h-11 items-center gap-1.5 py-1 text-label text-foreground"
+            >
+              <Checkbox
+                checked={entry.muted_event_types.includes(o.type)}
+                onCheckedChange={(checked) =>
+                  toggleMutedEventType(o.type, checked)
+                }
+                aria-label={o.aria}
+              />
+              {o.label}
+            </label>
+          ))}
         </div>
       </fieldset>
     </div>

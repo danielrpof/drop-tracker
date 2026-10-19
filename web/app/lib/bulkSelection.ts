@@ -1,7 +1,7 @@
 import type { BulkAxisDelta, TagRef, WatchlistEntry } from "~/lib/api"
 import { sortTagsByName } from "~/lib/tags"
 
-// Pure selection helpers: type-only imports, because route tests automock ~/lib/api.
+// Pure helpers; type-only api imports because route tests automock ~/lib/api.
 
 export type SelectAllState = "checked" | "indeterminate" | "unchecked"
 
@@ -21,7 +21,7 @@ export function selectAllState(
   return effectiveCount >= visibleCount ? "checked" : "indeterminate"
 }
 
-// Unchecking drops only the visible ids; hidden selections survive (grill Q9).
+// Unchecking drops only the visible ids; hidden selections survive.
 export function toggleAllVisible(
   visible: WatchlistEntry[],
   selected: ReadonlySet<number>
@@ -37,7 +37,7 @@ export function toggleAllVisible(
 }
 
 // Sets the inclusive anchor..clicked span, in visible order, to `next`. Without
-// a usable anchor it toggles only the clicked id. Spans only `order` (T-26-45).
+// a usable anchor it toggles only the clicked id. Spans only `order`.
 export function applyRange(
   order: readonly number[],
   anchor: number | null,
@@ -93,13 +93,6 @@ export function removableTags(
 }
 
 export type TriState = "checked" | "unchecked" | "indeterminate"
-
-// Mirrors Go `EventTypes`.
-export const EVENT_TYPE_ORDER = [
-  "new_release",
-  "guest_feature",
-  "deluxe_change",
-] as const
 
 export type PreferenceAxis = "release_types" | "muted_event_types"
 

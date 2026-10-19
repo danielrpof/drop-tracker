@@ -514,6 +514,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 261007-lc4 | Phase 24 comment cleanup: comment-only trim to 1-3 line why-notes with one doc ref, fixed inaccurate WithTags/merge-trigger/buildTagSuggestions comments, removed plan narration | 2026-10-07 | be98a62 | [261007-lc4-phase-24-comment-cleanup](./quick/261007-lc4-phase-24-comment-cleanup/) |
 | 261011-gq7 | Amend Phase 26 CONTEXT and UI-SPEC with grill decisions Q1–Q10 (derived selection, outcome-only bulk responses + refresh, ordered-lock bulk tag attach, single-statement remove/preferences, pending-alert disclosure) and add withdraw-pending-events todo | 2026-10-11 | 6408d28 | [261011-gq7-amend-phase-26-docs-with-grill-decisions](./quick/261011-gq7-amend-phase-26-docs-with-grill-decisions/) |
 | 261011-moj | Amend Phase 26 CONTEXT and UI-SPEC with UI review U1–U4 (route-level confirm + close→clear→focus order, scroll-padding focus clearance, one-row phone bar, remove-tag Undo) | 2026-10-11 | 9ac478c | [261011-moj-amend-phase-26-ui-spec-and-context-with-](./quick/261011-moj-amend-phase-26-ui-spec-and-context-with-/) |
+| 261019-jkv | Refactor phase 26 bulk UI: shared preference options, popover and outcome-messages modules, useBulkSelection hook | 2026-10-19 | 66e1990 | [261019-jkv-refactor-phase-26-bulk-ui-preferenceopti](./quick/261019-jkv-refactor-phase-26-bulk-ui-preferenceopti/) |
 
 ### Roadmap Evolution
 

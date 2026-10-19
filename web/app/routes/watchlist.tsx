@@ -19,28 +19,13 @@ import {
   type SearchArtist,
   type SearchResponse,
   type TagRef,
-  type BulkAddTagOutcome,
-  type BulkAxisDelta,
-  type BulkOutcome,
-  type BulkRemoveOutcome,
-  type BulkRemoveTagOutcome,
   type WatchlistEntry,
   addWatchlist,
-  bulkAddTag,
-  bulkRemoveTag,
-  bulkRemoveWatchlist,
-  bulkUpdatePreferences,
   listWatchlist,
   removeWatchlist,
 } from "~/lib/api"
-import {
-  applyRange,
-  effectiveSelection,
-  selectAllState,
-  toggleAllVisible,
-} from "~/lib/bulkSelection"
-import { formatAlreadyRemoved, formatNameList } from "~/lib/format"
 import { isAddableSource } from "~/lib/sources"
+import { useBulkSelection } from "~/lib/useBulkSelection"
 import { useScrollAnchor } from "~/lib/useScrollAnchor"
 import { useUrlParams } from "~/lib/useUrlParams"
 import {
@@ -78,17 +63,6 @@ import {
 const Q_WRITE_DEBOUNCE_MS = 300
 const COUNT_ANNOUNCE_DEBOUNCE_MS = 500
 
-const BULK_REMOVE_FAILED =
-  "Couldn't remove the selected artists — nothing was removed. Try again."
-
-type RemoveOutcome =
-  | { ok: true; out: BulkRemoveOutcome }
-  | { ok: false; error: unknown }
-
-function plural(n: number): string {
-  return n === 1 ? "" : "s"
-}
-
 function filterKeyOf(view: WatchlistView): string {
   return `${view.sort}|${view.tagIds.join(",")}|${view.muted}|${view.custom}`
 }
@@ -101,24 +75,6 @@ export default function Watchlist() {
   )
   const [statusMessage, setStatusMessage] = useState("")
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
-  // Never trimmed to the visible set; the effective selection is derived (D-11).
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(EMPTY_IDS)
-  const [bulkInFlight, setBulkInFlight] = useState(false)
-  // ids and names are snapshotted at open and kept while the dialog closes.
-  const [removeConfirm, setRemoveConfirm] = useState<{
-    open: boolean
-    ids: number[]
-    names: string[]
-  }>({ open: false, ids: [], names: [] })
-  const removeOutcomeRef = useRef<RemoveOutcome | null>(null)
-  const anchorRef = useRef<number | null>(null)
-  const pageHeadingRef = useRef<HTMLHeadingElement>(null)
-  const selectAllRef = useRef<HTMLElement | null>(null)
-  const clearFiltersRef = useRef<HTMLButtonElement | null>(null)
-  const removeButtonRef = useRef<HTMLButtonElement | null>(null)
-  const removeCloseKindRef = useRef<"success" | "return">("return")
-  const [pendingFocus, setPendingFocus] = useState(false)
-
   const { params, write } = useUrlParams()
   const location = useLocation()
   const navigationType = useNavigationType()
@@ -130,8 +86,6 @@ export default function Watchlist() {
   const filterInputRef = useRef<HTMLInputElement | null>(null)
   const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const countRef = useRef({ n: 0, m: 0, k: 0 })
-  // Undo outlives the render that built it, so it reads the live visible order.
-  const visibleIdsRef = useRef<number[]>([])
   // Cards the user just touched or added stay visible past a filter (G4). Keyed
   // to the filter: the router commits the URL in a transition, so the reset must
   // happen in that same render.
@@ -248,15 +202,6 @@ export default function Watchlist() {
       clearSticky()
     }
   }, [view.q])
-
-  // A range never survives a change of what the user sees or an empty selection.
-  useEffect(() => {
-    anchorRef.current = null
-  }, [filterKey, query])
-
-  useEffect(() => {
-    if (selectedIds.size === 0) anchorRef.current = null
-  }, [selectedIds])
 
   const headingRef = useRef<HTMLHeadingElement>(null)
   // G-25-12: after a keyboard toggle removes its card, focus the fallback card's chip, else the heading.
@@ -526,266 +471,6 @@ export default function Watchlist() {
     })
   }
 
-  function handleSelectChange(id: number, next: boolean, shift: boolean) {
-    const order = visible.map((e) => e.id)
-    let result: ReadonlySet<number>
-    if (shift) {
-      result = applyRange(order, anchorRef.current, id, next, selectedIds)
-    } else if (selectedIds.has(id) === next) {
-      result = selectedIds
-    } else {
-      const out = new Set(selectedIds)
-      if (next) out.add(id)
-      else out.delete(id)
-      result = out
-    }
-    setSelectedIds(result)
-    anchorRef.current = id
-    const n = effectiveSelection(visible, result).length
-    if (effective.length === 0 && n > 0) {
-      announce(`${n} selected. Selection actions follow the artist list.`)
-    }
-  }
-
-  // The box's own next value is ignored: the result depends on the visible set.
-  function handleSelectAllVisible() {
-    const next = toggleAllVisible(visible, selectedIds)
-    setSelectedIds(next)
-    const n = effectiveSelection(visible, next).length
-    announce(
-      n > 0 ? `Selected ${n} visible artist${plural(n)}.` : "Selection cleared."
-    )
-  }
-
-  function finishBulkSuccess() {
-    setSelectedIds(EMPTY_IDS)
-    anchorRef.current = null
-    setPendingFocus(true)
-  }
-
-  // First of: Select all visible, the filtered-to-zero Clear filters, the h1.
-  function resolveFallbackTarget(): HTMLElement | null {
-    if (entries && entries.length > 0) {
-      return visible.length > 0 ? selectAllRef.current : clearFiltersRef.current
-    }
-    return pageHeadingRef.current
-  }
-
-  function clearSelection() {
-    setSelectedIds(EMPTY_IDS)
-    anchorRef.current = null
-    setPendingFocus(true)
-    announce("Selection cleared.")
-  }
-
-  // `max` comes from the response body; Go and TS share no constant.
-  function showBulkFailure(error: unknown, fallbackMessage: string) {
-    if (error instanceof ApiError && error.code === "bulk_too_many_ids") {
-      const max = (error.body as { max?: unknown } | undefined)?.max
-      if (typeof max === "number") {
-        toast.error(
-          `Too many artists selected — select at most ${max} and try again.`
-        )
-        return
-      }
-    }
-    toast.error(fallbackMessage)
-  }
-
-  // Cap skips are named in the order sent (visible order), not the server's id order (D-01).
-  function reportBulkAddOutcome(
-    outcome: BulkAddTagOutcome,
-    sentIds: number[],
-    variant: "add" | "restore" = "add"
-  ) {
-    const n = outcome.applied.length
-    const tag = `“${outcome.tag.name}”`
-    const caps = outcome.skipped
-      .filter((s) => s.reason === "cap")
-      .sort((a, b) => sentIds.indexOf(a.id) - sentIds.indexOf(b.id))
-    const names = caps.map(
-      (s) => s.name ?? entries?.find((e) => e.id === s.id)?.name ?? ""
-    )
-    const g = outcome.skipped.filter((s) => s.reason === "gone").length
-    const gone = g > 0 ? formatAlreadyRemoved(g) : ""
-    const join = (...parts: string[]) => parts.filter(Boolean).join(" ")
-
-    if (caps.length > 0 && n === 0) {
-      toast.warning(
-        variant === "restore"
-          ? `Couldn't restore “${outcome.tag.name}” — every artist already has 10 tags.`
-          : `Couldn't add ${tag} — every selected artist already has 10 tags.`,
-        {
-          description: join(`${formatNameList(names)}.`, gone),
-          duration: 8000,
-        }
-      )
-      return
-    }
-    const title = `${variant === "restore" ? "Restored" : "Added"} ${tag} ${variant === "restore" ? "on" : "to"} ${n} artist${plural(n)}.`
-    if (caps.length > 0) {
-      const k = caps.length
-      toast.warning(title, {
-        description: join(
-          `${k} already ${k === 1 ? "has" : "have"} 10 tags: ${formatNameList(names)}.`,
-          gone
-        ),
-        duration: 8000,
-      })
-    } else if (gone) {
-      toast.success(title, { description: gone })
-    } else {
-      toast.success(title)
-    }
-  }
-
-  // One request for the whole selection; null tells the bar to stay selected.
-  async function handleBulkAddTag(
-    name: string
-  ): Promise<BulkAddTagOutcome | null> {
-    const sentIds = effective.map((e) => e.id)
-    setBulkInFlight(true)
-    let out: BulkAddTagOutcome
-    try {
-      out = await bulkAddTag(sentIds, name)
-    } catch (error) {
-      setBulkInFlight(false)
-      showBulkFailure(
-        error,
-        `Couldn't add “${name}” to the selected artists — try again.`
-      )
-      return null
-    }
-    setBulkInFlight(false)
-    markStickyMany(out.applied)
-    refresh()
-    reportBulkAddOutcome(out, sentIds)
-    return out
-  }
-
-  // One request for the selection; null keeps it selected. Undo (U4) re-adds by name.
-  async function handleBulkRemoveTag(
-    tag: TagRef
-  ): Promise<BulkRemoveTagOutcome | null> {
-    const sentIds = effective.map((e) => e.id)
-    setBulkInFlight(true)
-    let out: BulkRemoveTagOutcome
-    try {
-      out = await bulkRemoveTag(sentIds, tag.id)
-    } catch (error) {
-      setBulkInFlight(false)
-      showBulkFailure(
-        error,
-        `Couldn't remove “${tag.name}” from the selected artists — try again.`
-      )
-      if (error instanceof ApiError && error.status === 404) refresh()
-      return null
-    }
-    setBulkInFlight(false)
-    markStickyMany(out.applied)
-    refresh()
-    const g = out.skipped.filter((s) => s.reason === "gone").length
-    toast.success(
-      `Removed “${tag.name}” from ${out.carried} artist${plural(out.carried)}.`,
-      {
-        duration: 8000,
-        ...(g > 0 && { description: formatAlreadyRemoved(g) }),
-        ...(out.applied.length > 0 && {
-          action: {
-            label: "Undo",
-            onClick: () => undoRemoveTag(tag.name, out.applied),
-          },
-        }),
-      }
-    )
-    return out
-  }
-
-  // Touches neither the selection nor the bar; only the removed-link ids get the tag back.
-  async function undoRemoveTag(name: string, ids: number[]) {
-    let out: BulkAddTagOutcome
-    try {
-      out = await bulkAddTag(ids, name)
-    } catch {
-      toast.error(`Couldn't restore “${name}” — try again.`)
-      return
-    }
-    markStickyMany(out.applied)
-    refresh()
-    const order = visibleIdsRef.current
-    const shown = order.filter((id) => ids.includes(id))
-    const hidden = ids.filter((id) => !order.includes(id)).sort((a, b) => a - b)
-    reportBulkAddOutcome(out, [...shown, ...hidden], "restore")
-  }
-
-  // One request carrying only the changed types; null keeps the popover open.
-  async function handleBulkPreferences(delta: {
-    releaseTypes: BulkAxisDelta
-    mutedEventTypes: BulkAxisDelta
-  }): Promise<BulkOutcome | null> {
-    const sentIds = effective.map((e) => e.id)
-    setBulkInFlight(true)
-    let out: BulkOutcome
-    try {
-      out = await bulkUpdatePreferences(sentIds, delta)
-    } catch (error) {
-      setBulkInFlight(false)
-      showBulkFailure(error, "Couldn't update preferences — try again.")
-      return null
-    }
-    setBulkInFlight(false)
-    markStickyMany(out.applied)
-    refresh()
-    const n = out.applied.length
-    const g = out.skipped.filter((s) => s.reason === "gone").length
-    const msg = `Updated preferences for ${n} artist${plural(n)}.`
-    if (g > 0) toast.success(msg, { description: formatAlreadyRemoved(g) })
-    else toast.success(msg)
-    return out
-  }
-
-  function openRemoveConfirm() {
-    setRemoveConfirm({
-      open: true,
-      ids: effective.map((e) => e.id),
-      names: effective.map((e) => e.name),
-    })
-  }
-
-  // Never throws and never touches selection or entries: those wait for the
-  // dialog to close (U1).
-  async function confirmRemove() {
-    setBulkInFlight(true)
-    try {
-      const out = await bulkRemoveWatchlist(removeConfirm.ids)
-      removeOutcomeRef.current = { ok: true, out }
-    } catch (error) {
-      removeOutcomeRef.current = { ok: false, error }
-    }
-  }
-
-  function handleRemoveDialogOpenChange(open: boolean) {
-    if (open) return
-    const outcome = removeOutcomeRef.current
-    removeOutcomeRef.current = null
-    removeCloseKindRef.current = outcome?.ok ? "success" : "return"
-    setRemoveConfirm((prev) => ({ ...prev, open: false }))
-    setBulkInFlight(false)
-    if (!outcome) return
-    if (!outcome.ok) {
-      showBulkFailure(outcome.error, BULK_REMOVE_FAILED)
-      return
-    }
-    const gone = new Set([...outcome.out.removed, ...outcome.out.already_gone])
-    setEntries((rows) => (rows ? rows.filter((r) => !gone.has(r.id)) : rows))
-    finishBulkSuccess()
-    const g = outcome.out.already_gone.length
-    const msg = `Removed ${gone.size} artist${plural(gone.size)} from your watchlist.`
-    if (g > 0) toast.success(msg, { description: formatAlreadyRemoved(g) })
-    else toast.success(msg)
-    refresh()
-  }
-
   if (entries) {
     for (const r of entries) {
       for (const t of r.tags) tagNamesRef.current.set(t.id, t.name)
@@ -806,22 +491,21 @@ export default function Watchlist() {
   const visible = entries
     ? selectVisible(entries, { ...view, q: query }, stickyIds)
     : []
-  const effective = effectiveSelection(visible, selectedIds)
-  visibleIdsRef.current = visible.map((e) => e.id)
+  const bulk = useBulkSelection({
+    entries,
+    visible,
+    filterKey,
+    query,
+    setEntries,
+    refresh,
+    markStickyMany,
+    announce,
+  })
   countRef.current = {
     n: visible.length,
     m: entries?.length ?? 0,
-    k: effective.length,
+    k: bulk.effective.length,
   }
-  const allState = selectAllState(visible.length, effective.length)
-
-  // Focus moves only once the bar has unmounted and nothing is in flight (F4).
-  useEffect(() => {
-    if (!pendingFocus || bulkInFlight || effective.length > 0) return
-    setPendingFocus(false)
-    resolveFallbackTarget()?.focus()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resolveFallbackTarget reads this render's values
-  }, [pendingFocus, bulkInFlight, effective.length])
 
   function handleTagsChange(ids: number[]) {
     write((p) => {
@@ -880,7 +564,7 @@ export default function Watchlist() {
       <div className="flex flex-col gap-6 p-8 pb-[calc(2rem+var(--bulk-bar-clearance,0px))]">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h1
-            ref={pageHeadingRef}
+            ref={bulk.refs.pageHeading}
             tabIndex={-1}
             className="text-display font-semibold text-foreground outline-none"
           >
@@ -901,33 +585,7 @@ export default function Watchlist() {
           onOpenChange={setManageTagsOpen}
         />
 
-        <ConfirmDialog
-          open={removeConfirm.open}
-          onOpenChange={handleRemoveDialogOpenChange}
-          title={
-            removeConfirm.ids.length === 1
-              ? `Remove ${removeConfirm.names[0]} from your watchlist?`
-              : `Remove ${removeConfirm.ids.length} artists from your watchlist?`
-          }
-          description={
-            removeConfirm.ids.length === 1
-              ? "Their note is deleted but their tags are kept; alerts already found for them may still be sent, and re-adding them later may alert you about releases from while they were removed."
-              : `${formatNameList(removeConfirm.names)}. Their notes are deleted but their tags are kept; alerts already found for them may still be sent, and re-adding any of them later may alert you about releases from while they were removed.`
-          }
-          actionLabel={
-            removeConfirm.ids.length === 1
-              ? "Remove 1 artist"
-              : `Remove ${removeConfirm.ids.length} artists`
-          }
-          pendingLabel="Removing…"
-          variant="destructive"
-          onConfirm={confirmRemove}
-          finalFocus={() =>
-            removeCloseKindRef.current === "success"
-              ? resolveFallbackTarget()
-              : removeButtonRef.current
-          }
-        />
+        <ConfirmDialog {...bulk.confirmDialog} />
 
         <div className="flex flex-col gap-6">
           <SearchBox onResults={setSearchResponse} />
@@ -980,12 +638,12 @@ export default function Watchlist() {
               <div className="flex flex-wrap items-center gap-4">
                 <label className="flex min-h-11 cursor-pointer items-center gap-2 text-label text-foreground select-none">
                   <Checkbox
-                    ref={selectAllRef}
+                    ref={bulk.refs.selectAll}
                     className="border-muted-foreground"
-                    checked={allState === "checked"}
-                    indeterminate={allState === "indeterminate"}
-                    disabled={visible.length === 0 || bulkInFlight}
-                    onCheckedChange={handleSelectAllVisible}
+                    checked={bulk.selectAll.state === "checked"}
+                    indeterminate={bulk.selectAll.state === "indeterminate"}
+                    disabled={bulk.selectAll.disabled}
+                    onCheckedChange={bulk.selectAll.onChange}
                   />
                   Select all visible
                 </label>
@@ -1017,7 +675,7 @@ export default function Watchlist() {
                 heading="No artists match these filters"
                 body={`Try a different name or fewer filters, or clear them to see all ${entries.length} artist${entries.length === 1 ? "" : "s"}.`}
                 action={
-                  <Button ref={clearFiltersRef} onClick={clearFilters}>
+                  <Button ref={bulk.refs.clearFilters} onClick={clearFilters}>
                     Clear filters
                   </Button>
                 }
@@ -1037,26 +695,14 @@ export default function Watchlist() {
                       toggleFilterTag,
                     }}
                     announce={announce}
-                    selected={selectedIds.has(entry.id)}
-                    selectionDisabled={bulkInFlight}
-                    onSelectChange={handleSelectChange}
+                    selected={bulk.selectedIds.has(entry.id)}
+                    selectionDisabled={bulk.inFlight}
+                    onSelectChange={bulk.onSelectChange}
                   />
                 ))}
               </ul>
             )}
-            {effective.length > 0 && (
-              <BulkActionBar
-                selected={effective}
-                inFlight={bulkInFlight}
-                onRemove={openRemoveConfirm}
-                onAddTag={handleBulkAddTag}
-                onRemoveTag={handleBulkRemoveTag}
-                onApplyPreferences={handleBulkPreferences}
-                onSucceeded={finishBulkSuccess}
-                onClear={clearSelection}
-                removeButtonRef={removeButtonRef}
-              />
-            )}
+            {bulk.effective.length > 0 && <BulkActionBar {...bulk.bar} />}
           </section>
         )}
       </div>

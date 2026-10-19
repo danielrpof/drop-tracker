@@ -431,11 +431,16 @@ export interface BulkAxisDelta {
   unset: string[]
 }
 
+export interface PreferencesDelta {
+  releaseTypes: BulkAxisDelta
+  mutedEventTypes: BulkAxisDelta
+}
+
 // bulkUpdatePreferences sends only the changed types per axis (BULK-03); the
 // server leaves every other type, and notes, untouched.
 export async function bulkUpdatePreferences(
   ids: number[],
-  delta: { releaseTypes: BulkAxisDelta; mutedEventTypes: BulkAxisDelta }
+  delta: PreferencesDelta
 ): Promise<BulkOutcome> {
   return apiFetch<BulkOutcome>("/watchlist/bulk/preferences", {
     method: "PATCH",
