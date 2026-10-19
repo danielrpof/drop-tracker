@@ -71,7 +71,7 @@ created: "2026-10-19"
 | T-26-40 | CSRF | remove-tag and Undo calls | high | mitigate | Both via `apiFetch` | closed |
 | T-26-41 | Integrity | Undo on never-tagged artists | medium | mitigate | Undo sends only `out.applied`; test | closed |
 | T-26-42 | DoS (usability) | stale tag id | low | mitigate | 404 → toast + `refresh()`, selection kept | closed |
-| T-26-43 | Tampering | stale embedded bundle | medium | mitigate | Bundle rebuilt at e1aa421 and carries phase strings, but `f3105f1` (Shift fix) changed `WatchlistRow.tsx` without a rebuild; committed chunk still has the old handler | open — below high threshold (non-blocking) |
+| T-26-43 | Tampering | stale embedded bundle | medium | mitigate | Bundle rebuilt at e1aa421 and carries phase strings, but `f3105f1` (Shift fix) changed `WatchlistRow.tsx` without a rebuild; committed chunk still has the old handler | closed (bundle rebuilt after f3105f1) |
 | T-26-44 | Scope creep | out-of-scope packages/files | low | mitigate | Blast-radius diff vs `f793ffc` empty | closed |
 | T-26-45 | Safety | Shift range reaching hidden ids | low | mitigate | `applyRange` over `visible` ids only; anchor resets; `f3105f1` does not weaken it | closed |
 | T-26-46 | XSS | combobox label strings | medium | mitigate | `aria-label` / JSX text only | closed |
@@ -79,7 +79,7 @@ created: "2026-10-19"
 | T-26-SC | Tampering | shadcn vendoring | medium | mitigate | `registries: {}`; package.json/lockfile/components.json unchanged | closed |
 | T-26-SC2 | Tampering | npm installs in `make web` | high | mitigate | `--frozen-lockfile` (Makefile, Dockerfile, CI); lockfile unchanged | closed |
 
-*Status: open · closed · open — below high threshold (non-blocking)*
+*Status: open · closed*
 *Severity: critical > high > medium > low — only open threats at or above `high` count toward threats_open*
 
 ---
@@ -99,9 +99,9 @@ created: "2026-10-19"
 
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
-| 2026-10-19 | 49 | 48 | 1 (non-blocking) | gsd-security-auditor |
+| 2026-10-19 | 49 | 49 | 0 | gsd-security-auditor |
 
-**Follow-up for T-26-43:** run `make web` and commit `internal/webassets/build/client/`. The published image is unaffected (the Dockerfile builds the SPA from source); only a Node-less `go build` from a fresh clone would carry the old handler.
+**T-26-43:** closed after the bundle was rebuilt with `f3105f1` (new chunk carries the modifier-key set; old handler absent).
 
 ---
 
@@ -112,4 +112,4 @@ created: "2026-10-19"
 - [x] `threats_open: 0` confirmed (no open threat at or above `high`)
 - [x] `status: verified` set in frontmatter
 
-**Approval:** verified 2026-10-19 (T-26-43 open, non-blocking)
+**Approval:** verified 2026-10-19 
