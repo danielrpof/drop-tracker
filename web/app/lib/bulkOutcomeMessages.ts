@@ -12,7 +12,7 @@ export interface ToastSpec {
 
 const LONG_MS = 8000
 
-function plural(n: number): string {
+export function plural(n: number): string {
   return n === 1 ? "" : "s"
 }
 
