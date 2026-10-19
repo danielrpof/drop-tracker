@@ -1,4 +1,4 @@
-import { useState, type RefObject } from "react"
+import { useState, type ComponentProps } from "react"
 
 import {
   AlertDialog,
@@ -20,7 +20,7 @@ export interface ConfirmDialogProps {
   pendingLabel: string
   variant: "default" | "destructive"
   onConfirm: () => Promise<void>
-  finalFocus?: RefObject<HTMLElement | null>
+  finalFocus?: ComponentProps<typeof AlertDialogContent>["finalFocus"]
 }
 
 // ConfirmDialog (D-16) is the shared confirm dialog for merge and delete.

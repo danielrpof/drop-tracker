@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import {
   formatAbsoluteTime,
+  formatAlreadyRemoved,
   formatClock,
   formatDetectedDate,
   formatDuration,
   formatIsoTitle,
+  formatNameList,
   formatPollInterval,
   formatRelativeTime,
   formatReleaseDate,
@@ -149,5 +151,34 @@ describe("formatDetectedDate", () => {
 
   it("returns null for an unparseable string", () => {
     expect(formatDetectedDate("not a date")).toBeNull()
+  })
+})
+
+describe("formatNameList", () => {
+  it("joins names by count and caps at three with a remainder", () => {
+    expect(formatNameList([])).toBe("")
+    expect(formatNameList(["Drake"])).toBe("Drake")
+    expect(formatNameList(["Drake", "SZA"])).toBe("Drake and SZA")
+    expect(formatNameList(["Drake", "Bad Bunny", "SZA"])).toBe(
+      "Drake, Bad Bunny and SZA"
+    )
+    expect(formatNameList(["Drake", "Bad Bunny", "SZA", "Rosalia"])).toBe(
+      "Drake, Bad Bunny, SZA and 1 more"
+    )
+    const fourteen = Array.from({ length: 14 }, (_, i) => `Artist ${i}`)
+    expect(formatNameList(fourteen)).toBe(
+      "Artist 0, Artist 1, Artist 2 and 11 more"
+    )
+  })
+})
+
+describe("formatAlreadyRemoved", () => {
+  it("pluralizes on the count", () => {
+    expect(formatAlreadyRemoved(1)).toBe(
+      "1 artist was already removed from your watchlist."
+    )
+    expect(formatAlreadyRemoved(3)).toBe(
+      "3 artists were already removed from your watchlist."
+    )
   })
 })

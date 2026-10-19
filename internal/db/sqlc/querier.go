@@ -60,6 +60,15 @@ type Querier interface {
 	// 1 row = new link, 0 = already linked (D-21). The cap trigger enforces the
 	// 10-tag limit; this statement never counts.
 	AttachTag(ctx context.Context, arg AttachTagParams) (int64, error)
+	// Inserts only where the artist has room; the literal 10 mirrors MaxTagsPerArtist.
+	BulkAttachTag(ctx context.Context, arg BulkAttachTagParams) ([]BulkAttachTagRow, error)
+	// One statement is all-or-nothing; an id it does not return was already gone (D-03).
+	BulkDeleteWatchlist(ctx context.Context, ids []int64) ([]int64, error)
+	// Deletes the tag's links on the selected entries' artists; removed marks entries that carried it.
+	BulkDetachTag(ctx context.Context, arg BulkDetachTagParams) ([]BulkDetachTagRow, error)
+	// Per-type delta: locks targets in id order, rebuilds each axis as (current + set) - unset in
+	// canonical order, and updates only changed rows (D-05). COALESCE keeps a nil array from wiping.
+	BulkUpdateWatchlistPreferences(ctx context.Context, arg BulkUpdateWatchlistPreferencesParams) ([]int64, error)
 	// Watched carriers of one tag, for the merge target's post-merge count.
 	CountCarriers(ctx context.Context, tagID int64) (int64, error)
 	// Watched carriers across the given tags, each artist counted once (D-19).
@@ -92,6 +101,7 @@ type Querier interface {
 	// No fallback SELECT (D-29): the no-op DO UPDATE makes RETURNING yield the
 	// existing row on a collision, keeping its first-entered casing.
 	GetOrCreateTag(ctx context.Context, name string) (GetOrCreateTagRow, error)
+	GetTagByID(ctx context.Context, id int64) (GetTagByIDRow, error)
 	// Only after a tags_name_lower_idx violation, to identify the collider (D-22).
 	GetTagByName(ctx context.Context, lower string) (GetTagByNameRow, error)
 	// Resolves a watchlist entry's artist; artist_tags keys on artists.id (TAG-07).
@@ -238,6 +248,8 @@ type Querier interface {
 	// Locks both tags in id order so concurrent merges cannot deadlock; it also
 	// parks a concurrent attach/rename until commit.
 	LockTagsForMerge(ctx context.Context, ids []int64) ([]LockTagsForMergeRow, error)
+	// Locks the cap trigger's artist rows in id order before any insert (ADR 0004 bulk amendment).
+	LockWatchlistArtistsForBulkTag(ctx context.Context, entryIds []int64) ([]LockWatchlistArtistsForBulkTagRow, error)
 	// Precondition: only ever called after discord.Client.Send has confirmed a
 	// 204 for this row (D-09) -- never before. The AND notified_at IS NULL
 	// predicate is load-bearing, not decorative: it makes the ack idempotent, so

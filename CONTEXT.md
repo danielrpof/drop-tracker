@@ -95,3 +95,15 @@ _Avoid_: filter (that narrows the existing watchlist)
 **Note**:
 The single plain-text annotation on a watchlist entry. It goes away when the artist is removed from the watchlist, and the remove toast's Undo restores it.
 _Avoid_: notes (there is only one), comment, memo
+
+**Bulk selection**:
+The set of watchlist entries the user has checked for one bulk action (add or remove tag, change preferences, remove). It is never trimmed when a filter hides an entry, so it can hold entries that are not currently shown.
+_Avoid_: multi-select, batch
+
+**Effective selection**:
+The bulk selection restricted to the entries currently visible. Every bulk action, the bar's count and Undo work on this set, so a hidden entry is never changed by accident.
+_Avoid_: visible selection, active selection
+
+**Bulk outcome**:
+What a bulk request reports back: the entries it **applied** to, and the entries it **skipped** with a reason (the artist is at the tag cap, or the entry is already gone). A skip is a result, not an error; the whole request only fails if nothing could be attempted.
+_Avoid_: partial failure, result set

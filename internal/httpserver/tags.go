@@ -60,6 +60,8 @@ type TagStore interface {
 	Rename(ctx context.Context, id int64, name string) (tags.Tag, error)
 	Delete(ctx context.Context, id int64) (int64, error)
 	Merge(ctx context.Context, sourceID, targetID int64) (tags.Summary, error)
+	BulkAttach(ctx context.Context, entryIDs []int64, name string) (tags.BulkAttachResult, error)
+	BulkDetach(ctx context.Context, entryIDs []int64, tagID int64) (tags.BulkDetachResult, error)
 }
 
 // WithTags supplies the tags store backing every tag route: attach/detach

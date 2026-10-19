@@ -3,9 +3,12 @@ import { Tags } from "lucide-react"
 import { NavigationType, useLocation, useNavigationType } from "react-router"
 import { toast } from "sonner"
 
+import { ConfirmDialog } from "~/components/common/ConfirmDialog"
 import { EmptyState } from "~/components/common/EmptyState"
 import { Button } from "~/components/ui/button"
+import { Checkbox } from "~/components/ui/checkbox"
 import { Skeleton } from "~/components/ui/skeleton"
+import { BulkActionBar } from "~/components/watchlist/BulkActionBar"
 import { ManageTagsDialog } from "~/components/watchlist/ManageTagsDialog"
 import { SearchBox } from "~/components/watchlist/SearchBox"
 import { SearchResultsColumns } from "~/components/watchlist/SearchResultsColumns"
@@ -22,6 +25,7 @@ import {
   removeWatchlist,
 } from "~/lib/api"
 import { isAddableSource } from "~/lib/sources"
+import { useBulkSelection } from "~/lib/useBulkSelection"
 import { useScrollAnchor } from "~/lib/useScrollAnchor"
 import { useUrlParams } from "~/lib/useUrlParams"
 import {
@@ -71,7 +75,6 @@ export default function Watchlist() {
   )
   const [statusMessage, setStatusMessage] = useState("")
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
-
   const { params, write } = useUrlParams()
   const location = useLocation()
   const navigationType = useNavigationType()
@@ -82,7 +85,7 @@ export default function Watchlist() {
   const qTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const filterInputRef = useRef<HTMLInputElement | null>(null)
   const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const countRef = useRef({ n: 0, m: 0 })
+  const countRef = useRef({ n: 0, m: 0, k: 0 })
   // Cards the user just touched or added stay visible past a filter (G4). Keyed
   // to the filter: the router commits the URL in a transition, so the reset must
   // happen in that same render.
@@ -109,6 +112,14 @@ export default function Watchlist() {
   function markSticky(id: number) {
     setSticky((prev) =>
       prev.ids.has(id) ? prev : { ...prev, ids: new Set(prev.ids).add(id) }
+    )
+  }
+
+  function markStickyMany(ids: readonly number[]) {
+    setSticky((prev) =>
+      ids.every((id) => prev.ids.has(id))
+        ? prev
+        : { ...prev, ids: new Set([...prev.ids, ...ids]) }
     )
   }
 
@@ -154,10 +165,10 @@ export default function Watchlist() {
   function scheduleCountAnnouncement() {
     if (countTimer.current) clearTimeout(countTimer.current)
     countTimer.current = setTimeout(() => {
-      const { n, m } = countRef.current
+      const { n, m, k } = countRef.current
       announce(
         n > 0
-          ? `Showing ${formatArtistCount(n, m)}.`
+          ? `Showing ${formatArtistCount(n, m)}.${k > 0 ? ` ${k} selected.` : ""}`
           : "No artists match these filters."
       )
     }, COUNT_ANNOUNCE_DEBOUNCE_MS)
@@ -480,7 +491,21 @@ export default function Watchlist() {
   const visible = entries
     ? selectVisible(entries, { ...view, q: query }, stickyIds)
     : []
-  countRef.current = { n: visible.length, m: entries?.length ?? 0 }
+  const bulk = useBulkSelection({
+    entries,
+    visible,
+    filterKey,
+    query,
+    setEntries,
+    refresh,
+    markStickyMany,
+    announce,
+  })
+  countRef.current = {
+    n: visible.length,
+    m: entries?.length ?? 0,
+    k: bulk.effective.length,
+  }
 
   function handleTagsChange(ids: number[]) {
     write((p) => {
@@ -536,9 +561,13 @@ export default function Watchlist() {
 
   return (
     <TagVocabularyProvider onChange={applyTagChange}>
-      <div className="flex flex-col gap-6 p-8">
+      <div className="flex flex-col gap-6 p-8 pb-[calc(2rem+var(--bulk-bar-clearance,0px))]">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h1 className="text-display font-semibold text-foreground">
+          <h1
+            ref={bulk.refs.pageHeading}
+            tabIndex={-1}
+            className="text-display font-semibold text-foreground outline-none"
+          >
             Watchlist
           </h1>
           <Button variant="secondary" onClick={() => setManageTagsOpen(true)}>
@@ -555,6 +584,8 @@ export default function Watchlist() {
           open={manageTagsOpen}
           onOpenChange={setManageTagsOpen}
         />
+
+        <ConfirmDialog {...bulk.confirmDialog} />
 
         <div className="flex flex-col gap-6">
           <SearchBox onResults={setSearchResponse} />
@@ -595,7 +626,7 @@ export default function Watchlist() {
             aria-labelledby="watchlist-artists-heading"
             className="flex flex-col gap-4"
           >
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2
                 id="watchlist-artists-heading"
                 ref={headingRef}
@@ -604,9 +635,22 @@ export default function Watchlist() {
               >
                 Your artists
               </h2>
-              <p className="text-label text-muted-foreground tabular-nums">
-                {formatArtistCount(visible.length, entries.length)}
-              </p>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex min-h-11 cursor-pointer items-center gap-2 text-label text-foreground select-none">
+                  <Checkbox
+                    ref={bulk.refs.selectAll}
+                    className="border-muted-foreground"
+                    checked={bulk.selectAll.state === "checked"}
+                    indeterminate={bulk.selectAll.state === "indeterminate"}
+                    disabled={bulk.selectAll.disabled}
+                    onCheckedChange={bulk.selectAll.onChange}
+                  />
+                  Select all visible
+                </label>
+                <p className="text-label text-muted-foreground tabular-nums">
+                  {formatArtistCount(visible.length, entries.length)}
+                </p>
+              </div>
             </div>
             <WatchlistToolbar
               query={query}
@@ -630,7 +674,11 @@ export default function Watchlist() {
               <EmptyState
                 heading="No artists match these filters"
                 body={`Try a different name or fewer filters, or clear them to see all ${entries.length} artist${entries.length === 1 ? "" : "s"}.`}
-                action={<Button onClick={clearFilters}>Clear filters</Button>}
+                action={
+                  <Button ref={bulk.refs.clearFilters} onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                }
               />
             ) : (
               <ul className="flex flex-col gap-4">
@@ -647,10 +695,14 @@ export default function Watchlist() {
                       toggleFilterTag,
                     }}
                     announce={announce}
+                    selected={bulk.selectedIds.has(entry.id)}
+                    selectionDisabled={bulk.inFlight}
+                    onSelectChange={bulk.onSelectChange}
                   />
                 ))}
               </ul>
             )}
+            {bulk.effective.length > 0 && <BulkActionBar {...bulk.bar} />}
           </section>
         )}
       </div>

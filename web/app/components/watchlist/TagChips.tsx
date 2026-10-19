@@ -251,7 +251,8 @@ export function TagChips({ entry, actions, announce }: TagChipsProps) {
       ))}
       {editorOpen ? (
         <TagCombobox
-          entry={entry}
+          inputLabel={`Add tag to ${entry.name}`}
+          alreadyOnMessage={(name) => `“${name}” is already on this artist`}
           vocabulary={vocabulary}
           onArtist={entry.tags}
           pendingNames={pending.map((p) => p.name)}

@@ -1,7 +1,10 @@
+import { useRef } from "react"
 import { X } from "lucide-react"
 
 import { CoverArt } from "~/components/common/CoverArt"
 import { Button } from "~/components/ui/button"
+import { Checkbox } from "~/components/ui/checkbox"
+import { cn } from "~/lib/utils"
 import type { WatchlistEntry } from "~/lib/api"
 import { formatReleaseDate } from "~/lib/format"
 
@@ -9,12 +12,17 @@ import { ArtistNote } from "./ArtistNote"
 import { PreferenceToggles } from "./PreferenceToggles"
 import { TagChips, type TagActions } from "./TagChips"
 
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta"])
+
 export interface WatchlistRowProps {
   entry: WatchlistEntry
   onEntryChange: (id: number, patch: Partial<WatchlistEntry>) => void
   onRemove: (entry: WatchlistEntry) => void
   tagActions: TagActions
   announce: (message: string) => void
+  selected: boolean
+  selectionDisabled: boolean
+  onSelectChange: (id: number, next: boolean, shiftKey: boolean) => void
 }
 
 // WatchlistRow renders one WatchlistEntry: the artist's art, name, and --
@@ -33,10 +41,45 @@ export function WatchlistRow({
   onRemove,
   tagActions,
   announce,
+  selected,
+  selectionDisabled,
+  onSelectChange,
 }: WatchlistRowProps) {
+  // Shift is read on pointer-down: the label's synthesized click may not carry it.
+  const shiftRef = useRef(false)
+
   return (
-    <li className="flex flex-col gap-4 rounded-md bg-card p-4 sm:flex-row sm:items-center">
-      <CoverArt src={entry.image_url} alt={entry.name} size={64} />
+    <li
+      className={cn(
+        "flex flex-col gap-4 rounded-md bg-card p-4 sm:flex-row sm:items-center",
+        selected && "ring-1 ring-foreground/40 ring-inset"
+      )}
+    >
+      <div className="flex items-center gap-1">
+        <label
+          className="-ml-3 flex size-11 shrink-0 cursor-pointer items-center justify-center select-none"
+          onPointerDownCapture={(e) => {
+            shiftRef.current = e.shiftKey
+          }}
+          onKeyDownCapture={(e) => {
+            // A held Shift re-fires keydown here (Windows); it must not void its own flag.
+            if (!MODIFIER_KEYS.has(e.key)) shiftRef.current = false
+          }}
+        >
+          <Checkbox
+            className="border-muted-foreground"
+            aria-label={`Select ${entry.name}`}
+            checked={selected}
+            disabled={selectionDisabled}
+            onCheckedChange={(next) => {
+              const shift = shiftRef.current
+              shiftRef.current = false
+              onSelectChange(entry.id, next, shift)
+            }}
+          />
+        </label>
+        <CoverArt src={entry.image_url} alt={entry.name} size={64} />
+      </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <span

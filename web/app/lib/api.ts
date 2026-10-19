@@ -364,6 +364,95 @@ export async function removeWatchlist(id: number): Promise<void> {
   await apiFetch<void>(`/watchlist/${id}`, { method: "DELETE" })
 }
 
+export interface BulkRemoveOutcome {
+  removed: number[]
+  already_gone: number[]
+}
+
+// bulkRemoveWatchlist deletes many entries in one request (BULK-04); ids
+// already gone come back in already_gone rather than failing the call.
+export async function bulkRemoveWatchlist(
+  ids: number[]
+): Promise<BulkRemoveOutcome> {
+  return apiFetch<BulkRemoveOutcome>("/watchlist/bulk/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  })
+}
+
+export interface BulkSkip {
+  id: number
+  name?: string
+  reason: "cap" | "gone"
+}
+
+export interface BulkOutcome {
+  applied: number[]
+  skipped: BulkSkip[]
+}
+
+export interface BulkAddTagOutcome extends BulkOutcome {
+  tag: TagRef
+}
+
+// bulkAddTag tags many entries in one request (BULK-02); cap and gone ids
+// come back in skipped rather than failing the call.
+export async function bulkAddTag(
+  ids: number[],
+  name: string
+): Promise<BulkAddTagOutcome> {
+  return apiFetch<BulkAddTagOutcome>("/watchlist/bulk/tags/add", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, name }),
+  })
+}
+
+export interface BulkRemoveTagOutcome extends BulkOutcome {
+  carried: number
+}
+
+// bulkRemoveTag unlinks one tag id from many entries (BULK-02); `applied` is
+// exactly the entries that carried it, so Undo can restore only those.
+export async function bulkRemoveTag(
+  ids: number[],
+  tagId: number
+): Promise<BulkRemoveTagOutcome> {
+  return apiFetch<BulkRemoveTagOutcome>("/watchlist/bulk/tags/remove", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, tag_id: tagId }),
+  })
+}
+
+export interface BulkAxisDelta {
+  set: string[]
+  unset: string[]
+}
+
+export interface PreferencesDelta {
+  releaseTypes: BulkAxisDelta
+  mutedEventTypes: BulkAxisDelta
+}
+
+// bulkUpdatePreferences sends only the changed types per axis (BULK-03); the
+// server leaves every other type, and notes, untouched.
+export async function bulkUpdatePreferences(
+  ids: number[],
+  delta: PreferencesDelta
+): Promise<BulkOutcome> {
+  return apiFetch<BulkOutcome>("/watchlist/bulk/preferences", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ids,
+      release_types: delta.releaseTypes,
+      muted_event_types: delta.mutedEventTypes,
+    }),
+  })
+}
+
 // detachTag removes one tag from an entry (TAG-02); idempotent server-side,
 // so an already-gone link still resolves 204.
 export async function detachTag(entryId: number, tagId: number): Promise<void> {

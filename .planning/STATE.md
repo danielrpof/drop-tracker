@@ -2,20 +2,20 @@
 gsd_state_version: "1.0"
 milestone: v1.6
 milestone_name: Watchlist Organization
-current_phase: 26
-current_phase_name: Bulk Edit & Remove
+current_phase: 27
+current_phase_name: Paste-a-List Bulk Add
 status: planning
-stopped_at: Phase 25 complete, ready to plan Phase 26
-last_updated: "2026-10-13T02:17:52.713Z"
-last_activity: 2026-10-12
-last_activity_desc: Phase 25 complete, transitioned to Phase 26
-state_head: aa235f1e00be1b78be6cbea284f996b550c2fd43
+stopped_at: Phase 26 complete, ready to plan Phase 27
+last_updated: "2026-10-19T18:12:58.677Z"
+last_activity: 2026-10-19
+last_activity_desc: Phase 26 complete, transitioned to Phase 27
+state_head: ad1cd5326e7e95181f3651ffae7d5644d0d39e38
 progress:
   total_phases: 5
-  completed_phases: 2
-  total_plans: 35
-  completed_plans: 35
-  percent: 40
+  completed_phases: 3
+  total_plans: 47
+  completed_plans: 47
+  percent: 60
 ---
 
 # Project State
@@ -25,20 +25,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 25 — Find & Filter — Watchlist and History
+**Current focus:** Phase 26 — Bulk Edit & Remove
 
 ## Current Position
 
-Phase: 26 — Bulk Edit & Remove
+Phase: 27 — Paste-a-List Bulk Add
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-12 — Phase 25 complete, transitioned to Phase 26
+Last activity: 2026-10-19 — Phase 26 complete, transitioned to Phase 27
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 134
+- Total plans completed: 146
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -71,6 +71,7 @@ Last activity: 2026-10-12 — Phase 25 complete, transitioned to Phase 26
 | 23 | 4 | - | - |
 | 24 | 14 | - | - |
 | 25 | 21 | - | - |
+| 26 | 12 | - | - |
 
 **Recent Trend:**
 
@@ -184,6 +185,18 @@ Last activity: 2026-10-12 — Phase 25 complete, transitioned to Phase 26
 | Phase 25 P19 | 2 min | 2 tasks | 4 files |
 | Phase 25 P20 | 10 min | 3 tasks | 7 files |
 | Phase 25 P21 | 9 min | 3 tasks | 4 files |
+| Phase 26 P01 | 14 min | 3 tasks | 9 files |
+| Phase 26 P02 | 14min | 3 tasks | 10 files |
+| Phase 26 P03 | 8 min | 2 tasks | 8 files |
+| Phase 26 P04 | 10min | 3 tasks | 5 files |
+| Phase 26 P05 | 12min | 3 tasks | 8 files |
+| Phase 26 P06 | 12min | 3 tasks | 8 files |
+| Phase 26 P07 | 12 min | 2 tasks | 9 files |
+| Phase 26 P08 | 11 min | 2 tasks | 8 files |
+| Phase 26 P09 | 14min | 2 tasks | 6 files |
+| Phase 26 P10 | 35 min | 3 tasks | 9 files |
+| Phase 26 P11 | 40min | 3 tasks | 9 files |
+| Phase 26 P12 | 7 min | 2 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -429,6 +442,18 @@ Recent decisions affecting current work:
 - [Phase 25]: [Phase 25-19]: G-25-11 scroll anchor fallback widened to the nearest surviving card (no distance cap, next before previous at each distance), user decision 2026-10-12
 - [Phase 25]: G-25-12 (2026-10-12): keyboard-only focus move (click detail 0) to fallback card's chip label, else Your artists heading, via useScrollAnchor onFocusLost/useEffectEvent
 - [Phase 25]: G-25-13 (user decision 2026-10-12): disabled Deezer button described via aria-describedby to a per-row useId sr-only hint; no visual change
+- [Phase 26]: 26-01: bulk delete is POST /watchlist/bulk/delete, max 1000 ids, 64 KiB body cap; max returned in the 400 body — Keeps the SPA independent of the constants; watchlist rows only, artists/tags/pending events survive (D-17, D-18)
+- [Phase 26]: [Phase 26-02] Bulk add-tag lives on tags.Service/TagStore; all-capped or all-gone batches roll back and report tag id 0 so no orphan tags row
+- [Phase 26]: 26-03: confirmRemove records the outcome in a ref; the dialog close handler applies it (close, then clear) so the route-hosted dialog never unmounts with the bar
+- [Phase 26]: 26-04: Select all visible name comes from its wrapping label text only; disabled Base UI checkboxes expose data-disabled
+- [Phase 26]: 26-05: bulk preferences is PATCH /watchlist/bulk/preferences; omitted axis means empty lists; validation precedes empty-ids shortcut
+- [Phase 26]: 26-06: finalFocus function reads a close-kind ref so focus target is chosen at close; pendingFocus effect is a backstop
+- [Phase 26]: 26-07: bulk remove-tag lives on tags.Service/TagStore with no transaction; missing tag is 404, applied is exactly what Undo re-adds
+- [Phase 26]: 26-08: bar picker onClose ignored while pending; Cancel exits on pointer-down and click; remember(tag) only when applied is non-empty
+- [Phase 26]: [26-09] Vocabulary memory in bar tests is observed via the reopened picker, not a provider spy
+- [Phase 26]: 26-10: popover.tsx hand-written from registry source; shadcn CLI tried to pnpm add a bogus cn package
+- [Phase 26]: 26-10: Add tag disabled while Preferences popover is open (one-surface rule)
+- [Phase 26]: 26-11: Remove-tag Undo re-adds by name to the remove response's applied ids only; picker owns its query and filters with filter={null}; DISMISS_REASONS shared from TagCombobox
 
 ### Pending Todos
 
@@ -489,6 +514,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 261007-lc4 | Phase 24 comment cleanup: comment-only trim to 1-3 line why-notes with one doc ref, fixed inaccurate WithTags/merge-trigger/buildTagSuggestions comments, removed plan narration | 2026-10-07 | be98a62 | [261007-lc4-phase-24-comment-cleanup](./quick/261007-lc4-phase-24-comment-cleanup/) |
 | 261011-gq7 | Amend Phase 26 CONTEXT and UI-SPEC with grill decisions Q1–Q10 (derived selection, outcome-only bulk responses + refresh, ordered-lock bulk tag attach, single-statement remove/preferences, pending-alert disclosure) and add withdraw-pending-events todo | 2026-10-11 | 6408d28 | [261011-gq7-amend-phase-26-docs-with-grill-decisions](./quick/261011-gq7-amend-phase-26-docs-with-grill-decisions/) |
 | 261011-moj | Amend Phase 26 CONTEXT and UI-SPEC with UI review U1–U4 (route-level confirm + close→clear→focus order, scroll-padding focus clearance, one-row phone bar, remove-tag Undo) | 2026-10-11 | 9ac478c | [261011-moj-amend-phase-26-ui-spec-and-context-with-](./quick/261011-moj-amend-phase-26-ui-spec-and-context-with-/) |
+| 261019-jkv | Refactor phase 26 bulk UI: shared preference options, popover and outcome-messages modules, useBulkSelection hook | 2026-10-19 | 66e1990 | [261019-jkv-refactor-phase-26-bulk-ui-preferenceopti](./quick/261019-jkv-refactor-phase-26-bulk-ui-preferenceopti/) |
 
 ### Roadmap Evolution
 
@@ -524,8 +550,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-12T22:25:32.998Z
-Stopped at: Phase 25 complete, ready to plan Phase 26
+Last session: 2026-10-16T23:59:43.847Z
+Stopped at: Phase 26 complete, ready to plan Phase 27
 Resume file: None
 
 ## Operator Next Steps

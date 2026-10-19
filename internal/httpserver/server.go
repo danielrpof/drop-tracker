@@ -43,6 +43,7 @@ type Server struct {
 	pollInterval     time.Duration
 	settingsStore    SettingsStore
 	tags             TagStore
+	watchlistBulk    WatchlistBulkStore
 }
 
 // serverConfig collects the optional settings New applies before building
@@ -60,6 +61,7 @@ type serverConfig struct {
 	pollInterval      time.Duration
 	settingsStore     SettingsStore
 	tags              TagStore
+	watchlistBulk     WatchlistBulkStore
 }
 
 // Option customises New, mirroring internal/poller's and internal/notifier's
@@ -178,6 +180,7 @@ func New(db Pinger, store watchlist.Store, eventsStore events.Store, sources []S
 	s.pollInterval = cfg.pollInterval
 	s.settingsStore = cfg.settingsStore
 	s.tags = cfg.tags
+	s.watchlistBulk = cfg.watchlistBulk
 
 	r := chi.NewRouter()
 
@@ -290,6 +293,11 @@ func registerDataRoutes(r chi.Router, s *Server) {
 	r.Patch("/tags/{id}", s.handleRenameTag)
 	r.Delete("/tags/{id}", s.handleDeleteTag)
 	r.Post("/tags/{id}/merge", s.handleMergeTag)
+	// Literal bulk paths inherit the gate and outrank /watchlist/{id}.
+	r.Post("/watchlist/bulk/delete", s.handleBulkDelete)
+	r.Post("/watchlist/bulk/tags/add", s.handleBulkAddTag)
+	r.Post("/watchlist/bulk/tags/remove", s.handleBulkRemoveTag)
+	r.Patch("/watchlist/bulk/preferences", s.handleBulkPreferences)
 }
 
 // securityResponseHeaders sets response headers that apply to every route in

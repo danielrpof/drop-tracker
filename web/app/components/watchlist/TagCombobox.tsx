@@ -10,7 +10,8 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "~/components/ui/combobox"
-import type { TagRef, WatchlistEntry } from "~/lib/api"
+import type { TagRef } from "~/lib/api"
+import { cn } from "~/lib/utils"
 import {
   MAX_TAG_LENGTH,
   TAG_COUNTER_THRESHOLD,
@@ -19,7 +20,10 @@ import {
 import { buildTagSuggestions, type TagSuggestion } from "~/lib/tags"
 
 export interface TagComboboxProps {
-  entry: WatchlistEntry
+  inputLabel: string
+  alreadyOnMessage: (name: string) => string
+  disabled?: boolean
+  inputClassName?: string
   vocabulary: TagRef[] | null
   onArtist: TagRef[]
   pendingNames: string[]
@@ -35,7 +39,7 @@ function itemLabel(item: TagSuggestion): string {
 
 // DISMISS_REASONS are the base-ui close reasons that mean the user wants the
 // editor gone. Reason "none" (Enter with nothing selectable) must not close it.
-const DISMISS_REASONS = new Set([
+export const DISMISS_REASONS = new Set([
   "escape-key",
   "outside-press",
   "focus-out",
@@ -45,7 +49,10 @@ const DISMISS_REASONS = new Set([
 // TagCombobox is the "+ tag" editor (TAG-01): a creatable base-ui Combobox
 // that only renders what buildTagSuggestions returns.
 export function TagCombobox({
-  entry,
+  inputLabel,
+  alreadyOnMessage,
+  disabled,
+  inputClassName,
   vocabulary,
   onArtist,
   pendingNames,
@@ -131,9 +138,10 @@ export function TagCombobox({
       <div className="flex items-center gap-1">
         <ComboboxInput
           placeholder="Tag name"
-          aria-label={`Add tag to ${entry.name}`}
+          aria-label={inputLabel}
           aria-describedby={counterId}
-          className="h-8 w-full max-w-60 text-label"
+          className={cn("h-8 w-full max-w-60 text-label", inputClassName)}
+          disabled={disabled}
           showTrigger={false}
           autoFocus
         />
@@ -175,7 +183,7 @@ export function TagCombobox({
         </ComboboxList>
         <ComboboxEmpty>
           {suggestions.state === "already-on"
-            ? `“${suggestions.name}” is already on this artist`
+            ? alreadyOnMessage(suggestions.name)
             : overLimit
               ? `Tags can be at most ${MAX_TAG_LENGTH} characters.`
               : "Type a name to create a tag"}

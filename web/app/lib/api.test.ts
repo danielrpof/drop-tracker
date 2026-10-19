@@ -4,6 +4,10 @@ import {
   ApiError,
   addWatchlist,
   attachTag,
+  bulkAddTag,
+  bulkRemoveTag,
+  bulkRemoveWatchlist,
+  bulkUpdatePreferences,
   deleteTag,
   detachTag,
   listEvents,
@@ -160,6 +164,108 @@ describe("apiFetch (via the exported endpoint wrappers)", () => {
     expect(url).toBe("/watchlist/42/tags")
     expect(init.method).toBe("POST")
     expect(JSON.parse(init.body as string)).toEqual({ name: "Reggaeton" })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("bulkAddTag POSTs the ids and name to /watchlist/bulk/tags/add with the CSRF header and resolves the outcome", async () => {
+    const outcome = {
+      tag: { id: 7, name: "rap" },
+      applied: [1],
+      skipped: [{ id: 2, name: "SZA", reason: "cap" }],
+    }
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(outcome), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(bulkAddTag([1, 2], "rap")).resolves.toEqual(outcome)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/bulk/tags/add")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({
+      ids: [1, 2],
+      name: "rap",
+    })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("bulkRemoveTag POSTs the ids and tag id to /watchlist/bulk/tags/remove with the CSRF header and resolves the outcome", async () => {
+    const outcome = {
+      applied: [1],
+      carried: 1,
+      skipped: [{ id: 2, reason: "gone" }],
+    }
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(outcome), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(bulkRemoveTag([1, 2], 7)).resolves.toEqual(outcome)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/bulk/tags/remove")
+    expect(init.method).toBe("POST")
+    expect(init.body).toBe('{"ids":[1,2],"tag_id":7}')
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("bulkUpdatePreferences PATCHes the snake_case delta to /watchlist/bulk/preferences with the CSRF header and resolves the outcome", async () => {
+    const outcome = { applied: [1], skipped: [{ id: 2, reason: "gone" }] }
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(outcome), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(
+      bulkUpdatePreferences([1, 2], {
+        releaseTypes: { set: ["ep"], unset: ["deluxe"] },
+        mutedEventTypes: { set: [], unset: ["guest_feature"] },
+      })
+    ).resolves.toEqual(outcome)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/bulk/preferences")
+    expect(init.method).toBe("PATCH")
+    expect(JSON.parse(init.body as string)).toEqual({
+      ids: [1, 2],
+      release_types: { set: ["ep"], unset: ["deluxe"] },
+      muted_event_types: { set: [], unset: ["guest_feature"] },
+    })
+    expect(new Headers(init.headers).get("X-Requested-With")).toBe(
+      "drop-tracker"
+    )
+  })
+
+  it("bulkRemoveWatchlist POSTs the ids to /watchlist/bulk/delete with the CSRF header and resolves the outcome", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ removed: [4], already_gone: [5] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await expect(bulkRemoveWatchlist([4, 5])).resolves.toEqual({
+      removed: [4],
+      already_gone: [5],
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("/watchlist/bulk/delete")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({ ids: [4, 5] })
     expect(new Headers(init.headers).get("X-Requested-With")).toBe(
       "drop-tracker"
     )
