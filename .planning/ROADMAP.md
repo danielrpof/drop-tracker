@@ -416,7 +416,7 @@ Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
 
 **Plans**: TBD (proposed slices)
 
-- (a) Bootstrap module: state storage account + GitHub OIDC app registration, never destroyed
+- (a) Bootstrap module: state storage account + GitHub OIDC managed identity, never destroyed (DONE, 84bc8a8; managed identity because the university tenant denied app-registration writes)
 - (b) Root module: resource group, Container App, Postgres Flexible Server, budget alert; applied locally
 - (c) Smoke-test script: `/health` + `/ready`, then POST /watchlist and re-GET
 - (d) CI: `terraform fmt`/`validate`, tflint, config scan, plan comment on PRs

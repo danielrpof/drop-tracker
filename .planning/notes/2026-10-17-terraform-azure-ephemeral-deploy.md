@@ -24,3 +24,13 @@ context: /gsd-explore session; $100 Azure student credit, goal is Terraform/IaC 
 
 - Flexible Server B1ms ~ $0.02/hr and "stopped server auto-restarts after 7 days" - unverifiable: prior knowledge, no primary source consulted.
 - Total credit runway estimates (~100+ sessions) - derived from the unverified hourly figure above.
+
+## Update 2026-10-30 (slice a done, 84bc8a8)
+
+- **Learning mode:** the user wants to learn Terraform. Claude writes boilerplate; the user writes core resources and predicts `plan` output; quiz via the grilling skill. Weak spot to revisit: the three-way compare (config vs state vs real Azure).
+- **Region:** the student subscription's policy allows only southcentralus, canadacentral, mexicocentral, eastus2, brazilsouth. Use `eastus2`.
+- **Free tier** (expires 2027-02-06): Postgres Flexible B1MS 750 h + 32 GB storage and backup. Free-tier B-series VMs are restricted in the allowed regions, so the app runs on Container Apps.
+- **Identity:** a user-assigned managed identity with a federated credential replaced the app registration. The tenant returned 403 on service-principal and credential writes, and the app had been created with no owner. An orphan app `droptracker-github-actions` remains in the unal.edu.co tenant.
+- **OIDC subject** uses immutable IDs (`gh api repos/{owner}/{repo}/actions/oidc/customization/sub`). Unverified until the first real login; Azure prints the received subject on mismatch.
+- **Providers** `Microsoft.App`, `Microsoft.DBforPostgreSQL`, `Microsoft.OperationalInsights` were NotRegistered; slice (b) must register them (azurerm registers a core set automatically).
+- Backend `key` for the root module should be `root/terraform.tfstate`; auth defaults to the `az login` key lookup (Owner role), not Entra data-plane auth.
