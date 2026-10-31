@@ -6,10 +6,10 @@ current_phase: 27
 current_phase_name: Paste-a-List Bulk Add
 status: planning
 stopped_at: Phase 26 complete, ready to plan Phase 27
-last_updated: "2026-10-19T18:12:58.677Z"
+last_updated: "2026-10-31T01:13:32.522Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 26 complete, transitioned to Phase 27
-state_head: ad1cd5326e7e95181f3651ffae7d5644d0d39e38
+state_head: f45762a87d8d6ae5f09e49fa58de6fc906f4bbe2
 progress:
   total_phases: 5
   completed_phases: 3
@@ -515,6 +515,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 261011-gq7 | Amend Phase 26 CONTEXT and UI-SPEC with grill decisions Q1–Q10 (derived selection, outcome-only bulk responses + refresh, ordered-lock bulk tag attach, single-statement remove/preferences, pending-alert disclosure) and add withdraw-pending-events todo | 2026-10-11 | 6408d28 | [261011-gq7-amend-phase-26-docs-with-grill-decisions](./quick/261011-gq7-amend-phase-26-docs-with-grill-decisions/) |
 | 261011-moj | Amend Phase 26 CONTEXT and UI-SPEC with UI review U1–U4 (route-level confirm + close→clear→focus order, scroll-padding focus clearance, one-row phone bar, remove-tag Undo) | 2026-10-11 | 9ac478c | [261011-moj-amend-phase-26-ui-spec-and-context-with-](./quick/261011-moj-amend-phase-26-ui-spec-and-context-with-/) |
 | 261019-jkv | Refactor phase 26 bulk UI: shared preference options, popover and outcome-messages modules, useBulkSelection hook | 2026-10-19 | 66e1990 | [261019-jkv-refactor-phase-26-bulk-ui-preferenceopti](./quick/261019-jkv-refactor-phase-26-bulk-ui-preferenceopti/) |
+| 38 | Fix trivy-fs: bump transitive web deps body-parser, systeminformation, undici for HIGH CVEs | 2026-10-31 | f45762a | — |
 
 ### Roadmap Evolution
 
