@@ -25,7 +25,7 @@ context: /gsd-explore session; $100 Azure student credit, goal is Terraform/IaC 
 - Flexible Server B1ms ~ $0.02/hr and "stopped server auto-restarts after 7 days" - unverifiable: prior knowledge, no primary source consulted.
 - Total credit runway estimates (~100+ sessions) - derived from the unverified hourly figure above.
 
-## Update 2026-10-30 (slice a done, 84bc8a8)
+## Update 2026-10-30 (slice a done, 67b1bec)
 
 - **Learning mode:** the user wants to learn Terraform. Claude writes boilerplate; the user writes core resources and predicts `plan` output; quiz via the grilling skill. Weak spot to revisit: the three-way compare (config vs state vs real Azure).
 - **Region:** the student subscription's policy allows only southcentralus, canadacentral, mexicocentral, eastus2, brazilsouth. Use `eastus2`.
