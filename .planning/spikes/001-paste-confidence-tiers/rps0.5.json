@@ -1,0 +1,4421 @@
+[
+  {
+    "line": "Kendrick Lamar",
+    "error": "musicbrainz: search artists: unexpected status 503",
+    "results": null,
+    "exacts": null,
+    "tiers": {
+      "D02": "Error",
+      "S100": "Error",
+      "TOP": "Error",
+      "TOPANY": "Error"
+    }
+  },
+  {
+    "line": "Drake",
+    "error": "musicbrainz: search artists: unexpected status 503",
+    "results": null,
+    "exacts": null,
+    "tiers": {
+      "D02": "Error",
+      "S100": "Error",
+      "TOP": "Error",
+      "TOPANY": "Error"
+    }
+  },
+  {
+    "line": "J. Cole",
+    "error": "musicbrainz: search artists: unexpected status 503",
+    "results": null,
+    "exacts": null,
+    "tiers": {
+      "D02": "Error",
+      "S100": "Error",
+      "TOP": "Error",
+      "TOPANY": "Error"
+    }
+  },
+  {
+    "line": "Future",
+    "error": "musicbrainz: search artists: unexpected status 503",
+    "results": null,
+    "exacts": null,
+    "tiers": {
+      "D02": "Error",
+      "S100": "Error",
+      "TOP": "Error",
+      "TOPANY": "Error"
+    }
+  },
+  {
+    "line": "Travis Scott",
+    "error": "musicbrainz: search artists: unexpected status 503",
+    "results": null,
+    "exacts": null,
+    "tiers": {
+      "D02": "Error",
+      "S100": "Error",
+      "TOP": "Error",
+      "TOPANY": "Error"
+    }
+  },
+  {
+    "line": "tyler the creator",
+    "error": "musicbrainz: search artists: unexpected status 503",
+    "results": null,
+    "exacts": null,
+    "tiers": {
+      "D02": "Error",
+      "S100": "Error",
+      "TOP": "Error",
+      "TOPANY": "Error"
+    }
+  },
+  {
+    "line": "Metro Boomin",
+    "error": "musicbrainz: search artists: unexpected status 503",
+    "results": null,
+    "exacts": null,
+    "tiers": {
+      "D02": "Error",
+      "S100": "Error",
+      "TOP": "Error",
+      "TOPANY": "Error"
+    }
+  },
+  {
+    "line": "21 Savage",
+    "results": [
+      {
+        "id": "37b2cb82-ef79-4d46-a184-a549450aa231",
+        "name": "21 Savage",
+        "sort-name": "21 Savage",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "974781ac-0f7d-4922-a537-ac1f611ea247",
+        "name": "Savage",
+        "sort-name": "Savage",
+        "disambiguation": "Italian disco artist Robert Zanetti",
+        "country": "IT",
+        "type": "Person",
+        "score": 90
+      },
+      {
+        "id": "56712745-7be6-4914-a676-dac6789124f5",
+        "name": "The Savage Rose",
+        "sort-name": "Savage Rose, The",
+        "disambiguation": "Danish psychedelic rock group",
+        "country": "DK",
+        "type": "Group",
+        "score": 87
+      },
+      {
+        "id": "a871fd87-50f7-4032-b06d-da56779edcce",
+        "name": "Savage Garden",
+        "sort-name": "Savage Garden",
+        "disambiguation": "",
+        "country": "AU",
+        "type": "Group",
+        "score": 85
+      },
+      {
+        "id": "2074d0c1-3aa3-4ea7-b945-aad05e190124",
+        "name": "Savage",
+        "sort-name": "Savage",
+        "disambiguation": "UK, heavy metal",
+        "country": "GB",
+        "type": "Group",
+        "score": 83
+      },
+      {
+        "id": "413f8dfe-1d83-42ec-bdaf-dfc9acc4d719",
+        "name": "Savage",
+        "sort-name": "Savage",
+        "disambiguation": "NZ hip hop MC Demetrius Savelio",
+        "country": "NZ",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "21009d8a-74b8-4bb5-b3ee-9cf04d7ee8f6",
+        "name": "Nasty Savage",
+        "sort-name": "Nasty Savage",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 81
+      },
+      {
+        "id": "64d8e3d5-113e-45be-bac2-88c08866a049",
+        "name": "SAVAGE",
+        "sort-name": "SAVAGE",
+        "disambiguation": "Japanese visual kei",
+        "country": "JP",
+        "type": "Group",
+        "score": 80
+      },
+      {
+        "id": "15459f19-e285-4aa0-9cb8-9c41a7dcd2f9",
+        "name": "xSavagex",
+        "sort-name": "xSavagex",
+        "disambiguation": "Powerviolence from Seattle",
+        "country": "",
+        "type": "Group",
+        "score": 80
+      },
+      {
+        "id": "180b52ce-053d-4278-90a9-921884370b17",
+        "name": "Savage Savage",
+        "sort-name": "Savage Savage",
+        "disambiguation": "",
+        "country": "AT",
+        "type": "",
+        "score": 79
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "37b2cb82-ef79-4d46-a184-a549450aa231",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Lil Baby",
+    "results": [
+      {
+        "id": "d42a5768-ada1-4fb6-85fd-f61aba6264e0",
+        "name": "Lil Baby",
+        "sort-name": "Lil Baby",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "125ec42a-7229-4250-afc5-e057484327fe",
+        "name": "[unknown]",
+        "sort-name": "[unknown]",
+        "disambiguation": "Special Purpose Artist – Do not add releases here, if possible.",
+        "country": "XW",
+        "type": "Other",
+        "score": 93
+      },
+      {
+        "id": "5a045b09-af06-4348-9ce6-d51b6a370770",
+        "name": "Rockabye Baby!",
+        "sort-name": "Rockabye Baby!",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 90
+      },
+      {
+        "id": "93aaa233-6b5f-41bf-bfe8-70cf1552c218",
+        "name": "Babybird",
+        "sort-name": "Babybird",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Group",
+        "score": 89
+      },
+      {
+        "id": "9c9f1380-2516-4fc9-a3e6-f9f61941d090",
+        "name": "Muse",
+        "sort-name": "Muse",
+        "disambiguation": "UK rock band",
+        "country": "GB",
+        "type": "Group",
+        "score": 88
+      },
+      {
+        "id": "aff9bedf-319d-49a4-ad0d-caa7b2a8d81f",
+        "name": "Baby Woodrose",
+        "sort-name": "Baby Woodrose",
+        "disambiguation": "Danish rock band",
+        "country": "DK",
+        "type": "Group",
+        "score": 83
+      },
+      {
+        "id": "aae96072-e23c-496a-9016-8637be8c67bc",
+        "name": "Dragon",
+        "sort-name": "Dragon",
+        "disambiguation": "NZ/Australian rock group",
+        "country": "NZ",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "deb99423-954a-444d-8ff3-663db57a8095",
+        "name": "Los Babys",
+        "sort-name": "Babys, Los",
+        "disambiguation": "Mexican group",
+        "country": "MX",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "8e1e03fe-ebbc-467a-b541-857144db10fb",
+        "name": "Babyshambles",
+        "sort-name": "Babyshambles",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "969fca4a-9f0d-47f0-b503-87142ef2fa7c",
+        "name": "Baby Baby",
+        "sort-name": "Baby Baby",
+        "disambiguation": "Atlanta party rock band",
+        "country": "US",
+        "type": "Group",
+        "score": 81
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "d42a5768-ada1-4fb6-85fd-f61aba6264e0",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Gunna",
+    "results": [
+      {
+        "id": "100b8734-f4f0-4536-9960-47f7c59d1b4c",
+        "name": "Gunna",
+        "sort-name": "Gunna",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "d4f39038-4832-442a-b73a-8e8d9628c4c2",
+        "name": "D Gunna",
+        "sort-name": "Gunna, D",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 73
+      },
+      {
+        "id": "2bae5023-15db-4ee5-be21-114d1beedb51",
+        "name": "BabyFace Gunna",
+        "sort-name": "BabyFace Gunna",
+        "disambiguation": "US Rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 73
+      },
+      {
+        "id": "464679ac-158f-4e4f-96b8-48718d0a8a10",
+        "name": "B.R. Gunna",
+        "sort-name": "B.R. Gunna",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 72
+      },
+      {
+        "id": "013bb438-55e7-4ca5-b0cb-e718ee5bc0f6",
+        "name": "Young Gunna",
+        "sort-name": "Young Gunna",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 72
+      },
+      {
+        "id": "7f1d60dd-050c-445d-830d-704d19ccdcb4",
+        "name": "Gunna Dee",
+        "sort-name": "Gunna Dee",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 72
+      },
+      {
+        "id": "02369fd0-0453-46ee-bc0a-7d6d77577352",
+        "name": "Gunna Chorna",
+        "sort-name": "Chorna, Gunna",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 71
+      },
+      {
+        "id": "70a2174e-3709-4813-921e-4557bb06d5ad",
+        "name": "The Gunna",
+        "sort-name": "Gunna, The",
+        "disambiguation": "German hip hop producer",
+        "country": "DE",
+        "type": "Person",
+        "score": 71
+      },
+      {
+        "id": "0aaf5480-b529-4f6a-af1e-c2620ac5a524",
+        "name": "Pee Gunna",
+        "sort-name": "Pee Gunna",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 71
+      },
+      {
+        "id": "d21fc29a-0936-4994-8bbd-ef21e25f9966",
+        "name": "YNW Gunna",
+        "sort-name": "YNW Gunna",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 71
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "100b8734-f4f0-4536-9960-47f7c59d1b4c",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Young Thug",
+    "results": [
+      {
+        "id": "800760de-bdf8-43a2-8fe0-44a2401a5515",
+        "name": "Young Thug",
+        "sort-name": "Young Thug",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "e0f5273c-637e-4e10-8304-81f2f9a31523",
+        "name": "Slim Thug",
+        "sort-name": "Slim Thug",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 87
+      },
+      {
+        "id": "2b764555-50e1-4341-836d-81680c53fa24",
+        "name": "Thug",
+        "sort-name": "Thug",
+        "disambiguation": "Australian band",
+        "country": "AU",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "1a9cc1a5-51f1-4deb-91fe-da866f6cc6ce",
+        "name": "Young Thug",
+        "sort-name": "Young Thug",
+        "disambiguation": "French rapper",
+        "country": "FR",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "927a29b5-1ef1-48f8-9c2b-cec25946b9af",
+        "name": "Thug",
+        "sort-name": "Thug",
+        "disambiguation": "IDM producer Tim Koch",
+        "country": "AU",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "ad129e5d-5777-4dc3-8fb9-2945a8af849a",
+        "name": "Young T.H.U.G.",
+        "sort-name": "Young T.H.U.G.",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 81
+      },
+      {
+        "id": "6dcfe0b4-635d-42d2-8f27-2eb7d0fb7222",
+        "name": "T.H.U.G",
+        "sort-name": "T.H.U.G",
+        "disambiguation": "Australian skinhead, hard rock band",
+        "country": "AU",
+        "type": "Group",
+        "score": 80
+      },
+      {
+        "id": "eded5e56-e85f-43a9-94f0-3c2e46897da8",
+        "name": "T.H.U.G.",
+        "sort-name": "T.H.U.G.",
+        "disambiguation": "The House of Urban Grooves",
+        "country": "",
+        "type": "Group",
+        "score": 80
+      },
+      {
+        "id": "0baccdd5-caf1-4741-9787-6c0b7ab59687",
+        "name": "Thug",
+        "sort-name": "Thug",
+        "disambiguation": "US grindecore band",
+        "country": "US",
+        "type": "Group",
+        "score": 80
+      },
+      {
+        "id": "135cd494-1f4e-410f-a351-61989de7a4b5",
+        "name": "Thug",
+        "sort-name": "Thug",
+        "disambiguation": "US rapper",
+        "country": "",
+        "type": "",
+        "score": 79
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "800760de-bdf8-43a2-8fe0-44a2401a5515",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person"
+      },
+      {
+        "rank": 4,
+        "score": 82,
+        "mbid": "1a9cc1a5-51f1-4deb-91fe-da866f6cc6ce",
+        "disambiguation": "French rapper",
+        "country": "FR",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "Medium",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Playboi Carti",
+    "results": [
+      {
+        "id": "2baf3276-ed6a-4349-8d2e-f4601e7b2167",
+        "name": "Playboi Carti",
+        "sort-name": "Playboi Carti",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "185cc07f-cc62-42e2-b11c-19291b8d8f30",
+        "name": "Carti Benz",
+        "sort-name": "Carti Benz",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 68
+      },
+      {
+        "id": "cf769625-2df8-4a4a-bb09-07c992dc9a45",
+        "name": "Cold Carti",
+        "sort-name": "Максименков Евгений Алексеевич",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 68
+      },
+      {
+        "id": "397c6421-a691-48b2-8f4b-89322ed266d6",
+        "name": "Lil Carti",
+        "sort-name": "Lil Carti",
+        "disambiguation": "young rapper from Virginia, aka Cartier Fresh",
+        "country": "",
+        "type": "Person",
+        "score": 67
+      },
+      {
+        "id": "6a8870c9-475a-4b5b-9c80-5cd4b320d5fb",
+        "name": "AI Carti",
+        "sort-name": "AI Carti",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 67
+      },
+      {
+        "id": "d79a9801-6e59-4bba-9474-33c8709797e3",
+        "name": "Carti Bankx",
+        "sort-name": "Carti Bankx",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 67
+      },
+      {
+        "id": "09c71aa4-13f7-45b4-9bd1-e24e02527b35",
+        "name": "GAYBOI CARTI **!",
+        "sort-name": "CHRISTIAN DIORRR",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 60
+      },
+      {
+        "id": "c8b03190-306c-4120-bb0b-6f2ebfc06ea9",
+        "name": "The Weeknd",
+        "sort-name": "Weeknd, The",
+        "disambiguation": "Canadian R\u0026B singer",
+        "country": "CA",
+        "type": "Person",
+        "score": 60
+      },
+      {
+        "id": "cfefa885-8424-49d8-9bfe-6997c33bdb77",
+        "name": "Cartier’GOD",
+        "sort-name": "Cartier’GOD",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 52
+      },
+      {
+        "id": "aa5963ff-c85f-49c5-98f2-951b6d38af16",
+        "name": "Playboi Cae",
+        "sort-name": "Cae, Playboi",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 47
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "2baf3276-ed6a-4349-8d2e-f4601e7b2167",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Megan Thee Stallion",
+    "results": [
+      {
+        "id": "ee27b2d8-648c-4a9d-a68c-e55066959975",
+        "name": "Megan Thee Stallion",
+        "sort-name": "Megan Thee Stallion",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "73f3c11c-976c-4037-af5c-0de4bec9f19b",
+        "name": "Stallion",
+        "sort-name": "Stallion",
+        "disambiguation": "German heavy metal band from Weingarten",
+        "country": "DE",
+        "type": "Group",
+        "score": 47
+      },
+      {
+        "id": "008230be-2785-4209-acde-2473ac1a5686",
+        "name": "Stallion",
+        "sort-name": "Stallion",
+        "disambiguation": "rock band from Hastings, UK",
+        "country": "",
+        "type": "Group",
+        "score": 46
+      },
+      {
+        "id": "f390d9ae-518f-4156-9865-f4238402d910",
+        "name": "Stallion",
+        "sort-name": "Stallion",
+        "disambiguation": "German heavy metal band from Hilden",
+        "country": "DE",
+        "type": "Group",
+        "score": 46
+      },
+      {
+        "id": "61f1669b-e0ee-434e-98b7-fd56f20e414f",
+        "name": "Stallion",
+        "sort-name": "Stallion",
+        "disambiguation": "US 70s rock band",
+        "country": "US",
+        "type": "Group",
+        "score": 46
+      },
+      {
+        "id": "f65785d8-8673-4453-a91d-6486f9d6621d",
+        "name": "STALLION",
+        "sort-name": "STALLION",
+        "disambiguation": "Stallioncr",
+        "country": "",
+        "type": "Group",
+        "score": 45
+      },
+      {
+        "id": "32ca94ad-a945-4d7b-9d6c-4f06d6772bbd",
+        "name": "Stallion",
+        "sort-name": "Stallion",
+        "disambiguation": "Belgian hard rock / heavy metal band",
+        "country": "BE",
+        "type": "Group",
+        "score": 45
+      },
+      {
+        "id": "f8446841-a274-4d4e-bae8-41390c2ec0b0",
+        "name": "Stallion",
+        "sort-name": "Stallion",
+        "disambiguation": "Dubstep producer",
+        "country": "",
+        "type": "Person",
+        "score": 45
+      },
+      {
+        "id": "8af10f84-3ad6-4587-bd8b-7101cb4a52e1",
+        "name": "Stallion",
+        "sort-name": "Stallion",
+        "disambiguation": "early 1970s UK band",
+        "country": "GB",
+        "type": "Group",
+        "score": 45
+      },
+      {
+        "id": "688f1d5c-f961-4e6a-b858-e2c948f99a85",
+        "name": "Stallion",
+        "sort-name": "Stallion",
+        "disambiguation": "punk rock n' roll band formed in Nashville",
+        "country": "US",
+        "type": "Group",
+        "score": 45
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "ee27b2d8-648c-4a9d-a68c-e55066959975",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Doja Cat",
+    "results": [
+      {
+        "id": "5df62a88-cac9-490a-b62c-c7c88f4020f4",
+        "name": "Doja Cat",
+        "sort-name": "Doja Cat",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "e2345fdf-2be7-47c5-a6dd-be64353ad134",
+        "name": "Cat Stevens",
+        "sort-name": "Stevens, Cat",
+        "disambiguation": "now known as Yusuf Islam",
+        "country": "GB",
+        "type": "Person",
+        "score": 85
+      },
+      {
+        "id": "05755bf1-380c-487f-983f-d1a02401fa28",
+        "name": "Cat Power",
+        "sort-name": "Cat Power",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "68c6d24f-1750-485b-9763-59cf7ca2a6b1",
+        "name": "猫 シ Corp.",
+        "sort-name": "Neko Shi Corp.",
+        "disambiguation": "",
+        "country": "NL",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "4e06c668-47aa-4510-9e92-819ca7aac5fc",
+        "name": "CatCat",
+        "sort-name": "CatCat",
+        "disambiguation": "finnish duo",
+        "country": "FI",
+        "type": "Group",
+        "score": 76
+      },
+      {
+        "id": "f8e38e52-ccba-416f-b1cc-1db546518ff4",
+        "name": "Cat Cat",
+        "sort-name": "Cat Cat",
+        "disambiguation": "Australian rock band",
+        "country": "AU",
+        "type": "Group",
+        "score": 74
+      },
+      {
+        "id": "553d1b5f-7cb6-4df7-8a69-e78b4bc4f7a5",
+        "name": "Purrple Cat",
+        "sort-name": "Purrple Cat",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 73
+      },
+      {
+        "id": "aeef772f-8169-41bf-88d9-9a5ca4f5c92e",
+        "name": "Cat! Cat! Cat!",
+        "sort-name": "Cat! Cat! Cat!",
+        "disambiguation": "New Zealand band",
+        "country": "",
+        "type": "Group",
+        "score": 72
+      },
+      {
+        "id": "c2c689b4-86fd-44b3-8010-8a0f6f27dc74",
+        "name": "cat soup",
+        "sort-name": "cat soup",
+        "disambiguation": "US rapper, producer",
+        "country": "US",
+        "type": "Person",
+        "score": 72
+      },
+      {
+        "id": "2d5fbbfd-27a7-4b74-848a-2b1f24fa1d0a",
+        "name": "Super Cat",
+        "sort-name": "Super Cat",
+        "disambiguation": "dancehall deejay",
+        "country": "JM",
+        "type": "Person",
+        "score": 72
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "5df62a88-cac9-490a-b62c-c7c88f4020f4",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Nicki Minaj",
+    "results": [
+      {
+        "id": "1036b808-f58c-4a3e-b461-a2c4492ecf1b",
+        "name": "Nicki Minaj",
+        "sort-name": "Minaj, Nicki",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "535cf1d2-c333-43aa-8112-fdac8568d079",
+        "name": "Cara Minaj",
+        "sort-name": "Cara Minaj",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 65
+      },
+      {
+        "id": "a8f801e1-c751-4dce-afb0-e5df4c48c148",
+        "name": "Molly Minaj",
+        "sort-name": "Minaj, Molly",
+        "disambiguation": "NoPixel RP character",
+        "country": "",
+        "type": "Character",
+        "score": 64
+      },
+      {
+        "id": "8241273f-de29-45c0-86fb-2a2c25ab7dfa",
+        "name": "Ardy Minaj",
+        "sort-name": "Minaj, Ardy",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 64
+      },
+      {
+        "id": "a303209e-430d-472a-a1ba-025d7a9b29b4",
+        "name": "Keta Minaj",
+        "sort-name": "Minaj, Keta",
+        "disambiguation": "",
+        "country": "NL",
+        "type": "Person",
+        "score": 64
+      },
+      {
+        "id": "0b41a445-bbb2-49cc-9af0-c7425a3453fc",
+        "name": "Nia Minaj",
+        "sort-name": "Minaj, Nia",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 64
+      },
+      {
+        "id": "efc1969f-fee5-41ed-a7a7-c77575e5d9e4",
+        "name": "Lincoln Minaj",
+        "sort-name": "Minaj, Lincoln",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 64
+      },
+      {
+        "id": "97a754ba-eb0e-4c2c-b2e2-51a43574857b",
+        "name": "LEXI MINAJ",
+        "sort-name": "LEXI MINAJ",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 64
+      },
+      {
+        "id": "f276dca5-1abe-4701-89e1-79dc76949678",
+        "name": "Nídia",
+        "sort-name": "Nídia",
+        "disambiguation": "formerly Nídia Minaj",
+        "country": "FR",
+        "type": "Person",
+        "score": 58
+      },
+      {
+        "id": "88d9457a-d065-49a1-8fa2-a1d218412a30",
+        "name": "Minaj A Twaa",
+        "sort-name": "Twaa, Minaj A",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 58
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "1036b808-f58c-4a3e-b461-a2c4492ecf1b",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Cardi B",
+    "results": [
+      {
+        "id": "2f3c4d70-0462-40da-bba3-0aec5772c556",
+        "name": "Cardi B",
+        "sort-name": "Cardi B",
+        "disambiguation": "American rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "1550f952-c91b-40d7-9b4d-d26a259ee932",
+        "name": "Lil B",
+        "sort-name": "Lil B",
+        "disambiguation": "US rapper, a.k.a. “The BasedGod”",
+        "country": "US",
+        "type": "Person",
+        "score": 83
+      },
+      {
+        "id": "dcb03ce3-67a5-4eb3-b2d1-2a12d93a38f3",
+        "name": "B.B. King",
+        "sort-name": "King, B.B.",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "4336a134-d091-4e54-9967-c7c433db6d4e",
+        "name": "Buddy Guy",
+        "sort-name": "Guy, Buddy",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 74
+      },
+      {
+        "id": "49ae5227-605a-47a8-9b8e-cd89bf01a97c",
+        "name": "Benjamin Britten",
+        "sort-name": "Britten, Benjamin",
+        "disambiguation": "English composer, conductor, and pianist",
+        "country": "GB",
+        "type": "Person",
+        "score": 74
+      },
+      {
+        "id": "b7c00c4a-7ddf-4ee1-a659-cc1d6c5e3957",
+        "name": "Anthony B",
+        "sort-name": "Anthony B",
+        "disambiguation": "Jamaican DJ/singer",
+        "country": "JM",
+        "type": "Person",
+        "score": 74
+      },
+      {
+        "id": "372119b0-2350-455f-acd8-6371bc947531",
+        "name": "Max B",
+        "sort-name": "Max B",
+        "disambiguation": "US rapper \u0026 Dipset crew member Charles Wingate",
+        "country": "US",
+        "type": "Person",
+        "score": 73
+      },
+      {
+        "id": "baff466c-be65-4425-85bf-56069801d947",
+        "name": "DJ B-B-B-B-B-B-B-B-B-B-バカ",
+        "sort-name": "B-B-B-B-B-B-B-B-B-B-バカ, DJ",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 73
+      },
+      {
+        "id": "353856b7-8d79-4136-9ac6-7e47954e5be9",
+        "name": "John B",
+        "sort-name": "John B",
+        "disambiguation": "drum \u0026 bass artist; John B. Williams",
+        "country": "GB",
+        "type": "Person",
+        "score": 73
+      },
+      {
+        "id": "d59c4cda-11d9-48db-8bfe-b557ee602aed",
+        "name": "Billie Holiday",
+        "sort-name": "Holiday, Billie",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 73
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "2f3c4d70-0462-40da-bba3-0aec5772c556",
+        "disambiguation": "American rapper",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Kanye West",
+    "results": [
+      {
+        "id": "44017d4d-a289-45a2-a9b6-816313a7fa45",
+        "name": "WEST.",
+        "sort-name": "WEST.",
+        "disambiguation": "Japanese boy band, formerly ジャニーズWEST",
+        "country": "JP",
+        "type": "Group",
+        "score": 100
+      },
+      {
+        "id": "164f0d73-1234-4e2c-8743-d77bf2191051",
+        "name": "Ye",
+        "sort-name": "Ye",
+        "disambiguation": "formerly Kanye West",
+        "country": "US",
+        "type": "Person",
+        "score": 97
+      },
+      {
+        "id": "41ff7032-f14b-4cf8-acf3-54b545927f8d",
+        "name": "Go West",
+        "sort-name": "Go West",
+        "disambiguation": "English pop group",
+        "country": "GB",
+        "type": "Group",
+        "score": 89
+      },
+      {
+        "id": "2c2a80cf-193d-4be6-992e-311428085474",
+        "name": "Way Out West",
+        "sort-name": "Way Out West",
+        "disambiguation": "UK electronic duo",
+        "country": "GB",
+        "type": "Group",
+        "score": 89
+      },
+      {
+        "id": "edfa1708-f764-43b1-867f-6dd363cca3f1",
+        "name": "Dottie West",
+        "sort-name": "West, Dottie",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 87
+      },
+      {
+        "id": "5f000e69-3cfd-4871-8f1b-faa7f0d4bcbc",
+        "name": "Westlife",
+        "sort-name": "Westlife",
+        "disambiguation": "",
+        "country": "IE",
+        "type": "Group",
+        "score": 87
+      },
+      {
+        "id": "fa39bc82-9b27-4bbb-9425-d719a72e09ac",
+        "name": "Leonard Bernstein",
+        "sort-name": "Bernstein, Leonard",
+        "disambiguation": "American conductor, composer, pianist",
+        "country": "US",
+        "type": "Person",
+        "score": 87
+      },
+      {
+        "id": "e90d72be-4457-4f03-a9db-41e33f5432c9",
+        "name": "Nina West",
+        "sort-name": "West, Nina",
+        "disambiguation": "German actress",
+        "country": "DE",
+        "type": "Person",
+        "score": 86
+      },
+      {
+        "id": "40baf67d-1490-47e2-95e4-c83273df7c9f",
+        "name": "Matthew West",
+        "sort-name": "West, Matthew",
+        "disambiguation": "US CCM musician and actor",
+        "country": "US",
+        "type": "Person",
+        "score": 85
+      },
+      {
+        "id": "99b381c8-1348-4154-b704-a6d94dc7274e",
+        "name": "Erothyme",
+        "sort-name": "Erothyme",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 85
+      }
+    ],
+    "exacts": null,
+    "tiers": {
+      "D02": "Medium",
+      "S100": "Medium",
+      "TOP": "Medium",
+      "TOPANY": "Medium"
+    }
+  },
+  {
+    "line": "ye",
+    "results": [
+      {
+        "id": "164f0d73-1234-4e2c-8743-d77bf2191051",
+        "name": "Ye",
+        "sort-name": "Ye",
+        "disambiguation": "formerly Kanye West",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "90add6af-2a9b-4342-a037-8097512010a9",
+        "name": "Ye Ali",
+        "sort-name": "Ye Ali",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 72
+      },
+      {
+        "id": "3fc6d679-c2f7-4faa-a5b6-57f91f56d9b1",
+        "name": "Glutamato Ye-Ye",
+        "sort-name": "Glutamato Ye-Ye",
+        "disambiguation": "",
+        "country": "ES",
+        "type": "Group",
+        "score": 71
+      },
+      {
+        "id": "fc18e038-6926-4a61-aff9-abf340bd6fb9",
+        "name": "Yé-Yé",
+        "sort-name": "Yé-Yé",
+        "disambiguation": "French synth-pop duo",
+        "country": "",
+        "type": "Group",
+        "score": 70
+      },
+      {
+        "id": "945ba2da-dc53-4515-8fdc-1e1f0eb9a36f",
+        "name": "Ye Ye",
+        "sort-name": "Ye Ye",
+        "disambiguation": "Bristol, UK electronic producer",
+        "country": "",
+        "type": "",
+        "score": 69
+      },
+      {
+        "id": "a0ba6f9e-7dda-4018-8d29-47cee6274c0f",
+        "name": "Y.E",
+        "sort-name": "Y.E",
+        "disambiguation": "featured on A Quelques Jours Du Passe by Milionbeats",
+        "country": "FR",
+        "type": "Person",
+        "score": 68
+      },
+      {
+        "id": "4c2e6c73-0ce6-4fcb-8892-0c1322636c55",
+        "name": "Ye Vagabonds",
+        "sort-name": "Vagabonds, Ye",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 67
+      },
+      {
+        "id": "bb4a5e41-5421-461f-8c27-d6f3f0c27c00",
+        "name": "Ye Banished Privateers",
+        "sort-name": "Banished Privateers, Ye",
+        "disambiguation": "",
+        "country": "SE",
+        "type": "Group",
+        "score": 67
+      },
+      {
+        "id": "3ce1ccc4-ffe5-42f1-b0db-074abb4e6e69",
+        "name": "YE",
+        "sort-name": "YE",
+        "disambiguation": "featured by Gilli Conway on Mackin’",
+        "country": "",
+        "type": "",
+        "score": 66
+      },
+      {
+        "id": "8bb6cbe1-628a-4a02-9264-54fccabb1a33",
+        "name": "Ye",
+        "sort-name": "Ye",
+        "disambiguation": "French rapper",
+        "country": "",
+        "type": "",
+        "score": 66
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "164f0d73-1234-4e2c-8743-d77bf2191051",
+        "disambiguation": "formerly Kanye West",
+        "country": "US",
+        "type": "Person"
+      },
+      {
+        "rank": 9,
+        "score": 66,
+        "mbid": "3ce1ccc4-ffe5-42f1-b0db-074abb4e6e69",
+        "disambiguation": "featured by Gilli Conway on Mackin’",
+        "country": "",
+        "type": ""
+      },
+      {
+        "rank": 10,
+        "score": 66,
+        "mbid": "8bb6cbe1-628a-4a02-9264-54fccabb1a33",
+        "disambiguation": "French rapper",
+        "country": "",
+        "type": ""
+      }
+    ],
+    "tiers": {
+      "D02": "Medium",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Lil Wayne",
+    "results": [
+      {
+        "id": "ac9a487a-d9d2-4f27-bb23-0f4686488345",
+        "name": "Lil Wayne",
+        "sort-name": "Lil Wayne",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "2379937f-6e0d-46a2-b8ff-633fafd72002",
+        "name": "Wayne Shorter",
+        "sort-name": "Shorter, Wayne",
+        "disambiguation": "US jazz saxophonist and composer",
+        "country": "US",
+        "type": "Person",
+        "score": 81
+      },
+      {
+        "id": "4af16f2c-89c0-4715-9e76-3aa986f67031",
+        "name": "Jeff Wayne",
+        "sort-name": "Wayne, Jeff",
+        "disambiguation": "musician",
+        "country": "GB",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "fa5ecc27-10f6-41eb-90ac-9498a2bf6b43",
+        "name": "Wayne Wonder",
+        "sort-name": "Wonder, Wayne",
+        "disambiguation": "Jamaican singer Vonwayne Charles",
+        "country": "JM",
+        "type": "Person",
+        "score": 77
+      },
+      {
+        "id": "b6b6f1cf-e1c8-46e9-bc54-1a63ed1f8d51",
+        "name": "Wayne Newton",
+        "sort-name": "Newton, Wayne",
+        "disambiguation": "American actor and singer",
+        "country": "US",
+        "type": "Person",
+        "score": 77
+      },
+      {
+        "id": "942123a3-df28-463f-9f6e-202b69b8e253",
+        "name": "Porter Wagoner",
+        "sort-name": "Wagoner, Porter",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "14356daa-aca7-4d60-8f7f-292884bd2bbb",
+        "name": "Wayne Fontana",
+        "sort-name": "Fontana, Wayne",
+        "disambiguation": "rock and pop singer",
+        "country": "GB",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "59db3d82-86ea-451f-881f-dffc8ec387c9",
+        "name": "Metro Boomin",
+        "sort-name": "Metro Boomin",
+        "disambiguation": "American record producer",
+        "country": "US",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "0f7f7e94-ce9d-496a-b894-42d642b5229e",
+        "name": "Jan Wayne",
+        "sort-name": "Wayne, Jan",
+        "disambiguation": "",
+        "country": "DE",
+        "type": "Person",
+        "score": 75
+      },
+      {
+        "id": "70bd369d-f58a-48ab-96eb-299d9b89a3c7",
+        "name": "Jonwayne",
+        "sort-name": "Jonwayne",
+        "disambiguation": "United States rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 74
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "ac9a487a-d9d2-4f27-bb23-0f4686488345",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Nas",
+    "results": [
+      {
+        "id": "cfbc0924-0035-4d6c-8197-f024653af823",
+        "name": "Nas",
+        "sort-name": "Nas",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "0b30341b-b59d-4979-8130-b66c0e475321",
+        "name": "Lil Nas X",
+        "sort-name": "Lil Nas X",
+        "disambiguation": "American rapper and singer",
+        "country": "US",
+        "type": "Person",
+        "score": 73
+      },
+      {
+        "id": "207f750c-5d9d-4202-a2e6-e04661ebb38f",
+        "name": "NAS",
+        "sort-name": "NAS",
+        "disambiguation": "Stereomatics",
+        "country": "JP",
+        "type": "",
+        "score": 70
+      },
+      {
+        "id": "739753b7-21f4-4842-b585-4c836570bd6c",
+        "name": "NAS",
+        "sort-name": "NAS",
+        "disambiguation": "Japanese electronic producer",
+        "country": "",
+        "type": "Person",
+        "score": 69
+      },
+      {
+        "id": "8dfb749c-f272-480a-99fe-cd158fd784f1",
+        "name": "NAS",
+        "sort-name": "NAS",
+        "disambiguation": "Japanese anime production/merchandising company",
+        "country": "JP",
+        "type": "Group",
+        "score": 69
+      },
+      {
+        "id": "3fb3b082-a55f-42f4-b70e-686508698d8b",
+        "name": "Nas",
+        "sort-name": "Nas",
+        "disambiguation": "Swiss rapper ?",
+        "country": "",
+        "type": "Person",
+        "score": 69
+      },
+      {
+        "id": "8f88de6a-8812-45bc-820f-e78cbc1d5a87",
+        "name": "Digital Nas",
+        "sort-name": "Digital Nas",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 66
+      },
+      {
+        "id": "dae1d0d3-6949-4e04-8d3f-9b56ce5729a7",
+        "name": "Nas-Tee",
+        "sort-name": "Nas-Tee",
+        "disambiguation": "Grime/hip-hop artist based in Wolverhampton, England",
+        "country": "GB",
+        "type": "Person",
+        "score": 64
+      },
+      {
+        "id": "ad23244b-87d1-48bd-be37-6705eaa98bf8",
+        "name": "Polo Nas",
+        "sort-name": "Polo Nas",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 64
+      },
+      {
+        "id": "73655f47-a44d-4569-83b1-215644d69681",
+        "name": "Nas Horizon",
+        "sort-name": "Nas Horizon",
+        "disambiguation": "DJ/producer",
+        "country": "",
+        "type": "Person",
+        "score": 64
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "cfbc0924-0035-4d6c-8197-f024653af823",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person"
+      },
+      {
+        "rank": 3,
+        "score": 70,
+        "mbid": "207f750c-5d9d-4202-a2e6-e04661ebb38f",
+        "disambiguation": "Stereomatics",
+        "country": "JP",
+        "type": ""
+      },
+      {
+        "rank": 4,
+        "score": 69,
+        "mbid": "739753b7-21f4-4842-b585-4c836570bd6c",
+        "disambiguation": "Japanese electronic producer",
+        "country": "",
+        "type": "Person"
+      },
+      {
+        "rank": 5,
+        "score": 69,
+        "mbid": "8dfb749c-f272-480a-99fe-cd158fd784f1",
+        "disambiguation": "Japanese anime production/merchandising company",
+        "country": "JP",
+        "type": "Group"
+      },
+      {
+        "rank": 6,
+        "score": 69,
+        "mbid": "3fb3b082-a55f-42f4-b70e-686508698d8b",
+        "disambiguation": "Swiss rapper ?",
+        "country": "",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "Medium",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Common",
+    "results": [
+      {
+        "id": "c0a1179b-b14a-4d68-a3c1-1fdab16ed602",
+        "name": "Common",
+        "sort-name": "Common",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "0445710f-628e-4c56-a4e0-2788095dd13b",
+        "name": "Common Rotation",
+        "sort-name": "Common Rotation",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 78
+      },
+      {
+        "id": "50f7e211-93e6-4654-9268-011772bfa70b",
+        "name": "Common Kings",
+        "sort-name": "Common Kings",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 76
+      },
+      {
+        "id": "c8b259a5-6acb-43e8-bb28-bc09e92eb22e",
+        "name": "Common Market",
+        "sort-name": "Common Market",
+        "disambiguation": "hip‐hop duo",
+        "country": "",
+        "type": "Group",
+        "score": 75
+      },
+      {
+        "id": "a951d508-04f0-44df-afe8-26ae4c252934",
+        "name": "Common Enemy",
+        "sort-name": "Common Enemy",
+        "disambiguation": "American punk/hardcore band",
+        "country": "",
+        "type": "Group",
+        "score": 73
+      },
+      {
+        "id": "c49ab122-c314-448f-9dc3-61cdec39bbd3",
+        "name": "The Common Linnets",
+        "sort-name": "Common Linnets, The",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 73
+      },
+      {
+        "id": "3e5d88cb-502e-42d2-9372-7c9b12b43e6d",
+        "name": "Common Sense",
+        "sort-name": "Common Sense",
+        "disambiguation": "US band",
+        "country": "US",
+        "type": "Group",
+        "score": 73
+      },
+      {
+        "id": "1e4500e0-5f30-44c4-b236-317234829229",
+        "name": "Common Factor",
+        "sort-name": "Common Factor",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Person",
+        "score": 73
+      },
+      {
+        "id": "c456fb22-8378-4e7b-becb-1b72861e93a0",
+        "name": "Common Holly",
+        "sort-name": "Common Holly",
+        "disambiguation": "Canadian folk / indie rock musician Brigitte Naggar",
+        "country": "",
+        "type": "Person",
+        "score": 73
+      },
+      {
+        "id": "f43f343e-1629-4bdc-a921-6c5f971809f8",
+        "name": "Common Rider",
+        "sort-name": "Common Rider",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 73
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "c0a1179b-b14a-4d68-a3c1-1fdab16ed602",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Logic",
+    "results": [
+      {
+        "id": "713e751f-3ddb-4b77-b3b1-9e6f2e953ad5",
+        "name": "Logic",
+        "sort-name": "Logic",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "e4f83b54-83c3-4189-9ce7-0b7a9c6e7cb1",
+        "name": "Logic System",
+        "sort-name": "Logic System",
+        "disambiguation": "",
+        "country": "JP",
+        "type": "Group",
+        "score": 83
+      },
+      {
+        "id": "20104c4d-cba0-4371-ab77-2f9d544674be",
+        "name": "Logic",
+        "sort-name": "Logic",
+        "disambiguation": "UK rapper in “People’s Army”",
+        "country": "GB",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "358beee9-a1dc-4124-b2ad-528b155906d2",
+        "name": "Logic",
+        "sort-name": "Logic",
+        "disambiguation": "house collab, key tracks “The Warning”, “Blues for You”",
+        "country": "US",
+        "type": "Group",
+        "score": 81
+      },
+      {
+        "id": "515b7934-3ec6-45b1-b2ac-180b180ebea4",
+        "name": "Dreamstate Logic",
+        "sort-name": "Dreamstate Logic",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 79
+      },
+      {
+        "id": "ec85661d-707c-4e0a-8483-12b3de78d845",
+        "name": "Louis Logic",
+        "sort-name": "Louis Logic",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "8c8f813f-9cf3-45b9-8c0b-f53afac4a415",
+        "name": "Odd Logic",
+        "sort-name": "Odd Logic",
+        "disambiguation": "US prog rock/metal",
+        "country": "",
+        "type": "Group",
+        "score": 78
+      },
+      {
+        "id": "5e8f6cf6-4a41-4364-a199-b33752e1cd54",
+        "name": "Logic Bomb",
+        "sort-name": "Logic Bomb",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 78
+      },
+      {
+        "id": "a966e841-bf19-47b1-93a0-44a310bc1cbd",
+        "name": "Essential Logic",
+        "sort-name": "Essential Logic",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Group",
+        "score": 78
+      },
+      {
+        "id": "2dfbd37e-15d8-4306-a024-c48ad56bb180",
+        "name": "Logic Moon",
+        "sort-name": "Logic Moon",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 78
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "713e751f-3ddb-4b77-b3b1-9e6f2e953ad5",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person"
+      },
+      {
+        "rank": 3,
+        "score": 82,
+        "mbid": "20104c4d-cba0-4371-ab77-2f9d544674be",
+        "disambiguation": "UK rapper in “People’s Army”",
+        "country": "GB",
+        "type": "Person"
+      },
+      {
+        "rank": 4,
+        "score": 81,
+        "mbid": "358beee9-a1dc-4124-b2ad-528b155906d2",
+        "disambiguation": "house collab, key tracks “The Warning”, “Blues for You”",
+        "country": "US",
+        "type": "Group"
+      }
+    ],
+    "tiers": {
+      "D02": "Medium",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Eminem",
+    "results": [
+      {
+        "id": "b95ce3ff-3d05-4e87-9e01-c97b66af13d4",
+        "name": "Eminem",
+        "sort-name": "Eminem",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "9091bc03-ee73-476b-8d29-840b29388762",
+        "name": "Eminem",
+        "sort-name": "Eminem",
+        "disambiguation": "Turkish singer",
+        "country": "TR",
+        "type": "Person",
+        "score": 68
+      },
+      {
+        "id": "012fc5b7-6fa1-4047-84e9-c9ee9dfbe152",
+        "name": "Eminem Godzilla",
+        "sort-name": "Eminem Godzilla",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 62
+      },
+      {
+        "id": "4d6e56f3-f059-471d-a06e-99fc8629f4e8",
+        "name": "Eminem 2",
+        "sort-name": "Eminem 2",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 61
+      },
+      {
+        "id": "ff7e6622-f806-44e0-8331-1b17e0ac9393",
+        "name": "Gli Eminem",
+        "sort-name": "Gli Eminem",
+        "disambiguation": "Sardinia, Italy",
+        "country": "IT",
+        "type": "Group",
+        "score": 60
+      },
+      {
+        "id": "518487b0-3d10-48a8-a345-e811bd62a52a",
+        "name": "Twenty One Pilots Vs Eminem",
+        "sort-name": "Twenty One Pilots Vs Eminem",
+        "disambiguation": "",
+        "country": "",
+        "type": "Other",
+        "score": 51
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "b95ce3ff-3d05-4e87-9e01-c97b66af13d4",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person"
+      },
+      {
+        "rank": 2,
+        "score": 68,
+        "mbid": "9091bc03-ee73-476b-8d29-840b29388762",
+        "disambiguation": "Turkish singer",
+        "country": "TR",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "Medium",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "A$AP Rocky",
+    "results": [
+      {
+        "id": "25b7b584-d952-4662-a8b9-dd8cdfbfeb64",
+        "name": "A$AP Rocky",
+        "sort-name": "ASAP Rocky",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "3ccd3f66-009f-43e2-ad82-28953910fdd5",
+        "name": "Rocky",
+        "sort-name": "Rocky",
+        "disambiguation": "k-pop singer, member of ASTRO",
+        "country": "KR",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "c7b8495c-8cec-4aac-b051-19578bbd4ade",
+        "name": "Rocky",
+        "sort-name": "Rocky",
+        "disambiguation": "Progressive / psy-trance artist based in Israel, Roy Tilbor",
+        "country": "IL",
+        "type": "Person",
+        "score": 81
+      },
+      {
+        "id": "c7db5f3a-4db0-4cc3-8b10-6daa9783a3d1",
+        "name": "Rocky",
+        "sort-name": "Rocky",
+        "disambiguation": "Works with The Driver Era",
+        "country": "",
+        "type": "",
+        "score": 79
+      },
+      {
+        "id": "05010b18-ba21-46dc-be6d-615d90170b8e",
+        "name": "Rocky Votolato",
+        "sort-name": "Votolato, Rocky",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 78
+      },
+      {
+        "id": "e5f9b58f-f4e6-40d1-94af-9680e8ab1ef0",
+        "name": "Rocky",
+        "sort-name": "Rocky",
+        "disambiguation": "Dance music band from Lille, France",
+        "country": "",
+        "type": "Group",
+        "score": 77
+      },
+      {
+        "id": "897ab12f-627b-4843-b6d7-4ecfcdd7fd96",
+        "name": "Rocky",
+        "sort-name": "Rocky",
+        "disambiguation": "Norwegian rock",
+        "country": "",
+        "type": "",
+        "score": 77
+      },
+      {
+        "id": "66fa9d0f-e425-43eb-8117-7818a433d718",
+        "name": "Rocky",
+        "sort-name": "Rocky",
+        "disambiguation": "Eurobeat Artist",
+        "country": "",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "1a7dd9e5-ea63-4c69-a0b8-c392961537c0",
+        "name": "Rocky",
+        "sort-name": "Rocky",
+        "disambiguation": "known for \"Let the Love Begin\"",
+        "country": "PH",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "8ff1ea06-4cea-47bc-a523-3af335fb9e99",
+        "name": "Rocky",
+        "sort-name": "Rocky",
+        "disambiguation": "Filipino Singer",
+        "country": "PH",
+        "type": "Person",
+        "score": 76
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "25b7b584-d952-4662-a8b9-dd8cdfbfeb64",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Pusha T",
+    "results": [
+      {
+        "id": "14ecd19f-7121-4192-8549-e5056241a42f",
+        "name": "Pusha T",
+        "sort-name": "Pusha T",
+        "disambiguation": "US rapper Terrence Thornton, member of Clipse",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "c842d29f-a297-48cd-bb71-4f77fd672b16",
+        "name": "T. Rex",
+        "sort-name": "T. Rex",
+        "disambiguation": "UK band",
+        "country": "GB",
+        "type": "Group",
+        "score": 91
+      },
+      {
+        "id": "0480ca1e-6fe0-42e7-893b-8b876fa1f902",
+        "name": "T‐SQUARE",
+        "sort-name": "T‐SQUARE",
+        "disambiguation": "",
+        "country": "JP",
+        "type": "Group",
+        "score": 88
+      },
+      {
+        "id": "d72ae77d-ca32-498d-870e-8204165b8ee4",
+        "name": "t+pazolite",
+        "sort-name": "topazolite",
+        "disambiguation": "",
+        "country": "JP",
+        "type": "Person",
+        "score": 83
+      },
+      {
+        "id": "ce55e49a-32f4-4757-9849-bf04d06d5fcc",
+        "name": "T‐Pain",
+        "sort-name": "T‐Pain",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 83
+      },
+      {
+        "id": "8a75ce0d-1df3-47cc-b076-ce2f4e8250f0",
+        "name": "Ice‐T",
+        "sort-name": "Ice‐T",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 83
+      },
+      {
+        "id": "f1a3fb4a-fff6-4556-a290-3704b109da90",
+        "name": "T‐Bone Walker",
+        "sort-name": "Walker, T‐Bone",
+        "disambiguation": "US blues musician \u0026 songwriter, 1910–1975",
+        "country": "US",
+        "type": "Person",
+        "score": 80
+      },
+      {
+        "id": "9be7f096-97ec-4615-8957-8d40b5dcbc41",
+        "name": "[traditional]",
+        "sort-name": "[traditional]",
+        "disambiguation": "special purpose artist",
+        "country": "XW",
+        "type": "Other",
+        "score": 79
+      },
+      {
+        "id": "d4c6ae95-497b-42f7-bdec-41cf76d1a39c",
+        "name": "Mousse T.",
+        "sort-name": "Mousse T.",
+        "disambiguation": "",
+        "country": "DE",
+        "type": "Person",
+        "score": 77
+      },
+      {
+        "id": "070d193a-845c-479f-980e-bef15710653e",
+        "name": "Prince",
+        "sort-name": "Prince",
+        "disambiguation": "“The Artist Formerly Known as…”",
+        "country": "US",
+        "type": "Person",
+        "score": 76
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "14ecd19f-7121-4192-8549-e5056241a42f",
+        "disambiguation": "US rapper Terrence Thornton, member of Clipse",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "JID",
+    "results": [
+      {
+        "id": "d616b606-cf6a-4b6e-ab0f-e253b8db6610",
+        "name": "JID",
+        "sort-name": "JID",
+        "disambiguation": "rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "f42c1675-3e6f-4ca7-8694-23b885bdbf0a",
+        "name": "J.I.D.",
+        "sort-name": "J.I.D.",
+        "disambiguation": "rock band",
+        "country": "US",
+        "type": "",
+        "score": 82
+      },
+      {
+        "id": "23412029-ef45-45ee-8b0d-65c80d600735",
+        "name": "Jid",
+        "sort-name": "Jid",
+        "disambiguation": "drummer, allias of Jeff Bowman",
+        "country": "",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "f401d26a-781b-4a2c-b3ab-ebf1c4a2d57d",
+        "name": "Ma*JiD",
+        "sort-name": "Khaliq, Majid",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 75
+      },
+      {
+        "id": "138d734a-4171-40ac-a2fb-5b2d9f32be19",
+        "name": "Jid Sames",
+        "sort-name": "Sames, Jid",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Person",
+        "score": 74
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "d616b606-cf6a-4b6e-ab0f-e253b8db6610",
+        "disambiguation": "rapper",
+        "country": "US",
+        "type": "Person"
+      },
+      {
+        "rank": 3,
+        "score": 82,
+        "mbid": "23412029-ef45-45ee-8b0d-65c80d600735",
+        "disambiguation": "drummer, allias of Jeff Bowman",
+        "country": "",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "Medium",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Denzel Curry",
+    "results": [
+      {
+        "id": "5f95440d-7737-4a36-9bcf-c05337f7129b",
+        "name": "Denzel Curry",
+        "sort-name": "Curry, Denzel",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "33ce4a70-005d-4563-bb6e-2d253fab9842",
+        "name": "Tim Curry",
+        "sort-name": "Curry, Tim",
+        "disambiguation": "English actor and singer",
+        "country": "GB",
+        "type": "Person",
+        "score": 80
+      },
+      {
+        "id": "448d19dd-e582-4e08-81ab-c408423f4efc",
+        "name": "Curry",
+        "sort-name": "Curry",
+        "disambiguation": "little-known American folk artist",
+        "country": "US",
+        "type": "Person",
+        "score": 77
+      },
+      {
+        "id": "e9c9790e-447d-4710-ac30-6474a9ab975b",
+        "name": "Jessica Curry",
+        "sort-name": "Curry, Jessica",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "cf2f2191-40c6-43f9-9145-848ea6cc2c7b",
+        "name": "Sheldon Curry",
+        "sort-name": "Curry, Sheldon",
+        "disambiguation": "Butch Curry",
+        "country": "US",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "0a2ee45a-3bb5-4ac0-914c-607086639d8d",
+        "name": "Curry",
+        "sort-name": "Curry",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 76
+      },
+      {
+        "id": "29014a5b-e95b-4f02-83ad-6f81f6970d73",
+        "name": "curry",
+        "sort-name": "curry",
+        "disambiguation": "Storyboard artist",
+        "country": "",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "64fa64c4-e096-432f-b303-af605fd0e682",
+        "name": "Curry",
+        "sort-name": "Curry",
+        "disambiguation": "an independent indie-pop trio from Mangaluru, India",
+        "country": "IN",
+        "type": "Group",
+        "score": 76
+      },
+      {
+        "id": "2666baf5-0152-49fc-b02a-5593f14b7f17",
+        "name": "Curry",
+        "sort-name": "Curry",
+        "disambiguation": "1990s Swedish band",
+        "country": "SE",
+        "type": "Group",
+        "score": 76
+      },
+      {
+        "id": "6b78b019-7857-4827-949a-72390a601b85",
+        "name": "Tracy Lynn Curry",
+        "sort-name": "Curry, Tracy Lynn",
+        "disambiguation": "primarily known by his stage name The D.O.C., American rapper from Dallas, Texas",
+        "country": "",
+        "type": "Person",
+        "score": 72
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "5f95440d-7737-4a36-9bcf-c05337f7129b",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Baby Keem",
+    "results": [
+      {
+        "id": "81d12ca7-5b89-4d21-8736-860b7400b4eb",
+        "name": "Baby Keem",
+        "sort-name": "Baby Keem",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "b13c1d4d-050e-4531-bf06-e887b632f6c4",
+        "name": "Keem",
+        "sort-name": "Keem",
+        "disambiguation": "US rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 87
+      },
+      {
+        "id": "93a7a8e8-2f42-4dca-88e2-a59832d68216",
+        "name": "KEEM",
+        "sort-name": "KEEM",
+        "disambiguation": "Dutch group",
+        "country": "",
+        "type": "Group",
+        "score": 87
+      },
+      {
+        "id": "13abadb5-5e82-48c8-aac4-3ea9c9e64460",
+        "name": "Lil Keem Keem",
+        "sort-name": "Keem, Lil Keem",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 86
+      },
+      {
+        "id": "3e1cb5f5-514e-4529-9a5d-44e77517707d",
+        "name": "$ugarHill Keem",
+        "sort-name": "$ugarHill Keem",
+        "disambiguation": "Harlem rapper aka Mr. Movelook",
+        "country": "US",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "5d7e5826-8302-4e74-91c6-918a13fc881c",
+        "name": "Hoodrich Keem",
+        "sort-name": "Hoodrich Keem",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 77
+      },
+      {
+        "id": "a2c2e063-13be-458e-8ca1-95fbc70d0ceb",
+        "name": "Metallic Keem",
+        "sort-name": "Metallic Keem",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 77
+      },
+      {
+        "id": "db7e7bcb-be95-45f5-bd5c-51dd401051aa",
+        "name": "KEEM KONG",
+        "sort-name": "KEEM KONG",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 76
+      },
+      {
+        "id": "d0ec7a04-537e-4384-9a54-6484c7f9793d",
+        "name": "Hella Keem",
+        "sort-name": "Keem, Hella",
+        "disambiguation": "",
+        "country": "EE",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "01244849-353d-445d-8b91-e582c2ca9ac3",
+        "name": "Kidd Keem",
+        "sort-name": "Keem, Kidd",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 76
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "81d12ca7-5b89-4d21-8736-860b7400b4eb",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Bad Bunny",
+    "results": [
+      {
+        "id": "89aa5ecb-59ad-46f5-b3eb-2d424e941f19",
+        "name": "Bad Bunny",
+        "sort-name": "Bad Bunny",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "d4ab32fd-e45d-44bf-9e70-891521672085",
+        "name": "Bunny Wailer",
+        "sort-name": "Wailer, Bunny",
+        "disambiguation": "",
+        "country": "JM",
+        "type": "Person",
+        "score": 89
+      },
+      {
+        "id": "25044792-a0be-4386-8af2-fa0127b5e501",
+        "name": "原子邦妮",
+        "sort-name": "yuanzi bangni",
+        "disambiguation": "",
+        "country": "TW",
+        "type": "Group",
+        "score": 86
+      },
+      {
+        "id": "00bc2d9b-37d5-43dd-b3b3-1b57fbd7fb80",
+        "name": "•bunny",
+        "sort-name": "Bunny",
+        "disambiguation": "Graphic designer and musician",
+        "country": "NL",
+        "type": "Person",
+        "score": 85
+      },
+      {
+        "id": "fc8e4da5-8a8c-4c7c-b999-2a9b7a093037",
+        "name": "Jive Bunny \u0026 the Mastermixers",
+        "sort-name": "Jive Bunny \u0026 the Mastermixers",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Group",
+        "score": 85
+      },
+      {
+        "id": "0d99a768-4878-4d40-a264-205e7fe5d20a",
+        "name": "Bunny Berigan",
+        "sort-name": "Berigan, Bunny",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 84
+      },
+      {
+        "id": "30f0a856-02cc-4a91-a67a-8e98846dc8ab",
+        "name": "Bunny",
+        "sort-name": "Bunny",
+        "disambiguation": "Toronto group",
+        "country": "",
+        "type": "Group",
+        "score": 84
+      },
+      {
+        "id": "a4ba6ab3-424e-4d20-b1b6-d1090bbffc8b",
+        "name": "BUNNY",
+        "sort-name": "BUNNY",
+        "disambiguation": "Dj/producer from Japan",
+        "country": "",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "505d308b-2a2a-42e9-9d77-84fcac562572",
+        "name": "Bunny",
+        "sort-name": "Bunny",
+        "disambiguation": "Belgian artist, released Leave",
+        "country": "BE",
+        "type": "",
+        "score": 82
+      },
+      {
+        "id": "e7a2a858-70b7-4304-9a46-d079eb9eefdc",
+        "name": "Bunny",
+        "sort-name": "Bunny",
+        "disambiguation": "Mohsin Raza",
+        "country": "PK",
+        "type": "Person",
+        "score": 82
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "89aa5ecb-59ad-46f5-b3eb-2d424e941f19",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "J Balvin",
+    "results": [
+      {
+        "id": "5bdeb32d-56a5-4b6d-a768-264101fa0a0a",
+        "name": "J Balvin",
+        "sort-name": "Balvin, J",
+        "disambiguation": "",
+        "country": "CO",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "5749ffef-848b-472d-bff9-2e4c06f90eab",
+        "name": "Juan Balvin",
+        "sort-name": "Balvin, Juan",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 75
+      },
+      {
+        "id": "24e65e48-07e6-4fa5-b6ed-757e83bc00da",
+        "name": "Greg Balvin",
+        "sort-name": "Balvin, Greg",
+        "disambiguation": "photographer",
+        "country": "",
+        "type": "Person",
+        "score": 75
+      },
+      {
+        "id": "569c0d90-28dd-413b-83e4-aaa7c27e667b",
+        "name": "J. K. Rowling",
+        "sort-name": "Rowling, J. K.",
+        "disambiguation": "English novelist",
+        "country": "GB",
+        "type": "Person",
+        "score": 73
+      },
+      {
+        "id": "90907108-1804-43b3-8d17-4bf2f3fa5ddd",
+        "name": "Ondřej Balvín",
+        "sort-name": "Balvín, Ondřej",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 70
+      },
+      {
+        "id": "1b85c622-6974-4031-bdf1-1c227b7b1c36",
+        "name": "D. J. MacHale",
+        "sort-name": "D. J. MacHale",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 66
+      },
+      {
+        "id": "cbcbb22c-3a8d-46af-b4ba-09c98f0d7931",
+        "name": "J Dilla",
+        "sort-name": "J Dilla",
+        "disambiguation": "US producer and rapper aka Jay Dee",
+        "country": "US",
+        "type": "Person",
+        "score": 57
+      },
+      {
+        "id": "db76c5ca-d555-4f09-b1db-baa1b713d875",
+        "name": "Mary J. Blige",
+        "sort-name": "Blige, Mary J.",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 57
+      },
+      {
+        "id": "e1e5f453-f8b8-41ab-a142-335bec9e2f0a",
+        "name": "Robert J. Foster",
+        "sort-name": "Foster, Robert J.",
+        "disambiguation": "UK production/library music composer",
+        "country": "GB",
+        "type": "Person",
+        "score": 56
+      },
+      {
+        "id": "d24fb461-dee8-41fc-bb15-2f13bb2644a6",
+        "name": "Jessie J",
+        "sort-name": "Jessie J",
+        "disambiguation": "English singer-songwriter",
+        "country": "GB",
+        "type": "Person",
+        "score": 56
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "5bdeb32d-56a5-4b6d-a768-264101fa0a0a",
+        "disambiguation": "",
+        "country": "CO",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Karol G",
+    "results": [
+      {
+        "id": "9567ea4f-7321-400d-a134-ad5f45b67335",
+        "name": "G. G. Anderson",
+        "sort-name": "Anderson, G. G.",
+        "disambiguation": "German Schlager singer, aka Gerd Grabowski",
+        "country": "DE",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "de22adae-f8ac-414f-b653-b0162611bd60",
+        "name": "KAROL G",
+        "sort-name": "KAROL G",
+        "disambiguation": "Colombian singer",
+        "country": "CO",
+        "type": "Person",
+        "score": 99
+      },
+      {
+        "id": "85d7666c-d3ce-4e2c-8b1b-f20db7cdae4f",
+        "name": "Warren G",
+        "sort-name": "Warren G",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 95
+      },
+      {
+        "id": "27870d47-bb98-42d1-bf2b-c7e972e6befc",
+        "name": "George Frideric Handel",
+        "sort-name": "Handel, George Frideric",
+        "disambiguation": "German‐British baroque composer",
+        "country": "GB",
+        "type": "Person",
+        "score": 94
+      },
+      {
+        "id": "3a212655-d7d5-4570-9d31-4b7b1ef02629",
+        "name": "G‐Unit",
+        "sort-name": "G‐Unit",
+        "disambiguation": "hip hop group",
+        "country": "US",
+        "type": "Group",
+        "score": 94
+      },
+      {
+        "id": "4cd556a5-db82-43f6-8d55-99598b42da8f",
+        "name": "Kenny G",
+        "sort-name": "G, Kenny",
+        "disambiguation": "saxophonist",
+        "country": "US",
+        "type": "Person",
+        "score": 92
+      },
+      {
+        "id": "8d610e51-64b4-4654-b8df-064b0fb7a9d9",
+        "name": "Gustav Mahler",
+        "sort-name": "Mahler, Gustav",
+        "disambiguation": "Austro‐Bohemian Romantic composer",
+        "country": "AT",
+        "type": "Person",
+        "score": 92
+      },
+      {
+        "id": "f1bedf1f-4445-4651-9c35-f4a3f3860a13",
+        "name": "Giuseppe Verdi",
+        "sort-name": "Verdi, Giuseppe",
+        "disambiguation": "Italian opera composer",
+        "country": "IT",
+        "type": "Person",
+        "score": 88
+      },
+      {
+        "id": "84306022-264d-4351-a710-adb828e38a23",
+        "name": "H. G. Wells",
+        "sort-name": "Wells, H. G.",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Person",
+        "score": 88
+      },
+      {
+        "id": "550ac122-4a03-4711-a5ef-3204286e7583",
+        "name": "P. G. Wodehouse",
+        "sort-name": "Wodehouse, P. G.",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Person",
+        "score": 87
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 2,
+        "score": 99,
+        "mbid": "de22adae-f8ac-414f-b653-b0162611bd60",
+        "disambiguation": "Colombian singer",
+        "country": "CO",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "Medium",
+      "TOP": "Medium",
+      "TOPANY": "Medium"
+    }
+  },
+  {
+    "line": "Daddy Yankee",
+    "results": [
+      {
+        "id": "2f522f5c-111c-4ce8-8bd0-d82e97c227ad",
+        "name": "Daddy Yankee",
+        "sort-name": "Daddy Yankee",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "0746c832-55f0-449b-b175-60d70bab724b",
+        "name": "Yankee",
+        "sort-name": "Yankee",
+        "disambiguation": "Reggae Artist",
+        "country": "",
+        "type": "Person",
+        "score": 78
+      },
+      {
+        "id": "bed263a1-236b-4f99-a833-648a8047bbec",
+        "name": "Yankee",
+        "sort-name": "Yankee",
+        "disambiguation": "late 80s French pop duo renamed to Début de Soirée",
+        "country": "",
+        "type": "Group",
+        "score": 78
+      },
+      {
+        "id": "2ea976c0-07b0-416d-93d4-0fde67b61b9a",
+        "name": "Yankee",
+        "sort-name": "Yankee",
+        "disambiguation": "Swedish euro house \"Zombie\"",
+        "country": "SE",
+        "type": "",
+        "score": 78
+      },
+      {
+        "id": "865e6b60-e485-4a10-9854-4662ba46e373",
+        "name": "Yankee",
+        "sort-name": "Yankee",
+        "disambiguation": "Brazilian hard-rock band",
+        "country": "BR",
+        "type": "Group",
+        "score": 78
+      },
+      {
+        "id": "5e1c0b25-cf85-4330-939d-fe9ca04b87c2",
+        "name": "Yankee Wuss",
+        "sort-name": "Yankee Wuss",
+        "disambiguation": "hardcore punk band",
+        "country": "US",
+        "type": "Group",
+        "score": 72
+      },
+      {
+        "id": "98f2f66e-ab61-4c86-bf08-7697f1d2c479",
+        "name": "Yankee5",
+        "sort-name": "Yankee5",
+        "disambiguation": "BOYS AND MEN subgroup",
+        "country": "JP",
+        "type": "Group",
+        "score": 71
+      },
+      {
+        "id": "c295e963-f754-457e-ad41-93d364fa161a",
+        "name": "Yankee B",
+        "sort-name": "B, Yankee",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 70
+      },
+      {
+        "id": "0eb32acc-0b29-4aed-b5ba-25e5bc961a46",
+        "name": "Yankee Grey",
+        "sort-name": "Yankee Grey",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 70
+      },
+      {
+        "id": "959564dc-6755-4a03-8c46-7f37793547db",
+        "name": "Yankee Bastard",
+        "sort-name": "Yankee Bastard",
+        "disambiguation": "hardcore punk band from Richmond, VA",
+        "country": "",
+        "type": "Group",
+        "score": 70
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "2f522f5c-111c-4ce8-8bd0-d82e97c227ad",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Ozuna",
+    "results": [
+      {
+        "id": "f2651b63-a44d-4d1d-ba64-d981d971ecd1",
+        "name": "Ozuna",
+        "sort-name": "Ozuna",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "fd25fa9e-037d-4852-a9fb-2ea659019425",
+        "name": "Sunny Ozuna",
+        "sort-name": "Ozuna, Sunny",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "c1fe9a8b-64a9-4d1d-b589-7370bad0e71d",
+        "name": "Bobby Ozuna",
+        "sort-name": "Ozuna, Bobby",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 78
+      },
+      {
+        "id": "cf677fc0-12c1-45c5-883f-8d6013a5cb7e",
+        "name": "julio ozuna",
+        "sort-name": "ozuna julio",
+        "disambiguation": "baterista de la banda novena radio",
+        "country": "",
+        "type": "",
+        "score": 78
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "f2651b63-a44d-4d1d-ba64-d981d971ecd1",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Rauw Alejandro",
+    "results": [
+      {
+        "id": "197b70c7-8910-4030-ad03-632d82aa40e3",
+        "name": "Rauw Alejandro",
+        "sort-name": "Rauw Alejandro",
+        "disambiguation": "Puerto Rican rapper",
+        "country": "PR",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "9bacf78f-9132-43da-8873-8a9eb49da0e9",
+        "name": "Alejandro Sanz",
+        "sort-name": "Sanz, Alejandro",
+        "disambiguation": "",
+        "country": "ES",
+        "type": "Person",
+        "score": 87
+      },
+      {
+        "id": "772a8360-e81e-4647-92e2-195c19efddad",
+        "name": "Alejandro Fernández",
+        "sort-name": "Fernández, Alejandro",
+        "disambiguation": "Mexican singer, son of Vicente Fernández",
+        "country": "MX",
+        "type": "Person",
+        "score": 86
+      },
+      {
+        "id": "bf103bec-70e3-45a5-9d1b-97715db04a96",
+        "name": "Alejandro Escovedo",
+        "sort-name": "Escovedo, Alejandro",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 84
+      },
+      {
+        "id": "aae1ec8e-ecd9-44ef-aca8-b5f44579ecce",
+        "name": "Alejandro Lerner",
+        "sort-name": "Lerner, Alejandro",
+        "disambiguation": "",
+        "country": "AR",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "27fbfd0e-d80d-4dd0-af37-a4fd70590ae4",
+        "name": "Alejandro Filio",
+        "sort-name": "Filio, Alejandro",
+        "disambiguation": "",
+        "country": "MX",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "e2caa2bb-1ae4-4507-b067-731ae2e8fe33",
+        "name": "Rachel Alejandro",
+        "sort-name": "Alejandro, Rachel",
+        "disambiguation": "",
+        "country": "PH",
+        "type": "Person",
+        "score": 78
+      },
+      {
+        "id": "24ca022c-653e-4379-812a-71f729b900ef",
+        "name": "Shakey Graves",
+        "sort-name": "Shakey Graves",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 77
+      },
+      {
+        "id": "aa80e8a8-f15a-49a0-9f14-9ba1409f2f4a",
+        "name": "ALEJANDRO",
+        "sort-name": "ALEJANDRO",
+        "disambiguation": "EDM artist",
+        "country": "US",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "8c523955-bcb7-4f05-ad5a-a7fdd7449110",
+        "name": "Alejandro",
+        "sort-name": "Alejandro",
+        "disambiguation": "Bristol rapper",
+        "country": "",
+        "type": "Person",
+        "score": 76
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "197b70c7-8910-4030-ad03-632d82aa40e3",
+        "disambiguation": "Puerto Rican rapper",
+        "country": "PR",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Feid",
+    "results": [
+      {
+        "id": "eaee97f6-f2e4-414a-966c-f31a1fb4696a",
+        "name": "Feid",
+        "sort-name": "Feid",
+        "disambiguation": "Colombian singer-songwriter",
+        "country": "CO",
+        "type": "Person",
+        "score": 100
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "eaee97f6-f2e4-414a-966c-f31a1fb4696a",
+        "disambiguation": "Colombian singer-songwriter",
+        "country": "CO",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Anuel AA",
+    "results": [
+      {
+        "id": "87a75fc3-59e7-4598-925c-8e230bce5db9",
+        "name": "Anuel AA",
+        "sort-name": "Anuel AA",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "4322e1f6-65c7-423a-9ec4-dbb6d8db2bf5",
+        "name": "AA=",
+        "sort-name": "AA=",
+        "disambiguation": "All Animals are Equal",
+        "country": "JP",
+        "type": "Group",
+        "score": 89
+      },
+      {
+        "id": "89ad4ac3-39f7-470e-963a-56509c546377",
+        "name": "Various Artists",
+        "sort-name": "Various Artists",
+        "disambiguation": "add compilations to this artist",
+        "country": "",
+        "type": "Other",
+        "score": 84
+      },
+      {
+        "id": "acf0762f-5661-41ef-bb87-4ac7c3782f7b",
+        "name": "Aa",
+        "sort-name": "Aa",
+        "disambiguation": "New York noise band; ‘BIG A Little a’",
+        "country": "US",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "c05e5179-1c79-41fe-8520-7b58b5230f3c",
+        "name": "A.A. Milne",
+        "sort-name": "Milne, A.A.",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Person",
+        "score": 81
+      },
+      {
+        "id": "985def30-e125-4b9b-8c93-a29a70b502aa",
+        "name": "AA",
+        "sort-name": "AA",
+        "disambiguation": "horrorcore rapper",
+        "country": "US",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "ffc293c4-7fd9-4573-89c2-2a1c9718686b",
+        "name": "_aa_",
+        "sort-name": "aa",
+        "disambiguation": "American synthesizer artist Jared Burke",
+        "country": "US",
+        "type": "Person",
+        "score": 79
+      },
+      {
+        "id": "67fea990-97b7-4156-9466-853e51b5bdc4",
+        "name": "AA",
+        "sort-name": "AA",
+        "disambiguation": "Belgian new‐wave/punk band",
+        "country": "BE",
+        "type": "Group",
+        "score": 79
+      },
+      {
+        "id": "7cbfa4fa-03c3-4221-b154-9ceefd4dc989",
+        "name": "AA",
+        "sort-name": "AA",
+        "disambiguation": "featured Eindkrak on track “Orankastank”",
+        "country": "",
+        "type": "",
+        "score": 78
+      },
+      {
+        "id": "d565d80b-8a1f-4467-961b-199076122e7e",
+        "name": "Aa",
+        "sort-name": "Aa",
+        "disambiguation": "electronic artist from Brooklyn",
+        "country": "",
+        "type": "",
+        "score": 78
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "87a75fc3-59e7-4598-925c-8e230bce5db9",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Myke Towers",
+    "results": [
+      {
+        "id": "d2945137-b01d-4195-9f82-64d20f8ba657",
+        "name": "Myke Towers",
+        "sort-name": "Towers, Myke",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "b197e9e3-762b-465a-b761-86f5fb38a192",
+        "name": "Lee Towers",
+        "sort-name": "Towers, Lee",
+        "disambiguation": "",
+        "country": "NL",
+        "type": "Person",
+        "score": 89
+      },
+      {
+        "id": "77fb2a67-29cb-4b9f-96fb-aad528a6d2f5",
+        "name": "Towers",
+        "sort-name": "Towers",
+        "disambiguation": "Rock band from Dorset",
+        "country": "",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "6099400b-f30c-45bb-911c-fab0a9cbbef9",
+        "name": "Towers",
+        "sort-name": "Towers",
+        "disambiguation": "Experimental hardcore band from Philadelphia",
+        "country": "",
+        "type": "",
+        "score": 82
+      },
+      {
+        "id": "39b4f2ed-bf40-460b-bed9-0905c6cdc21c",
+        "name": "Towers",
+        "sort-name": "Towers",
+        "disambiguation": "stoner from Portland",
+        "country": "US",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "c2febc0b-d6d1-4bb0-b694-d0c4dfa7548f",
+        "name": "TOWERS",
+        "sort-name": "TOWERS",
+        "disambiguation": "dark ambient; Enylobe \u0026 ImCoPav",
+        "country": "",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "6216bc6f-a99e-4c8e-a678-64ee570cf1ff",
+        "name": "Towers",
+        "sort-name": "Towers",
+        "disambiguation": "American deathcore band",
+        "country": "",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "031e3565-fa7a-4280-93d1-02ccfd0b84e8",
+        "name": "TOWERS",
+        "sort-name": "TOWERS",
+        "disambiguation": "Bass music producer",
+        "country": "",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "8ca88dbb-d99c-4e97-acdc-c01a2dfcd590",
+        "name": "Towers",
+        "sort-name": "Towers",
+        "disambiguation": "Nottingham Hard Rock band",
+        "country": "",
+        "type": "Group",
+        "score": 81
+      },
+      {
+        "id": "334d3934-8d49-4536-89d3-ac5c337a45ed",
+        "name": "Ivory Tower",
+        "sort-name": "Ivory Tower",
+        "disambiguation": "German melodic/progressive power metal band",
+        "country": "DE",
+        "type": "Group",
+        "score": 80
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "d2945137-b01d-4195-9f82-64d20f8ba657",
+        "disambiguation": "",
+        "country": "PR",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Rosalia",
+    "results": [
+      {
+        "id": "25f3abd9-63b5-471a-bd25-feb9672dfa11",
+        "name": "ROSALÍA",
+        "sort-name": "ROSALÍA",
+        "disambiguation": "Spanish singer",
+        "country": "ES",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "ac0ee862-a6ca-4d39-a7a4-d8460534ba30",
+        "name": "Rosalía",
+        "sort-name": "Rosalía",
+        "disambiguation": "60s pop singer",
+        "country": "ES",
+        "type": "Person",
+        "score": 84
+      },
+      {
+        "id": "2ffc92fa-e51e-45ed-8a90-fa494aab50de",
+        "name": "Rosalía",
+        "sort-name": "Rosalía",
+        "disambiguation": "Not to be confused with ROSALÍA. Mexican actress, singer, songwriter and guitarist who came to fame in 2003 through La Academia, a musical reality show.",
+        "country": "",
+        "type": "Person",
+        "score": 83
+      },
+      {
+        "id": "3e666715-f92a-4b68-8314-cceb5cd98861",
+        "name": "ROSALIA",
+        "sort-name": "ROSALIA",
+        "disambiguation": "Japanese girl band",
+        "country": "JP",
+        "type": "Group",
+        "score": 83
+      },
+      {
+        "id": "6c51e42b-3e64-4bbc-9c9d-c9d452d2870d",
+        "name": "Rosalia de Souza",
+        "sort-name": "Souza, Rosalia de",
+        "disambiguation": "",
+        "country": "BR",
+        "type": "Person",
+        "score": 81
+      },
+      {
+        "id": "76adfc55-fdeb-4c6d-8db4-a6519d2bcc1e",
+        "name": "Rosalía Sairem",
+        "sort-name": "Sairem, Rosalía",
+        "disambiguation": "",
+        "country": "ES",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "60e94296-88e5-4a65-9d90-d91068c13ec8",
+        "name": "Rosalia Bertini",
+        "sort-name": "Bertini, Rosalia",
+        "disambiguation": "",
+        "country": "ES",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "98863e4e-8785-4b36-aef6-a5bf779839e6",
+        "name": "Rosalia Misseri",
+        "sort-name": "Misseri, Rosalia",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "c6eb3cf9-8b9a-42f7-a5e9-f5690933deb8",
+        "name": "Rosalia Jones",
+        "sort-name": "Rosalia Jones",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 76
+      },
+      {
+        "id": "e743e480-5d85-4251-a039-c64d8b61d8f7",
+        "name": "Rosalía León",
+        "sort-name": "León, Rosalía",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 76
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "25f3abd9-63b5-471a-bd25-feb9672dfa11",
+        "disambiguation": "Spanish singer",
+        "country": "ES",
+        "type": "Person"
+      },
+      {
+        "rank": 2,
+        "score": 84,
+        "mbid": "ac0ee862-a6ca-4d39-a7a4-d8460534ba30",
+        "disambiguation": "60s pop singer",
+        "country": "ES",
+        "type": "Person"
+      },
+      {
+        "rank": 3,
+        "score": 83,
+        "mbid": "2ffc92fa-e51e-45ed-8a90-fa494aab50de",
+        "disambiguation": "Not to be confused with ROSALÍA. Mexican actress, singer, songwriter and guitarist who came to fame in 2003 through La Academia, a musical reality show.",
+        "country": "",
+        "type": "Person"
+      },
+      {
+        "rank": 4,
+        "score": 83,
+        "mbid": "3e666715-f92a-4b68-8314-cceb5cd98861",
+        "disambiguation": "Japanese girl band",
+        "country": "JP",
+        "type": "Group"
+      }
+    ],
+    "tiers": {
+      "D02": "Medium",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Peso Pluma",
+    "results": [
+      {
+        "id": "75e4f8ef-34c3-44fd-8467-88a7d9599f77",
+        "name": "Peso Pluma",
+        "sort-name": "Peso Pluma",
+        "disambiguation": "Mexican corridos tumbados singer",
+        "country": "MX",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "de642515-2eda-48e6-abe3-ee2d9c81ed53",
+        "name": "PLUMA",
+        "sort-name": "PLUMA",
+        "disambiguation": "Brazilian band",
+        "country": "BR",
+        "type": "Group",
+        "score": 87
+      },
+      {
+        "id": "40c02eed-a6b0-4dd1-8a30-d698ced9451e",
+        "name": "Pluma",
+        "sort-name": "Pluma",
+        "disambiguation": "US Electronic Music producer",
+        "country": "US",
+        "type": "Person",
+        "score": 86
+      },
+      {
+        "id": "3c037215-dda5-4f03-ab2e-c186286bc763",
+        "name": "PLUMA",
+        "sort-name": "PLUMA",
+        "disambiguation": "",
+        "country": "KR",
+        "type": "Person",
+        "score": 86
+      },
+      {
+        "id": "8122b0e2-a14f-45a7-8c8e-b472edafa037",
+        "name": "Pluma Davis",
+        "sort-name": "Davis, Pluma",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 74
+      },
+      {
+        "id": "553c541f-6b50-4189-90d6-4a133c9e37c7",
+        "name": "Los Pesos Pluma",
+        "sort-name": "Pesos Pluma, Los",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 66
+      },
+      {
+        "id": "dc7e9c1b-eb2b-4b3b-8eef-8a31a2b2f4d4",
+        "name": "The Pluma Davis Orchestra",
+        "sort-name": "Davis, Pluma, Orchestra, The",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Orchestra",
+        "score": 61
+      },
+      {
+        "id": "90b6d4b7-2426-42be-b3f9-75dd035c8d14",
+        "name": "Pluma y sus Ocho Octavos",
+        "sort-name": "Pluma y sus Ocho Octavos",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 58
+      },
+      {
+        "id": "1d38200b-2531-4bad-9dd2-be58ec0dd51a",
+        "name": "Pluma Davis \u0026 His Rockets",
+        "sort-name": "Davis, Pluma \u0026 His Rockets",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 57
+      },
+      {
+        "id": "a72cf9a4-9805-4f7f-904b-39c168fb25a0",
+        "name": "Peso Peso",
+        "sort-name": "Peso Peso",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 57
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "75e4f8ef-34c3-44fd-8467-88a7d9599f77",
+        "disambiguation": "Mexican corridos tumbados singer",
+        "country": "MX",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Sech",
+    "results": [
+      {
+        "id": "709f5e96-51cd-49b4-a8e4-0ca0bf808de3",
+        "name": "Sech",
+        "sort-name": "Sech",
+        "disambiguation": "",
+        "country": "PA",
+        "type": "Person",
+        "score": 100
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "709f5e96-51cd-49b4-a8e4-0ca0bf808de3",
+        "disambiguation": "",
+        "country": "PA",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "SZA",
+    "results": [
+      {
+        "id": "272989c8-5535-492d-a25c-9f58803e027f",
+        "name": "SZA",
+        "sort-name": "SZA",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "7e360dc6-7f31-4879-a5db-a7b5e99bafb2",
+        "name": "Sza/Za",
+        "sort-name": "Sza/Za",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 72
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "272989c8-5535-492d-a25c-9f58803e027f",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Frank Ocean",
+    "results": [
+      {
+        "id": "e520459c-dff4-491d-a6e4-c97be35e0044",
+        "name": "Frank Ocean",
+        "sort-name": "Ocean, Frank",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "0e422e91-a42a-4b4d-8413-9baff67350f2",
+        "name": "Billy Ocean",
+        "sort-name": "Ocean, Billy",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Person",
+        "score": 96
+      },
+      {
+        "id": "601d793d-7e96-4bb6-b4a6-712d5c926259",
+        "name": "Ocean Colour Scene",
+        "sort-name": "Ocean Colour Scene",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Group",
+        "score": 92
+      },
+      {
+        "id": "197450cd-0124-4164-b723-3c22dd16494d",
+        "name": "Frank Sinatra",
+        "sort-name": "Sinatra, Frank",
+        "disambiguation": "American singer and actor, “Ol’ Blue Eyes”",
+        "country": "US",
+        "type": "Person",
+        "score": 90
+      },
+      {
+        "id": "8d0acf0e-c099-49ac-b4b3-d57ca9eb2561",
+        "name": "The Ocean",
+        "sort-name": "Ocean, The",
+        "disambiguation": "German metal band",
+        "country": "DE",
+        "type": "Group",
+        "score": 86
+      },
+      {
+        "id": "a55bbfed-a6ae-436c-90bf-cfa9ad0b8bf5",
+        "name": "Ocean Ocean",
+        "sort-name": "Ocean Ocean",
+        "disambiguation": "Russian band",
+        "country": "RU",
+        "type": "Group",
+        "score": 85
+      },
+      {
+        "id": "3313ed66-ed10-4acf-bee7-be24aa668ec4",
+        "name": "Oceán",
+        "sort-name": "Oceán",
+        "disambiguation": "Czech electronic group",
+        "country": "CZ",
+        "type": "Group",
+        "score": 85
+      },
+      {
+        "id": "ec091c5c-cb67-47e7-a2c9-e61ec1afc17a",
+        "name": "The Ocean Blue",
+        "sort-name": "Ocean Blue, The",
+        "disambiguation": "American indie pop",
+        "country": "US",
+        "type": "Group",
+        "score": 84
+      },
+      {
+        "id": "bd8c0cb2-13ec-488e-9075-8bc1a3363a5f",
+        "name": "Ocean",
+        "sort-name": "Ocean",
+        "disambiguation": "1970s Canadian gospel/soft rock band",
+        "country": "CA",
+        "type": "Group",
+        "score": 84
+      },
+      {
+        "id": "e20747e7-55a4-452e-8766-7b985585082d",
+        "name": "Frank Zappa",
+        "sort-name": "Zappa, Frank",
+        "disambiguation": "US musician, composer, activist \u0026 filmmaker",
+        "country": "US",
+        "type": "Person",
+        "score": 84
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "e520459c-dff4-491d-a6e4-c97be35e0044",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "The Weeknd",
+    "results": [
+      {
+        "id": "c8b03190-306c-4120-bb0b-6f2ebfc06ea9",
+        "name": "The Weeknd",
+        "sort-name": "Weeknd, The",
+        "disambiguation": "Canadian R\u0026B singer",
+        "country": "CA",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d",
+        "name": "The Beatles",
+        "sort-name": "Beatles, The",
+        "disambiguation": "UK rock band, “The Fab Four”",
+        "country": "GB",
+        "type": "Group",
+        "score": 71
+      },
+      {
+        "id": "d6652e7b-33fe-49ef-8336-4c863b4f996f",
+        "name": "The E Street Band",
+        "sort-name": "E Street Band, The",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 70
+      },
+      {
+        "id": "b071f9fa-14b0-4217-8e97-eb41da73f598",
+        "name": "The Rolling Stones",
+        "sort-name": "Rolling Stones, The",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Group",
+        "score": 70
+      },
+      {
+        "id": "b3258adb-41f6-4a99-bf3c-82e1d40cb5fa",
+        "name": "The Weeknd's Hair",
+        "sort-name": "The Weeknd's Hair",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 68
+      },
+      {
+        "id": "ba0d6274-db14-4ef5-b28d-657ebde1a396",
+        "name": "The Smashing Pumpkins",
+        "sort-name": "Smashing Pumpkins, The",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 64
+      },
+      {
+        "id": "ebfc1398-8d96-47e3-82c3-f782abcdb13d",
+        "name": "The Beach Boys",
+        "sort-name": "Beach Boys, The",
+        "disambiguation": "American rock band",
+        "country": "US",
+        "type": "Group",
+        "score": 64
+      },
+      {
+        "id": "9fdaa16b-a6c4-4831-b87c-bc9ca8ce7eaa",
+        "name": "The Who",
+        "sort-name": "Who, The",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Group",
+        "score": 63
+      },
+      {
+        "id": "69ee3720-a7cb-4402-b48d-a02c366f2bcf",
+        "name": "The Cure",
+        "sort-name": "Cure, The",
+        "disambiguation": "",
+        "country": "GB",
+        "type": "Group",
+        "score": 63
+      },
+      {
+        "id": "c296e10c-110a-4103-9e77-47bfebb7fb2e",
+        "name": "Bob Marley \u0026 The Wailers",
+        "sort-name": "Marley, Bob \u0026 The Wailers",
+        "disambiguation": "",
+        "country": "JM",
+        "type": "Group",
+        "score": 62
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "c8b03190-306c-4120-bb0b-6f2ebfc06ea9",
+        "disambiguation": "Canadian R\u0026B singer",
+        "country": "CA",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Summer Walker",
+    "results": [
+      {
+        "id": "9167f739-da47-4495-9d63-9c13b40114ac",
+        "name": "Summer Walker",
+        "sort-name": "Walker, Summer",
+        "disambiguation": "R\u0026B singer",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "f1a3fb4a-fff6-4556-a290-3704b109da90",
+        "name": "T‐Bone Walker",
+        "sort-name": "Walker, T‐Bone",
+        "disambiguation": "US blues musician \u0026 songwriter, 1910–1975",
+        "country": "US",
+        "type": "Person",
+        "score": 88
+      },
+      {
+        "id": "788139a6-9143-4852-abe8-d3546a60a691",
+        "name": "Nicola Walker",
+        "sort-name": "Walker, Nicola",
+        "disambiguation": "voice actor",
+        "country": "GB",
+        "type": "Person",
+        "score": 88
+      },
+      {
+        "id": "99524243-dc2e-4bf3-82c0-72395391d21f",
+        "name": "Scott Walker",
+        "sort-name": "Walker, Scott",
+        "disambiguation": "singer‐songwriter, musician and producer",
+        "country": "GB",
+        "type": "Person",
+        "score": 87
+      },
+      {
+        "id": "93cdcb31-94ad-48ed-9086-349af65e67dd",
+        "name": "Shirley Walker",
+        "sort-name": "Walker, Shirley",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 87
+      },
+      {
+        "id": "45433c63-c874-47e9-a761-c20963d47fa7",
+        "name": "The Walker Brothers",
+        "sort-name": "Walker Brothers, The",
+        "disambiguation": "60s/70s pop band",
+        "country": "US",
+        "type": "Group",
+        "score": 87
+      },
+      {
+        "id": "044df3e9-9b40-450c-b347-9ef6c964b313",
+        "name": "Billy Walker",
+        "sort-name": "Walker, Billy",
+        "disambiguation": "country singer and guitarist, known for “Charlie’s Shoes”",
+        "country": "US",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "b0e4bc50-3062-4d31-afad-def6a6b7a8e9",
+        "name": "Alan Walker",
+        "sort-name": "Walker, Alan",
+        "disambiguation": "Norwegian producer",
+        "country": "NO",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "b60527cc-54f3-4bbe-a01b-dcf34c95ae14",
+        "name": "Donna Summer",
+        "sort-name": "Summer, Donna",
+        "disambiguation": "soul/disco diva",
+        "country": "US",
+        "type": "Person",
+        "score": 82
+      },
+      {
+        "id": "3faa019a-ad91-4ddf-87d5-fdcbdfd8327c",
+        "name": "Jerry Jeff Walker",
+        "sort-name": "Walker, Jerry Jeff",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 81
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "9167f739-da47-4495-9d63-9c13b40114ac",
+        "disambiguation": "R\u0026B singer",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Brent Faiyaz",
+    "results": [
+      {
+        "id": "201412c6-7ced-472b-87a9-9259ec3c07d3",
+        "name": "Brent Faiyaz",
+        "sort-name": "Faiyaz, Brent",
+        "disambiguation": "American singer-songwriter and producer",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "e19a1a59-b723-4388-abdb-ab2eacac4da4",
+        "name": "Faiyaz",
+        "sort-name": "Faiyaz",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 89
+      },
+      {
+        "id": "031f1525-913c-40a7-a6cd-712f1d78bceb",
+        "name": "Faiyaz Khan",
+        "sort-name": "Khan, Faiyaz",
+        "disambiguation": "Indian classical vocalist",
+        "country": "IN",
+        "type": "Person",
+        "score": 77
+      },
+      {
+        "id": "af732d28-7551-4e55-9877-04a4159822d4",
+        "name": "Faiyaz Khan",
+        "sort-name": "Khan, Faiyaz",
+        "disambiguation": "Indian tabla player",
+        "country": "IN",
+        "type": "Person",
+        "score": 77
+      },
+      {
+        "id": "97f9d05b-7481-491f-8c2c-cfd816cbe6ca",
+        "name": "Faiyaz Jafri",
+        "sort-name": "Faiyaz Jafri",
+        "disambiguation": "",
+        "country": "",
+        "type": "",
+        "score": 77
+      },
+      {
+        "id": "38a6e23d-8349-4bbf-a790-20a61181c16a",
+        "name": "Faiyaz Hussain Khan",
+        "sort-name": "Khan, Faiyaz Hussain",
+        "disambiguation": "violin",
+        "country": "",
+        "type": "Person",
+        "score": 69
+      },
+      {
+        "id": "a67edb19-5669-4c41-b8b8-d88df641f1d7",
+        "name": "Brent Gutzeit",
+        "sort-name": "Gutzeit, Brent",
+        "disambiguation": "American experimental musician",
+        "country": "US",
+        "type": "Person",
+        "score": 61
+      },
+      {
+        "id": "c9fa99aa-d6c0-43d3-8fe3-03c3c367bffb",
+        "name": "Faiyaz \u0026 the Wasted Chances",
+        "sort-name": "Faiyaz \u0026 the Wasted Chances",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 59
+      },
+      {
+        "id": "7183e4bd-1c95-4f0e-a479-51ae435f1aa7",
+        "name": "Brent Lewis",
+        "sort-name": "Lewis, Brent",
+        "disambiguation": "Percussionist and drummer",
+        "country": "",
+        "type": "Person",
+        "score": 54
+      },
+      {
+        "id": "3ccdd97f-4e1c-4bf0-8015-f00428cf48a1",
+        "name": "Brent Burns",
+        "sort-name": "Burns, Brent",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 53
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "201412c6-7ced-472b-87a9-9259ec3c07d3",
+        "disambiguation": "American singer-songwriter and producer",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Daniel Caesar",
+    "results": [
+      {
+        "id": "b46e298d-d3a5-4695-a03e-63e8c523b23e",
+        "name": "Daniel Caesar",
+        "sort-name": "Caesar, Daniel",
+        "disambiguation": "Canadian R\u0026B/soul singer‐songwriter",
+        "country": "CA",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "bf3b19ed-8d83-422e-a591-699ebc983c42",
+        "name": "Caesar",
+        "sort-name": "Caesar",
+        "disambiguation": "Dutch band",
+        "country": "NL",
+        "type": "Group",
+        "score": 97
+      },
+      {
+        "id": "2bb81df0-e9e2-42ee-9708-d30b0c85d946",
+        "name": "Shirley Caesar",
+        "sort-name": "Caesar, Shirley",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 90
+      },
+      {
+        "id": "d8501bd1-36d5-4f25-8167-40321b4b770b",
+        "name": "Caesar",
+        "sort-name": "Caesar",
+        "disambiguation": "Pop Iuliu Patrick, house producer from Romania",
+        "country": "RO",
+        "type": "Person",
+        "score": 90
+      },
+      {
+        "id": "e643889a-1b6e-4c3c-90b7-6df22c72e004",
+        "name": "Caesar",
+        "sort-name": "Caesar",
+        "disambiguation": "Russian power/progressive metal",
+        "country": "RU",
+        "type": "Group",
+        "score": 89
+      },
+      {
+        "id": "525edc2e-e482-4ad9-a57f-58c22311aa84",
+        "name": "Caesar",
+        "sort-name": "Caesar",
+        "disambiguation": "Macedonian-German dance/Schlager artist",
+        "country": "DE",
+        "type": "Person",
+        "score": 89
+      },
+      {
+        "id": "8da4ac40-7bd9-4c92-9cc1-1190ea326dca",
+        "name": "Caesar",
+        "sort-name": "Caesar",
+        "disambiguation": "Dutch Trance producer Cor Sanger: track \"Peace \u0026 Love\"",
+        "country": "",
+        "type": "Person",
+        "score": 89
+      },
+      {
+        "id": "c1abc3c9-ec26-4a8e-a388-4e229e1c4bab",
+        "name": "Caesar",
+        "sort-name": "Caesar",
+        "disambiguation": "German Hip Hop",
+        "country": "",
+        "type": "",
+        "score": 89
+      },
+      {
+        "id": "6e812bdf-dc81-4c24-8131-0e9757c35e71",
+        "name": "Caesar",
+        "sort-name": "Caesar",
+        "disambiguation": "aka Don Caesar",
+        "country": "",
+        "type": "",
+        "score": 88
+      },
+      {
+        "id": "4da6a23f-5bee-4508-8836-aa0111de7c13",
+        "name": "Caesar",
+        "sort-name": "Caesar",
+        "disambiguation": "appears on Amit's AMAR label",
+        "country": "",
+        "type": "",
+        "score": 88
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "b46e298d-d3a5-4695-a03e-63e8c523b23e",
+        "disambiguation": "Canadian R\u0026B/soul singer‐songwriter",
+        "country": "CA",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "HER",
+    "results": [
+      {
+        "id": "93998e01-ff53-4af7-ba2a-5674adcdf21e",
+        "name": "H.E.R.",
+        "sort-name": "H.E.R.",
+        "disambiguation": "US R\u0026B artist",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "cc474f1b-1220-4e23-b0ef-73e81890df69",
+        "name": "Billie Holiday and Her Orchestra",
+        "sort-name": "Holiday, Billie and Her Orchestra",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 97
+      },
+      {
+        "id": "e67a956b-b7cd-4deb-b41e-461e976cd191",
+        "name": "Ella Fitzgerald and Her Famous Orchestra",
+        "sort-name": "Fitzgerald, Ella and Her Famous Orchestra",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Group",
+        "score": 91
+      },
+      {
+        "id": "1ba465cf-33a0-4af6-be33-f0dcac3f75c9",
+        "name": "Keel Her",
+        "sort-name": "Keel Her",
+        "disambiguation": "",
+        "country": "",
+        "type": "Person",
+        "score": 91
+      },
+      {
+        "id": "85002755-85e7-484e-a831-dc47c27af2b3",
+        "name": "Her",
+        "sort-name": "Her",
+        "disambiguation": "French band",
+        "country": "FR",
+        "type": "Group",
+        "score": 91
+      },
+      {
+        "id": "aa547a6d-5fed-47cf-83af-64d6387167d1",
+        "name": "HER",
+        "sort-name": "HER",
+        "disambiguation": "US Artist now Solo from HER \u0026 Kings County",
+        "country": "US",
+        "type": "Person",
+        "score": 90
+      },
+      {
+        "id": "350a221a-b1a2-4480-8697-bef1910b1063",
+        "name": "Her Space Holiday",
+        "sort-name": "Her Space Holiday",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 90
+      },
+      {
+        "id": "a801318a-fdb0-4ea5-ab24-0fd2a636724e",
+        "name": "Seagull Screaming Kiss Her Kiss Her",
+        "sort-name": "Seagull Screaming Kiss Her Kiss Her",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 88
+      },
+      {
+        "id": "4cf16338-847d-4147-a115-f6808d1e31a9",
+        "name": "Kinit Her",
+        "sort-name": "Kinit Her",
+        "disambiguation": "",
+        "country": "",
+        "type": "Group",
+        "score": 87
+      },
+      {
+        "id": "da357978-095d-4621-a7ee-2c0f336c5e8a",
+        "name": "Her’s",
+        "sort-name": "Her’s",
+        "disambiguation": "UK dream pop duo",
+        "country": "GB",
+        "type": "Group",
+        "score": 87
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 5,
+        "score": 91,
+        "mbid": "85002755-85e7-484e-a831-dc47c27af2b3",
+        "disambiguation": "French band",
+        "country": "FR",
+        "type": "Group"
+      },
+      {
+        "rank": 6,
+        "score": 90,
+        "mbid": "aa547a6d-5fed-47cf-83af-64d6387167d1",
+        "disambiguation": "US Artist now Solo from HER \u0026 Kings County",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "Medium",
+      "S100": "Medium",
+      "TOP": "Medium",
+      "TOPANY": "Medium"
+    }
+  },
+  {
+    "line": "jhene aiko",
+    "results": [
+      {
+        "id": "ceb3f5b7-9f1a-430f-afbe-976fdcf30482",
+        "name": "Jhené Aiko",
+        "sort-name": "Aiko, Jhené",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      },
+      {
+        "id": "53e90c12-6ad0-4d1e-ad5b-f2e5d0059946",
+        "name": "aiko",
+        "sort-name": "aiko",
+        "disambiguation": "singer-songwriter Aiko Yanai",
+        "country": "JP",
+        "type": "Person",
+        "score": 91
+      },
+      {
+        "id": "8c7d227c-8565-4a00-8dea-8fe1ca4401b6",
+        "name": "Aiko Aiko",
+        "sort-name": "Aiko Aiko",
+        "disambiguation": "Electronic music duo Nada Aiko \u0026 Pascal Holper from Vienna, Austria.",
+        "country": "AT",
+        "type": "Group",
+        "score": 82
+      },
+      {
+        "id": "6a6d7262-051e-44dc-8176-81a32ae66ea6",
+        "name": "Aiko",
+        "sort-name": "Aiko",
+        "disambiguation": "Czech singer",
+        "country": "CZ",
+        "type": "Person",
+        "score": 80
+      },
+      {
+        "id": "dd831205-1d5c-498f-a804-9a3dfd728036",
+        "name": "Aiko",
+        "sort-name": "Aiko",
+        "disambiguation": "Hawaiian music",
+        "country": "",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "6dfe7d70-58a5-452d-934a-223727fc118f",
+        "name": "Aiko",
+        "sort-name": "Aiko",
+        "disambiguation": "singer, member of Lonely Music Collective",
+        "country": "",
+        "type": "Person",
+        "score": 76
+      },
+      {
+        "id": "428fa12e-feab-458f-87a1-312aa0db00c3",
+        "name": "AIKO",
+        "sort-name": "AIKO",
+        "disambiguation": "bemani artist",
+        "country": "",
+        "type": "",
+        "score": 75
+      },
+      {
+        "id": "e561e6cf-2aa8-4436-8139-8c3a13c4072d",
+        "name": "Aiko",
+        "sort-name": "Aiko",
+        "disambiguation": "Appears on \"Deep \u0026 Dark Dubstep Vol.6\"",
+        "country": "",
+        "type": "",
+        "score": 75
+      },
+      {
+        "id": "a34bbc53-097b-4ac8-a079-771d0aab59b5",
+        "name": "Aiko",
+        "sort-name": "Aiko",
+        "disambiguation": "key track: Streamline",
+        "country": "",
+        "type": "",
+        "score": 75
+      },
+      {
+        "id": "4989c5c6-7254-4500-ac69-58e5b3e6d616",
+        "name": "Aiko",
+        "sort-name": "Aiko",
+        "disambiguation": "Serbian musician",
+        "country": "",
+        "type": "Person",
+        "score": 75
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "ceb3f5b7-9f1a-430f-afbe-976fdcf30482",
+        "disambiguation": "",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Kehlani",
+    "results": [
+      {
+        "id": "3260ce89-5eb0-4c6a-89c7-379c0dfc2ab9",
+        "name": "Kehlani",
+        "sort-name": "Kehlani",
+        "disambiguation": "Kehlani Ashley Parrish, an American singer-songwriter",
+        "country": "US",
+        "type": "Person",
+        "score": 100
+      }
+    ],
+    "exacts": [
+      {
+        "rank": 1,
+        "score": 100,
+        "mbid": "3260ce89-5eb0-4c6a-89c7-379c0dfc2ab9",
+        "disambiguation": "Kehlani Ashley Parrish, an American singer-songwriter",
+        "country": "US",
+        "type": "Person"
+      }
+    ],
+    "tiers": {
+      "D02": "High",
+      "S100": "High",
+      "TOP": "High",
+      "TOPANY": "High"
+    }
+  },
+  {
+    "line": "Beyoncé",
+    "error": "musicbrainz: search artists: unexpected status 503",
+    "results": null,
+    "exacts": null,
+    "tiers": {
+      "D02": "Error",
+      "S100": "Error",
+      "TOP": "Error",
+      "TOPANY": "Error"
+    }
+  }
+]

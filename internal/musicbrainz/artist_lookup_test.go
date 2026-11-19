@@ -188,7 +188,7 @@ func TestLookupArtist_NonOKStatus(t *testing.T) {
 		mu.Lock()
 		requestCount++
 		mu.Unlock()
-		w.WriteHeader(http.StatusServiceUnavailable)
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
 
@@ -197,8 +197,8 @@ func TestLookupArtist_NonOKStatus(t *testing.T) {
 	if err == nil {
 		t.Fatal("LookupArtist: got nil error, want a non-nil error naming the status")
 	}
-	if !strings.Contains(err.Error(), "503") {
-		t.Errorf("error = %q, want it to name status 503", err.Error())
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error = %q, want it to name status 500", err.Error())
 	}
 	if detail.MBID != "" || detail.Relations != nil || detail.Aliases != nil {
 		t.Fatalf("detail = %+v, want the zero ArtistDetail", detail)

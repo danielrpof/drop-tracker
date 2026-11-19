@@ -84,6 +84,7 @@ func newTestClient(t *testing.T, ts *httptest.Server, limiter *rate.Limiter) *Cl
 	t.Helper()
 	c := NewClient(limiter, ts.Client())
 	c.baseURL = ts.URL
+	c.retry.BaseBackoff = time.Millisecond
 	return c
 }
 
@@ -273,6 +274,64 @@ func TestSearchArtists_UpstreamErrorStatus(t *testing.T) {
 	}
 	if artists != nil {
 		t.Fatalf("artists = %v, want nil", artists)
+	}
+}
+
+func TestSearchArtists_RetriesTransient503(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		n := hits
+		mu.Unlock()
+		if n <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(drakeSearchFixture))
+	}))
+	defer ts.Close()
+
+	c := newTestClient(t, ts, unlimitedLimiter())
+	artists, err := c.SearchArtists(context.Background(), "drake", 25)
+	if err != nil {
+		t.Fatalf("SearchArtists: %v", err)
+	}
+	if len(artists) != 1 || artists[0].Name != "Drake" {
+		t.Fatalf("artists = %+v, want the Drake fixture", artists)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 3 {
+		t.Errorf("hits = %d, want 3", hits)
+	}
+}
+
+func TestSearchArtists_Persistent503NamesComponent(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(t, ts, unlimitedLimiter())
+	_, err := c.SearchArtists(context.Background(), "drake", 25)
+	if err == nil {
+		t.Fatal("SearchArtists: got nil error, want an error naming the status")
+	}
+	if !strings.HasPrefix(err.Error(), "deezer: ") || !strings.Contains(err.Error(), "503") {
+		t.Errorf("error = %q, want prefix %q and status 503", err.Error(), "deezer: ")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 3 {
+		t.Errorf("hits = %d, want 3", hits)
 	}
 }
 

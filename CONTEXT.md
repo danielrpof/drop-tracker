@@ -104,6 +104,10 @@ _Avoid_: multi-select, batch
 The bulk selection restricted to the entries currently visible. Every bulk action, the bar's count and Undo work on this set, so a hidden entry is never changed by accident.
 _Avoid_: visible selection, active selection
 
+**Same name**:
+Two artist names are the same name when they differ only in letter case, leading, trailing or repeated whitespace, accents ("Rosalía" and "Rosalia"), or a curly versus straight apostrophe. Anything else, including punctuation, "The", or extra words, makes them different names. One definition serves art matching, paste duplicates, and paste confidence.
+_Avoid_: fuzzy match, similar name
+
 **Bulk outcome**:
-What a bulk request reports back: the entries it **applied** to, and the entries it **skipped** with a reason (the artist is at the tag cap, or the entry is already gone). A skip is a result, not an error; the whole request only fails if nothing could be attempted.
+What a bulk request reports back: the entries it **applied** to, the entries it **skipped** with a reason (the artist is at the tag cap, the entry is already gone, or the artist is already on the watchlist), and the items it **failed** because it refused to attempt them as invalid. A skip is a result, not an error: the item was attempted and there was nothing to do. The whole request fails only if nothing could be attempted.
 _Avoid_: partial failure, result set
