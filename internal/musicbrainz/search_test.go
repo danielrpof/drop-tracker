@@ -59,7 +59,73 @@ func newTestClient(t *testing.T, ts *httptest.Server, userAgent string, limiter 
 	t.Helper()
 	c := NewClient(userAgent, limiter, ts.Client())
 	c.baseURL = ts.URL
+	c.retry.BaseBackoff = time.Millisecond
 	return c
+}
+
+func TestSearchArtists_RetriesTransient503(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	missingUA := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		n := hits
+		if r.Header.Get("User-Agent") != "drop-tracker-test/1.0" {
+			missingUA++
+		}
+		mu.Unlock()
+		if n <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(driveFixture))
+	}))
+	defer ts.Close()
+
+	c := newTestClient(t, ts, "drop-tracker-test/1.0", unlimitedLimiter())
+	artists, err := c.SearchArtists(context.Background(), "drake", 25)
+	if err != nil {
+		t.Fatalf("SearchArtists: %v", err)
+	}
+	if len(artists) == 0 {
+		t.Fatal("artists is empty, want the decoded fixture")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 3 {
+		t.Errorf("hits = %d, want 3", hits)
+	}
+	if missingUA != 0 {
+		t.Errorf("%d hits lacked the User-Agent header, want every retry to carry it", missingUA)
+	}
+}
+
+func TestSearchArtists_Persistent503NamesComponent(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(t, ts, "drop-tracker-test/1.0", unlimitedLimiter())
+	_, err := c.SearchArtists(context.Background(), "drake", 25)
+	if err == nil {
+		t.Fatal("SearchArtists: got nil error, want an error naming the status")
+	}
+	if !strings.HasPrefix(err.Error(), "musicbrainz: ") || !strings.Contains(err.Error(), "503") {
+		t.Errorf("error = %q, want prefix %q and status 503", err.Error(), "musicbrainz: ")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 3 {
+		t.Errorf("hits = %d, want 3", hits)
+	}
 }
 
 func TestSearchArtists_DecodesFixture(t *testing.T) {

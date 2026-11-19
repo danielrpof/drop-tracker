@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/httplog/v3"
@@ -27,6 +28,10 @@ const maxSearchQueryRunes = 512
 // pagination plumbing this phase doesn't need (03-RESEARCH.md Open
 // Question 1).
 const searchResultLimit = 10
+
+// searchDeadline keeps upstream retries inside the server's 15s WriteTimeout
+// (#17).
+const searchDeadline = 12 * time.Second
 
 // SearchArtist is the wire shape for one artist result in the GET /search
 // response, common across every source -- source-tagged so a caller can
@@ -160,9 +165,9 @@ func (s deezerSource) SearchArtists(ctx context.Context, q string, limit int) ([
 var _ SearchSource = deezerSource{}
 
 // handleSearch implements GET /search (WLST-01, CLNT-03, D-01/D-02/D-03):
-// fans out to every configured source concurrently, using r.Context() so an
-// inbound cancellation cancels every in-flight upstream call and limiter
-// wait, and joins before writing any response -- WriteHeader only happens
+// fans out to every configured source concurrently, under a searchDeadline
+// ctx derived from r.Context() so an inbound cancellation cancels every
+// in-flight upstream call and limiter wait, and joins before writing any response -- WriteHeader only happens
 // after the WaitGroup completes, so a cancelled request never emits a
 // partial body. A source failing never fails the whole request (D-03): raw
 // upstream error text never reaches the response body (T-03-01, V13) --
@@ -178,6 +183,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(r.Context(), searchDeadline)
+	defer cancel()
+
 	sources := make(map[string]sourceResult, len(s.sources))
 	sourceErrs := make(map[string]string, len(s.sources))
 	var mu sync.Mutex
@@ -188,7 +196,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		go func(src SearchSource) {
 			defer wg.Done()
 
-			artists, err := src.SearchArtists(r.Context(), q, searchResultLimit)
+			artists, err := src.SearchArtists(ctx, q, searchResultLimit)
 
 			var result sourceResult
 			var errText string

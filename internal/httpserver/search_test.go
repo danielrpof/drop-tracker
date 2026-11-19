@@ -126,6 +126,36 @@ func TestSearch_Success(t *testing.T) {
 	}
 }
 
+func TestSearch_SourcesRunUnderSearchDeadline(t *testing.T) {
+	type deadline struct {
+		remaining time.Duration
+		ok        bool
+	}
+	got := make(chan deadline, 1)
+	src := stubSearchSource{name: "musicbrainz", searchFunc: func(ctx context.Context, _ string, _ int) ([]httpserver.SearchArtist, error) {
+		dl, ok := ctx.Deadline()
+		got <- deadline{remaining: time.Until(dl), ok: ok}
+		return nil, nil
+	}}
+	srv := httpserver.New(noopPinger{}, stubStore{}, stubEventsStore{}, []httpserver.SearchSource{src}, discardLogger())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/search?q=drake")
+	if err != nil {
+		t.Fatalf("GET /search: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	d := <-got
+	if !d.ok {
+		t.Fatal("source ctx has no deadline, want the search deadline")
+	}
+	if d.remaining <= 11*time.Second || d.remaining > 12*time.Second {
+		t.Errorf("remaining = %v, want within (11s, 12s]", d.remaining)
+	}
+}
+
 // TestSearch_MusicBrainzCountryReachesResponseBody proves D-09/D-10's
 // end-to-end path: a MusicBrainz artist with a blank disambiguation but a
 // populated country survives client struct -> adapter -> JSON encode ->

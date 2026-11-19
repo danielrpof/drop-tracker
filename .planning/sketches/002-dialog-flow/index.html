@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 002: Dialog Flow</title>
+<link rel="stylesheet" href="../themes/default.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-sans); font-size: var(--text-body); line-height: 1.5; padding-top: 56px; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+  #variant-nav { position: fixed; inset: 0 0 auto 0; z-index: 9998; background: var(--color-surface); border-bottom: 1px solid var(--color-border); padding: 8px 16px; display: flex; gap: 8px; overflow-x: auto; }
+  .variant-tab { background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-full); padding: 6px 14px; font-size: var(--text-label); white-space: nowrap; color: var(--color-text-muted); transition: all .15s ease; }
+  .variant-tab:hover { color: var(--color-text); }
+  .variant-tab.active { color: var(--color-text); background: var(--color-surface-2); border-color: var(--color-primary); }
+
+  #frame { margin: 0 auto; max-width: 1280px; min-height: calc(100dvh - 56px); position: relative; container-type: inline-size; border-inline: 1px dashed var(--color-border); transition: max-width .2s ease; }
+  .page { padding: 24px 16px; }
+  .page h1 { font-size: var(--text-display); font-weight: 600; margin: 0 0 16px; line-height: 1.2; }
+  .page-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .fake-input { flex: 1 1 200px; height: 44px; border: 1px solid var(--color-input); border-radius: var(--radius-sm); padding: 0 12px; color: var(--color-text-muted); display: flex; align-items: center; font-size: var(--text-label); }
+  .wl-card { min-height: 64px; background: var(--color-surface); border-radius: var(--radius-md); margin-bottom: 8px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
+  .wl-art { width: 40px; height: 40px; border-radius: var(--radius-sm); background: var(--color-surface-2); flex-shrink: 0; }
+  .wl-card.new { box-shadow: inset 3px 0 0 var(--color-primary); }
+
+  .overlay { position: absolute; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: stretch; justify-content: center; z-index: 10; }
+  .overlay.open { display: flex; }
+  .dialog { background: var(--color-surface); width: 100%; display: flex; flex-direction: column; position: sticky; top: 56px; height: calc(100dvh - 56px); }
+  @container (min-width: 640px) {
+    .overlay { align-items: flex-start; padding-top: 6vh; }
+    .dialog { max-width: 672px; height: auto; max-height: 85dvh; border-radius: var(--radius-lg); border: 1px solid var(--color-border); box-shadow: var(--shadow-lg); top: calc(56px + 6vh); }
+  }
+  .dlg-head { padding: 16px; border-bottom: 1px solid var(--color-border); display: flex; align-items: flex-start; gap: 8px; }
+  .dlg-head h2 { margin: 0; font-size: var(--text-heading); font-weight: 600; line-height: 1.2; }
+  .dlg-head p { margin: 4px 0 0; color: var(--color-text-muted); font-size: var(--text-label); }
+  .steps { display: flex; gap: 4px; margin-top: 8px; font-size: 0.8125rem; color: var(--color-text-muted); flex-wrap: wrap; }
+  .steps span { padding: 2px 8px; border-radius: var(--radius-full); border: 1px solid var(--color-border); }
+  .steps span.on { color: var(--color-text); border-color: var(--color-primary); }
+  .steps span.done { color: var(--color-text); }
+  .icon-btn { margin-left: auto; width: 44px; height: 44px; display: grid; place-items: center; background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--color-text-muted); flex-shrink: 0; }
+  .icon-btn:hover { background: var(--color-surface-2); color: var(--color-text); }
+  .dlg-body { overflow-y: auto; flex: 1; min-height: 0; }
+  .dlg-foot { border-top: 1px solid var(--color-border); padding: 12px 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .status { font-size: var(--text-label); color: var(--color-text-muted); flex: 1; min-width: 140px; }
+  .status strong { color: var(--color-text); font-weight: 600; }
+
+  .btn { height: 44px; padding: 0 16px; border-radius: var(--radius-sm); border: 1px solid var(--color-input); background: transparent; font-size: var(--text-label); display: inline-flex; align-items: center; gap: 8px; transition: all .15s ease; }
+  .btn:hover { background: var(--color-surface-2); }
+  .btn.primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; font-weight: 600; }
+  .btn.primary:hover { background: var(--color-primary-hover); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.sm { height: 36px; padding: 0 12px; }
+
+  /* paste step */
+  .paste { padding: 16px; display: flex; flex-direction: column; gap: 8px; height: 100%; }
+  .paste label { font-size: var(--text-label); font-weight: 600; }
+  .paste textarea { flex: 1; min-height: 240px; resize: vertical; background: var(--color-bg); border: 1px solid var(--color-input); border-radius: var(--radius-sm); padding: 12px; font-size: var(--text-body); line-height: 1.6; }
+  .paste textarea[aria-invalid="true"] { border-color: var(--color-danger); }
+  .helper { font-size: var(--text-label); color: var(--color-text-muted); }
+  .err { font-size: var(--text-label); color: #f87171; display: flex; gap: 6px; align-items: center; }
+  .linkbtn { background: none; border: 0; padding: 0; color: #a5b4fc; text-decoration: underline; font-size: var(--text-label); min-height: 24px; }
+
+  /* progress */
+  .prog { padding: 16px; border-bottom: 1px solid var(--color-border); }
+  .bar { height: 8px; background: var(--color-surface-2); border-radius: var(--radius-full); overflow: hidden; margin: 8px 0; }
+  .bar i { display: block; height: 100%; background: var(--color-primary); width: 0; transition: width .2s linear; }
+  .prog-big { padding: 48px 16px; text-align: center; }
+  .prog-big .n { font-size: var(--text-display); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .prog-big .bar { max-width: 360px; margin: 16px auto; }
+  .tallies { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; font-size: var(--text-label); color: var(--color-text-muted); }
+  .tallies span { display: inline-flex; gap: 6px; align-items: center; font-variant-numeric: tabular-nums; }
+  .now { font-size: var(--text-label); color: var(--color-text-muted); min-height: 1.5em; }
+
+  /* review (variant C of sketch 001) */
+  .seg { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--color-border); position: sticky; top: 0; background: var(--color-surface); z-index: 2; overflow-x: auto; }
+  .seg button { flex: 1; min-height: 44px; border: 1px solid var(--color-border); background: transparent; border-radius: var(--radius-sm); font-size: var(--text-label); white-space: nowrap; padding: 0 10px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+  .seg button[aria-selected="true"] { background: var(--color-surface-2); color: var(--color-text); border-color: var(--color-primary); }
+  .row { display: flex; gap: 4px; padding: 10px 16px 10px 8px; border-bottom: 1px solid var(--color-border); animation: in .2s ease; }
+  @keyframes in { from { opacity: 0; transform: translateY(4px); } }
+  .row.dim { opacity: .65; }
+  .check { width: 44px; height: 44px; display: grid; place-items: center; flex-shrink: 0; }
+  .check input { width: 18px; height: 18px; accent-color: var(--color-primary); margin: 0; }
+  .rbody { flex: 1; min-width: 0; padding-top: 2px; }
+  .rtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pasted { font-size: var(--text-label); color: var(--color-text-muted); overflow-wrap: anywhere; }
+  .match { font-weight: 600; overflow-wrap: anywhere; }
+  .match .dis { font-weight: 400; color: var(--color-text-muted); }
+  .note { font-size: var(--text-label); color: var(--color-text-muted); }
+  .empty { padding: 32px 16px; text-align: center; color: var(--color-text-muted); font-size: var(--text-label); }
+  .badge { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 0.8125rem; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-full); white-space: nowrap; border: 1px solid transparent; }
+  .b-high { color: #4ade80; background: rgba(34,197,94,.12); }
+  .b-medium { color: #fbbf24; background: rgba(245,158,11,.12); }
+  .b-notfound { color: var(--color-text-muted); background: var(--color-surface-2); }
+  .b-error { color: #f87171; background: rgba(220,38,38,.14); }
+  .b-notsearched, .b-pending { color: var(--color-text-muted); border-color: var(--color-border); }
+  .b-watched { color: #a5b4fc; background: rgba(99,102,241,.14); }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* result */
+  .result { padding: 24px 16px; }
+  .tally { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .tally div { background: var(--color-surface-2); border-radius: var(--radius-md); padding: 12px; }
+  .tally .n { font-size: var(--text-display); font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .tally .l { font-size: var(--text-label); color: var(--color-text-muted); }
+
+  /* discard confirm */
+  .alert { position: absolute; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
+  .alert.open { display: flex; }
+  .alert-box { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 20px; max-width: 400px; width: 100%; }
+  .alert-box h3 { margin: 0 0 8px; font-size: var(--text-heading); font-weight: 600; }
+  .alert-box p { margin: 0 0 16px; color: var(--color-text-muted); font-size: var(--text-label); }
+  .alert-box .acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .btn.danger { background: var(--color-danger); border-color: var(--color-danger); color: #fff; font-weight: 600; }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--color-surface-2); border: 1px solid var(--color-border); padding: 10px 16px; border-radius: var(--radius-sm); font-size: var(--text-label); opacity: 0; transition: all .2s ease; z-index: 9997; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+<div id="variant-nav">
+  <button class="variant-tab active" data-v="a">A: Live review while resolving</button>
+  <button class="variant-tab" data-v="b">B: Progress screen, then review ★ Selected</button>
+</div>
+
+<div id="frame">
+  <div class="page">
+    <h1>Watchlist</h1>
+    <div class="page-bar"><div class="fake-input">Search artists to add…</div><button class="btn" id="open">Add from list</button></div>
+    <div id="wl"></div>
+  </div>
+  <div class="overlay" id="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" id="dialog"></div></div>
+  <div class="alert" id="alert" role="alertdialog" aria-modal="true" aria-labelledby="al-t">
+    <div class="alert-box"><h3 id="al-t">Discard this list?</h3><p id="al-p">Searches stop, and nothing is added to your watchlist.</p>
+      <div class="acts"><button class="btn" data-keep>Keep reviewing</button><button class="btn danger" data-discard>Discard</button></div></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<div id="sketch-tools" style="position:fixed;bottom:12px;right:12px;z-index:9999;font-family:system-ui;font-size:12px;background:rgba(0,0,0,0.8);color:white;padding:8px 10px;border-radius:8px;opacity:0.5;transition:opacity 0.2s;display:flex;gap:6px;align-items:center" onmouseenter="this.style.opacity='1'" onmouseleave="this.style.opacity='0.5'">
+  <select onchange="document.querySelector('link[href*=themes]').href='../themes/'+this.value+'.css'" style="background:#222;color:#fff;border:1px solid #444;border-radius:4px"><option value="default">Default</option></select>
+  <button onclick="setVp(375)" style="background:#333;border:0;color:#fff;border-radius:4px;padding:4px 8px">375</button>
+  <button onclick="setVp(768)" style="background:#333;border:0;color:#fff;border-radius:4px;padding:4px 8px">768</button>
+  <button onclick="setVp(1280)" style="background:#333;border:0;color:#fff;border-radius:4px;padding:4px 8px">1280</button>
+  <label style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="slow"> slow MB</label>
+</div>
+
+<script>
+const I = {
+  high: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  medium: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  notfound: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  error: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+  notsearched: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  pending: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  watched: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+};
+const svg = (k, s = 16, cls = '') => `<svg class="${cls}" aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[k]}</svg>`;
+const LABEL = { high: 'High', medium: 'Medium', notfound: 'Not found', error: 'Error', notsearched: 'Not searched', pending: 'Searching', watched: 'On watchlist' };
+
+const SAMPLE = `Future
+Kendrick Lamar
+Drake
+Karol G
+
+Tems
+Feid
+Doechii
+the weekend
+Mora
+21 Savage
+Rauw Alejandro
+summer walker
+Kanye West
+Metro Boomin
+Young Miko
+drake
+GloRilla
+xqzv
+Brent Faiyaz
+Peso Pluma
+Cardi B
+
+Victoria Monét
+JID
+Myke Towers
+Kehlani
+Travis Scott
+j cole
+Jhené Aiko
+Eladio Carrión
+Daniel Caesar
+Bryson Tiller
+Ozuna
+Rosalía`;
+const WATCHED = new Set(['drake', 'sza', 'bad bunny']);
+const MEDIUM = new Set(['the weekend', 'mora', 'j cole', 'bryson tiller', 'future']);
+const NOTFOUND = new Set(['xqzv']);
+const ERROR = new Set(['cardi b']);
+const norm = s => s.normalize('NFD').replace(/\p{M}/gu, '').trim().replace(/\s+/g, ' ').toLowerCase();
+const MAX = 100, CONC = 4;
+
+let variant = 'a', step = 'paste', text = '', rows = [], done = 0, aborted = false, seg = 'review', wl = ['SZA', 'Bad Bunny', 'Drake'], fresh = new Set(), timers = [];
+
+function parse(t) {
+  const seen = new Set(); let blank = 0, dup = 0; const names = [];
+  t.split('\n').forEach(l => { const n = norm(l); if (!n) { blank++; return; } if (seen.has(n)) { dup++; return; } seen.add(n); names.push(l.trim()); });
+  return { names, blank, dup };
+}
+function classify(name) {
+  const n = norm(name);
+  if (ERROR.has(n)) return 'error';
+  if (NOTFOUND.has(n)) return 'notfound';
+  if (MEDIUM.has(n)) return 'medium';
+  return 'high';
+}
+function display(name) { const n = norm(name); return { 'the weekend': 'The Weeknd', 'j cole': 'J. Cole', 'summer walker': 'Summer Walker' }[n] || name.replace(/\b\w/g, ch => ch.toUpperCase()); }
+
+function startResolve() {
+  const p = parse(text); rows = p.names.map((line, i) => ({ n: i + 1, line, status: 'pending', name: null, selected: false, watched: false }));
+  done = 0; aborted = false; step = 'resolve'; seg = 'review'; render();
+  let next = 0; const delay = () => (document.getElementById('slow').checked ? 900 : 250) + Math.random() * 300;
+  const worker = () => {
+    if (aborted || next >= rows.length) return;
+    const r = rows[next++];
+    timers.push(setTimeout(() => {
+      if (aborted) return;
+      r.status = classify(r.line);
+      if (r.status === 'high' || r.status === 'medium') r.name = display(r.line);
+      r.watched = WATCHED.has(norm(r.name || ''));
+      r.selected = r.status === 'high' && !r.watched;
+      done++;
+      if (done === rows.length) { step = 'review'; }
+      render(); worker();
+    }, delay()));
+  };
+  for (let i = 0; i < CONC; i++) worker();
+}
+function cancel() {
+  aborted = true; timers.forEach(clearTimeout); timers = [];
+  rows.forEach(r => { if (r.status === 'pending') r.status = 'notsearched'; });
+  step = 'review'; render();
+}
+function group(r) {
+  if (r.status === 'pending') return 'pending';
+  if (r.watched) return 'skipped';
+  return r.status === 'high' ? 'ready' : 'review';
+}
+
+function stepper() {
+  const order = ['paste', 'resolve', 'review', 'result'], names = ['Paste', 'Find matches', 'Review', 'Done'];
+  const i = order.indexOf(step);
+  return `<div class="steps" aria-label="Step ${i + 1} of 4">${names.map((n, k) => `<span class="${k === i ? 'on' : k < i ? 'done' : ''}">${k + 1}. ${n}</span>`).join('')}</div>`;
+}
+function head(title, sub) {
+  return `<div class="dlg-head"><div><h2 id="dlg-title">${title}</h2>${sub ? `<p>${sub}</p>` : ''}${stepper()}</div><button class="icon-btn" aria-label="Close" data-close>${svg('x', 20)}</button></div>`;
+}
+function badge(r) { const k = r.watched ? 'watched' : r.status; return `<span class="badge b-${k}">${svg(k, 14, k === 'pending' ? 'spin' : '')}${LABEL[k]}</span>`; }
+function rowHtml(r) {
+  const dis = r.watched || !r.name;
+  let body = '';
+  if (r.status === 'pending') body = `<div class="note">Waiting for MusicBrainz…</div>`;
+  else if (r.status === 'error') body = `<div class="note">Search failed. Retry from Needs review.</div>`;
+  else if (r.status === 'notsearched') body = `<div class="note">Cancelled before this line was searched.</div>`;
+  else if (r.status === 'notfound') body = `<div class="note">No MusicBrainz match.</div>`;
+  else body = `<div class="match">${r.name} <span class="dis">${r.status === 'medium' ? '· 3 candidates' : ''}</span></div>${r.watched ? '<div class="note">Already on your watchlist.</div>' : ''}`;
+  return `<div class="row ${dis ? 'dim' : ''}"><label class="check"><input type="checkbox" data-sel="${r.n}" ${r.selected ? 'checked' : ''} ${dis ? 'disabled' : ''} aria-label="Add line ${r.n}: ${r.line}"></label>
+    <div class="rbody"><div class="rtop"><span class="pasted">${r.n}. “${r.line}”</span>${badge(r)}</div>${body}</div></div>`;
+}
+function segHtml(includePending) {
+  const counts = { review: 0, ready: 0, skipped: 0, pending: 0 }; rows.forEach(r => counts[group(r)]++);
+  const tabs = [['review', 'Needs review'], ['ready', 'Ready'], ['skipped', 'Skipped']];
+  if (includePending && counts.pending) tabs.push(['pending', 'Searching']);
+  if (!tabs.some(t => t[0] === seg)) seg = 'review';
+  const list = rows.filter(r => group(r) === seg);
+  return `<div class="seg" role="tablist">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${seg === k}" data-seg="${k}">${l} (${counts[k]})</button>`).join('')}</div>` +
+    (list.length ? list.map(rowHtml).join('') : `<div class="empty">${seg === 'review' ? 'Nothing needs review yet.' : 'Nothing here.'}</div>`);
+}
+function counts() { const c = { high: 0, medium: 0, notfound: 0, error: 0 }; rows.forEach(r => { if (r.status in c) c[r.status]++; }); return c; }
+
+function render() {
+  const d = document.getElementById('dialog');
+  if (step === 'paste') {
+    const p = parse(text), over = p.names.length > MAX;
+    const skips = [p.dup && `${p.dup} duplicate${p.dup > 1 ? 's' : ''}`, p.blank && `${p.blank} blank line${p.blank > 1 ? 's' : ''}`].filter(Boolean).join(' and ');
+    d.innerHTML = head('Add from list', 'Paste artist names. You review every match before anything is added.') + `
+      <div class="dlg-body"><div class="paste">
+        <label for="ta">Artist names, one per line</label>
+        <textarea id="ta" aria-describedby="ta-help" aria-invalid="${over}" placeholder="Bad Bunny&#10;SZA&#10;Kendrick Lamar">${text}</textarea>
+        <div id="ta-help" class="${over ? 'err' : 'helper'}" aria-live="polite">${over ? `${svg('error', 14)} ${p.names.length} names. The limit is ${MAX} per list, so remove ${p.names.length - MAX} or split the list.` : p.names.length ? `${p.names.length} names${skips ? ` · ${skips} will be skipped` : ''}` : `Up to ${MAX} names per list.`}</div>
+        ${text ? '' : '<div><button class="linkbtn" data-sample>Use a sample list (32 names)</button></div>'}
+      </div></div>
+      <div class="dlg-foot"><div class="status"></div><button class="btn" data-close>Cancel</button><button class="btn primary" data-find ${p.names.length && !over ? '' : 'disabled'}>Find matches</button></div>`;
+    const ta = d.querySelector('#ta'); ta.addEventListener('input', e => { text = e.target.value; const pos = ta.selectionStart; render(); const t2 = document.getElementById('ta'); t2.focus(); t2.setSelectionRange(pos, pos); });
+    return;
+  }
+  if (step === 'resolve') {
+    const pct = Math.round(done / rows.length * 100), c = counts();
+    const statusText = `<strong>${done} of ${rows.length} searched</strong>`;
+    if (variant === 'a') {
+      const sel = rows.filter(r => r.selected).length;
+      d.innerHTML = head('Finding matches', 'Review the lines that are done while the rest are searched.') + `
+        <div class="prog"><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${rows.length}" aria-valuenow="${done}" aria-label="Searches complete"><i style="width:${pct}%"></i></div></div>
+        <div class="dlg-body">${segHtml(true)}</div>
+        <div class="dlg-foot"><div class="status" role="status" aria-atomic="true">${statusText} · ${sel} selected</div><button class="btn" data-cancel>Stop searching</button><button class="btn primary" disabled>Add ${sel} artists</button></div>`;
+    } else {
+      const cur = rows.filter(r => r.status === 'pending').slice(0, CONC).map(r => r.line);
+      d.innerHTML = head('Finding matches', 'About 1 search a second, to stay within MusicBrainz limits.') + `
+        <div class="dlg-body"><div class="prog-big">
+          <div class="n">${done} <span style="color:var(--color-text-muted);font-weight:400">of ${rows.length}</span></div>
+          <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${rows.length}" aria-valuenow="${done}" aria-label="Searches complete"><i style="width:${pct}%"></i></div>
+          <div class="tallies"><span>${svg('high', 14)} ${c.high} High</span><span>${svg('medium', 14)} ${c.medium} Medium</span><span>${svg('notfound', 14)} ${c.notfound} Not found</span><span>${svg('error', 14)} ${c.error} Error</span></div>
+          <p class="now">Searching ${cur.map(x => `“${x}”`).join(', ')}</p>
+        </div></div>
+        <div class="dlg-foot"><div class="status" role="status" aria-atomic="true">${statusText}</div><button class="btn" data-cancel>Stop and review</button></div>`;
+    }
+    return;
+  }
+  if (step === 'review') {
+    const sel = rows.filter(r => r.selected).length, need = rows.filter(r => group(r) === 'review').length;
+    const cancelled = rows.filter(r => r.status === 'notsearched').length;
+    d.innerHTML = head('Review matches', cancelled ? `Stopped early. ${cancelled} lines weren't searched.` : `${rows.length} names searched. Nothing is added until you confirm.`) + `
+      <div class="dlg-body">${segHtml(false)}</div>
+      <div class="dlg-foot"><div class="status" role="status" aria-atomic="true"><strong>${sel} selected</strong> · ${need} need review</div><button class="btn" data-back>Edit list</button><button class="btn primary" data-confirm ${sel ? '' : 'disabled'}>Add ${sel} artists</button></div>`;
+    return;
+  }
+  if (step === 'result') {
+    const added = rows.filter(r => r.selected).length;
+    d.innerHTML = head(`Added ${added} artists`, 'Artwork fills in over the next few minutes.') + `
+      <div class="dlg-body"><div class="result"><div class="tally" role="status" aria-atomic="true">
+        <div><div class="n">${added}</div><div class="l">Added</div></div><div><div class="n">0</div><div class="l">Skipped</div></div><div><div class="n">0</div><div class="l">Failed</div></div>
+      </div></div></div>
+      <div class="dlg-foot"><div class="status"></div><button class="btn primary" data-done>Done</button></div>`;
+  }
+}
+function renderWl() {
+  document.getElementById('wl').innerHTML = wl.map(n => `<div class="wl-card ${fresh.has(n) ? 'new' : ''}"><div class="wl-art"></div><div><div style="font-weight:600">${n}</div><div class="note">${fresh.has(n) ? 'Just added' : 'All releases'}</div></div></div>`).join('');
+}
+function openDlg() { step = 'paste'; text = ''; document.getElementById('overlay').classList.add('open'); render(); }
+function closeDlg() { aborted = true; timers.forEach(clearTimeout); document.getElementById('overlay').classList.remove('open'); document.getElementById('alert').classList.remove('open'); }
+function toast(m) { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 3000); }
+
+document.addEventListener('change', e => { if (e.target.dataset.sel) { rows.find(r => r.n === +e.target.dataset.sel).selected = e.target.checked; render(); } });
+document.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.classList.contains('variant-tab')) { document.querySelectorAll('.variant-tab').forEach(b => b.classList.toggle('active', b === t)); variant = t.dataset.v; closeDlg(); openDlg(); text = SAMPLE; render(); return; }
+  if (t.id === 'open') openDlg();
+  if (t.hasAttribute('data-sample')) { text = SAMPLE; render(); }
+  if (t.hasAttribute('data-find')) startResolve();
+  if (t.hasAttribute('data-cancel')) cancel();
+  if (t.dataset.seg) { seg = t.dataset.seg; render(); }
+  if (t.hasAttribute('data-back')) { step = 'paste'; render(); }
+  if (t.hasAttribute('data-close')) { if (step === 'paste' || step === 'result') closeDlg(); else document.getElementById('alert').classList.add('open'); }
+  if (t.hasAttribute('data-keep')) document.getElementById('alert').classList.remove('open');
+  if (t.hasAttribute('data-discard')) { closeDlg(); toast('List discarded. Nothing was added.'); }
+  if (t.hasAttribute('data-confirm')) { t.disabled = true; t.innerHTML = `${svg('pending', 16, 'spin')} Adding…`; setTimeout(() => { step = 'result'; const names = rows.filter(r => r.selected).map(r => r.name); fresh = new Set(names); wl = [...names, ...wl]; renderWl(); render(); }, 900); }
+  if (t.hasAttribute('data-done')) { closeDlg(); toast('Watchlist updated'); }
+});
+function setVp(w) { document.getElementById('frame').style.maxWidth = w + 'px'; }
+setVp(375); renderWl();
+</script>
+</body>
+</html>

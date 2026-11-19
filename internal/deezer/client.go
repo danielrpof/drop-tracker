@@ -54,6 +54,7 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 	limiter    *rate.Limiter
+	retry      httpclient.Policy
 }
 
 // NewClient builds a Client that paces outbound calls through limiter
@@ -67,6 +68,7 @@ func NewClient(limiter *rate.Limiter, httpClient *http.Client) *Client {
 		baseURL:    defaultBaseURL,
 		httpClient: httpClient,
 		limiter:    limiter,
+		retry:      httpclient.DefaultPolicy(),
 	}
 }
 
@@ -132,17 +134,12 @@ func decodeChecked(body []byte, v any) error {
 	return nil
 }
 
-// doRequest is the single request path for this package: it sets Accept,
-// then delegates rate-limited execution to the shared
-// internal/httpclient.Do (extracted from this method's own former
-// implementation -- see internal/httpclient for the timeout-wrap,
-// limiter.Wait, cancel-on-error, and cancel-on-close logic, mirroring
-// internal/musicbrainz's doRequest). Every outbound Deezer request in this
-// package -- and in plan 03-04's poll cycle -- must go through this one
-// helper.
+// doRequest is the single request path for this package: it sets Accept and
+// delegates rate limiting, timeouts and retries to internal/httpclient.Do.
+// Every outbound Deezer request must go through it.
 func (c *Client) doRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
 	req.Header.Set("Accept", "application/json")
-	return httpclient.Do(ctx, req, c.limiter, c.httpClient, "deezer")
+	return httpclient.Do(ctx, req, c.limiter, c.httpClient, c.retry, "deezer")
 }
 
 // clampLimit maps a caller-requested limit onto this package's valid range:

@@ -46,6 +46,7 @@ type Client struct {
 	userAgent  string
 	httpClient *http.Client
 	limiter    *rate.Limiter
+	retry      httpclient.Policy
 }
 
 // NewClient builds a Client that identifies itself with userAgent on every
@@ -64,6 +65,7 @@ func NewClient(userAgent string, limiter *rate.Limiter, httpClient *http.Client)
 		userAgent:  userAgent,
 		httpClient: httpClient,
 		limiter:    limiter,
+		retry:      httpclient.DefaultPolicy(),
 	}
 }
 
@@ -90,17 +92,12 @@ type ReleaseGroupLister interface {
 var _ ReleaseGroupLister = (*Client)(nil)
 
 // doRequest is the single request path for this package: it sets the
-// identifying headers MusicBrainz's throttling keys off of (T-03-04), then
-// delegates rate-limited execution to the shared internal/httpclient.Do
-// (extracted from this method's own former implementation -- see
-// internal/httpclient for the timeout-wrap, limiter.Wait, cancel-on-error,
-// and cancel-on-close logic). Every outbound MusicBrainz request in this
-// package -- and in plan 03-03's release-groups browse -- must go through
-// this one helper.
+// identifying headers MusicBrainz's throttling keys off of (T-03-04) and
+// delegates rate limiting, timeouts and retries to internal/httpclient.Do.
 func (c *Client) doRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
-	return httpclient.Do(ctx, req, c.limiter, c.httpClient, "musicbrainz")
+	return httpclient.Do(ctx, req, c.limiter, c.httpClient, c.retry, "musicbrainz")
 }
 
 // clampLimit maps a caller-requested limit onto MusicBrainz's valid range:

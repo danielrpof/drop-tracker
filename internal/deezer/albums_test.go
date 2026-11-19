@@ -459,7 +459,7 @@ func TestArtistAlbums_MidFetchErrorStopsWithNoRetry(t *testing.T) {
 		mu.Unlock()
 
 		if n == 2 {
-			w.WriteHeader(http.StatusServiceUnavailable)
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		index, _ := strconv.Atoi(r.URL.Query().Get("index"))
@@ -473,8 +473,8 @@ func TestArtistAlbums_MidFetchErrorStopsWithNoRetry(t *testing.T) {
 	if err == nil {
 		t.Fatal("ArtistAlbums: got nil error, want a non-nil error naming the status")
 	}
-	if !strings.Contains(err.Error(), "503") {
-		t.Errorf("error = %q, want it to name status 503", err.Error())
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error = %q, want it to name status 500", err.Error())
 	}
 	if albums != nil {
 		t.Fatalf("albums = %v, want nil", albums)

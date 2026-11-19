@@ -43,6 +43,8 @@
 
 ### Bulk Add
 
+> **Deferred 2026-11-18** with Phase 27 (`SEED-261118-1bb`). These are not v1.6 scope; they come back with the seed.
+
 - [ ] **IMPT-01**: User can paste a list of artist names, one per line; blank lines and in-paste duplicates are ignored
 - [ ] **IMPT-02**: The app searches each name within existing rate limits, shows progress, and can be cancelled
 - [ ] **IMPT-03**: A review screen shows each line's best match with confidence (high / medium / not found) and lets the user pick an alternate or skip
@@ -59,6 +61,7 @@
 
 Deferred — tracked but not in the v1.6 roadmap.
 
+- IMPT-01…05, paste-a-list bulk add (deferred with Phase 27, `SEED-261118-1bb`)
 - Apply tags to all artists at bulk-add confirm time
 - Group the digest by tag
 - Show notes on History cards
@@ -101,11 +104,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BULK-03 | Phase 26 | Complete |
 | BULK-04 | Phase 26 | Complete |
 | BULK-05 | Phase 26 | Complete |
-| IMPT-01 | Phase 27 | Pending |
-| IMPT-02 | Phase 27 | Pending |
-| IMPT-03 | Phase 27 | Pending |
-| IMPT-04 | Phase 27 | Pending |
-| IMPT-05 | Phase 27 | Pending |
+| IMPT-01 | Phase 27 (deferred) | Deferred |
+| IMPT-02 | Phase 27 (deferred) | Deferred |
+| IMPT-03 | Phase 27 (deferred) | Deferred |
+| IMPT-04 | Phase 27 (deferred) | Deferred |
+| IMPT-05 | Phase 27 (deferred) | Deferred |
 | NTFY-05 | Phase 28 | Pending |
 | NTFY-06 | Phase 28 | Pending |
 | NTFY-07 | Phase 28 | Pending |

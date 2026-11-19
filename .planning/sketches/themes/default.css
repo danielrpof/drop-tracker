@@ -1,0 +1,34 @@
+/* Mirrors web/app/app.css .dark tokens (06-UI-SPEC): dark-only zinc surfaces, indigo accent. */
+:root {
+  --color-bg: #09090b;
+  --color-surface: #18181b;
+  --color-surface-2: #27272a;
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-input: rgba(255, 255, 255, 0.15);
+  --color-text: #fafafa;
+  --color-text-muted: #a1a1aa;
+  --color-primary: #6366f1;
+  --color-primary-hover: #4f46e5;
+  --color-danger: #dc2626;
+  --color-ok: #22c55e;
+  --color-warn: #f59e0b;
+
+  --font-sans: 'Inter Variable', Inter, system-ui, sans-serif;
+  --text-label: 0.875rem;
+  --text-body: 1rem;
+  --text-heading: 1.25rem;
+  --text-display: 1.75rem;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
+}

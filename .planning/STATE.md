@@ -2,14 +2,14 @@
 gsd_state_version: "1.0"
 milestone: v1.6
 milestone_name: Watchlist Organization
-current_phase: 27
-current_phase_name: Paste-a-List Bulk Add
+current_phase: 28
+current_phase_name: Tags on Discord Notifications
 status: planning
-stopped_at: Phase 26 complete, ready to plan Phase 27
-last_updated: "2026-10-31T01:13:32.522Z"
-last_activity: 2026-10-19
-last_activity_desc: Phase 26 complete, transitioned to Phase 27
-state_head: d000201d354a01a5d349dc5c6a6dce1f3de992e3
+stopped_at: "Issue 17 layer 1 done (quick 261118-krs); next is Phase 28"
+last_updated: "2026-11-18T20:17:36.449Z"
+last_activity: 2026-11-18
+last_activity_desc: Phase 27 deferred after grilling + spike 001; issue
+state_head: f45f7c3c41903646d5565734b6f5cf452c69f932
 progress:
   total_phases: 5
   completed_phases: 3
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** A single Go binary that reliably detects and notifies on new releases for watched artists, built and shipped through a CI/CD pipeline rigorous enough to demonstrate real DevOps practice.
-**Current focus:** Phase 26 — Bulk Edit & Remove
+**Current focus:** Phase 28 — Tags on Discord Notifications
 
 ## Current Position
 
-Phase: 27 — Paste-a-List Bulk Add
+Phase: 28 — Tags on Discord Notifications
 Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-19 — Phase 26 complete, transitioned to Phase 27
+Status: Ready to discuss
+Last activity: 2026-11-18 - Completed quick task 261118-krs: MusicBrainz 503 retry in httpclient.Do (issue 17 layer 1)
 
 ## Performance Metrics
 
@@ -517,6 +517,7 @@ _Closed 2026-09-05: Phase 16 gap G-16-1 (n1-boot guard-adoption skip) — quick 
 | 261019-jkv | Refactor phase 26 bulk UI: shared preference options, popover and outcome-messages modules, useBulkSelection hook | 2026-10-19 | 66e1990 | [261019-jkv-refactor-phase-26-bulk-ui-preferenceopti](./quick/261019-jkv-refactor-phase-26-bulk-ui-preferenceopti/) |
 | 261025-i7g | Phase 999.1 slice (a): Terraform bootstrap module (Azure remote state + GitHub OIDC managed identity), applied and state migrated | 2026-10-30 | 67b1bec | [261025-i7g-bootstrap-terraform-module-for-azure-rem](./quick/261025-i7g-bootstrap-terraform-module-for-azure-rem/) |
 | 38 | Fix trivy-fs: bump transitive web deps body-parser, systeminformation, undici for HIGH CVEs | 2026-10-31 | d000201 | — |
+| 261118-krs | MusicBrainz 503 retry in httpclient.Do (issue 17 layer 1) | 2026-11-18 | f45f7c3 | [261118-krs-musicbrainz-503-retry-in-httpclient-do-i](./quick/261118-krs-musicbrainz-503-retry-in-httpclient-do-i/) |
 
 ### Roadmap Evolution
 
@@ -552,9 +553,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-16T23:59:43.847Z
-Stopped at: Phase 26 complete, ready to plan Phase 27
-Resume file: None
+Last session: 2026-11-18T17:31:59.343Z
+Stopped at: Phase 27 UI-SPEC approved
+Resume file: .planning/phases/27-paste-a-list-bulk-add/27-UI-SPEC.md
 
 ## Operator Next Steps
 

@@ -14,11 +14,13 @@ v1.6 is about the watchlist itself, not detection or delivery. Past about 50 art
 - ✅ **v1.3 Continuous Deployment** — Phases 14-17 (shipped partial 2026-09-09; **Phase 17 deferred**)
 - ✅ **v1.4 Operator Observability** — Phases 18, 18.1, 19 (shipped 2026-09-11)
 - ✅ **v1.5 Digest Notifications** — Phases 20-23 (shipped 2026-09-18)
-- 🚧 **v1.6 Watchlist Organization** — Phases 24-28 (in progress)
+- 🚧 **v1.6 Watchlist Organization** — Phases 24-28 (in progress; **Phase 27 deferred**)
 
 Full phase-by-phase detail for every shipped milestone is archived under `.planning/milestones/v[X.Y]-ROADMAP.md`. Requirement archives: `.planning/milestones/v[X.Y]-REQUIREMENTS.md`. Accomplishment summaries: `.planning/MILESTONES.md`.
 
 **Deferred:** **Phase 17 — Automated VPS Deploy with Health-Gated Rollback** (DPLY-01…08). Blocked on a provisioned VPS + domain the developer does not have yet. `discuss-phase` context was already gathered — archived at `.planning/milestones/v1.3-phases/17-automated-vps-deploy-with-health-gated-rollback/` (`17-CONTEXT.md`, `17-DISCUSSION-LOG.md`). Un-defer it as its own milestone cycle once a box exists; the `/ready` probe from v1.4 is built for its health-gate to consume.
+
+**Deferred:** **Phase 27 — Paste-a-List Bulk Add** (IMPT-01…05), on 2026-11-18. It is fully designed (CONTEXT with grilling amendments G-27-1…10, an approved UI-SPEC, sketches 001/002, spike 001) but would rarely be used in a personal, locally run tool. Parked as `SEED-261118-1bb`, which surfaces when the user wants to import a playlist or an existing artist list. The design stays in `.planning/phases/27-paste-a-list-bulk-add/`. Prerequisite on revival: GitHub issue #17 Layer 1 (MusicBrainz 503 retry).
 
 ## Phases
 
@@ -90,7 +92,7 @@ Full phase-by-phase detail for every shipped milestone is archived under `.plann
 - [x] **Phase 24: Artist Tags & Notes** - Free-form, case-insensitive tags with autocomplete and a plain-text note on each Watchlist card, global tag rename/merge/delete, and tags that belong to the artist so they survive a remove and re-add (completed 2026-10-06)
 - [x] **Phase 25: Find & Filter — Watchlist and History** - Client-side name search, stable sorts (including latest release), and tag/preference filters over the fully loaded watchlist, plus a retention-aware tag filter on the History feed (completed 2026-10-12)
 - [x] **Phase 26: Bulk Edit & Remove** - Multi-select on the Watchlist with one-action tag add/remove, preference changes, and a count-confirmed all-or-nothing remove, backed by set-based transactional endpoints (completed 2026-10-19)
-- [ ] **Phase 27: Paste-a-List Bulk Add** - Paste names one per line, watch them resolve one search at a time within the existing rate limits, review best matches by confidence, and add the confirmed set in one request
+- [ ] Phase 27: Paste-a-List Bulk Add — **DEFERRED** (rarely used in a personal tool); fully designed, parked as `SEED-261118-1bb`
 - [ ] **Phase 28: Tags on Discord Notifications** - Tags on real-time embeds and digest lines, with markdown escaping added to the real-time path and the digest's chunking guarantees re-proven against longer lines
 
 > **Ordering rationale.** Tags are the shared dependency for five of the seven features (autocomplete, rename/delete, both filters, Discord display), so the tags-and-notes slice lands first and carries the milestone's only schema migration. Every length cap goes into that migration at creation, because `cmd/migration-check` treats tightening an already-shipped column as a full expand/contract cycle. Filtering comes before bulk edit because "select all visible" is defined by the filtered view. History-by-tag goes in with the Watchlist filters instead of standing alone. It is a single requirement, it uses the same tag vocabulary and combobox, and on its own it would get task-shaped success criteria. Paste-a-list follows bulk edit and reuses its set-based, per-item-outcome endpoint shape for the confirm step. Discord tag display is last on purpose. It is the only change that touches Phase 23's chunker and ack invariants, so it has the milestone's highest blast radius, and it is best tested once real tags exist. It depends only on Phase 24, so it could run in parallel with 25-27, but it should not merge before its escaping and fixture-precondition work is done.
@@ -340,6 +342,8 @@ Plans:
 
 ### Phase 27: Paste-a-List Bulk Add
 
+**Status**: DEFERRED 2026-11-18, parked as `SEED-261118-1bb`. Not part of v1.6 execution. The detail below is kept for revival.
+
 **Goal**: The user can paste a list of artist names and add the right artists in one reviewed batch. They see what each line matched and can fix or skip the doubtful ones, and nothing is added until they confirm.
 **Depends on**: Phase 26 (the confirm step reuses its bulk-endpoint conventions: protected route group, bounded id lists, refresh without reload. It may reuse Phase 26's per-id outcome shape, but it isn't committed to: Phase 27 confirms by external id, and its skip reasons differ)
 **Requirements**: IMPT-01, IMPT-02, IMPT-03, IMPT-04, IMPT-05
@@ -398,14 +402,14 @@ Plans:
 - **v1.6:** in progress.
 
 **Execution Order:**
-Phases execute in numeric order: 24 → 25 → 26 → 27 → 28
+Phases execute in numeric order: 24 → 25 → 26 → 28 (27 deferred)
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 24. Artist Tags & Notes | 14/14 | Complete    | 2026-10-06 |
 | 25. Find & Filter — Watchlist and History | 21/21 | Complete    | 2026-10-12 |
 | 26. Bulk Edit & Remove | 12/12 | Complete    | 2026-10-19 |
-| 27. Paste-a-List Bulk Add | 0/? | Not started | - |
+| 27. Paste-a-List Bulk Add | 0/? | Deferred (SEED-261118-1bb) | - |
 | 28. Tags on Discord Notifications | 0/? | Not started | - |
 
 ## Backlog
